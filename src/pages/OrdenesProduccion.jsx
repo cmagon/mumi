@@ -417,15 +417,13 @@ export default function OrdenesProduccion() {
     const filasProc = procRows.length ? `<div class="seccion">TIEMPOS POR PROCESO / SUBPROCESO</div>
       <table class="ingr"><thead><tr><th>Proceso / Subproceso</th><th>Fecha</th><th>Hora inicio</th><th>Hora fin</th></tr></thead>
       <tbody>${procRows.map(p => `<tr><td>${p.nombre || ''}</td><td>${fmtF(p.fecha)}</td><td>${p.inicio || ''}</td><td>${p.fin || ''}</td></tr>`).join('')}</tbody></table>` : ''
-    // Ajuste para que todo quepa en UNA hoja: reduce el zoom si hay muchas filas
-    const filasTotales = prepIngs.length + procRows.length
-    const zoom = filasTotales > 22 ? Math.max(0.55, 0.9 - (filasTotales - 22) * 0.014) : 0.9
     const w = window.open('', '_blank')
     w.document.write(`<html><head><title>PTZ-OR-01 Orden #${opNum(o.id)}</title><style>
-      @page { size: A4; margin: 10mm; }
+      @page { size: letter; margin: 10mm; }
       * { box-sizing: border-box; }
       html,body { margin:0; }
-      body { font-family: Arial, sans-serif; color:#222; font-size:11px; zoom: ${zoom}; }
+      body { font-family: Arial, sans-serif; color:#222; font-size:11px; }
+      #content { padding-bottom:10px; }
       table { width:100%; border-collapse:collapse; }
       td,th { border:1px solid #555; padding:4px 8px; vertical-align:top; }
       th { background:#e9efe7; text-align:left; }
@@ -439,12 +437,12 @@ export default function OrdenesProduccion() {
       .campos td { border:1px solid #555; }
       .lbl { background:#f3f6f1; font-weight:bold; width:18%; }
       .prev td { border:1px solid #555; }
-      .firmas { margin-top:26px; }
+      .firmas { margin-top:0; padding-top:26px; }
       .firmas td { border:none; text-align:center; padding-top:28px; }
       .firmas .linea { border-top:1px solid #555; padding-top:3px; }
       tbody tr:nth-child(even) td { background:#fafafa; }
       .ingr tbody tr:nth-child(even) td { background:#fafafa; }
-    </style></head><body>
+    </style></head><body><div id="content">
 
       <!-- Encabezado del formato -->
       <table class="hdr">
@@ -479,7 +477,7 @@ export default function OrdenesProduccion() {
       ${filasProc}
 
       <div class="seccion">OBSERVACIONES</div>
-      <table class="campos"><tr><td style="height:90px; vertical-align:top">${o.notas_orden || ''}</td></tr></table>
+      <table class="campos"><tr><td id="obsbox" style="height:90px; vertical-align:top">${o.notas_orden || ''}</td></tr></table>
 
       <table class="firmas">
         <tr>
@@ -488,7 +486,25 @@ export default function OrdenesProduccion() {
         </tr>
       </table>
 
-      <script>window.addEventListener('load',function(){setTimeout(function(){window.focus();window.print()},150)})</script>
+      </div>
+      <script>window.addEventListener('load',function(){setTimeout(function(){
+        var c=document.getElementById('content');
+        // Alto util conservador de una hoja carta (cubre los margenes que el navegador agrega)
+        var availH=900;
+        function alto(){ return Math.max(c.scrollHeight, c.offsetHeight, c.getBoundingClientRect().height); }
+        var h=alto();
+        // 1) Si sobra espacio: agranda Observaciones para llenar la hoja y bajar las firmas
+        if(h<availH){
+          var box=document.getElementById('obsbox');
+          var extra=availH-h-10;
+          if(box && extra>0){ box.style.height=(box.offsetHeight + extra)+'px'; }
+        }
+        // 2) Ajuste final garantizado: si por lo que sea quedo mas alto, reduce para que SIEMPRE
+        //    entre en una sola hoja (la firma nunca pasa a la 2a pagina).
+        var hf=alto();
+        if(hf>availH){ document.body.style.zoom=availH/hf; }
+        window.focus();window.print();
+      },200)})</script>
       </body></html>`)
     w.document.close()
   }
