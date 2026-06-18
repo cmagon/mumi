@@ -9,9 +9,11 @@ const AuthContext = createContext(null)
 const loginAEmail = (login) =>
   `${String(login || '').toLowerCase().trim().replace(/\s+/g, '').replace(/[^a-z0-9._-]/g, '')}@mumi.internal`
 
-// La sesión se cierra automáticamente a las 8 horas del inicio de sesión
-const SESION_MAX_MS = 8 * 60 * 60 * 1000
+// La sesión se cierra automáticamente a las 48 horas del inicio de sesión
+const SESION_MAX_MS = 48 * 60 * 60 * 1000
 const LOGIN_KEY = 'mumi_login_at'
+const PROFILE_KEY = 'mumi_profile'   // último perfil conocido (para ver datos offline)
+const PERMS_KEY = 'mumi_perms'       // últimos permisos/labels conocidos (offline)
 const getLoginAt   = () => { const v = localStorage.getItem(LOGIN_KEY); return v ? parseInt(v) : null }
 const setLoginAt   = (ts) => localStorage.setItem(LOGIN_KEY, String(ts))
 const clearLoginAt = () => localStorage.removeItem(LOGIN_KEY)
@@ -25,30 +27,47 @@ export function AuthProvider({ children }) {
   // Carga la configuración de permisos por rol (tabla role_permissions) y la aplica
   async function recargarPermisos() {
     try {
-      const { data } = await supabase.from('role_permissions').select('rol, permisos, label')
+      const { data, error } = await supabase.from('role_permissions').select('rol, permisos, label')
+      if (error) throw error
       const map = {}
       const labels = {}
       ;(data || []).forEach(r => { map[r.rol] = r.permisos; if (r.label) labels[r.rol] = r.label })
       setPermisosOverride(map)
       setRolLabels(labels)
       setPermisos(map)
+      localStorage.setItem(PERMS_KEY, JSON.stringify({ map, labels }))
     } catch {
+      // Sin conexión: usa los últimos permisos conocidos (para que el menú funcione offline)
+      try {
+        const cached = JSON.parse(localStorage.getItem(PERMS_KEY) || 'null')
+        if (cached?.map) { setPermisosOverride(cached.map); setRolLabels(cached.labels || {}); setPermisos(cached.map); return }
+      } catch { /* noop */ }
       setPermisosOverride(null)
     }
   }
 
   async function fetchProfile(uid) {
-    const { data } = await supabase
-      .from('user_profiles')
-      .select('*')
-      .eq('id', uid)
-      .single()
-    setProfile(data)
-    return data
+    try {
+      const { data, error } = await supabase
+        .from('user_profiles')
+        .select('*')
+        .eq('id', uid)
+        .single()
+      if (error) throw error
+      if (data) { setProfile(data); localStorage.setItem(PROFILE_KEY, JSON.stringify(data)) }
+      return data
+    } catch {
+      // Sin conexión / error: usa el último perfil conocido para poder ver los datos offline
+      try {
+        const cached = JSON.parse(localStorage.getItem(PROFILE_KEY) || 'null')
+        if (cached && cached.id === uid) { setProfile(cached); return cached }
+      } catch { /* noop */ }
+      return null
+    }
   }
 
   async function cerrarSesionAuto() {
-    clearLoginAt()
+    clearLoginAt(); localStorage.removeItem(PROFILE_KEY)
     await supabase.auth.signOut()
     setUser(null); setProfile(null)
   }
@@ -77,7 +96,7 @@ export function AuthProvider({ children }) {
     return () => subscription.unsubscribe()
   }, [])
 
-  // Temporizador de cierre automático a las 9h (sobrevive recargas vía localStorage)
+  // Temporizador de cierre automático a las 48h (sobrevive recargas vía localStorage)
   useEffect(() => {
     if (!user) return
     const programar = () => {
@@ -100,7 +119,7 @@ export function AuthProvider({ children }) {
     const email = loginAEmail(login)
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw error
-    setLoginAt(Date.now())   // marca de inicio para el cierre automático a las 9h
+    setLoginAt(Date.now())   // marca de inicio para el cierre automático a las 48h
     // Actualizar último acceso
     if (data.user) {
       await supabase
@@ -112,7 +131,7 @@ export function AuthProvider({ children }) {
   }
 
   async function signOut() {
-    clearLoginAt()
+    clearLoginAt(); localStorage.removeItem(PROFILE_KEY)
     await supabase.auth.signOut()
     setUser(null)
     setProfile(null)

@@ -14,7 +14,7 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 1000 * 20,                 // 20s en caché → al cambiar de módulo recarga si pasó ese tiempo
-      gcTime: 1000 * 60 * 60 * 24,          // conserva el caché 24h (necesario para persistir offline)
+      gcTime: 1000 * 60 * 60 * 24 * 7,      // conserva el caché 7 días (necesario para persistir offline)
       retry: 3,                             // reintenta si el servidor está lento/falla
       retryDelay: (a) => Math.min(1000 * 2 ** a, 8000),
       refetchOnMount: true,                 // recarga al entrar a cada módulo si los datos están viejos
@@ -41,7 +41,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
     <BrowserRouter>
       <PersistQueryClientProvider
         client={queryClient}
-        persistOptions={{ persister, maxAge: 1000 * 60 * 60 * 24 }}  // 24h
+        persistOptions={{ persister, maxAge: 1000 * 60 * 60 * 24 * 7 }}  // 7 días
       >
         <AuthProvider>
           <ConfirmProvider>
