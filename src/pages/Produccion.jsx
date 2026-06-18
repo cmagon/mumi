@@ -2,6 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, uploadFile } from '../lib/supabase'
+import { writeOrQueue } from '../lib/offlineQueue'
 import { fFecha, fNum, fCOP } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
@@ -173,6 +174,9 @@ export default function Produccion() {
     e?.preventDefault()
     if (!form.producto.trim() || !form.fecha) { toast('Producto y fecha son obligatorios', 'warning'); return }
     if (!form.lote.trim()) { toast('El lote es obligatorio (ej. 012026)', 'warning'); return }
+    if (!navigator.onLine && fotos.some(f => f.file)) {
+      toast('Sin conexión: las fotos requieren internet. Quítalas para guardar el registro offline.', 'warning'); return
+    }
     setSaving(true)
     try {
       const fotosUrls = await subirFotos()
@@ -205,9 +209,8 @@ export default function Produccion() {
           cant_subporciones: form.cant_subporciones !== '' ? (parseFloat(form.cant_subporciones) || 0) : null,
           surtido: form.surtido, lote_mezcla: form.surtido ? (form.lote_mezcla || null) : null,
         }
-        const { error } = await supabase.from('production_records').update(datos).eq('id', editId)
-        if (error) throw error
-        toast('Registro actualizado ✓')
+        const r = await writeOrQueue({ table: 'production_records', action: 'update', payload: datos, match: { id: editId } })
+        toast(r.queued ? 'Registro guardado sin conexión — se sincronizará 📴' : 'Registro actualizado ✓')
       } else {
         // ¿Existe ya un lote con ese id (mismo producto y tipo, no completado)? → acumula etapa
         const existente = registros.find(r =>
@@ -217,7 +220,7 @@ export default function Produccion() {
           const etapas = [...(Array.isArray(existente.etapas) ? existente.etapas : []), etapa]
           const cantidadFinal = sumarRotulado(etapas)
           const fotosAll = [...(Array.isArray(existente.fotos) ? existente.fotos : []), ...fotosUrls]
-          const { error } = await supabase.from('production_records').update({
+          const r = await writeOrQueue({ table: 'production_records', action: 'update', match: { id: existente.id }, payload: {
             etapas, cantidad: cantidadFinal, completado: form.completado,
             peso_final: sumarPeso(etapas, 'peso_final'), peso_desperdicio: sumarPeso(etapas, 'peso_desperdicio'),
             vence: form.vence || existente.vence, empaque: form.empaque, fecha: form.fecha,
@@ -227,12 +230,11 @@ export default function Produccion() {
             peso_subporcion: form.peso_subporcion !== '' ? (parseFloat(form.peso_subporcion) || 0) : existente.peso_subporcion,
             cant_subporciones: form.cant_subporciones !== '' ? (parseFloat(form.cant_subporciones) || 0) : existente.cant_subporciones,
             surtido: form.surtido || existente.surtido, lote_mezcla: form.lote_mezcla || existente.lote_mezcla || null,
-          }).eq('id', existente.id)
-          if (error) throw error
-          toast(`Etapa "${form.labor}" agregada al lote ${form.lote} ✓`)
+          } })
+          toast(r.queued ? `Etapa guardada sin conexión — se sincronizará 📴` : `Etapa "${form.labor}" agregada al lote ${form.lote} ✓`)
         } else {
           const etapas = [etapa]
-          const { error } = await supabase.from('production_records').insert({
+          const r = await writeOrQueue({ table: 'production_records', action: 'insert', payload: {
             tipo_registro: form.tipo_registro, producto: form.producto, fecha: form.fecha,
             lote: form.lote, vence: form.vence || null, empaque: form.empaque,
             cantidad: sumarRotulado(etapas), inicio: inicioG || null, fin: finG || null,
@@ -245,10 +247,9 @@ export default function Produccion() {
             peso_subporcion: form.peso_subporcion !== '' ? (parseFloat(form.peso_subporcion) || 0) : null,
             cant_subporciones: form.cant_subporciones !== '' ? (parseFloat(form.cant_subporciones) || 0) : null,
             surtido: form.surtido, lote_mezcla: form.surtido ? (form.lote_mezcla || null) : null,
-          })
-          if (error) throw error
-          if (esOperario) await notificar({ destinatario: 'admin', tipo: 'registro_pendiente', mensaje: `Registro de producción pendiente de aprobación: ${form.producto} (lote ${form.lote}) por ${profile?.nombre || 'operario'}`, link: '/produccion' })
-          toast(esOperario ? 'Registro creado — pendiente de aprobación del administrador' : 'Registro de lote creado ✓')
+          } })
+          if (esOperario && !r.queued) await notificar({ destinatario: 'admin', tipo: 'registro_pendiente', mensaje: `Registro de producción pendiente de aprobación: ${form.producto} (lote ${form.lote}) por ${profile?.nombre || 'operario'}`, link: '/produccion' })
+          toast(r.queued ? 'Registro guardado sin conexión — se sincronizará 📴' : (esOperario ? 'Registro creado — pendiente de aprobación del administrador' : 'Registro de lote creado ✓'))
         }
       }
       qc.invalidateQueries({ queryKey: ['production_records'] })

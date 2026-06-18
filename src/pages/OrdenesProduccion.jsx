@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, uploadFile } from '../lib/supabase'
 import { consumirPEPS } from '../lib/lotes'
+import { writeOrQueue } from '../lib/offlineQueue'
 import { getConfig } from '../lib/appConfig'
 import { useReorder } from '../hooks/useReorder'
 import TimeField from '../components/ui/TimeField'
@@ -320,7 +321,7 @@ export default function OrdenesProduccion() {
     const inicios = procs.map(p => p.inicio).filter(Boolean).sort()
     const fines = procs.map(p => p.fin).filter(Boolean).sort()
     try {
-      await supabase.from('production_orders').update({
+      const r = await writeOrQueue({ table: 'production_orders', action: 'update', match: { id: ordenPrep.id }, payload: {
         lote: prepLote, vence: prepVence || null, fecha_inicio: prepFechaInicio || null,
         inicio: inicios[0] || null, fin: fines.length ? fines[fines.length - 1] : null,
         procesos_tiempos: procs,
@@ -330,10 +331,10 @@ export default function OrdenesProduccion() {
         peso_subporcion: prepPorciona && prepPesoSubp !== '' ? (parseFloat(prepPesoSubp) || 0) : null,
         cant_subporciones: prepPorciona && prepCantSubp !== '' ? (parseFloat(prepCantSubp) || 0) : null,
         obs_result: prepObs || null, surtido: prepSurtido, lote_mezcla: prepSurtido ? (prepLoteMezcla || null) : null,
-      }).eq('id', ordenPrep.id)
+      } })
       setAutoSavedAt(new Date().toLocaleTimeString('es-CO'))
       qc.invalidateQueries({ queryKey: ['production_orders'] })
-      if (!silent) toast('Guardado ✓')
+      if (!silent) toast(r.queued ? 'Progreso guardado sin conexión — se sincronizará 📴' : 'Guardado ✓')
     } catch (e) { if (!silent) toast(e.message, 'error') }
   }
 
@@ -529,6 +530,9 @@ export default function OrdenesProduccion() {
   // Confirmar y enviar: crea el registro de producción y cierra la orden (a aprobación)
   const confirmarEnviar = async () => {
     const o = ordenPrep; if (!o) return
+    if (!navigator.onLine && prepFotoFile) {
+      toast('Sin conexión: la foto requiere internet. Quítala para enviar la orden offline.', 'warning'); return
+    }
     setSavingEvid(true)
     try {
       const { procs, inicioGlobal, finGlobal } = tiemposGlobal()
@@ -554,10 +558,10 @@ export default function OrdenesProduccion() {
         surtido: prepSurtido, lote_mezcla: prepSurtido ? (prepLoteMezcla || null) : null,
         lotes_origen: prepSurtido ? (prepLoteMezcla || '') : '',
       }
-      if (recExist) await supabase.from('production_records').update(regData).eq('id', recExist.id)
-      else await supabase.from('production_records').insert(regData)
+      if (recExist) await writeOrQueue({ table: 'production_records', action: 'update', match: { id: recExist.id }, payload: regData })
+      else await writeOrQueue({ table: 'production_records', action: 'insert', payload: regData })
       // 2) Cerrar la orden (a aprobación) con todos los datos del proceso
-      await supabase.from('production_orders').update({
+      const r = await writeOrQueue({ table: 'production_orders', action: 'update', match: { id: o.id }, payload: {
         estado: 'ejecutada', cantidad_result: unidades, lote: prepLote, vence: prepVence || null,
         fecha_inicio: fechaIni, inicio: inicioGlobal || null, fin: finGlobal || null, procesos_tiempos: procs,
         peso_final: parseFloat(prepPesoFinal) || 0, peso_desperdicio: parseFloat(prepPesoDesp) || 0,
@@ -565,11 +569,11 @@ export default function OrdenesProduccion() {
         cant_subporciones: prepPorciona ? (parseFloat(prepCantSubp) || 0) : null,
         surtido: prepSurtido, lote_mezcla: prepSurtido ? (prepLoteMezcla || null) : null,
         obs_result: prepObs || '', foto_url, fecha_envio: new Date().toISOString(),
-      }).eq('id', o.id)
-      await notificar({ destinatario: 'admin', tipo: 'orden_enviada', mensaje: `Orden #${opNum(o.id)} (${o.producto}) enviada para aprobación por ${profile?.nombre || 'operario'}`, link: '/ordenes', ref_id: o.id })
+      } })
+      if (!r.queued) await notificar({ destinatario: 'admin', tipo: 'orden_enviada', mensaje: `Orden #${opNum(o.id)} (${o.producto}) enviada para aprobación por ${profile?.nombre || 'operario'}`, link: '/ordenes', ref_id: o.id })
       qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['production_records'] })
       setModalConfirmEnvio(false); setModalProceso(false)
-      toast('Producción registrada y orden enviada a aprobación ✓')
+      toast(r.queued ? 'Orden guardada sin conexión — se enviará al sincronizar 📴' : 'Producción registrada y orden enviada a aprobación ✓')
     } catch (e) { toast(e.message, 'error') } finally { setSavingEvid(false) }
   }
 

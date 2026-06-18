@@ -8,6 +8,7 @@ import { loadConfig } from './lib/appConfig'
 import Sidebar from './components/Layout/Sidebar'
 import MobileHeader from './components/Layout/MobileHeader'
 import AttendanceModal from './components/AttendanceModal'
+import ConnStatus from './components/ConnStatus'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
 import Costos from './pages/Costos'
@@ -120,6 +121,7 @@ function ProtectedLayout() {
         <Outlet />
       </main>
       <div id="toast-container" />
+      <ConnStatus />
       {asistModo && empVinculado && (
         <AttendanceModal
           emp={empVinculado}

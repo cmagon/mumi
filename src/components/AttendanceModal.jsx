@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
+import { writeOrQueue } from '../lib/offlineQueue'
 import { fFecha, calcHoras } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
 import Modal from './ui/Modal'
@@ -40,12 +41,12 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
   const registrarLlegada = useMutation({
     mutationFn: async () => {
       if (abiertaDia) throw new Error('Ya hay una llegada sin salida en esta fecha')
-      const { error } = await supabase.from('attendance').insert({
-        emp_id: emp.id, fecha, entrada: hora, entrada_ts: new Date().toISOString(),
+      return writeOrQueue({
+        table: 'attendance', action: 'insert',
+        payload: { emp_id: emp.id, fecha, entrada: hora, entrada_ts: new Date().toISOString() },
       })
-      if (error) throw error
     },
-    onSuccess: () => { refetch(); qc.invalidateQueries({ queryKey: ['attendance'] }); toast('Llegada registrada ✓'); setHora(horaAhora()) },
+    onSuccess: (r) => { refetch(); qc.invalidateQueries({ queryKey: ['attendance'] }); toast(r?.queued ? 'Llegada guardada sin conexión — se sincronizará 📴' : 'Llegada registrada ✓'); setHora(horaAhora()) },
     onError: (e) => toast(e.message, 'error'),
   })
 
@@ -54,12 +55,13 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
       const obj = objetivoSalida
       if (!obj) throw new Error('No hay una llegada abierta para cerrar')
       if (obj.entrada && hora < obj.entrada) throw new Error(`La salida no puede ser anterior a la entrada (${obj.entrada})`)
-      const { error } = await supabase.from('attendance').update({
-        salida: hora, salida_ts: new Date().toISOString(),
-      }).eq('id', obj.id)
-      if (error) throw error
+      return writeOrQueue({
+        table: 'attendance', action: 'update',
+        payload: { salida: hora, salida_ts: new Date().toISOString() },
+        match: { id: obj.id },
+      })
     },
-    onSuccess: () => { refetch(); qc.invalidateQueries({ queryKey: ['attendance'] }); toast('Salida registrada ✓'); setHora(horaAhora()) },
+    onSuccess: (r) => { refetch(); qc.invalidateQueries({ queryKey: ['attendance'] }); toast(r?.queued ? 'Salida guardada sin conexión — se sincronizará 📴' : 'Salida registrada ✓'); setHora(horaAhora()) },
     onError: (e) => toast(e.message, 'error'),
   })
 
