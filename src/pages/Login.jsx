@@ -1,7 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
+import { getConfig, loadConfig } from '../lib/appConfig'
 
 export default function Login() {
   const [login, setLogin]       = useState('')
@@ -10,8 +11,12 @@ export default function Login() {
   const [loading, setLoading]   = useState(false)
   const [recuperando, setRecuperando] = useState(false)
   const [msgRec, setMsgRec]     = useState('')
+  const [cfg, setCfg]           = useState(getConfig())
   const { signIn } = useAuth()
   const navigate = useNavigate()
+
+  // Carga la marca personalizable (logo, nombre, eslogan) aunque no haya sesión
+  useEffect(() => { loadConfig().then(setCfg).catch(() => {}) }, [])
 
   const recuperarPassword = async () => {
     if (!login.trim()) { setError('Escribe tu usuario y pulsa "Recuperar contraseña"'); return }
@@ -51,19 +56,21 @@ export default function Login() {
         width: 'min(420px, 90vw)', textAlign: 'center',
         backdropFilter: 'blur(10px)'
       }}>
-        <div style={{ fontSize: '3rem', marginBottom: 16 }}>🌿</div>
+        {cfg.logo_url
+          ? <img src={cfg.logo_url} alt="logo" style={{ maxWidth: 140, maxHeight: 90, objectFit: 'contain', marginBottom: 16 }} />
+          : <div style={{ fontSize: '3rem', marginBottom: 16 }}>🌿</div>}
         <div style={{
           fontFamily: "'Playfair Display', serif",
           fontSize: '2.2rem', color: 'var(--dorado)',
           marginBottom: 4, letterSpacing: 2
         }}>
-          Mumi Amazonia
+          {cfg.empresa || 'Mumi Amazonia'}
         </div>
         <div style={{
           color: 'rgba(245,240,232,0.6)', fontSize: '0.85rem',
           letterSpacing: 3, textTransform: 'uppercase', marginBottom: 36
         }}>
-          Sistema de Gestión Empresarial
+          {cfg.eslogan || 'Sistema de Gestión Empresarial'}
         </div>
 
         <form onSubmit={handleSubmit}>

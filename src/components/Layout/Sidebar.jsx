@@ -1,8 +1,9 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
 import { getRolLabel } from '../../lib/businessLogic'
 import { puedeVer, RUTA_MODULO } from '../../lib/permisos'
+import { getConfig, loadConfig } from '../../lib/appConfig'
 import NotificationBell from '../NotificationBell'
 import ChangePasswordModal from '../ChangePasswordModal'
 
@@ -32,6 +33,8 @@ export default function Sidebar({ open, onClose, onLogout, puedeFichar, onRegist
   const { profile, signOut } = useAuth()
   const navigate = useNavigate()
   const [pwdModal, setPwdModal] = useState(false)
+  const [cfg, setCfg] = useState(getConfig())
+  useEffect(() => { loadConfig().then(setCfg).catch(() => {}) }, [])
 
   // Si el layout maneja el cierre (modal de asistencia), lo delegamos; si no, cerramos directo
   const handleLogout = async () => {
@@ -48,8 +51,13 @@ export default function Sidebar({ open, onClose, onLogout, puedeFichar, onRegist
       />
       <aside className={`sidebar ${open ? 'open' : ''}`}>
         <div className="sidebar-brand">
-          <div className="brand-name">🌿 Mumi Amazonia</div>
-          <div className="brand-tagline">Gestión Empresarial</div>
+          <div className="brand-name" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+            {cfg.logo_url
+              ? <img src={cfg.logo_url} alt="logo" style={{ maxWidth: 32, maxHeight: 32, objectFit: 'contain' }} />
+              : <span>🌿</span>}
+            <span>{cfg.empresa || 'Mumi Amazonia'}</span>
+          </div>
+          <div className="brand-tagline">{cfg.eslogan || 'Gestión Empresarial'}</div>
         </div>
 
         <div className="sidebar-user">
