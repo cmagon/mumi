@@ -9,11 +9,20 @@ import Modal from '../components/ui/Modal'
 import MoneyInput from '../components/ui/MoneyInput'
 import { useConfirm, usePrompt } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
-import { crearLoteEntrada, consumirPEPS, estadoLote } from '../lib/lotes'
+import { crearLoteEntrada, consumirPEPS, consumirLote, estadoLote } from '../lib/lotes'
 import * as XLSX from 'xlsx'
 
 const EMPTY_MP = { nombre: '', categoria: 'pulpa', tipo: 'comprado', unidad: 'Kg', precio: '', stock_min: 0, stock: 0, lote: '', vencimiento: '', obs: '', extra: {} }
-const EMPTY_MOV = { mp_id: '', tipo: 'entrada', cantidad: '', fecha: new Date().toISOString().split('T')[0], responsable: '', obs: '', lote: '', vencimiento: '', extra: {}, costo: '' }
+const EMPTY_MOV = { mp_id: '', tipo: 'entrada', cantidad: '', fecha: new Date().toISOString().split('T')[0], responsable: '', obs: '', lote: '', vencimiento: '', extra: {}, costo: '', motivo: 'consumo', lote_id: '' }
+// Motivos de salida/ajuste manual de inventario
+const MOTIVOS_SALIDA = [
+  { value: 'consumo', label: 'Consumo / uso' },
+  { value: 'perdida', label: 'Pérdida / daño' },
+  { value: 'vencimiento', label: 'Vencimiento' },
+  { value: 'no_contabilizada', label: 'Salida no contabilizada' },
+  { value: 'ajuste', label: 'Ajuste de conteo' },
+]
+const motivoLabel = (m) => (MOTIVOS_SALIDA.find(x => x.value === m)?.label || m)
 const UNIDADES = ['Kg','Litro','Unidad']
 // Sufijo corto para mostrar el precio según la unidad
 const sufijoUnidad = (u) => u === 'Kg' ? '/Kg' : u === 'Litro' ? '/L' : u === 'Unidad' ? '/u' : `/${u || 'u'}`
@@ -152,14 +161,26 @@ export default function Inventario() {
           cantidad, costo_unitario: formMov.costo !== '' ? parseFloat(formMov.costo) || 0 : (mp?.precio || 0),
           creado_por: profile?.nombre || '',
         })
-      } else if (formMov.tipo === 'salida' && !esEmpaque(mp?.categoria)) {
-        const { consumidos, faltante } = await consumirPEPS({ mp_id: mpId, cantidad })
+      } else if (!esEmpaque(mp?.categoria) && (formMov.tipo === 'salida' || (formMov.tipo === 'ajuste' && cantidad < 0))) {
+        // Salida (o ajuste negativo): exige motivo; descuenta del lote elegido o por PEPS
+        if (!formMov.motivo) throw new Error('Indica el motivo de la salida')
+        const aDescontar = formMov.tipo === 'salida' ? cantidad : Math.abs(cantidad)
+        let consumidos = [], faltante = 0
+        if (formMov.lote_id) {
+          const r = await consumirLote({ lote_id: parseInt(formMov.lote_id), cantidad: aDescontar }); consumidos = r.consumidos; faltante = r.faltante
+        } else {
+          const r = await consumirPEPS({ mp_id: mpId, cantidad: aDescontar }); consumidos = r.consumidos; faltante = r.faltante
+        }
         if (consumidos.length) extra.lotes_consumidos = consumidos
         if (faltante > 0) extra.faltante_sin_lote = faltante
+        extra.motivo = formMov.motivo
       }
+      const obsFinal = (formMov.tipo === 'salida' || (formMov.tipo === 'ajuste' && cantidad < 0))
+        ? `[${motivoLabel(formMov.motivo)}] ${formMov.obs || ''}`.trim()
+        : formMov.obs
       const { error: movErr } = await supabase.from('inventory_movements').insert({
         mp_id: mpId, tipo: formMov.tipo, cantidad, fecha: formMov.fecha,
-        responsable: formMov.responsable, obs: formMov.obs,
+        responsable: formMov.responsable, obs: obsFinal,
         lote: formMov.lote || '', vencimiento: formMov.vencimiento || null, extra,
       })
       if (movErr) throw movErr
@@ -477,8 +498,28 @@ export default function Inventario() {
             </div>
           )
         })()}
-        {/* Lote y vencimiento — no aplican a empaques */}
-        {!esEmpaque(mps.find(m => String(m.id) === String(formMov.mp_id))?.categoria) && (
+        {/* Salida/ajuste: motivo + lote a descontar (pérdida, vencimiento, salida no contabilizada…) */}
+        {(formMov.tipo === 'salida' || formMov.tipo === 'ajuste') && !esEmpaque(mps.find(m => String(m.id) === String(formMov.mp_id))?.categoria) && (
+          <div className="form-grid-2" style={{ background: 'rgba(192,57,43,0.05)', border: '1px solid rgba(192,57,43,0.18)', borderRadius: 'var(--radio)', padding: 10 }}>
+            <div className="form-group">
+              <label className="form-label">Motivo {formMov.tipo === 'salida' && <small style={{ color: 'var(--rojo)' }}>*</small>}</label>
+              <select className="form-control" value={formMov.motivo} onChange={e => setFormMov(f => ({ ...f, motivo: e.target.value }))}>
+                {MOTIVOS_SALIDA.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+              </select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">¿De qué lote se descuenta?</label>
+              <select className="form-control" value={formMov.lote_id} onChange={e => setFormMov(f => ({ ...f, lote_id: e.target.value }))}>
+                <option value="">Automático (PEPS: el más antiguo/próximo a vencer)</option>
+                {lotesDe(parseInt(formMov.mp_id)).map(l => (
+                  <option key={l.id} value={l.id}>Lote {l.lote || '(s/n)'} · {fNum(l.cantidad_actual)} disp.{l.vencimiento ? ` · vence ${l.vencimiento}` : ''}</option>
+                ))}
+              </select>
+            </div>
+          </div>
+        )}
+        {/* Lote y vencimiento — solo en entradas (crea el lote), no aplican a empaques */}
+        {formMov.tipo === 'entrada' && !esEmpaque(mps.find(m => String(m.id) === String(formMov.mp_id))?.categoria) && (
           <div className="form-grid-2">
             <div className="form-group"><label className="form-label">Lote</label><input className="form-control" value={formMov.lote} onChange={e => setFormMov(f => ({ ...f, lote: e.target.value }))} placeholder="N° de lote" /></div>
             <div className="form-group"><label className="form-label">Fecha de vencimiento</label><input type="date" className="form-control" value={formMov.vencimiento || ''} onChange={e => setFormMov(f => ({ ...f, vencimiento: e.target.value }))} /></div>
@@ -545,10 +586,10 @@ export default function Inventario() {
               </div>
               <div className="table-wrap">
                 <table>
-                  <thead><tr><th>#PEPS</th><th>Lote</th><th>Ingreso</th><th>Vence</th><th className="td-number">Inicial</th><th className="td-number">Saldo</th><th className="td-number">Costo/u</th><th>Estado</th></tr></thead>
+                  <thead><tr><th>#PEPS</th><th>Lote</th><th>Ingreso</th><th>Vence</th><th className="td-number">Inicial</th><th className="td-number">Disponible</th><th className="td-number">Reservado</th><th className="td-number">Costo/u</th><th>Estado</th></tr></thead>
                   <tbody>
                     {lotes.length === 0
-                      ? <tr><td colSpan={8} className="empty-table">Sin lotes. Registra una entrada para crear el primero.</td></tr>
+                      ? <tr><td colSpan={9} className="empty-table">Sin lotes. Registra una entrada para crear el primero.</td></tr>
                       : lotes.map((l, i) => {
                         const est = estadoLote(l.vencimiento)
                         const agotado = (l.cantidad_actual || 0) <= 0
@@ -560,6 +601,7 @@ export default function Inventario() {
                             <td>{l.vencimiento ? fFecha(l.vencimiento) : '—'}</td>
                             <td className="td-number">{fNum(l.cantidad_inicial)}</td>
                             <td className="td-number"><strong>{fNum(l.cantidad_actual)}</strong></td>
+                            <td className="td-number">{(l.cantidad_reservada || 0) > 0 ? <span style={{ color: 'var(--tierra)' }}>{fNum(l.cantidad_reservada)}</span> : '—'}</td>
                             <td className="td-number">{l.costo_unitario ? fNum(l.costo_unitario) : '—'}</td>
                             <td>{agotado ? <span className="badge">Agotado</span> : est === 'vencido' ? <span className="badge badge-rojo">Vencido</span> : est === 'por_vencer' ? <span className="badge badge-dorado">Por vencer</span> : <span className="badge badge-verde">Vigente</span>}</td>
                           </tr>

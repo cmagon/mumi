@@ -185,6 +185,8 @@ export default function Costos() {
   const cifTotal = cifManual + costoNomina.total
   const operariosActivos = (parseFloat(op.numOperarios) || 0) > 0 ? parseFloat(op.numOperarios) : (empleados.length || 3)
   const costoMin = getCostoMinuto(cifTotal, operariosActivos, op.dias, op.jornadaHoras, op.improductividad)
+  // Minutos productivos disponibles al mes (denominador del costo/minuto)
+  const minsDisponibles = operariosActivos * (parseFloat(op.dias) || 0) * (parseFloat(op.jornadaHoras) || 0) * 60 * (1 - (parseFloat(op.improductividad) || 0))
   const cifDist  = getCIFDistribucion(cifTotal, productos)
 
   // Unidades/mes totales del portafolio (para % CIF en vivo)
@@ -543,7 +545,17 @@ export default function Costos() {
   })
 
   // ---- CIF CRUD ----
-  const addCIF = async () => { await supabase.from('cif_items').insert({ descripcion: 'Nuevo ítem', categoria: 'General', frecuencia: 'mensual', valor: 0 }); refetchCIF(); toast('Ítem CIF agregado') }
+  // Guarda el N° de operarios de capacidad en los parámetros de operación (sin perder los demás)
+  const guardarNumOperarios = async (val) => {
+    const n = parseInt(val)
+    if (isNaN(n) || n < 0) { toast('Número de operarios inválido', 'warning'); return }
+    if (n === parseInt(op.numOperarios || 0)) return
+    const nuevo = { ...paramsNom, operacion: { ...op, numOperarios: n } }
+    const { error } = await supabase.from('payroll_settings').upsert({ id: 1, params: nuevo, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+    if (error) { toast(error.message, 'error'); return }
+    qc.invalidateQueries({ queryKey: ['payroll_settings'] }); toast('N° de operarios actualizado ✓')
+  }
+  const addCIF = async () =>{ await supabase.from('cif_items').insert({ descripcion: 'Nuevo ítem', categoria: 'General', frecuencia: 'mensual', valor: 0 }); refetchCIF(); toast('Ítem CIF agregado') }
   const updateCIF = async (id, field, val) => { await supabase.from('cif_items').update({ [field]: val }).eq('id', id); refetchCIF() }
   const deleteCIF = async (id) => { await supabase.from('cif_items').delete().eq('id', id); refetchCIF(); toast('Ítem eliminado') }
 
@@ -1371,6 +1383,33 @@ export default function Costos() {
             <strong> No agregues los salarios como ítem manual</strong> para no duplicar. Detalle de la nómina:
             Salarios {fCOP(costoNomina.salarios)} · Auxilio {fCOP(costoNomina.auxilios)} · Prestaciones {fCOP(costoNomina.prestaciones)} · Parafiscales {fCOP(costoNomina.parafiscales)}{costoNomina.honorarios > 0 ? ` · Honorarios (CPS) ${fCOP(costoNomina.honorarios)}` : ''}.
           </div>
+          {/* Desglose y simulador del costo por minuto de mano de obra */}
+          <div style={{ marginTop:16, padding:16, background:'#fff8e8', border:'1px solid var(--dorado)', borderRadius:'var(--radio)' }}>
+            <strong style={{ color:'var(--selva)' }}>⏱ Costo por minuto de mano de obra</strong>
+            <div style={{ fontSize:'0.85rem', marginTop:8, display:'grid', gap:4 }}>
+              <div>CIF total mensual: <strong>{fCOP(cifTotal)}</strong> <small style={{ color:'var(--texto-suave)' }}>(manuales {fCOP(cifManual)} + nómina {fCOP(costoNomina.total)})</small></div>
+              <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+                <span>N° de operarios de capacidad:</span>
+                {(() => {
+                  const empActivos = empleados.filter(e => (e.estado || 'activo') === 'activo' && !e.archivado).length
+                  return (
+                    <select className="form-control" style={{ width:'auto' }} value={parseInt(op.numOperarios || 0)} onChange={e => guardarNumOperarios(e.target.value)} title="Se guarda en los parámetros de operación">
+                      <option value={0}>todos los activos ({empActivos})</option>
+                      {Array.from({ length: empActivos }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n}</option>)}
+                    </select>
+                  )
+                })()}
+                <small style={{ color:'var(--texto-suave)' }}>· {op.dias} días · {op.jornadaHoras} h/día · improd. {((parseFloat(op.improductividad)||0)*100).toFixed(0)}%</small>
+              </div>
+              <div>Minutos disponibles/mes: <strong>{fNum(Math.round(minsDisponibles))}</strong> <small style={{ color:'var(--texto-suave)' }}>= {operariosActivos} × {op.dias} × {op.jornadaHoras} × 60 × (1 − {parseFloat(op.improductividad)||0})</small></div>
+              <div style={{ fontSize:'1rem', marginTop:2 }}>Costo/minuto = {fCOP(cifTotal)} ÷ {fNum(Math.round(minsDisponibles))} = <strong style={{ color:'var(--dorado)' }}>{fCOP(costoMin)}/min</strong></div>
+            </div>
+
+            <div className="alert alert-info" style={{ fontSize:'0.8rem', marginTop:10 }}>
+              ⚠ La <strong>nómina</strong> del CIF incluye a <strong>todos</strong> los empleados ({empleados.length}), pero los <strong>“operarios de capacidad” ({operariosActivos})</strong> deben ser solo quienes producen. Si subes operarios sin que tengan su salario cargado, el costo/minuto baja artificialmente (el cuadro de arriba mantiene el CIF fijo a propósito, para que veas solo el efecto de la capacidad).
+            </div>
+          </div>
+
           <div style={{ marginTop:16, padding:16, background:'var(--crema)', borderRadius:'var(--radio)' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, flexWrap:'wrap', gap:8 }}>
               <strong style={{ color:'var(--selva)' }}>📊 Distribución CIF por línea de producto</strong>
@@ -1412,11 +1451,14 @@ export default function Costos() {
                   </table>
                 </div>
             }
-            <div style={{ marginTop:12, padding:10, background:'white', borderRadius:'var(--radio)', border:'1px solid var(--crema-oscuro)' }}>
-              <span style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}>⚙️ Fallback sin fichas — unidades manuales:</span>
-              <input type="number" className="form-control" value={cifUnidadesFallback} onChange={e => setCifUnidadesFallback(Number(e.target.value))} style={{ width:110, display:'inline-block', marginLeft:8 }} />
-              <span style={{ fontSize:'0.82rem', color:'var(--texto-suave)', marginLeft:8 }}>CIF/unidad: <strong style={{ color:'var(--dorado)' }}>{fCOP(cifTotal/(cifUnidadesFallback||1))}</strong></span>
-            </div>
+            {productos.length === 0 && (
+              <div style={{ marginTop:12, padding:10, background:'white', borderRadius:'var(--radio)', border:'1px solid var(--crema-oscuro)' }}>
+                <span style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}>⚙️ Estimación inicial (aún sin fichas) — unidades/mes:</span>
+                <input type="number" className="form-control" value={cifUnidadesFallback} onChange={e => setCifUnidadesFallback(Number(e.target.value))} style={{ width:110, display:'inline-block', marginLeft:8 }} />
+                <span style={{ fontSize:'0.82rem', color:'var(--texto-suave)', marginLeft:8 }}>CIF/unidad: <strong style={{ color:'var(--dorado)' }}>{fCOP(cifTotal/(cifUnidadesFallback||1))}</strong></span>
+                <div style={{ fontSize:'0.72rem', color:'var(--texto-suave)', marginTop:4 }}>Solo se usa mientras no haya fichas de producto. Al crear productos, el CIF se reparte automáticamente y este valor se ignora.</div>
+              </div>
+            )}
           </div>
         </div>
       )}

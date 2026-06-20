@@ -47,11 +47,13 @@ export default function NotificationBell({ variant = 'sidebar' }) {
 
   const panel = (
     <Modal open={abierto} onClose={() => setAbierto(false)} title="🔔 Notificaciones"
-      footer={<>
-        {noLeidas > 0 && <button className="btn btn-secondary" onClick={marcarTodas}>Marcar todas leídas</button>}
-        <button className="btn btn-secondary" onClick={() => setAbierto(false)}>Cerrar</button>
-      </>}
+      footer={<button className="btn btn-secondary" onClick={() => setAbierto(false)}>Cerrar</button>}
     >
+      {noLeidas > 0 && (
+        <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
+          <button className="btn btn-sm btn-secondary" onClick={marcarTodas}>✓ Marcar todas leídas</button>
+        </div>
+      )}
       {notifs.length === 0
         ? <p className="empty-table">No tienes notificaciones</p>
         : notifs.map(n => (

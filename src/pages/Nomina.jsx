@@ -14,7 +14,8 @@ import * as XLSX from 'xlsx'
 
 const MESES_LABELS = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 const EMPTY_EMP = {
-  nombre: '', cargo: 'Operario', tipo_pago: 'nomina', salario: SMV, cedula: '', telefono: '', estado: 'activo',
+  nombre: '', cargo: 'Operario', tipo_pago: 'nomina', salario: SMV, tarifa_destajo: '', valor_hora: '',
+  cedula: '', telefono: '', estado: 'activo',
   correo: '', direccion: '', fecha_nacimiento: '', fecha_ingreso: '', eps: '', contacto_emergencia: '',
 }
 
@@ -28,6 +29,7 @@ export default function Nomina() {
   const esAuxiliar = rol === 'auxiliar'   // solo su propia asistencia
   const [tab, setTab] = useState('empleados')
   const [nomEmpId, setNomEmpId] = useState('')
+  const [nomUnidades, setNomUnidades] = useState('')   // unidades producidas (para destajo por producción)
   const [nomPeriodo, setNomPeriodo] = useState('mensual')
   const [nomMes, setNomMes] = useState(new Date().getMonth() + 1)
   const [nomAño, setNomAño] = useState(new Date().getFullYear())
@@ -38,6 +40,7 @@ export default function Nomina() {
   const [modalEmp, setModalEmp] = useState(false)
   const [formEmp, setFormEmp] = useState(EMPTY_EMP)
   const [editEmpId, setEditEmpId] = useState(null)
+  const [empEsUsuario, setEmpEsUsuario] = useState(true)   // ¿el empleado tiene cuenta de usuario (login)?
   const [asistEmpModal, setAsistEmpModal] = useState(null)   // empleado para registrar asistencia
   const [detalleEmp, setDetalleEmp] = useState(null)         // empleado para ver detalle
   const [listadoEmp, setListadoEmp] = useState(null)         // empleado para ver/editar listado
@@ -269,13 +272,20 @@ export default function Nomina() {
   }
 
   const guardarEmpleado = () => {
-    if (!formEmp.cedula || !formEmp.nombre.trim()) { toast('Debes seleccionar un usuario registrado', 'warning'); return }
-    saveEmp.mutate({ ...formEmp, salario: parseFloat(formEmp.salario) || SMV })
+    if (!formEmp.nombre.trim()) { toast('El nombre del empleado es obligatorio', 'warning'); return }
+    if (empEsUsuario && !formEmp.cedula) { toast('Selecciona un usuario registrado (o desmarca "Tiene cuenta de usuario")', 'warning'); return }
+    saveEmp.mutate({
+      ...formEmp,
+      salario: parseFloat(formEmp.salario) || SMV,
+      tarifa_destajo: formEmp.tarifa_destajo !== '' && formEmp.tarifa_destajo != null ? (parseFloat(formEmp.tarifa_destajo) || 0) : null,
+      valor_hora: formEmp.valor_hora !== '' && formEmp.valor_hora != null ? (parseFloat(formEmp.valor_hora) || 0) : null,
+    })
   }
 
   // Abre el formulario de edición de un empleado (solo admin)
   const abrirEditarEmp = (e) => {
-    setFormEmp({ ...EMPTY_EMP, nombre: e.nombre, cargo: e.cargo, tipo_pago: e.tipo_pago, salario: e.salario, cedula: e.cedula || '', telefono: e.telefono || '', estado: e.estado, correo: e.correo || '', direccion: e.direccion || '', fecha_nacimiento: e.fecha_nacimiento || '', fecha_ingreso: e.fecha_ingreso || '', eps: e.eps || '', contacto_emergencia: e.contacto_emergencia || '' })
+    setFormEmp({ ...EMPTY_EMP, nombre: e.nombre, cargo: e.cargo, tipo_pago: e.tipo_pago, salario: e.salario, tarifa_destajo: e.tarifa_destajo ?? '', valor_hora: e.valor_hora ?? '', cedula: e.cedula || '', telefono: e.telefono || '', estado: e.estado, correo: e.correo || '', direccion: e.direccion || '', fecha_nacimiento: e.fecha_nacimiento || '', fecha_ingreso: e.fecha_ingreso || '', eps: e.eps || '', contacto_emergencia: e.contacto_emergencia || '' })
+    setEmpEsUsuario(usuarios.some(u => u.login === e.cedula))
     setEditEmpId(e.id); setModalEmp(true)
   }
 
@@ -292,7 +302,7 @@ export default function Nomina() {
   const asistEmp = nomEmpleado ? asistencia.filter(a => a.emp_id === nomEmpleado.id) : []
   const rangoValido = nomDesde && nomHasta && nomDesde <= nomHasta
   const nomResultado = (nomEmpleado && rangoValido)
-    ? calcularNomina(nomEmpleado, asistEmp, nomPeriodo, parseInt(nomMes), nomAño, params, { desde: nomDesde, hasta: nomHasta })
+    ? calcularNomina(nomEmpleado, asistEmp, nomPeriodo, parseInt(nomMes), nomAño, params, { desde: nomDesde, hasta: nomHasta }, parseFloat(nomUnidades) || 0)
     : null
   // ¿Existe un registro guardado cuyo rango se solape con el seleccionado para este empleado?
   const liquidacionExistente = nomEmpleado && rangoValido
@@ -319,7 +329,7 @@ export default function Nomina() {
       <div className="page-header">
         <h1 className="page-title">Asistencia & Nómina</h1>
         <div className="page-actions">
-          {esAdmin && <button className="btn btn-primary btn-sm" onClick={() => { setFormEmp(EMPTY_EMP); setEditEmpId(null); setModalEmp(true) }}>+ Nuevo Empleado</button>}
+          {esAdmin && <button className="btn btn-primary btn-sm" onClick={() => { setFormEmp(EMPTY_EMP); setEditEmpId(null); setEmpEsUsuario(true); setModalEmp(true) }}>+ Nuevo Empleado</button>}
         </div>
       </div>
 
@@ -330,7 +340,7 @@ export default function Nomina() {
       </div>
 
       {tab === 'parametros' && esAdmin && (
-        <ParametrosNomina params={params} onSaved={() => qc.invalidateQueries({ queryKey: ['payroll_settings'] })} />
+        <ParametrosNomina params={params} empleadosActivos={empleados.filter(e => (e.estado || 'activo') === 'activo' && !e.archivado).length} onSaved={() => qc.invalidateQueries({ queryKey: ['payroll_settings'] })} />
       )}
 
       {/* LIQUIDACIÓN NÓMINA */}
@@ -360,6 +370,13 @@ export default function Nomina() {
               <label className="form-label">Hasta</label>
               <input type="date" className="form-control" value={nomHasta} max={hoy} onChange={e => setNomHasta(e.target.value)} />
             </div>
+            {nomEmpleado?.tipo_pago === 'destajo' && (
+              <div className="form-group">
+                <label className="form-label">Unidades producidas (destajo)</label>
+                <input type="number" className="form-control" min={0} value={nomUnidades} onChange={e => setNomUnidades(e.target.value)} placeholder="Ej: 500" />
+                <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>× tarifa {fCOP(parseFloat(nomEmpleado.tarifa_destajo) || 0)}/unidad</small>
+              </div>
+            )}
           </div>
 
           {!rangoValido && nomEmpId && (
@@ -372,13 +389,27 @@ export default function Nomina() {
             </div>
           )}
 
+          {nomResultado && !liquidacionExistente && nomResultado.tipo === 'destajo' && !nomResultado.cumpleMinimo && (
+            <div className="alert alert-danger" style={{ fontSize: '0.85rem', marginTop: 12 }}>
+              ⚖️ <strong>Por debajo del salario mínimo legal.</strong> Lo devengado por destajo ({fCOP(nomResultado.salBase)}) es menor al mínimo proporcional al tiempo trabajado
+              ({fCOP(nomResultado.minimoProporcional)} = SMLMV {fCOP(params.smlmv)} × {nomResultado.diasTrab > 0 ? `${nomResultado.diasTrab}/30 días` : (nomPeriodo === 'quincenal' ? '15/30' : '30/30')}).
+              Debes <strong>completar {fCOP(nomResultado.faltanteMinimo)}</strong> para cumplir la ley.
+            </div>
+          )}
+          {nomResultado && !liquidacionExistente && nomResultado.tipo === 'destajo' && nomResultado.cumpleMinimo && nomResultado.minimoProporcional > 0 && (
+            <div className="alert" style={{ fontSize: '0.82rem', marginTop: 12, background: 'rgba(124,179,66,0.12)', border: '1px solid var(--lima)', borderRadius: 'var(--radio)', padding: 8 }}>
+              ✅ Cumple el mínimo legal: {fCOP(nomResultado.salBase)} ≥ mínimo proporcional {fCOP(nomResultado.minimoProporcional)}.
+            </div>
+          )}
           {nomResultado && !liquidacionExistente && (
             <div className="grid-resp" style={{ gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
               <div className="card" style={{ margin: 0 }}>
                 <div className="card-title">📋 {nomEmpleado?.nombre} — {getTipoPagoLabel(nomResultado.tipo)}</div>
                 <div style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', marginBottom: 8 }}>{fFecha(nomDesde)} → {fFecha(nomHasta)} · {nomPeriodo}</div>
                 <table><tbody>
-                  <tr><td>{nomResultado.esCPS ? 'Honorarios' : 'Salario base'} ({nomPeriodo})</td><td className="td-number">{fCOP(nomResultado.salBase)}</td></tr>
+                  <tr><td>{nomResultado.esCPS ? 'Honorarios' : nomResultado.esDestajoHora ? 'Pago por horas (destajo)' : nomResultado.tipo === 'destajo' ? 'Pago por producción (destajo)' : 'Salario base'} ({nomPeriodo})</td><td className="td-number">{fCOP(nomResultado.salBase)}</td></tr>
+                  {nomResultado.tipo === 'destajo' && <tr><td style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>↳ {fNum(nomResultado.unidadesDestajo)} unidades × {fCOP(nomResultado.tarifaDestajo)}</td><td></td></tr>}
+                  {nomResultado.esDestajoHora && <tr><td style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>↳ {nomResultado.horas.toFixed(2)} h × {fCOP(nomResultado.valorHora)}</td><td></td></tr>}
                   {nomResultado.incluyeAux && <tr><td>Auxilio de transporte</td><td className="td-number">{fCOP(nomResultado.auxTransp)}</td></tr>}
                   <tr><td>Horas trabajadas <small style={{ color: 'var(--texto-suave)' }}>(según asistencia)</small></td><td className="td-number">{nomResultado.horas.toFixed(2)} h</td></tr>
                   <tr><td>Días trabajados <small style={{ color: 'var(--texto-suave)' }}>(según asistencia)</small></td><td className="td-number">{nomResultado.diasTrab}</td></tr>
@@ -395,7 +426,21 @@ export default function Nomina() {
                 </tbody></table>
               </div>
 
-              {nomResultado.esCPS
+              {nomResultado.esDestajoHora
+                ? (
+                  <div className="card" style={{ margin: 0 }}>
+                    <div className="card-title">⏱ Destajo por hora</div>
+                    <div className="alert alert-warning" style={{ fontSize: '0.82rem' }}>
+                      Modalidad <strong>sin prestaciones ni aportes</strong> (no contemplada en el CST para contrato laboral). El costo para la empresa es el mismo que se le paga.
+                    </div>
+                    <table><tbody>
+                      <tr><td>Horas trabajadas</td><td className="td-number">{nomResultado.horas.toFixed(2)} h</td></tr>
+                      <tr><td>Valor hora</td><td className="td-number">{fCOP(nomResultado.valorHora)}</td></tr>
+                      <tr style={{ fontWeight: 700 }}><td>Costo para la empresa</td><td className="td-number">{fCOP(nomResultado.costoEmpleador)}</td></tr>
+                    </tbody></table>
+                  </div>
+                )
+                : nomResultado.esCPS
                 ? (
                   <div className="card" style={{ margin: 0 }}>
                     <div className="card-title">ℹ Contrato Prestación de Servicios</div>
@@ -494,7 +539,8 @@ export default function Nomina() {
                           {esAdmin && (
                             <>
                               <button className="btn btn-xs btn-secondary" title="Editar empleado" onClick={() => {
-                                setFormEmp({ ...EMPTY_EMP, nombre: e.nombre, cargo: e.cargo, tipo_pago: e.tipo_pago, salario: e.salario, cedula: e.cedula || '', telefono: e.telefono || '', estado: e.estado, correo: e.correo || '', direccion: e.direccion || '', fecha_nacimiento: e.fecha_nacimiento || '', fecha_ingreso: e.fecha_ingreso || '', eps: e.eps || '', contacto_emergencia: e.contacto_emergencia || '' })
+                                setFormEmp({ ...EMPTY_EMP, nombre: e.nombre, cargo: e.cargo, tipo_pago: e.tipo_pago, salario: e.salario, tarifa_destajo: e.tarifa_destajo ?? '', valor_hora: e.valor_hora ?? '', cedula: e.cedula || '', telefono: e.telefono || '', estado: e.estado, correo: e.correo || '', direccion: e.direccion || '', fecha_nacimiento: e.fecha_nacimiento || '', fecha_ingreso: e.fecha_ingreso || '', eps: e.eps || '', contacto_emergencia: e.contacto_emergencia || '' })
+                                setEmpEsUsuario(usuarios.some(u => u.login === e.cedula))
                                 setEditEmpId(e.id); setModalEmp(true)
                               }}>✏</button>
                               <button className="btn btn-xs btn-danger" title="Eliminar" onClick={() => confirmar('¿Eliminar empleado?').then(ok => ok && deleteEmp.mutate(e.id))}>✕</button>
@@ -687,30 +733,39 @@ export default function Nomina() {
           </>
         }
       >
-        <div className="form-group">
-          <label className="form-label">Usuario / Persona <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(debe estar registrado como usuario)</small></label>
-          <select className="form-control" value={formEmp.cedula}
-            onChange={e => {
-              const u = usuarios.find(x => x.login === e.target.value)
-              setFormEmp(f => ({ ...f, cedula: u ? u.login : '', nombre: u ? u.nombre : '' }))
-            }}>
-            <option value="">— Selecciona un usuario —</option>
-            {/* En edición, asegura que el usuario ya vinculado aparezca aunque esté "usado" */}
-            {(editEmpId
-              ? usuariosActivos.filter(u => u.login === formEmp.cedula || !cedulasUsadas.has(u.login))
-              : usuariosDisponibles
-            ).map(u => (
-              <option key={u.id} value={u.login}>{u.nombre} — C.C. {u.login}</option>
-            ))}
-          </select>
-          {usuariosDisponibles.length === 0 && !editEmpId && (
-            <small style={{ color: 'var(--texto-suave)', fontSize: '0.75rem' }}>
-              No hay usuarios disponibles sin vincular. Crea el usuario en "Usuarios & Permisos" primero.
-            </small>
-          )}
-        </div>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.88rem', cursor: 'pointer', fontWeight: 600, color: 'var(--selva)', marginBottom: 10 }}>
+          <input type="checkbox" checked={empEsUsuario} onChange={e => { const on = e.target.checked; setEmpEsUsuario(on); if (!on) setFormEmp(f => ({ ...f, cedula: '' })); else setFormEmp(f => ({ ...f, nombre: '', cedula: '' })) }} />
+          Tiene cuenta de usuario (login en el sistema)
+        </label>
+        {empEsUsuario ? (
+          <div className="form-group">
+            <label className="form-label">Usuario / Persona <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(debe estar registrado como usuario)</small></label>
+            <select className="form-control" value={formEmp.cedula}
+              onChange={e => {
+                const u = usuarios.find(x => x.login === e.target.value)
+                setFormEmp(f => ({ ...f, cedula: u ? u.login : '', nombre: u ? u.nombre : '' }))
+              }}>
+              <option value="">— Selecciona un usuario —</option>
+              {(editEmpId
+                ? usuariosActivos.filter(u => u.login === formEmp.cedula || !cedulasUsadas.has(u.login))
+                : usuariosDisponibles
+              ).map(u => (
+                <option key={u.id} value={u.login}>{u.nombre} — C.C. {u.login}</option>
+              ))}
+            </select>
+            {usuariosDisponibles.length === 0 && !editEmpId && (
+              <small style={{ color: 'var(--texto-suave)', fontSize: '0.75rem' }}>
+                No hay usuarios disponibles sin vincular. Crea el usuario en "Usuarios & Permisos", o desmarca la casilla para registrar un empleado sin login.
+              </small>
+            )}
+          </div>
+        ) : (
+          <div className="alert alert-info" style={{ fontSize: '0.8rem' }}>
+            Empleado <strong>sin login</strong>: no inicia sesión. El admin u operario le registra la asistencia. Útil para personal por destajo o jornal.
+          </div>
+        )}
         <div className="form-grid-2">
-          <div className="form-group"><label className="form-label">Nombre completo</label><input className="form-control" value={formEmp.nombre} readOnly placeholder="Se toma del usuario" /></div>
+          <div className="form-group"><label className="form-label">Nombre completo</label><input className="form-control" value={formEmp.nombre} readOnly={empEsUsuario} onChange={e => !empEsUsuario && setFormEmp(f => ({ ...f, nombre: e.target.value }))} placeholder={empEsUsuario ? 'Se toma del usuario' : 'Nombre del empleado'} /></div>
           <div className="form-group">
             <label className="form-label">Cargo <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(elige o escribe uno nuevo)</small></label>
             <input className="form-control" list="dl-cargos" value={formEmp.cargo} onChange={e => setFormEmp(f => ({ ...f, cargo: e.target.value }))} placeholder="Ej: Gerente, Operario, Empacador..." />
@@ -723,11 +778,34 @@ export default function Nomina() {
             <select className="form-control" value={formEmp.tipo_pago} onChange={e => setFormEmp(f => ({ ...f, tipo_pago: e.target.value }))}>
               {TIPOS_PAGO.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
             </select>
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
+              <strong>Por horas</strong>: contrato laboral, valor hora = salario ÷ horas-mes, <strong>con</strong> prestaciones. ·
+              <strong> Por hora informal</strong>: pago ocasional valor hora libre, <strong>sin</strong> prestaciones (no laboral).
+            </small>
           </div>
-          <div className="form-group"><label className="form-label">Salario base</label><MoneyInput value={formEmp.salario} onChange={v => setFormEmp(f => ({ ...f, salario: v }))} /></div>
+          <div className="form-group"><label className="form-label">Salario base {(formEmp.tipo_pago === 'destajo' || formEmp.tipo_pago === 'destajo_hora') && <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(referencia; el pago se calcula por {formEmp.tipo_pago === 'destajo' ? 'producción' : 'hora'})</small>}</label><MoneyInput value={formEmp.salario} onChange={v => setFormEmp(f => ({ ...f, salario: v }))} /></div>
         </div>
+        {formEmp.tipo_pago === 'destajo' && (
+          <div className="form-group">
+            <label className="form-label">💰 Tarifa por unidad producida</label>
+            <MoneyInput value={formEmp.tarifa_destajo} onChange={v => setFormEmp(f => ({ ...f, tarifa_destajo: v }))} />
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.75rem' }}>El pago = unidades producidas (las ingresas al liquidar) × esta tarifa. Lleva prestaciones y aportes de ley.</small>
+          </div>
+        )}
+        {formEmp.tipo_pago === 'destajo_hora' && (
+          <>
+            <div className="form-group">
+              <label className="form-label">⏱ Valor por hora</label>
+              <MoneyInput value={formEmp.valor_hora} onChange={v => setFormEmp(f => ({ ...f, valor_hora: v }))} />
+              <small style={{ color: 'var(--texto-suave)', fontSize: '0.75rem' }}>El pago = horas trabajadas (según asistencia) × este valor.</small>
+            </div>
+            <div className="alert alert-warning" style={{ fontSize: '0.8rem' }}>
+              ⚠ <strong>Destajo por hora sin prestaciones</strong>: esta modalidad <strong>no está contemplada en el Código Sustantivo del Trabajo</strong> para un contrato laboral (un trabajador subordinado genera prestaciones y aportes). Úsala bajo tu responsabilidad para pagos ocasionales/informales; para algo recurrente formaliza un contrato.
+            </div>
+          </>
+        )}
         <div className="form-grid-2">
-          <div className="form-group"><label className="form-label">Cédula / ID</label><input className="form-control" value={formEmp.cedula} readOnly placeholder="Del usuario" /></div>
+          <div className="form-group"><label className="form-label">Cédula / ID</label><input className="form-control" value={formEmp.cedula} readOnly={empEsUsuario} onChange={e => !empEsUsuario && setFormEmp(f => ({ ...f, cedula: e.target.value }))} placeholder={empEsUsuario ? 'Del usuario' : 'Cédula / identificación'} /></div>
           <div className="form-group"><label className="form-label">Teléfono</label><input className="form-control" value={formEmp.telefono} onChange={e => setFormEmp(f => ({ ...f, telefono: e.target.value }))} /></div>
         </div>
         <div className="form-grid-2">
@@ -769,7 +847,7 @@ function NumField({ label, value, onChange, pct = false, hint }) {
   )
 }
 
-function ParametrosNomina({ params, onSaved }) {
+function ParametrosNomina({ params, empleadosActivos = 0, onSaved }) {
   const toast = useToast()
   const [p, setP] = useState(params)
   const [saving, setSaving] = useState(false)
@@ -817,7 +895,11 @@ function ParametrosNomina({ params, onSaved }) {
 
       <div className="card-title" style={{ fontSize: '0.95rem' }}>Tiempo de operación <small style={{ fontWeight: 400, color: 'var(--texto-suave)' }}>— para el costo fijo por minuto del costeo de productos</small></div>
       <div className="form-grid-2">
-        <NumField label="N° de operarios" value={p.operacion?.numOperarios ?? 0} onChange={v => setSub('operacion', 'numOperarios', v)} hint="0 = usar los empleados activos" />
+        <div className="form-group">
+          <label className="form-label">N° de operarios</label>
+          <input className="form-control" value={(p.operacion?.numOperarios ?? 0) === 0 ? `Todos los activos (${empleadosActivos})` : `${p.operacion?.numOperarios}`} disabled readOnly />
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.75rem' }}>Se configura en <strong>Costos → Costos Fijos (CIF)</strong>, junto al simulador de costo/minuto.</small>
+        </div>
         <NumField label="Días hábiles al mes" value={p.operacion?.dias ?? 22} onChange={v => setSub('operacion', 'dias', v)} />
         <NumField label="Jornada (horas/día)" value={p.operacion?.jornadaHoras ?? 8} onChange={v => setSub('operacion', 'jornadaHoras', v)} />
         <NumField label="% Improductividad" pct value={p.operacion?.improductividad ?? 0.15} onChange={v => setSub('operacion', 'improductividad', v)} hint="Tiempo no productivo de la jornada" />

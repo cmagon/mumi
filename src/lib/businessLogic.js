@@ -206,10 +206,11 @@ export const PARAMS_NOMINA = { ...PARAMS_NOMINA_DEFAULT.prestaciones, ...PARAMS_
 
 // Etiquetas de los tipos de pago
 export const TIPOS_PAGO = [
-  { value: 'nomina',  label: 'Contrato a término fijo/indefinido (nómina)' },
-  { value: 'horas',   label: 'Por horas' },
-  { value: 'destajo', label: 'Por destajo / producción' },
-  { value: 'cps',     label: 'Contrato prestación de servicios (CPS)' },
+  { value: 'nomina',       label: 'Contrato a término fijo/indefinido (nómina)' },
+  { value: 'horas',        label: 'Por horas — contrato laboral (con prestaciones)' },
+  { value: 'destajo',      label: 'Por destajo / producción (con prestaciones)' },
+  { value: 'destajo_hora', label: 'Por hora informal, sin prestaciones (no laboral)' },
+  { value: 'cps',          label: 'Contrato prestación de servicios (CPS)' },
 ]
 export const getTipoPagoLabel = (t) => (TIPOS_PAGO.find(x => x.value === t)?.label || t)
 
@@ -221,6 +222,8 @@ export const getCostoNominaMensual = (empleados = [], params = PARAMS_NOMINA_DEF
   let salarios = 0, auxilios = 0, prestaciones = 0, parafiscales = 0, honorarios = 0
   for (const e of empleados) {
     if (e.estado && e.estado !== 'activo') continue
+    // El destajo por hora es variable/ocasional → no entra al CIF mensual fijo (su costo real se ve en la liquidación)
+    if (e.tipo_pago === 'destajo_hora') continue
     const sal = parseFloat(e.salario) || 0
     if (sal <= 0) continue
     if (e.tipo_pago === 'cps') { honorarios += sal; continue }
@@ -260,7 +263,7 @@ export const contarDiasHabiles = (desde, hasta, diasLaboralesSemana = 6) => {
   return n
 }
 
-export const calcularNomina = (empleado, asistencia = [], periodo = 'mensual', mes = 1, año = 2026, params = PARAMS_NOMINA_DEFAULT, rango = null) => {
+export const calcularNomina = (empleado, asistencia = [], periodo = 'mensual', mes = 1, año = 2026, params = PARAMS_NOMINA_DEFAULT, rango = null, unidadesDestajo = 0) => {
   if (!empleado) return null
   const P = params || PARAMS_NOMINA_DEFAULT
   const salario = empleado.salario || P.smlmv
@@ -301,6 +304,20 @@ export const calcularNomina = (empleado, asistencia = [], periodo = 'mensual', m
     }
   }
 
+  // ---------- Destajo por hora (informal, SIN prestaciones ni parafiscales) ----------
+  if (tipo === 'destajo_hora') {
+    const vh = parseFloat(empleado.valor_hora) || 0
+    const salBase = horas * vh
+    return {
+      tipo, esCPS: false, esDestajoHora: true, salario, incluyeAux: false, horas, diasTrab,
+      salBase, auxTransp: 0, valorHora: vh,
+      salud: 0, pension: 0, neto: salBase,
+      cesantias: 0, intCes: 0, prima: 0, vacaciones: 0, totalPrestaciones: 0,
+      parafiscales: { salud: 0, pension: 0, arl: 0, caja: 0, icbf: 0, sena: 0, total: 0 },
+      costoEmpleador: salBase,
+    }
+  }
+
   // ---------- Contrato laboral (nómina / horas / destajo) ----------
   const incluyeAux = salario <= P.topeAuxSMLMV * P.smlmv
   let auxTransp = incluyeAux ? P.auxTransporte * factor : 0
@@ -313,8 +330,11 @@ export const calcularNomina = (empleado, asistencia = [], periodo = 'mensual', m
   if (tipo === 'horas') {
     const valorHora = salario / (P.horasMes || 230)
     salBase = horas * valorHora
+  } else if (tipo === 'destajo') {
+    // Destajo por producción: unidades producidas × tarifa por unidad (con prestaciones)
+    salBase = (parseFloat(unidadesDestajo) || 0) * (parseFloat(empleado.tarifa_destajo) || 0)
   } else {
-    salBase = salario * factor   // nómina fija y destajo
+    salBase = salario * factor   // nómina fija
   }
 
   // ----- Descuentos por inasistencia (solo nómina fija; no aplica a 'horas' que ya paga lo trabajado) -----
@@ -370,9 +390,19 @@ export const calcularNomina = (empleado, asistencia = [], periodo = 'mensual', m
 
   const costoEmpleador = salBase + auxTransp + totalPrestaciones + paraTotal
 
+  // Garantía de salario mínimo (destajo): lo devengado no puede ser inferior al mínimo proporcional
+  // al tiempo trabajado. El SMLMV se toma de los parámetros (P.smlmv).
+  const diasMin = diasTrab > 0 ? diasTrab : (periodo === 'quincenal' ? 15 : 30)
+  const minimoProporcional = tipo === 'destajo' ? P.smlmv * (diasMin / 30) : 0
+  const cumpleMinimo = tipo !== 'destajo' || salBase >= minimoProporcional
+  const faltanteMinimo = Math.max(0, minimoProporcional - salBase)
+
   return {
     tipo, esCPS: false, salario, incluyeAux, horas, diasTrab,
     salBase, auxTransp, salud, pension, neto,
+    unidadesDestajo: tipo === 'destajo' ? (parseFloat(unidadesDestajo) || 0) : 0,
+    tarifaDestajo: tipo === 'destajo' ? (parseFloat(empleado.tarifa_destajo) || 0) : 0,
+    minimoProporcional, cumpleMinimo, faltanteMinimo,
     cesantias, intCes, prima, vacaciones, totalPrestaciones,
     diasNoLaborados, horasFaltantes, descuentoDias, descuentoHoras, descuentoInasistencia,
     parafiscales: { salud: paraSalud, pension: paraPension, arl: paraArl, caja: paraCaja, icbf: paraIcbf, sena: paraSena, total: paraTotal, exime },

@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { fFecha, getRolLabel } from '../lib/businessLogic'
 import { useAuth } from '../context/AuthContext'
+import { useConfirm } from '../context/ConfirmContext'
 import { useToast } from '../hooks/useToast'
 import { CATALOGO_MODULOS, MODULOS_POR_ROL } from '../lib/permisos'
 import Modal from '../components/ui/Modal'
@@ -146,6 +147,7 @@ export default function Usuarios() {
 
       <div className="tabs">
         <button className={`tab-btn${tab === 'usuarios' ? ' active' : ''}`} onClick={() => setTab('usuarios')}>👥 Usuarios</button>
+        <button className={`tab-btn${tab === 'roles' ? ' active' : ''}`} onClick={() => setTab('roles')}>🏷 Roles</button>
         <button className={`tab-btn${tab === 'permisos' ? ' active' : ''}`} onClick={() => setTab('permisos')}>🔐 Gestión de Permisos</button>
       </div>
 
@@ -233,6 +235,8 @@ export default function Usuarios() {
         </>
       )}
 
+      {tab === 'roles' && <RolesTab usuarios={usuarios} onSaved={recargarPermisos} onIrPermisos={() => setTab('permisos')} />}
+
       {tab === 'permisos' && <PermisosTab onSaved={recargarPermisos} />}
 
       {/* Modal alta/edición */}
@@ -299,6 +303,122 @@ export default function Usuarios() {
         <div className="form-group"><label className="form-label">Nueva contraseña</label>
           <input className="form-control" value={pwdValue} onChange={e => setPwdValue(e.target.value)} /></div>
       </Modal>
+    </div>
+  )
+}
+
+// ============================================================
+// Pestaña: Roles (crear / renombrar / eliminar)
+// ============================================================
+function RolesTab({ usuarios = [], onSaved, onIrPermisos }) {
+  const toast = useToast()
+  const confirmar = useConfirm()
+  const { permisos } = useAuth()
+  const [nuevo, setNuevo] = useState('')
+  const [editando, setEditando] = useState(null)   // rol en edición de nombre
+  const [labelEdit, setLabelEdit] = useState('')
+  const [busy, setBusy] = useState(false)
+
+  // Lista de roles = base + creados por el admin (en role_permissions)
+  const roles = [...new Set([...ROLES_BASE, ...Object.keys(permisos || {})])]
+  const esBase = (r) => ROLES_BASE.includes(r)
+  const usuariosDe = (r) => usuarios.filter(u => u.rol === r).length
+
+  const crear = async () => {
+    const slug = slugRol(nuevo)
+    if (!slug) { toast('Escribe un nombre de rol válido', 'warning'); return }
+    if (roles.includes(slug)) { toast('Ese rol ya existe', 'warning'); return }
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('role_permissions').upsert(
+        { rol: slug, label: nuevo.trim(), permisos: { modulos: ['dashboard'], secciones: {} } },
+        { onConflict: 'rol' }
+      )
+      if (error) throw error
+      await onSaved?.()
+      setNuevo('')
+      toast('Rol creado ✓ — configura sus permisos en la pestaña 🔐')
+    } catch (e) { toast(e.message || 'Error al crear el rol', 'error') } finally { setBusy(false) }
+  }
+
+  const guardarNombre = async (rol) => {
+    if (!labelEdit.trim()) { toast('El nombre no puede quedar vacío', 'warning'); return }
+    setBusy(true)
+    try {
+      // Conserva los permisos existentes (o defaults) y actualiza solo el label
+      const permisosObj = permisos?.[rol] || { modulos: MODULOS_POR_ROL[rol] || ['dashboard'], secciones: {} }
+      const { error } = await supabase.from('role_permissions').upsert(
+        { rol, label: labelEdit.trim(), permisos: permisosObj }, { onConflict: 'rol' }
+      )
+      if (error) throw error
+      await onSaved?.()
+      setEditando(null)
+      toast('Nombre del rol actualizado ✓')
+    } catch (e) { toast(e.message || 'Error al renombrar', 'error') } finally { setBusy(false) }
+  }
+
+  const eliminar = async (rol) => {
+    if (esBase(rol)) { toast('Los roles base (admin, operario, auxiliar) no se pueden eliminar', 'warning'); return }
+    const n = usuariosDe(rol)
+    if (n > 0) { toast(`No se puede eliminar: ${n} usuario(s) tienen este rol. Reasígnalos primero.`, 'warning'); return }
+    if (!await confirmar(`¿Eliminar el rol "${getRolLabel(rol)}"? Esta acción no se puede deshacer.`, { title: 'Eliminar rol', confirmText: 'Eliminar' })) return
+    setBusy(true)
+    try {
+      const { error } = await supabase.from('role_permissions').delete().eq('rol', rol)
+      if (error) throw error
+      await onSaved?.()
+      toast('Rol eliminado ✓')
+    } catch (e) { toast(e.message || 'Error al eliminar', 'error') } finally { setBusy(false) }
+  }
+
+  return (
+    <div className="card">
+      <div className="card-title">🏷 Roles del sistema</div>
+      <div className="alert alert-info" style={{ fontSize: '0.85rem' }}>
+        Aquí administras los roles que podrás <strong>asignar a los usuarios</strong>. Los roles
+        <strong> base</strong> (Administrador, Operario, Auxiliar) no se pueden eliminar. Para definir
+        qué ve cada rol, usa la pestaña <strong>🔐 Gestión de Permisos</strong>.
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, margin: '10px 0 16px', maxWidth: 460 }}>
+        <input className="form-control" placeholder="Nombre del nuevo rol (ej. Supervisor)" value={nuevo} onChange={e => setNuevo(e.target.value)} />
+        <button className="btn btn-primary" onClick={crear} disabled={busy}>➕ Crear rol</button>
+      </div>
+
+      <div className="table-wrap">
+        <table>
+          <thead><tr><th>Rol</th><th>Identificador</th><th>Usuarios</th><th>Acciones</th></tr></thead>
+          <tbody>
+            {roles.map(r => (
+              <tr key={r}>
+                <td>
+                  {editando === r
+                    ? <input className="form-control" value={labelEdit} onChange={e => setLabelEdit(e.target.value)} autoFocus />
+                    : <span className={`badge ${r === 'admin' ? 'badge-dorado' : 'badge-azul'}`}>{getRolLabel(r)}</span>}
+                </td>
+                <td><code>{r}</code>{esBase(r) && <small style={{ color: 'var(--texto-suave)', marginLeft: 6 }}>(base)</small>}</td>
+                <td>{usuariosDe(r)}</td>
+                <td>
+                  <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                    {editando === r ? (
+                      <>
+                        <button className="btn btn-xs btn-primary" onClick={() => guardarNombre(r)} disabled={busy}>💾 Guardar</button>
+                        <button className="btn btn-xs btn-secondary" onClick={() => setEditando(null)}>✕</button>
+                      </>
+                    ) : (
+                      <>
+                        {r !== 'admin' && <button className="btn btn-xs btn-secondary" title="Configurar permisos" onClick={onIrPermisos}>🔐 Permisos</button>}
+                        <button className="btn btn-xs btn-secondary" title="Renombrar" onClick={() => { setEditando(r); setLabelEdit(getRolLabel(r)) }}>✏</button>
+                        {!esBase(r) && <button className="btn btn-xs btn-dorado" title="Eliminar" onClick={() => eliminar(r)} disabled={busy}>🗑</button>}
+                      </>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }
