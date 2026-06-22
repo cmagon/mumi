@@ -118,7 +118,7 @@ export default function Compartido() {
                       {paso === 'idle'
                         ? <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                             <input type="email" className="form-control" value={emailOtp} onChange={e => setEmailOtp(e.target.value)} placeholder="tu correo" style={{ maxWidth: 240 }} />
-                            <button className="btn btn-sm btn-primary" onClick={enviarCodigo}>Enviar código</button>
+                            <button className="btn btn-sm btn-primary" onClick={enviarCodigo}>Solicitar edición</button>
                           </div>
                         : <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                             <input className="form-control" value={codigo} onChange={e => setCodigo(e.target.value)} placeholder="Código del correo" style={{ maxWidth: 180 }} />
