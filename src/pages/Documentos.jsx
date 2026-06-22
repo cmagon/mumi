@@ -193,13 +193,13 @@ export default function Documentos() {
     enabled: esAdmin,
     queryFn: async () => { const { data } = await supabase.from('share_solicitudes').select('*').eq('atendido', false).order('created_at', { ascending: false }); return data || [] },
   })
-  const concederTiempo = async (sol, dias) => {
+  const concederTiempo = async (sol, minutos, etiqueta) => {
     try {
-      const expira_at = new Date(Date.now() + dias * 86400000).toISOString()
+      const expira_at = new Date(Date.now() + minutos * 60000).toISOString()
       await supabase.from('document_shares').update({ expira_at }).eq('token', sol.token)
       await supabase.from('share_solicitudes').update({ atendido: true }).eq('id', sol.id)
       qc.invalidateQueries({ queryKey: ['share_solicitudes'] })
-      toast(`Acceso ampliado +${dias} día(s) ✓`)
+      toast(`Acceso ampliado ${etiqueta} ✓`)
     } catch (e) { toast(e.message, 'error') }
   }
   const rechazarSolicitud = async (sol) => {
@@ -920,9 +920,12 @@ export default function Documentos() {
                   <div style={{ fontSize: '0.85rem' }}><strong>{s.email || '—'}</strong> pidió más tiempo</div>
                   <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', marginBottom: 6 }}>{new Date(s.created_at).toLocaleString('es-CO')}</div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-                    <button className="btn btn-xs btn-success" onClick={() => concederTiempo(s, 1)}>+1 día</button>
-                    <button className="btn btn-xs btn-success" onClick={() => concederTiempo(s, 7)}>+7 días</button>
-                    <button className="btn btn-xs btn-success" onClick={() => concederTiempo(s, 30)}>+30 días</button>
+                    <button className="btn btn-xs btn-success" onClick={() => concederTiempo(s, 30, '+30 min')}>+30 min</button>
+                    <button className="btn btn-xs btn-success" onClick={() => concederTiempo(s, 60, '+1 hora')}>+1 h</button>
+                    <button className="btn btn-xs btn-success" onClick={() => concederTiempo(s, 120, '+2 horas')}>+2 h</button>
+                    <button className="btn btn-xs btn-success" onClick={() => concederTiempo(s, 1440, '+1 día')}>+1 día</button>
+                    <button className="btn btn-xs btn-success" onClick={() => concederTiempo(s, 10080, '+7 días')}>+7 días</button>
+                    <button className="btn btn-xs btn-success" onClick={() => concederTiempo(s, 43200, '+30 días')}>+30 días</button>
                     <button className="btn btn-xs btn-danger" style={{ marginLeft: 'auto' }} onClick={() => rechazarSolicitud(s)}>Descartar</button>
                   </div>
                 </div>

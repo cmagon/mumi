@@ -51,7 +51,17 @@ export default function Compartido() {
 
   const { data: share, isLoading } = useQuery({
     queryKey: ['share', token],
-    queryFn: async () => { const { data } = await supabase.from('document_shares').select('*').eq('token', token).maybeSingle(); return data },
+    queryFn: async () => {
+      let { data, error } = await supabase.from('document_shares').select('*').eq('token', token).maybeSingle()
+      if (error) {
+        // Sesión OTP vencida puede romper la lectura → limpiar y reintentar como anónimo
+        await supabase.auth.signOut().catch(() => {})
+        const r = await supabase.from('document_shares').select('*').eq('token', token).maybeSingle()
+        data = r.data
+      }
+      return data
+    },
+    retry: 1,
   })
 
   const expirado = share?.expira_at && new Date(share.expira_at) < new Date()
