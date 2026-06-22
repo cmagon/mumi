@@ -122,6 +122,8 @@ export default function Compartido() {
 
   // --- Edición real (como el admin) dentro de la carpeta compartida ---
   const carpetaScope = share?.carpeta || ''
+  const [rutaEdit, setRutaEdit] = useState('')
+  useEffect(() => { setRutaEdit(carpetaScope) }, [carpetaScope])
   const { data: liveDocs = [], refetch: refetchLive } = useQuery({
     queryKey: ['share_live_docs', token, carpetaScope],
     enabled: esEditor,
@@ -132,6 +134,40 @@ export default function Compartido() {
       return data || []
     },
   })
+  const { data: ordenPaths = [] } = useQuery({
+    queryKey: ['share_orden_paths'],
+    enabled: esEditor,
+    queryFn: async () => { const { data } = await supabase.from('app_settings').select('data').eq('id', 2).maybeSingle(); return Array.isArray(data?.data?.orden) ? data.data.orden : [] },
+  })
+  // Navegación por carpetas dentro del alcance compartido
+  const prefijoEdit = rutaEdit ? rutaEdit + '/' : ''
+  const enScope = (p) => !carpetaScope || p === carpetaScope || p.startsWith(carpetaScope + '/')
+  const subEdit = (() => {
+    const all = [...new Set([...ordenPaths, ...liveDocs.map(d => d.proceso).filter(Boolean)])]
+    const segs = []
+    all.forEach(p => {
+      if (!enScope(p)) return
+      if (rutaEdit && !p.startsWith(prefijoEdit)) return
+      const resto = rutaEdit ? p.slice(prefijoEdit.length) : p
+      const seg = resto.split('/')[0]
+      if (seg) { const full = prefijoEdit + seg; if (!segs.includes(full)) segs.push(full) }
+    })
+    return segs
+  })()
+  const docsEdit = liveDocs.filter(d => (d.proceso || '') === rutaEdit)
+  const segName = (p) => p.split('/').pop()
+  // Migas desde la carpeta compartida hasta la ruta actual (no se puede subir más allá del alcance)
+  const migas = (() => {
+    if (!rutaEdit) return []
+    const parts = rutaEdit.split('/')
+    const out = []
+    for (let i = 0; i < parts.length; i++) {
+      const full = parts.slice(0, i + 1).join('/')
+      if (carpetaScope && !enScope(full)) continue
+      out.push({ nombre: parts[i], full })
+    }
+    return out
+  })()
   const [nuevoNombre, setNuevoNombre] = useState('')
   const [nuevoFile, setNuevoFile] = useState(null)
   const [creando, setCreando] = useState(false)
@@ -148,7 +184,7 @@ export default function Compartido() {
         archivo_nombre = nuevoFile.name
       }
       const { error } = await supabase.from('documentos').insert({
-        nombre: nuevoNombre.trim(), proceso: carpetaScope, tipo: 'procedimiento', version: '1', vigente: true,
+        nombre: nuevoNombre.trim(), proceso: rutaEdit, tipo: 'procedimiento', version: '1', vigente: true,
         storage_path, storage_url, archivo_nombre, creado_por: sesionEmail,
       })
       if (error) throw error
@@ -177,7 +213,7 @@ export default function Compartido() {
   // Crear subcarpeta dentro de la carpeta compartida (acotada)
   const crearSubcarpeta = async () => {
     const n = nuevaSub.trim().replace(/\//g, '-'); if (!n) return
-    const full = carpetaScope ? `${carpetaScope}/${n}` : n
+    const full = rutaEdit ? `${rutaEdit}/${n}` : n
     try {
       const { data } = await supabase.from('app_settings').select('data').eq('id', 2).maybeSingle()
       const orden = Array.isArray(data?.data?.orden) ? data.data.orden : []
@@ -246,9 +282,29 @@ export default function Compartido() {
               {esEditor
                 ? (
                   <div>
-                    <div style={{ fontWeight: 600, marginBottom: 10 }}>📂 Editando: {carpetaScope || 'Todos los documentos'}</div>
+                    {/* Migas de navegación dentro del alcance compartido */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+                      <button className="btn btn-xs btn-secondary" onClick={() => setRutaEdit(carpetaScope)}>🏠 {carpetaScope ? segName(carpetaScope) : 'Inicio'}</button>
+                      {migas.filter(m => m.full !== carpetaScope).map(m => (
+                        <span key={m.full} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                          <span style={{ color: '#aaa' }}>/</span>
+                          <button className="btn btn-xs btn-secondary" onClick={() => setRutaEdit(m.full)}>{m.nombre}</button>
+                        </span>
+                      ))}
+                    </div>
+                    {/* Subcarpetas navegables */}
+                    {subEdit.length > 0 && (
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10, marginBottom: 12 }}>
+                        {subEdit.map(full => (
+                          <div key={full} onClick={() => setRutaEdit(full)} style={{ cursor: 'pointer', textAlign: 'center', padding: 12, border: '1px solid #cde0b8', borderRadius: 10, background: 'rgba(124,179,66,0.05)' }}>
+                            <div style={{ fontSize: '2rem' }}>📁</div>
+                            <div style={{ fontWeight: 600, fontSize: '0.8rem' }}>{segName(full)}</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                     <div style={{ border: '1px dashed #cde0b8', borderRadius: 8, padding: 10, marginBottom: 8 }}>
-                      <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 6 }}>+ Nuevo documento</div>
+                      <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 6 }}>+ Nuevo documento en {rutaEdit ? segName(rutaEdit) : 'la raíz'}</div>
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                         <input className="form-control" placeholder="Nombre del documento" value={nuevoNombre} onChange={e => setNuevoNombre(e.target.value)} style={{ maxWidth: 240 }} />
                         <input type="file" onChange={e => setNuevoFile(e.target.files[0] || null)} />
@@ -262,10 +318,10 @@ export default function Compartido() {
                         <button className="btn btn-sm btn-secondary" onClick={crearSubcarpeta}>Crear subcarpeta</button>
                       </div>
                     </div>
-                    {liveDocs.length === 0
-                      ? <p style={{ color: '#888' }}>Aún no hay documentos en esta carpeta. Crea el primero arriba.</p>
+                    {docsEdit.length === 0
+                      ? <p style={{ color: '#888' }}>Sin documentos en esta carpeta. {subEdit.length > 0 ? 'Entra a una subcarpeta o crea uno aquí.' : 'Crea el primero arriba.'}</p>
                       : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                          {liveDocs.map(d => <LiveDocRow key={d.id} d={d} onGuardar={guardarDoc} onReemplazar={reemplazarArchivo} />)}
+                          {docsEdit.map(d => <LiveDocRow key={d.id} d={d} onGuardar={guardarDoc} onReemplazar={reemplazarArchivo} />)}
                         </div>}
                   </div>
                 )
