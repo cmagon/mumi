@@ -523,9 +523,20 @@ export default function Documentos() {
     const modoTxt = permisoEdicion
       ? `en modo EDICIÓN (deberás verificar tu identidad con un código enviado a ${email})`
       : 'en modo solo lectura'
-    const asunto = encodeURIComponent(`Documentos compartidos: ${compartirGrupo?.titulo || ''}`)
-    const cuerpo = encodeURIComponent(`Hola,\n\nTe comparto la carpeta "${compartirGrupo?.titulo || ''}" ${modoTxt} (válida por ${venceTxt}):\n\n${enlaceGrupoLink}\n\nSaludos.`)
-    window.location.href = `mailto:${email}?subject=${asunto}&body=${cuerpo}`
+    const titulo = compartirGrupo?.titulo || ''
+    const asunto = `Documentos compartidos: ${titulo}`
+    const textoPlano = `Hola,\n\nTe comparto la carpeta "${titulo}" ${modoTxt} (válida por ${venceTxt}):\n\n${enlaceGrupoLink}\n\nSaludos.`
+    const html = `<p>Hola,</p><p>Te comparto la carpeta <strong>${titulo}</strong> ${modoTxt} (válida por ${venceTxt}).</p><p><a href="${enlaceGrupoLink}">Abrir documentos compartidos</a></p><p style="color:#888;font-size:12px">${enlaceGrupoLink}</p>`
+    // 1) Intento de envío automático (Edge Function). 2) Si falla, abre la app de correo.
+    try {
+      const { error } = await supabase.functions.invoke('enviar-correo', { body: { to: email, subject: asunto, html } })
+      if (error) throw error
+      toast(`Correo enviado a ${email} ✓`)
+      setMostrarCorreo(false)
+    } catch {
+      toast('Envío automático no disponible — abriendo tu app de correo', 'info')
+      window.location.href = `mailto:${email}?subject=${encodeURIComponent(asunto)}&body=${encodeURIComponent(textoPlano)}`
+    }
   }
 
   // Descargar todos los documentos (con archivo) de un proceso en un ZIP
