@@ -40,7 +40,6 @@ export default function Compartido() {
 
   // --- Acceso con edición por código (OTP) para el correo invitado ---
   const [sesionEmail, setSesionEmail] = useState('')
-  const [emailOtp, setEmailOtp] = useState('')
   const [codigo, setCodigo] = useState('')
   const [paso, setPaso] = useState('idle')   // 'idle' | 'codigo'
   const [otpMsg, setOtpMsg] = useState('')
@@ -53,18 +52,16 @@ export default function Compartido() {
     return () => sub.subscription.unsubscribe()
   }, [])
 
-  useEffect(() => { if (permiteEdicion && !emailOtp) setEmailOtp(share.email_invitado) }, [permiteEdicion, share, emailOtp])
-
   const enviarCodigo = async () => {
-    const email = emailOtp.trim().toLowerCase()
-    if (email !== String(share.email_invitado).toLowerCase()) { setOtpMsg('Este enlace de edición es solo para el correo invitado.'); return }
+    const email = String(share?.email_invitado || '').trim().toLowerCase()
+    if (!email) return
     setOtpMsg('Enviando código…')
     const { error } = await supabase.auth.signInWithOtp({ email })
     if (error) { setOtpMsg('No se pudo enviar el código: ' + error.message); return }
-    setPaso('codigo'); setOtpMsg('Te enviamos un código a tu correo. Ingrésalo aquí.')
+    setPaso('codigo'); setOtpMsg('Te enviamos un código al correo invitado. Ingrésalo aquí.')
   }
   const verificarCodigo = async () => {
-    const email = emailOtp.trim().toLowerCase()
+    const email = String(share?.email_invitado || '').trim().toLowerCase()
     setOtpMsg('Verificando…')
     const { error } = await supabase.auth.verifyOtp({ email, token: codigo.trim(), type: 'email' })
     if (error) { setOtpMsg('Código inválido o vencido: ' + error.message); return }
@@ -116,8 +113,8 @@ export default function Compartido() {
                   : <div style={{ background: '#fff8e8', border: '1px solid var(--dorado,#C8A94A)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
                       <div style={{ fontWeight: 600, marginBottom: 6, fontSize: '0.9rem' }}>✏ Este enlace permite edición para <strong>{share.email_invitado}</strong></div>
                       {paso === 'idle'
-                        ? <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-                            <input type="email" className="form-control" value={emailOtp} onChange={e => setEmailOtp(e.target.value)} placeholder="tu correo" style={{ maxWidth: 240 }} />
+                        ? <div>
+                            <p style={{ fontSize: '0.8rem', color: '#666', margin: '0 0 8px' }}>Para editar, solicita un código que llegará al correo invitado.</p>
                             <button className="btn btn-sm btn-primary" onClick={enviarCodigo}>Solicitar edición</button>
                           </div>
                         : <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
