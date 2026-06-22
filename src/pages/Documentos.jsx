@@ -187,6 +187,25 @@ export default function Documentos() {
 
   // Papelera: documentos con borrado suave (recuperables hasta 90 días)
   const [modalPapelera, setModalPapelera] = useState(false)
+  const [modalSolic, setModalSolic] = useState(false)
+  const { data: solicitudesTiempo = [] } = useQuery({
+    queryKey: ['share_solicitudes'],
+    enabled: esAdmin,
+    queryFn: async () => { const { data } = await supabase.from('share_solicitudes').select('*').eq('atendido', false).order('created_at', { ascending: false }); return data || [] },
+  })
+  const concederTiempo = async (sol, dias) => {
+    try {
+      const expira_at = new Date(Date.now() + dias * 86400000).toISOString()
+      await supabase.from('document_shares').update({ expira_at }).eq('token', sol.token)
+      await supabase.from('share_solicitudes').update({ atendido: true }).eq('id', sol.id)
+      qc.invalidateQueries({ queryKey: ['share_solicitudes'] })
+      toast(`Acceso ampliado +${dias} día(s) ✓`)
+    } catch (e) { toast(e.message, 'error') }
+  }
+  const rechazarSolicitud = async (sol) => {
+    await supabase.from('share_solicitudes').update({ atendido: true }).eq('id', sol.id)
+    qc.invalidateQueries({ queryKey: ['share_solicitudes'] }); toast('Solicitud descartada')
+  }
   const { data: papelera = [] } = useQuery({
     queryKey: ['documentos_papelera'],
     queryFn: async () => {
@@ -499,8 +518,9 @@ export default function Documentos() {
         grupos.push({ proceso: g.proceso, items })
       }
       const expira_at = new Date(Date.now() + expHoras * 3600 * 1000).toISOString()
+      const carpeta = compartirGrupo.grupos.length === 1 ? compartirGrupo.grupos[0].proceso : ''
       const { data: row, error } = await supabase.from('document_shares')
-        .insert({ titulo: compartirGrupo.titulo, items: [], grupos, doc_ids: docIds, expira_at, creado_por: profile?.nombre || '' })
+        .insert({ titulo: compartirGrupo.titulo, items: [], grupos, doc_ids: docIds, carpeta, expira_at, creado_por: profile?.nombre || '' })
         .select('token').single()
       if (error) throw error
       setTokenGrupo(row.token)
@@ -637,6 +657,7 @@ export default function Documentos() {
           {esAdmin && ordenProcesos.length === 0 && <button className="btn btn-secondary btn-sm" onClick={sembrarGrupos} disabled={saving}>📥 Cargar grupos base</button>}
           {puedeEditarDocs && vista !== 'carpetas' && <button className="btn btn-secondary btn-sm" onClick={() => crearCarpeta('')}>📁 Nueva carpeta</button>}
           {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalPapelera(true)}>🗑 Papelera{papelera.length > 0 ? ` (${papelera.length})` : ''}</button>}
+          {esAdmin && solicitudesTiempo.length > 0 && <button className="btn btn-dorado btn-sm" onClick={() => setModalSolic(true)}>🔔 Solicitudes ({solicitudesTiempo.length})</button>}
           {esAdmin && vista !== 'carpetas' && <button className="btn btn-primary btn-sm" onClick={() => abrirNuevo()}>+ Nuevo documento</button>}
         </div>
       </div>
@@ -886,6 +907,27 @@ export default function Documentos() {
                 })}
               </tbody>
             </table></div>}
+      </Modal>
+
+      {/* Modal solicitudes de más tiempo (invitados) */}
+      <Modal open={modalSolic} onClose={() => setModalSolic(false)} title="🔔 Solicitudes de acceso"
+        footer={<button className="btn btn-secondary" onClick={() => setModalSolic(false)}>Cerrar</button>}>
+        {solicitudesTiempo.length === 0
+          ? <p className="empty-table">No hay solicitudes pendientes.</p>
+          : <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {solicitudesTiempo.map(s => (
+                <div key={s.id} style={{ border: '1px solid var(--crema-oscuro,#e0d8c8)', borderRadius: 8, padding: 10 }}>
+                  <div style={{ fontSize: '0.85rem' }}><strong>{s.email || '—'}</strong> pidió más tiempo</div>
+                  <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', marginBottom: 6 }}>{new Date(s.created_at).toLocaleString('es-CO')}</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    <button className="btn btn-xs btn-success" onClick={() => concederTiempo(s, 1)}>+1 día</button>
+                    <button className="btn btn-xs btn-success" onClick={() => concederTiempo(s, 7)}>+7 días</button>
+                    <button className="btn btn-xs btn-success" onClick={() => concederTiempo(s, 30)}>+30 días</button>
+                    <button className="btn btn-xs btn-danger" style={{ marginLeft: 'auto' }} onClick={() => rechazarSolicitud(s)}>Descartar</button>
+                  </div>
+                </div>
+              ))}
+            </div>}
       </Modal>
 
       {/* Modal compartir grupo/carpeta (enlaces temporales de solo lectura) */}
