@@ -6,6 +6,7 @@ import { fFecha } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
 import { useConfirm, usePrompt } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
+import { puedeVer } from '../lib/permisos'
 import { useReorder } from '../hooks/useReorder'
 import JSZip from 'jszip'
 import Modal from '../components/ui/Modal'
@@ -146,6 +147,8 @@ export default function Documentos() {
   const navigate = useNavigate()
   const { profile } = useAuth()
   const esAdmin = profile?.rol === 'admin'
+  // Usuarios con acceso al módulo pueden crear carpetas/subcarpetas (no editar config ni documentos)
+  const puedeEditarDocs = esAdmin || puedeVer(profile?.rol, 'documentos')
   const fileRef = useRef()
 
   const [filtroProceso, setFiltroProceso] = useState('')
@@ -164,9 +167,13 @@ export default function Documentos() {
   const [genEnlace, setGenEnlace] = useState(false)
   const [zipProc, setZipProc] = useState('')         // proceso en descarga ZIP
   const [compartirGrupo, setCompartirGrupo] = useState(null)   // { titulo, docs } a compartir
-  const [enlacesGrupo, setEnlacesGrupo] = useState([])         // [{ nombre, codigo, url }]
+  const [enlaceGrupoLink, setEnlaceGrupoLink] = useState('')   // enlace único a la vista pública
   const [genGrupo, setGenGrupo] = useState(false)
-  const [carpetaAbierta, setCarpetaAbierta] = useState(null)   // proceso abierto en vista carpetas
+  const [tokenGrupo, setTokenGrupo] = useState('')             // token del enlace generado
+  const [mostrarCorreo, setMostrarCorreo] = useState(false)    // mostrar campo de correo al compartir
+  const [emailInvitado, setEmailInvitado] = useState('')
+  const [permisoEdicion, setPermisoEdicion] = useState(false)
+  const [ruta, setRuta] = useState('')   // ruta actual en la navegación de carpetas ('' = raíz)
   const [editandoProceso, setEditandoProceso] = useState(null) // proceso en edición inline (doble clic)
   const [nombreTmp, setNombreTmp] = useState('')
 
@@ -251,8 +258,17 @@ export default function Documentos() {
     try { await supabase.from('app_settings').upsert({ id: 2, data: { orden: arr }, updated_at: new Date().toISOString() }, { onConflict: 'id' }) }
     catch (e) { toast('No se pudo guardar el orden: ' + e.message, 'error'); qc.invalidateQueries({ queryKey: ['doc_orden_procesos'] }) }
   }
+  // El arrastre reordena la lista mostrada en el nivel actual (ref) y reconstruye el orden global
+  // por reemplazo de posiciones (sirve igual para la raíz que para subcarpetas).
+  const listaReorderRef = useRef([])
   const ordReorder = useReorder((updater) => {
-    setOrdenProcesos(prev => { const next = typeof updater === 'function' ? updater(prev) : updater; persistirOrden(next); return next })
+    const actual = listaReorderRef.current || []
+    const next = typeof updater === 'function' ? updater(actual) : updater
+    const set = new Set(actual); const queue = [...next]
+    const nuevoOrden = ordenProcesos.map(p => set.has(p) ? queue.shift() : p)
+    next.forEach(p => { if (!nuevoOrden.includes(p)) nuevoOrden.push(p) })
+    setOrdenProcesos(nuevoOrden)
+    persistirOrden(nuevoOrden)
   })
 
   const filtrados = documentos.filter(d =>
@@ -274,7 +290,26 @@ export default function Documentos() {
     const idx = (p) => { const i = ordenProcesos.indexOf(p); return i < 0 ? 9999 : i }
     return base.sort((a, b) => idx(a) - idx(b) || a.localeCompare(b))
   }, [gruposMap, ordenProcesos, hayFiltro])
-  const puedeReordenar = esAdmin && !hayFiltro && (vista === 'grupos' || (vista === 'carpetas' && !carpetaAbierta))
+  const puedeReordenar = puedeEditarDocs && !hayFiltro && (vista === 'grupos' || vista === 'carpetas')
+
+  // ---- Navegación por carpetas anidadas (modo rutas "Carpeta/Subcarpeta") ----
+  const prefijo = ruta ? ruta + '/' : ''
+  const rutasTodas = useMemo(() => [...new Set([...ordenProcesos, ...documentos.map(d => d.proceso).filter(Boolean)])], [ordenProcesos, documentos])
+  const subcarpetas = useMemo(() => {
+    const segs = []
+    rutasTodas.forEach(p => {
+      if (ruta && !p.startsWith(prefijo)) return
+      const resto = ruta ? p.slice(prefijo.length) : p
+      const seg = resto.split('/')[0]
+      if (seg) { const full = prefijo + seg; if (!segs.includes(full)) segs.push(full) }
+    })
+    const idx = (p) => { const i = ordenProcesos.indexOf(p); return i < 0 ? 9999 : i }
+    return segs.sort((a, b) => idx(a) - idx(b) || a.localeCompare(b))
+  }, [rutasTodas, ruta, prefijo, ordenProcesos])
+  const docsAqui = filtrados.filter(d => (d.proceso || '') === ruta)
+  const docsSubtree = (path) => documentos.filter(d => { const pr = d.proceso || ''; return pr === path || pr.startsWith(path + '/') })
+  const nombreSeg = (p) => p.split('/').pop()
+  listaReorderRef.current = vista === 'carpetas' ? subcarpetas : procesosMostrados
 
   // Recordar la vista preferida del usuario (localStorage)
   useEffect(() => { const v = localStorage.getItem('mumi_docs_vista'); if (v) setVista(v) }, [])
@@ -294,19 +329,21 @@ export default function Documentos() {
 
   // Renombrar un proceso: actualiza los documentos y el orden guardado
   const aplicarRenombre = async (viejo, nuevo) => {
-    const n = (nuevo || '').trim(); if (!n || n === viejo) return
+    const n = (nuevo || '').trim().replace(/^\/+|\/+$/g, ''); if (!n || n === viejo) return
+    // Renombra el segmento manteniendo el padre, y arrastra todas las subrutas
+    const padre = viejo.includes('/') ? viejo.slice(0, viejo.lastIndexOf('/')) : ''
+    const destino = padre ? `${padre}/${n.split('/').pop()}` : n.split('/').pop()
+    const remap = (p) => p === viejo ? destino : (p.startsWith(viejo + '/') ? destino + p.slice(viejo.length) : p)
     try {
-      // Optimista: actualiza el orden y los documentos en caché para conservar la posición sin parpadeo
-      const nuevoOrden = ordenProcesos.map(p => p === viejo ? n : p)
+      const nuevoOrden = ordenProcesos.map(remap)
       setOrdenProcesos(nuevoOrden)
       await persistirOrden(nuevoOrden)
-      qc.setQueryData(['documentos'], prev => (prev || []).map(d => (d.proceso || 'Sin proceso') === viejo ? { ...d, proceso: n } : d))
-      if (carpetaAbierta === viejo) setCarpetaAbierta(n)
-      if (viejo !== 'Sin proceso') {
-        const { error } = await supabase.from('documentos').update({ proceso: n }).eq('proceso', viejo)
-        if (error) throw error
-      }
-      toast('Proceso renombrado ✓')
+      qc.setQueryData(['documentos'], prev => (prev || []).map(d => ({ ...d, proceso: remap(d.proceso || '') })))
+      if (ruta === viejo || ruta.startsWith(viejo + '/')) setRuta(remap(ruta))
+      // BD: actualizar el documento exacto y los de subrutas
+      const afectados = documentos.filter(d => { const pr = d.proceso || ''; return pr === viejo || pr.startsWith(viejo + '/') })
+      for (const d of afectados) { const { error } = await supabase.from('documentos').update({ proceso: remap(d.proceso || '') }).eq('id', d.id); if (error) throw error }
+      toast('Carpeta renombrada ✓')
     } catch (e) { toast(e.message, 'error'); qc.invalidateQueries({ queryKey: ['documentos'] }) }
   }
   const renombrarProceso = async (viejo) => {
@@ -315,7 +352,7 @@ export default function Documentos() {
     await aplicarRenombre(viejo, nuevo)
   }
 
-  const abrirNuevo = () => { setForm(EMPTY); setEditId(null); setFile(null); setModal(true) }
+  const abrirNuevo = (procesoDefault = '') => { setForm({ ...EMPTY, proceso: procesoDefault }); setEditId(null); setFile(null); setModal(true) }
   const abrirEditar = (d) => {
     setForm({ codigo: d.codigo || '', nombre: d.nombre || '', tipo: d.tipo || 'procedimiento', proceso: d.proceso || '', descripcion: d.descripcion || '', version: d.version || '1', vigente: d.vigente !== false, modulo_link: d.modulo_link || '' })
     setEditId(d.id); setFile(null); setModal(true)
@@ -413,42 +450,82 @@ export default function Documentos() {
     window.location.href = `mailto:?subject=${asunto}&body=${cuerpo}`
   }
 
-  // Crear una nueva carpeta / grupo (proceso) vacío
-  const crearCarpeta = async () => {
-    const nombre = await pedir('Nombre de la nueva carpeta / grupo:', { title: 'Nueva carpeta' })
+  // Crear una nueva carpeta. Si `parent` viene, se crea como subcarpeta (ruta padre/nombre)
+  const crearCarpeta = async (parent = '') => {
+    const nombre = await pedir(parent ? `Nueva subcarpeta dentro de "${parent}":` : 'Nombre de la nueva carpeta:', { title: 'Nueva carpeta' })
     if (nombre == null) return
-    const n = nombre.trim(); if (!n) return
-    if (ordenProcesos.includes(n)) { toast('Ya existe una carpeta con ese nombre', 'warning'); return }
-    const nuevo = [...ordenProcesos, n]
-    await persistirOrden(nuevo); setOrdenProcesos(nuevo)
+    const n = nombre.trim().replace(/\//g, '-'); if (!n) return
+    const full = parent ? `${parent}/${n}` : n
+    if (ordenProcesos.includes(full)) { toast('Ya existe una carpeta con ese nombre aquí', 'warning'); return }
+    const nuevo = [...ordenProcesos, full]
+    setOrdenProcesos(nuevo); await persistirOrden(nuevo)
     toast('Carpeta creada ✓')
   }
-
-  // Compartir un grupo/carpeta (o todo): genera enlaces temporales de solo lectura para cada archivo
-  const abrirCompartirGrupo = (titulo, docs) => {
-    const conArchivo = (docs || []).filter(d => d.storage_path)
-    if (!conArchivo.length) { toast('No hay archivos para compartir aquí', 'warning'); return }
-    setCompartirGrupo({ titulo, docs: conArchivo }); setEnlacesGrupo([]); setExpHoras(168)
+  // Eliminar carpeta solo si está vacía (sin documentos ni subcarpetas en su subárbol)
+  const eliminarCarpeta = async (path) => {
+    const tieneDocs = documentos.some(d => { const pr = d.proceso || ''; return pr === path || pr.startsWith(path + '/') })
+    const tieneSub = ordenProcesos.some(p => p.startsWith(path + '/'))
+    if (tieneDocs || tieneSub) { toast('No se puede eliminar: la carpeta tiene contenido. Vacíala primero.', 'warning'); return }
+    if (!await confirmar(`¿Eliminar la carpeta vacía "${path}"?`, { title: 'Eliminar carpeta' })) return
+    const nuevo = ordenProcesos.filter(p => p !== path)
+    setOrdenProcesos(nuevo); await persistirOrden(nuevo)
+    toast('Carpeta eliminada')
   }
+
+  // Compartir: recibe `grupos` = [{ proceso, docs }] (una o varias carpetas, incluso vacías)
+  const abrirCompartirGrupo = (titulo, grupos) => {
+    if (!grupos.length) { toast('No hay carpetas para compartir', 'warning'); return }
+    setCompartirGrupo({ titulo, grupos }); setEnlaceGrupoLink(''); setExpHoras(168)
+    setTokenGrupo(''); setMostrarCorreo(false); setEmailInvitado(''); setPermisoEdicion(false)
+  }
+  // Atajos: compartir una sola carpeta, o compartir todas (estructura completa, con carpetas vacías)
+  const compartirUnaCarpeta = (proceso, docs) => abrirCompartirGrupo(proceso, [{ proceso, docs: docs || [] }])
+  const compartirTodo = () => abrirCompartirGrupo('Todos los documentos', procesosMostrados.map(p => ({ proceso: p, docs: gruposMap[p] || [] })))
+
+  // Genera UN enlace a una vista pública de solo lectura con la estructura de carpetas
   const generarEnlacesGrupo = async () => {
     if (!compartirGrupo) return
     setGenGrupo(true)
     try {
-      const out = []
-      for (const d of compartirGrupo.docs) {
-        const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(d.storage_path, Math.round(expHoras * 3600))
-        if (!error && data) out.push({ nombre: d.nombre, codigo: d.codigo || '', url: data.signedUrl })
+      const grupos = []
+      const docIds = []
+      for (const g of compartirGrupo.grupos) {
+        const items = []
+        for (const d of (g.docs || [])) {
+          if (!d.storage_path) continue
+          const { data, error } = await supabase.storage.from(BUCKET).createSignedUrl(d.storage_path, Math.round(expHoras * 3600))
+          if (!error && data) { items.push({ id: d.id, nombre: d.nombre, codigo: d.codigo || '', descripcion: d.descripcion || '', url: data.signedUrl }); docIds.push(String(d.id)) }
+        }
+        grupos.push({ proceso: g.proceso, items })
       }
-      setEnlacesGrupo(out)
-    } catch (e) { toast('Error: ' + e.message, 'error') } finally { setGenGrupo(false) }
+      const expira_at = new Date(Date.now() + expHoras * 3600 * 1000).toISOString()
+      const { data: row, error } = await supabase.from('document_shares')
+        .insert({ titulo: compartirGrupo.titulo, items: [], grupos, doc_ids: docIds, expira_at, creado_por: profile?.nombre || '' })
+        .select('token').single()
+      if (error) throw error
+      setTokenGrupo(row.token)
+      setEnlaceGrupoLink(`${window.location.origin}/compartido/${row.token}`)
+    } catch (e) { toast('Error al compartir: ' + e.message, 'error') } finally { setGenGrupo(false) }
   }
-  const textoEnlacesGrupo = () => enlacesGrupo.map(e => `• ${e.codigo ? e.codigo + ' — ' : ''}${e.nombre}:\n${e.url}`).join('\n\n')
-  const copiarGrupo = async () => { try { await navigator.clipboard.writeText(textoEnlacesGrupo()); toast('Enlaces copiados ✓') } catch { toast('Copia manual', 'info') } }
-  const enviarGrupoCorreo = () => {
+  const copiarGrupo = async () => { try { await navigator.clipboard.writeText(enlaceGrupoLink); toast('Enlace copiado ✓') } catch { toast('Copia manual', 'info') } }
+  // Enviar por correo: si se marcó edición, registra el correo invitado y el permiso en el enlace
+  const enviarGrupoCorreo = async () => {
+    const email = emailInvitado.trim().toLowerCase()
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) { toast('Escribe un correo válido', 'warning'); return }
+    try {
+      if (tokenGrupo) {
+        await supabase.from('document_shares').update({
+          email_invitado: email, permiso: permisoEdicion ? 'edicion' : 'lectura',
+        }).eq('token', tokenGrupo)
+      }
+    } catch (e) { toast('No se pudo registrar el invitado: ' + e.message, 'error'); return }
     const venceTxt = expHoras >= 24 ? `${Math.round(expHoras / 24)} día(s)` : `${expHoras} hora(s)`
+    const modoTxt = permisoEdicion
+      ? `en modo EDICIÓN (deberás verificar tu identidad con un código enviado a ${email})`
+      : 'en modo solo lectura'
     const asunto = encodeURIComponent(`Documentos compartidos: ${compartirGrupo?.titulo || ''}`)
-    const cuerpo = encodeURIComponent(`Hola,\n\nTe comparto estos documentos en modo solo lectura (válidos por ${venceTxt}):\n\n${textoEnlacesGrupo()}\n\nSaludos.`)
-    window.location.href = `mailto:?subject=${asunto}&body=${cuerpo}`
+    const cuerpo = encodeURIComponent(`Hola,\n\nTe comparto la carpeta "${compartirGrupo?.titulo || ''}" ${modoTxt} (válida por ${venceTxt}):\n\n${enlaceGrupoLink}\n\nSaludos.`)
+    window.location.href = `mailto:${email}?subject=${asunto}&body=${cuerpo}`
   }
 
   // Descargar todos los documentos (con archivo) de un proceso en un ZIP
@@ -545,11 +622,11 @@ export default function Documentos() {
             <button className={`btn btn-sm ${vista === 'grupos' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => cambiarVista('grupos')} title="Vista por grupos">▦</button>
             <button className={`btn btn-sm ${vista === 'lista' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => cambiarVista('lista')} title="Vista de lista">☰</button>
           </div>
-          <button className="btn btn-secondary btn-sm" onClick={() => abrirCompartirGrupo('Todos los documentos', documentos)} title="Compartir todas las carpetas">🔗 Compartir</button>
+          <button className="btn btn-secondary btn-sm" onClick={compartirTodo} title="Compartir todas las carpetas">🔗 Compartir</button>
           {esAdmin && ordenProcesos.length === 0 && <button className="btn btn-secondary btn-sm" onClick={sembrarGrupos} disabled={saving}>📥 Cargar grupos base</button>}
-          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={crearCarpeta}>📁 Nueva carpeta</button>}
+          {puedeEditarDocs && vista !== 'carpetas' && <button className="btn btn-secondary btn-sm" onClick={() => crearCarpeta('')}>📁 Nueva carpeta</button>}
           {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalPapelera(true)}>🗑 Papelera{papelera.length > 0 ? ` (${papelera.length})` : ''}</button>}
-          {esAdmin && <button className="btn btn-primary btn-sm" onClick={abrirNuevo}>+ Nuevo documento</button>}
+          {esAdmin && vista !== 'carpetas' && <button className="btn btn-primary btn-sm" onClick={() => abrirNuevo()}>+ Nuevo documento</button>}
         </div>
       </div>
 
@@ -574,49 +651,68 @@ export default function Documentos() {
           </div>
         : vista === 'carpetas'
         ? (
-          carpetaAbierta ? (
-            <div className="card">
-              <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                <button className="btn btn-xs btn-secondary" onClick={() => setCarpetaAbierta(null)}>← Carpetas</button>
-                📂 {tituloEditable(carpetaAbierta)} <span className="badge badge-verde" style={{ marginLeft: 4 }}>{(gruposMap[carpetaAbierta] || []).length}</span>
-                {(gruposMap[carpetaAbierta] || []).some(d => d.storage_path) && <button className="btn btn-xs btn-secondary" title="Compartir esta carpeta" style={{ marginLeft: 'auto' }} onClick={() => abrirCompartirGrupo(carpetaAbierta, gruposMap[carpetaAbierta] || [])}>🔗 Compartir</button>}
-                {(gruposMap[carpetaAbierta] || []).some(d => d.storage_path) && <button className="btn btn-xs btn-secondary" title="Descargar todos en ZIP" disabled={zipProc === carpetaAbierta} onClick={() => descargarZip(carpetaAbierta, gruposMap[carpetaAbierta] || [])}>{zipProc === carpetaAbierta ? 'Generando…' : '⬇ ZIP'}</button>}
-                {esAdmin && carpetaAbierta !== 'Sin proceso' && <button className="btn btn-xs btn-secondary" onClick={() => renombrarProceso(carpetaAbierta)}>✏ Renombrar</button>}
-              </div>
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th>Código</th><th>Documento</th><th>Tipo</th><th>Versión</th><th>Estado</th><th>Archivo</th><th>Acciones</th></tr></thead>
-                  <tbody>
-                    {(gruposMap[carpetaAbierta] || []).length === 0
-                      ? <tr><td colSpan={7} className="empty-table">Sin documentos en este proceso. {esAdmin && 'Usa "+ Nuevo documento".'}</td></tr>
-                      : (gruposMap[carpetaAbierta] || []).map(d => filaDoc(d, false))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : (
-            <div className="docs-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 12 }}>
-              {procesosMostrados.map((proceso, fi) => {
-                const docs = gruposMap[proceso] || []
-                const vacio = !documentos.some(d => (d.proceso || 'Sin proceso') === proceso)
-                return (
-                  <div key={proceso} className={`card doc-folder ${puedeReordenar ? ordReorder.rowClassName(fi) : ''}`} style={{ cursor: 'pointer', textAlign: 'center', padding: 16, margin: 0, position: 'relative' }} onClick={() => setCarpetaAbierta(proceso)} {...(puedeReordenar ? ordReorder.rowProps(fi) : {})}>
-                    {puedeReordenar && <span {...ordReorder.handleProps(fi)} onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: 6, left: 8, cursor: 'grab', color: 'var(--texto-suave)' }}>⠿</span>}
-                    <span style={{ position: 'absolute', top: 6, right: 10, fontWeight: 700, color: 'var(--dorado)', fontSize: '0.85rem' }}>{fi + 1}</span>
-                    <div style={{ fontSize: '2.6rem', lineHeight: 1 }}>📁</div>
-                    <div style={{ fontWeight: 600, fontSize: '0.85rem', marginTop: 6 }}>{proceso}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)', marginTop: 2 }}>{docs.length} doc{docs.length === 1 ? '' : 's'}</div>
-                    <div style={{ display: 'flex', gap: 4, justifyContent: 'center', marginTop: 6, flexWrap: 'wrap' }} onClick={e => e.stopPropagation()}>
-                      {docs.some(d => d.storage_path) && <button className="btn btn-xs btn-secondary" title="Compartir carpeta" onClick={() => abrirCompartirGrupo(proceso, docs)}>🔗</button>}
-                      {docs.some(d => d.storage_path) && <button className="btn btn-xs btn-secondary" title="Descargar ZIP" disabled={zipProc === proceso} onClick={() => descargarZip(proceso, docs)}>⬇</button>}
-                      {esAdmin && proceso !== 'Sin proceso' && <button className="btn btn-xs btn-secondary" title="Renombrar" onClick={() => renombrarProceso(proceso)}>✏</button>}
-                      {esAdmin && vacio && <button className="btn btn-xs btn-danger" title="Eliminar carpeta vacía" onClick={() => eliminarProcesoVacio(proceso)}>🗑</button>}
-                    </div>
-                  </div>
-                )
+          <div>
+            {/* Migas de pan + crear subcarpeta */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
+              <button className="btn btn-xs btn-secondary" onClick={() => setRuta('')}>🏠 Inicio</button>
+              {ruta && ruta.split('/').map((seg, i, arr) => {
+                const hasta = arr.slice(0, i + 1).join('/')
+                return <span key={hasta} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ color: 'var(--texto-suave)' }}>/</span>
+                  <button className="btn btn-xs btn-secondary" onClick={() => setRuta(hasta)}>{seg}</button>
+                </span>
               })}
+              {puedeEditarDocs && <button className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => crearCarpeta(ruta)}>📁 Nueva {ruta ? 'subcarpeta' : 'carpeta'}</button>}
+              {esAdmin && <button className="btn btn-xs btn-primary" style={{ marginLeft: puedeEditarDocs ? 0 : 'auto' }} onClick={() => abrirNuevo(ruta)}>+ Nuevo documento{ruta ? ' aquí' : ''}</button>}
             </div>
-          )
+
+            {/* Subcarpetas del nivel actual */}
+            {subcarpetas.length > 0 && (
+              <div className="docs-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', gap: 12, marginBottom: 16 }}>
+                {subcarpetas.map((full, fi) => {
+                  const sub = docsSubtree(full)
+                  const conArchivo = sub.filter(d => d.storage_path)
+                  const vacia = sub.length === 0 && !ordenProcesos.some(p => p.startsWith(full + '/'))
+                  const nSub = ordenProcesos.filter(p => p.startsWith(full + '/')).length
+                  return (
+                    <div key={full} className={`card doc-folder ${puedeReordenar ? ordReorder.rowClassName(fi) : ''}`} style={{ cursor: 'pointer', textAlign: 'center', padding: 16, margin: 0, position: 'relative' }} onClick={() => setRuta(full)} {...(puedeReordenar ? ordReorder.rowProps(fi) : {})}>
+                      {puedeReordenar && <span {...ordReorder.handleProps(fi)} onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: 6, left: 8, cursor: 'grab', color: 'var(--texto-suave)' }}>⠿</span>}
+                      <span style={{ position: 'absolute', top: 6, right: 10, fontWeight: 700, color: 'var(--dorado)', fontSize: '0.85rem' }}>{fi + 1}</span>
+                      <div style={{ fontSize: '2.6rem', lineHeight: 1 }}>📁</div>
+                      <div style={{ fontWeight: 600, fontSize: '0.85rem', marginTop: 6 }}>{nombreSeg(full)}</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', marginTop: 2 }}>{sub.length} doc{sub.length === 1 ? '' : 's'}{nSub > 0 ? ` · ${nSub} subcarpeta(s)` : ''}</div>
+                      <div style={{ display: 'flex', gap: 4, justifyContent: 'center', marginTop: 6, flexWrap: 'wrap' }} onClick={e => e.stopPropagation()}>
+                        {conArchivo.length > 0 && <button className="btn btn-xs btn-secondary" title="Compartir carpeta (incluye subcarpetas)" onClick={() => compartirUnaCarpeta(full, sub)}>🔗</button>}
+                        {conArchivo.length > 0 && <button className="btn btn-xs btn-secondary" title="Descargar ZIP" disabled={zipProc === full} onClick={() => descargarZip(full, sub)}>⬇</button>}
+                        {puedeEditarDocs && <button className="btn btn-xs btn-secondary" title="Renombrar" onClick={() => renombrarProceso(full)}>✏</button>}
+                        {puedeEditarDocs && vacia && <button className="btn btn-xs btn-danger" title="Eliminar carpeta vacía" onClick={() => eliminarCarpeta(full)}>🗑</button>}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+
+            {/* Documentos directamente en esta carpeta */}
+            {(docsAqui.length > 0 || (ruta && subcarpetas.length === 0)) && (
+              <div className="card">
+                <div className="card-title">📄 Documentos {ruta && <>en {nombreSeg(ruta)}</>} <span className="badge badge-verde" style={{ marginLeft: 6 }}>{docsAqui.length}</span></div>
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr><th>Código</th><th>Documento</th><th>Tipo</th><th>Versión</th><th>Estado</th><th>Archivo</th><th>Acciones</th></tr></thead>
+                    <tbody>
+                      {docsAqui.length === 0
+                        ? <tr><td colSpan={7} className="empty-table">Sin documentos aquí. {esAdmin && 'Usa "+ Nuevo documento".'}</td></tr>
+                        : docsAqui.map(d => filaDoc(d, false))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+            {subcarpetas.length === 0 && docsAqui.length === 0 && !ruta && (
+              <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--texto-suave)' }}>📁 Aún no hay carpetas. {esAdmin && 'Crea una con "📁 Nueva carpeta".'}</div>
+            )}
+          </div>
         )
         : vista === 'lista'
         ? (
@@ -642,10 +738,10 @@ export default function Documentos() {
                 {puedeReordenar && <span {...ordReorder.handleProps(gi)}>⠿</span>}
                 <span style={{ color: 'var(--dorado)', fontWeight: 700 }}>{gi + 1}.</span>
                 {tituloEditable(proceso)} <span className="badge badge-verde" style={{ marginLeft: 4 }}>{docs.length}</span>
-                {docs.some(d => d.storage_path) && <button className="btn btn-xs btn-secondary" title="Compartir esta carpeta" style={{ marginLeft: 'auto' }} onClick={() => abrirCompartirGrupo(proceso, docs)}>🔗 Compartir</button>}
+                {docs.some(d => d.storage_path) && <button className="btn btn-xs btn-secondary" title="Compartir esta carpeta" style={{ marginLeft: 'auto' }} onClick={() => compartirUnaCarpeta(proceso, docs)}>🔗 Compartir</button>}
                 {docs.some(d => d.storage_path) && <button className="btn btn-xs btn-secondary" title="Descargar todos en ZIP" disabled={zipProc === proceso} onClick={() => descargarZip(proceso, docs)}>{zipProc === proceso ? 'Generando…' : '⬇ ZIP'}</button>}
-                {esAdmin && proceso !== 'Sin proceso' && <button className="btn btn-xs btn-secondary" title="Renombrar proceso" onClick={() => renombrarProceso(proceso)}>✏ Renombrar</button>}
-                {esAdmin && docs.length === 0 && !documentos.some(d => (d.proceso || 'Sin proceso') === proceso) && <button className="btn btn-xs btn-danger" title="Eliminar proceso vacío" onClick={() => eliminarProcesoVacio(proceso)}>🗑</button>}
+                {puedeEditarDocs && proceso !== 'Sin proceso' && <button className="btn btn-xs btn-secondary" title="Renombrar proceso" onClick={() => renombrarProceso(proceso)}>✏ Renombrar</button>}
+                {puedeEditarDocs && docs.length === 0 && !documentos.some(d => (d.proceso || 'Sin proceso') === proceso) && <button className="btn btn-xs btn-danger" title="Eliminar proceso vacío" onClick={() => eliminarProcesoVacio(proceso)}>🗑</button>}
               </div>
               <div className="table-wrap">
                 <table>
@@ -785,30 +881,44 @@ export default function Documentos() {
       <Modal open={!!compartirGrupo} onClose={() => setCompartirGrupo(null)} title={`🔗 Compartir — ${compartirGrupo?.titulo || ''}`}
         footer={<button className="btn btn-secondary" onClick={() => setCompartirGrupo(null)}>Cerrar</button>}>
         <p style={{ fontSize: '0.85rem', color: 'var(--texto-suave)' }}>
-          Se generará un <strong>enlace temporal de solo lectura</strong> por cada archivo ({compartirGrupo?.docs?.length || 0} documento(s)). Quien los reciba puede ver/descargar hasta que expiren.
+          Se generará <strong>un enlace de solo lectura</strong> a la(s) carpeta(s) ({compartirGrupo?.grupos?.length || 0} carpeta(s), {(compartirGrupo?.grupos || []).reduce((s, g) => s + (g.docs || []).filter(d => d.storage_path).length, 0)} archivo(s)). Quien lo reciba verá las carpetas y documentos hasta que expire.
         </p>
         <div className="form-group">
-          <label className="form-label">Vigencia de los enlaces</label>
-          <select className="form-control" value={expHoras} onChange={e => { setExpHoras(parseInt(e.target.value)); setEnlacesGrupo([]) }}>
+          <label className="form-label">Vigencia del enlace</label>
+          <select className="form-control" value={expHoras} onChange={e => { setExpHoras(parseInt(e.target.value)); setEnlaceGrupoLink('') }}>
             <option value={1}>1 hora</option><option value={24}>1 día</option><option value={72}>3 días</option><option value={168}>7 días</option><option value={720}>30 días</option>
           </select>
         </div>
-        {enlacesGrupo.length === 0
-          ? <button className="btn btn-primary" onClick={generarEnlacesGrupo} disabled={genGrupo}>{genGrupo ? 'Generando…' : `🔗 Generar ${compartirGrupo?.docs?.length || 0} enlace(s)`}</button>
+        {!enlaceGrupoLink
+          ? <button className="btn btn-primary" onClick={generarEnlacesGrupo} disabled={genGrupo}>{genGrupo ? 'Generando…' : '🔗 Generar enlace de la carpeta'}</button>
           : (
             <>
-              <div className="table-wrap" style={{ maxHeight: 240, overflow: 'auto' }}>
-                <table><tbody>
-                  {enlacesGrupo.map((e, i) => (
-                    <tr key={i}><td style={{ fontSize: '0.8rem' }}>{e.codigo ? e.codigo + ' — ' : ''}{e.nombre}</td><td><a href={e.url} target="_blank" rel="noreferrer" style={{ fontSize: '0.75rem' }}>abrir</a></td></tr>
-                  ))}
-                </tbody></table>
+              <div className="form-group">
+                <label className="form-label">Enlace de la carpeta (vista de solo lectura)</label>
+                <input className="form-control" value={enlaceGrupoLink} readOnly onClick={e => e.target.select()} style={{ fontSize: '0.78rem' }} />
               </div>
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 10 }}>
-                <button className="btn btn-secondary" onClick={copiarGrupo}>📋 Copiar todos</button>
-                <button className="btn btn-primary" onClick={enviarGrupoCorreo}>✉ Enviar por correo</button>
-                <button className="btn btn-secondary" onClick={() => setEnlacesGrupo([])}>↻ Regenerar</button>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <button className="btn btn-secondary" onClick={copiarGrupo}>📋 Copiar</button>
+                <button className="btn btn-primary" onClick={() => setMostrarCorreo(v => !v)}>✉ Enviar por correo</button>
+                <button className="btn btn-secondary" onClick={() => { setEnlaceGrupoLink(''); setTokenGrupo(''); setMostrarCorreo(false) }}>↻ Regenerar</button>
               </div>
+              {mostrarCorreo && (
+                <div style={{ marginTop: 10, padding: 10, background: 'rgba(124,179,66,0.06)', borderRadius: 'var(--radio)' }}>
+                  <div className="form-group" style={{ marginBottom: 8 }}>
+                    <label className="form-label">Correo del invitado</label>
+                    <input type="email" className="form-control" value={emailInvitado} onChange={e => setEmailInvitado(e.target.value)} placeholder="persona@correo.com" />
+                  </div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={permisoEdicion} onChange={e => setPermisoEdicion(e.target.checked)} />
+                    ✏ Permitir edición (el invitado verifica su identidad con un código enviado a su correo)
+                  </label>
+                  <button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} onClick={enviarGrupoCorreo}>✉ Enviar a este correo</button>
+                  <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 6 }}>
+                    {permisoEdicion ? 'Solo ese correo podrá editar (tras ingresar el código). Otros correos solo verán.' : 'El invitado verá los documentos en solo lectura.'}
+                  </small>
+                </div>
+              )}
+              <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 8 }}>Quien abra el enlace verá las carpetas y documentos hasta que expire. La edición solo aplica al correo invitado.</small>
             </>
           )}
       </Modal>

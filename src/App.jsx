@@ -10,6 +10,7 @@ import MobileHeader from './components/Layout/MobileHeader'
 import AttendanceModal from './components/AttendanceModal'
 import ConnStatus from './components/ConnStatus'
 import Login from './pages/Login'
+import Compartido from './pages/Compartido'
 import Dashboard from './pages/Dashboard'
 import Costos from './pages/Costos'
 import Receta from './pages/Receta'
@@ -151,6 +152,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={<Login />} />
+      <Route path="/compartido/:token" element={<Compartido />} />
       <Route element={<ProtectedLayout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard"   element={<Dashboard />} />
