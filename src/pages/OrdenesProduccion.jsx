@@ -145,6 +145,18 @@ export default function OrdenesProduccion() {
     .sort((a, b) => ((a.vencimiento || '9999-99-99') < (b.vencimiento || '9999-99-99') ? -1 : a.vencimiento === b.vencimiento ? ((a.fecha_entrada || '') < (b.fecha_entrada || '') ? -1 : 1) : 1))
   const fmtVence = (v) => v ? new Date(v + 'T00:00:00').toLocaleDateString('es-CO') : '—'
 
+  // Estructura del lote: NN+AA (consecutivo del año + año a 2 dígitos). Ej: 0126 = lote 01 de 2026.
+  const ultimoLoteOrden = (ordenes.find(o => (o.lote || '').trim()) || {}).lote || ''
+  const anioYY = String(new Date().getFullYear()).slice(2)
+  // Mayor consecutivo del año actual entre los lotes de las órdenes (formato NN+AA)
+  const maxSeqAnio = ordenes
+    .map(o => (o.lote || '').trim())
+    .filter(l => /^\d{3,4}$/.test(l) && l.slice(-2) === anioYY)
+    .map(l => parseInt(l.slice(0, -2)))
+    .filter(n => !isNaN(n))
+    .reduce((mx, n) => Math.max(mx, n), 0)
+  const siguienteLoteSugerido = String(maxSeqAnio + 1).padStart(2, '0') + anioYY
+
   // Numeración visible de órdenes: secuencial (1,2,3…) por orden de creación, con inicio configurable
   const ordenIdsSorted = useMemo(() => [...ordenes].map(o => o.id).sort((a, b) => a - b), [ordenes])
   const opNum = (id) => {
@@ -1113,7 +1125,12 @@ export default function OrdenesProduccion() {
           </div>
         )}
         <div className="form-grid-2">
-          <div className="form-group"><label className="form-label">Lote</label><input className="form-control" value={form.lote} onChange={e => setForm(f => ({ ...f, lote: e.target.value }))} placeholder="Ej: L-2026-001" /></div>
+          <div className="form-group"><label className="form-label">Lote <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(N°+año, ej. {siguienteLoteSugerido})</small></label><input className="form-control" value={form.lote} onChange={e => setForm(f => ({ ...f, lote: e.target.value }))} placeholder={`Ej: ${siguienteLoteSugerido}`} />
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.73rem', display: 'block', marginTop: 4 }}>
+              {ultimoLoteOrden && <>Último lote usado: <strong>{ultimoLoteOrden}</strong> · </>}
+              <button type="button" className="btn btn-xs btn-secondary" onClick={() => setForm(f => ({ ...f, lote: siguienteLoteSugerido }))}>Usar siguiente: {siguienteLoteSugerido}</button>
+            </small>
+          </div>
           <div className="form-group"><label className="form-label">Fecha de vencimiento</label>
             <input type="date" className="form-control" value={form.vence} onChange={e => setForm(f => ({ ...f, vence: e.target.value }))} />
             <QuickVence opts={venceOpts} onEdit={editarVenceOpts} onPick={(v) => setForm(f => ({ ...f, vence: v }))} />

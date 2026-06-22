@@ -505,6 +505,28 @@ html { -webkit-text-size-adjust: 100%; }
 /* Línea difuminada que indica dónde quedará la fila */
 .ed-row.ed-soltar-antes   { box-shadow: inset 0 3px 0 0 var(--lima), 0 0 8px rgba(124,179,66,0.4); background: rgba(124,179,66,0.06); }
 .ed-row.ed-soltar-despues { box-shadow: inset 0 -3px 0 0 var(--lima), 0 0 8px rgba(124,179,66,0.4); background: rgba(124,179,66,0.06); }
+
+/* Arrastrar y soltar de carpetas (estilo Google Drive) */
+.docs-grid .doc-folder {
+  transition: transform 0.2s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.2s ease, opacity 0.2s ease, outline-color 0.15s ease, background 0.15s ease;
+  outline: 2px solid transparent; outline-offset: 3px; will-change: transform;
+}
+.docs-grid .doc-folder:hover { box-shadow: 0 4px 16px rgba(26,58,42,0.14); transform: translateY(-2px); }
+/* Tarjeta que se está arrastrando: se "levanta", se atenúa y rota un poco */
+.docs-grid .doc-folder.ed-arrastrando {
+  opacity: 0.55; filter: none; transform: scale(0.94) rotate(-1.5deg);
+  box-shadow: 0 14px 30px rgba(26,58,42,0.28); cursor: grabbing; z-index: 5;
+}
+/* Tarjeta destino: se CORRE para abrir un hueco y marca con una barra dónde se insertará
+   (en vez de crecer, que parecía "caer dentro" de la carpeta) */
+.docs-grid .doc-folder.ed-soltar-antes {
+  transform: translateX(10px);
+  box-shadow: inset 5px 0 0 0 var(--lima), 0 4px 14px rgba(0,0,0,0.10);
+}
+.docs-grid .doc-folder.ed-soltar-despues {
+  transform: translateX(-10px);
+  box-shadow: inset -5px 0 0 0 var(--lima), 0 4px 14px rgba(0,0,0,0.10);
+}
 @keyframes spin { to { transform: rotate(360deg); } }
 /* Separador visible entre filas del editor (escritorio) */
 @media (min-width: 769px) {
