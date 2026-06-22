@@ -71,7 +71,7 @@ export default function Compartido() {
   const [nuevaSub, setNuevaSub] = useState('')
   const permiteEdicion = share?.permiso === 'edicion' && !!share?.email_invitado
   const yaExpirado = expirado || vencido
-  const esEditor = permiteEdicion && !yaExpirado && sesionEmail && sesionEmail.toLowerCase() === String(share.email_invitado).toLowerCase()
+  const esEditor = !!(permiteEdicion && !yaExpirado && sesionEmail && sesionEmail.toLowerCase() === String(share?.email_invitado || '').toLowerCase())
 
   // Cierra la edición automáticamente cuando el enlace expira (según el tiempo que dio el admin)
   useEffect(() => {
