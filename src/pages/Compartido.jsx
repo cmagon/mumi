@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { supabase, uploadFile } from '../lib/supabase'
+import { supabase, supabaseSignup, uploadFile } from '../lib/supabase'
 import { getConfig, loadConfig } from '../lib/appConfig'
 
 const BUCKET = 'documentos'
@@ -51,16 +51,8 @@ export default function Compartido() {
 
   const { data: share, isLoading } = useQuery({
     queryKey: ['share', token],
-    queryFn: async () => {
-      let { data, error } = await supabase.from('document_shares').select('*').eq('token', token).maybeSingle()
-      if (error) {
-        // Sesión OTP vencida puede romper la lectura → limpiar y reintentar como anónimo
-        await supabase.auth.signOut().catch(() => {})
-        const r = await supabase.from('document_shares').select('*').eq('token', token).maybeSingle()
-        data = r.data
-      }
-      return data
-    },
+    // Se lee SIEMPRE como anónimo (cliente sin sesión) para que una sesión OTP vencida no rompa el enlace
+    queryFn: async () => { const { data } = await supabaseSignup.from('document_shares').select('*').eq('token', token).maybeSingle(); return data },
     retry: 1,
   })
 
