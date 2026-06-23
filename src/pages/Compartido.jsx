@@ -54,6 +54,7 @@ export default function Compartido() {
     // Se lee SIEMPRE como anónimo (cliente sin sesión) para que una sesión OTP vencida no rompa el enlace
     queryFn: async () => { const { data } = await supabaseSignup.from('document_shares').select('*').eq('token', token).maybeSingle(); return data },
     retry: 1,
+    refetchInterval: 30000,   // detecta si el admin amplía el tiempo y reactiva la edición sola
   })
 
   const expirado = share?.expira_at && new Date(share.expira_at) < new Date()
@@ -73,15 +74,16 @@ export default function Compartido() {
   const yaExpirado = expirado || vencido
   const esEditor = !!(permiteEdicion && !yaExpirado && sesionEmail && sesionEmail.toLowerCase() === String(share?.email_invitado || '').toLowerCase())
 
-  // Cierra la edición automáticamente cuando el enlace expira (según el tiempo que dio el admin)
+  // Bloquea la edición cuando el enlace expira; la reactiva sola si el admin amplía el tiempo.
+  // NO cierra la sesión: así, al ampliar, el invitado NO tiene que pedir un código nuevo.
   useEffect(() => {
-    if (!share?.expira_at) return
+    if (!share?.expira_at) { setVencido(false); return }
     const ms = new Date(share.expira_at).getTime() - Date.now()
     if (ms <= 0) { setVencido(true); return }
+    setVencido(false)
     const t = setTimeout(() => setVencido(true), Math.min(ms, 2147483647))
     return () => clearTimeout(t)
   }, [share])
-  useEffect(() => { if (vencido && sesionEmail) supabase.auth.signOut().catch(() => {}) }, [vencido, sesionEmail])
 
   const volverASolicitar = async () => {
     try {
