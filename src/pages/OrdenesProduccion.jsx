@@ -344,6 +344,21 @@ export default function OrdenesProduccion() {
     await prepararDatos(o); setModalProceso(true)
   }
 
+  // El admin diligencia el proceso de una orden abierta. Si aún está pendiente, la pone en
+  // proceso y reserva la MP (PEPS) antes de abrir el modal; al confirmar se auto-aprueba.
+  const adminDiligenciar = async (o) => {
+    try {
+      if (o.estado === 'pendiente') {
+        const { error } = await supabase.from('production_orders').update({ estado: 'en_proceso' }).eq('id', o.id)
+        if (error) throw error
+        try { await reservarMP(o) } catch (e) { console.warn('No se pudo reservar MP:', e) }
+        qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
+        o = { ...o, estado: 'en_proceso' }
+      }
+    } catch (e) { toast(e.message, 'error'); return }
+    await openProceso(o)
+  }
+
   // Imprimir la orden con los ingredientes — ajustado a UNA sola página
   // Guarda TODOS los campos del proceso (datos + resultado) en la orden
   const guardarProcesoData = async (silent = true) => {
@@ -597,6 +612,8 @@ export default function OrdenesProduccion() {
       }
       const unidades = parseFloat(prepUnidades) || 0
       const estado = prepConforme && unidades > 0 ? 'conforme' : 'no conforme'
+      // Si quien cierra y envía es un admin, la orden se aprueba automáticamente (no requiere otra aprobación)
+      const autoAprob = esAdmin
       // 1) Crear/actualizar el registro de producción vinculado a la orden
       const recExist = recordsDeOrden(o.id)[0]
       const regData = {
@@ -604,7 +621,7 @@ export default function OrdenesProduccion() {
         empaque: o.unidad || 'UNIDADES', cantidad: unidades, inicio: inicioGlobal || null, fin: finGlobal || null,
         labor: 'PRODUCCION', responsable: prepResp || o.operario || '', obs: prepObs || '',
         peso_final: parseFloat(prepPesoFinal) || 0, peso_desperdicio: parseFloat(prepPesoDesp) || 0,
-        estado, completado: true, foto_url, orden_id: o.id, aprobado: false,
+        estado, completado: true, foto_url, orden_id: o.id, aprobado: autoAprob,
         tipo_registro: o.es_subproducto ? 'subproducto' : 'final', subprocesos: procs,
         peso_subporcion: prepPorciona ? (parseFloat(prepPesoSubp) || 0) : null,
         cant_subporciones: prepPorciona ? (parseFloat(prepCantSubp) || 0) : null,
@@ -613,9 +630,12 @@ export default function OrdenesProduccion() {
       }
       if (recExist) await writeOrQueue({ table: 'production_records', action: 'update', match: { id: recExist.id }, payload: regData })
       else await writeOrQueue({ table: 'production_records', action: 'insert', payload: regData })
-      // 2) Cerrar la orden (a aprobación) con todos los datos del proceso
+      // 2) Cerrar la orden con todos los datos del proceso.
+      //    Admin: pasa directo a 'aprobada' (auto-aprobación). Operario: 'ejecutada' (espera aprobación).
       const r = await writeOrQueue({ table: 'production_orders', action: 'update', match: { id: o.id }, payload: {
-        estado: 'ejecutada', cantidad_result: unidades, lote: prepLote, vence: prepVence || null,
+        estado: autoAprob ? 'aprobada' : 'ejecutada',
+        ...(autoAprob ? { aprobado_por: profile?.nombre || 'admin', fecha_aprob: new Date().toISOString() } : {}),
+        cantidad_result: unidades, lote: prepLote, vence: prepVence || null,
         fecha_inicio: fechaIni, inicio: inicioGlobal || null, fin: finGlobal || null, procesos_tiempos: procs,
         peso_final: parseFloat(prepPesoFinal) || 0, peso_desperdicio: parseFloat(prepPesoDesp) || 0,
         peso_subporcion: prepPorciona ? (parseFloat(prepPesoSubp) || 0) : null,
@@ -626,10 +646,27 @@ export default function OrdenesProduccion() {
       } })
       // Consumo definitivo de la MP reservada (solo en línea; offline se reconcilia al sincronizar)
       if (!r.queued) { try { await consumirMP(o) } catch (e) { console.warn('No se pudo consumir MP:', e) } }
-      if (!r.queued) await notificar({ destinatario: 'admin', tipo: 'orden_enviada', mensaje: `Orden #${opNum(o.id)} (${o.producto}) enviada para aprobación por ${profile?.nombre || 'operario'}`, link: '/ordenes', ref_id: o.id })
-      qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['production_records'] }); qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
+      // Si un subproducto se auto-aprueba (admin), genera la entrada de inventario MP igual que al aprobar
+      if (!r.queued && autoAprob && o.es_subproducto && o.mp_id) {
+        try {
+          await supabase.from('inventory_movements').insert({
+            mp_id: o.mp_id, tipo: 'entrada', cantidad: unidades, fecha: fechaIni,
+            responsable: o.operario || profile?.nombre || '', obs: `Orden de producción #${opNum(o.id)} (subproducto)`, lote: prepLote || '', vencimiento: prepVence || null,
+          })
+          const { data: mpRow } = await supabase.from('raw_materials').select('stock').eq('id', o.mp_id).single()
+          const upd = { stock: (mpRow?.stock || 0) + unidades }
+          if (prepLote) upd.lote = prepLote
+          if (prepVence) upd.vencimiento = prepVence
+          await supabase.from('raw_materials').update(upd).eq('id', o.mp_id)
+        } catch (e) { console.warn('No se pudo sumar el subproducto a inventario:', e) }
+      }
+      if (!r.queued) {
+        if (autoAprob) { if (o.operario && o.operario !== profile?.nombre) await notificar({ destinatario: o.operario, tipo: 'orden_aprobada', mensaje: `La orden #${opNum(o.id)} (${o.producto}) fue cerrada y aprobada por ${profile?.nombre || 'admin'} ✓`, link: '/ordenes', ref_id: o.id }) }
+        else await notificar({ destinatario: 'admin', tipo: 'orden_enviada', mensaje: `Orden #${opNum(o.id)} (${o.producto}) enviada para aprobación por ${profile?.nombre || 'operario'}`, link: '/ordenes', ref_id: o.id })
+      }
+      qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['production_records'] }); qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] }); qc.invalidateQueries({ queryKey: ['inventory_movements'] })
       setModalConfirmEnvio(false); setModalProceso(false)
-      toast(r.queued ? 'Orden guardada sin conexión — se enviará al sincronizar 📴' : 'Producción registrada y orden enviada a aprobación ✓')
+      toast(r.queued ? 'Orden guardada sin conexión — se enviará al sincronizar 📴' : (autoAprob ? 'Producción registrada, cerrada y aprobada ✓' : 'Producción registrada y orden enviada a aprobación ✓'))
     } catch (e) { toast(e.message, 'error') } finally { setSavingEvid(false) }
   }
 
@@ -1038,6 +1075,10 @@ export default function OrdenesProduccion() {
                           </>}
                           {/* El admin puede imprimir cualquier orden sin tomarla */}
                           {esAdmin && !esMia && <button className="btn btn-xs btn-dorado" title="Imprimir orden" onClick={() => openPreparar(o)}>🖨 Imprimir</button>}
+                          {/* El admin puede diligenciar el proceso, cerrar y enviar cualquier orden abierta (se auto-aprueba) */}
+                          {esAdmin && (o.estado === 'pendiente' || o.estado === 'en_proceso' || o.estado === 'rechazada') && (
+                            <button className="btn btn-xs btn-primary" title="Diligenciar proceso, cerrar y enviar (se aprueba automáticamente)" onClick={() => adminDiligenciar(o)}>▶ Diligenciar proceso</button>
+                          )}
                           {/* Editar la orden mientras esté pendiente (no tomada) */}
                           {(esAdmin || esOperario) && o.estado === 'pendiente' && <button className="btn btn-xs btn-secondary" title="Modificar orden" onClick={() => openEditarOrden(o)}>✏ Editar</button>}
                           {/* Ventana de 1 día hábil para corregir el envío (no-admin) */}
@@ -1482,7 +1523,7 @@ export default function OrdenesProduccion() {
         </>}>
         {ordenPrep && (
           <div style={{ fontSize: '0.9rem' }}>
-            <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>Revisa los datos. Al confirmar se registra la producción y la orden pasa a <strong>aprobación</strong>.</div>
+            <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>{esAdmin ? <>Revisa los datos. Al confirmar se registra la producción y la orden queda <strong>cerrada y aprobada</strong> (no requiere otra aprobación).</> : <>Revisa los datos. Al confirmar se registra la producción y la orden pasa a <strong>aprobación</strong>.</>}</div>
             <table><tbody>
               <tr><td><b>Orden N°</b></td><td>OP-{opNum(ordenPrep.id)}{ordenPrep.es_prueba ? ' · 🧪 PRUEBA' : ''}</td></tr>
               <tr><td><b>Producto</b></td><td>{ordenPrep.producto}</td></tr>
