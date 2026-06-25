@@ -28,17 +28,23 @@ const cors = {
 const json = (o: unknown, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { ...cors, 'Content-Type': 'application/json' } })
 
 async function getCreds(supabase: any) {
-  const { data } = await supabase.from('alegra_config').select('email, token').eq('id', 1).maybeSingle()
+  const { data } = await supabase.from('alegra_config').select('email, token, price_list_mayor, price_list_detal').eq('id', 1).maybeSingle()
   const email = (data?.email || Deno.env.get('ALEGRA_EMAIL') || '').trim()
   const token = (data?.token || Deno.env.get('ALEGRA_TOKEN') || '').trim()
-  return { email, token }
+  return { email, token, listaMayor: data?.price_list_mayor || '', listaDetal: data?.price_list_detal || '' }
 }
 
-// 1) Actualiza nombre, precio y costo del ítem (PUT /items). El stock NO se setea aquí.
-async function pushDatos(authHeader: string, itemId: string, costo?: number, nombre?: string, precio?: number) {
+// 1) Actualiza nombre, precios (por lista) y costo del ítem (PUT /items). El stock NO se setea aquí.
+async function pushDatos(authHeader: string, itemId: string, costo?: number, nombre?: string,
+  precioMayor?: number, precioDetal?: number, listaMayor?: string, listaDetal?: string) {
   const body: Record<string, unknown> = {}
   if (nombre && nombre.trim()) body.name = nombre.trim()
-  if (typeof precio === 'number' && precio > 0) body.price = precio
+  // Precios: si hay listas mapeadas, se envía un arreglo {idPriceList, price}; si no, el mayor como precio general
+  const price: any[] = []
+  if (listaMayor && (precioMayor || 0) > 0) price.push({ idPriceList: Number(listaMayor), price: precioMayor })
+  if (listaDetal && (precioDetal || 0) > 0) price.push({ idPriceList: Number(listaDetal), price: precioDetal })
+  if (price.length) body.price = price
+  else if ((precioMayor || 0) > 0) body.price = precioMayor
   if (typeof costo === 'number' && costo > 0) body.inventory = { unitCost: costo }
   if (Object.keys(body).length === 0) return
   const res = await fetch(`${ALEGRA_BASE}/items/${itemId}`, {
@@ -73,12 +79,12 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
-  const { email, token } = await getCreds(supabase)
+  const { email, token, listaMayor, listaDetal } = await getCreds(supabase)
   if (!email || !token) return json({ error: 'Configura el correo y el token de Alegra en la app.' }, 400)
   const authHeader = 'Basic ' + btoa(`${email}:${token}`)
   try {
     const { finished_id, all } = await req.json().catch(() => ({}))
-    let query = supabase.from('finished_products').select('id, nombre, sku, alegra_item_id, stock, costo_unitario, precio_mayor')
+    let query = supabase.from('finished_products').select('id, nombre, sku, alegra_item_id, stock, costo_unitario, precio_mayor, precio_detal')
     if (!all) query = query.eq('id', finished_id)
     else query = query.not('alegra_item_id', 'is', null)
     const { data: prods } = await query
@@ -89,7 +95,7 @@ Deno.serve(async (req) => {
       if (!p.alegra_item_id) { resultados.push({ producto: p.nombre, estado: 'sin alegra_item_id' }); continue }
       try {
         const id = String(p.alegra_item_id)
-        await pushDatos(authHeader, id, Number(p.costo_unitario || 0), p.nombre, Number(p.precio_mayor || 0))
+        await pushDatos(authHeader, id, Number(p.costo_unitario || 0), p.nombre, Number(p.precio_mayor || 0), Number(p.precio_detal || 0), listaMayor, listaDetal)
         const stockRes = await ajustarStock(authHeader, id, Number(p.stock || 0), Number(p.costo_unitario || 0))
         resultados.push({ producto: p.nombre, stock: Number(p.stock || 0), ajuste: stockRes, estado: 'ok' })
       } catch (e) {

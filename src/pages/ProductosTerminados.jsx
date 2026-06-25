@@ -7,7 +7,7 @@ import { useConfirm } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
 
-const EMPTY_PROD = { nombre: '', sku: '', alegra_item_id: '', tipo: 'base', stock_min: '', costo_unitario: '', precio_mayor: '', imagen_url: '', activo: true }
+const EMPTY_PROD = { nombre: '', sku: '', alegra_item_id: '', tipo: 'base', stock_min: '', costo_unitario: '', precio_mayor: '', precio_detal: '', imagen_url: '', activo: true }
 const EMPTY_AJUSTE = { tipo: 'entrada', cantidad: '', lote: '', motivo: '' }
 
 export default function ProductosTerminados() {
@@ -31,9 +31,11 @@ export default function ProductosTerminados() {
   const [enlaces, setEnlaces] = useState({})             // { finished_id: alegra_item_id }
   const [ocultarFact, setOcultarFact] = useState(false)  // ocultar ítems de solo facturación
   const [modalConfig, setModalConfig] = useState(false)  // configurar credenciales Alegra
-  const [cfgForm, setCfgForm] = useState({ email: '', token: '' })
+  const [cfgForm, setCfgForm] = useState({ email: '', token: '', price_list_mayor: '', price_list_detal: '' })
   const [probando, setProbando] = useState(false)
   const [pruebaMsg, setPruebaMsg] = useState(null)
+  const [listasPrecios, setListasPrecios] = useState(null)
+  const [cargandoListas, setCargandoListas] = useState(false)
 
   const { data: productos = [] } = useQuery({
     queryKey: ['finished_products'],
@@ -81,7 +83,7 @@ export default function ProductosTerminados() {
   const saveProd = useMutation({
     mutationFn: async () => {
       if (!pForm.nombre.trim()) throw new Error('Indica el nombre del producto terminado')
-      const payload = { nombre: pForm.nombre.trim(), sku: pForm.sku || null, alegra_item_id: pForm.alegra_item_id || null, tipo: pForm.tipo, stock_min: parseFloat(pForm.stock_min) || 0, costo_unitario: parseFloat(pForm.costo_unitario) || 0, precio_mayor: parseFloat(pForm.precio_mayor) || 0, imagen_url: pForm.imagen_url || null, activo: pForm.activo }
+      const payload = { nombre: pForm.nombre.trim(), sku: pForm.sku || null, alegra_item_id: pForm.alegra_item_id || null, tipo: pForm.tipo, stock_min: parseFloat(pForm.stock_min) || 0, costo_unitario: parseFloat(pForm.costo_unitario) || 0, precio_mayor: parseFloat(pForm.precio_mayor) || 0, precio_detal: parseFloat(pForm.precio_detal) || 0, imagen_url: pForm.imagen_url || null, activo: pForm.activo }
       if (pEditId) { const { error } = await supabase.from('finished_products').update(payload).eq('id', pEditId); if (error) throw error }
       else { const { error } = await supabase.from('finished_products').insert(payload); if (error) throw error }
     },
@@ -203,13 +205,24 @@ export default function ProductosTerminados() {
   // ---- Configuración de credenciales de Alegra ----
   const { data: alegraCfg } = useQuery({
     queryKey: ['alegra_config'],
-    queryFn: async () => { const { data } = await supabase.from('alegra_config').select('email, token').eq('id', 1).maybeSingle(); return data || {} },
+    queryFn: async () => { const { data } = await supabase.from('alegra_config').select('email, token, price_list_mayor, price_list_detal').eq('id', 1).maybeSingle(); return data || {} },
     enabled: esAdmin,
   })
-  const abrirConfig = () => { setCfgForm({ email: alegraCfg?.email || '', token: alegraCfg?.token || '' }); setPruebaMsg(null); setModalConfig(true) }
+  const abrirConfig = () => { setCfgForm({ email: alegraCfg?.email || '', token: alegraCfg?.token || '', price_list_mayor: alegraCfg?.price_list_mayor || '', price_list_detal: alegraCfg?.price_list_detal || '' }); setPruebaMsg(null); setModalConfig(true) }
+  const cargarListas = async () => {
+    setCargandoListas(true)
+    try {
+      await guardarConfig.mutateAsync()
+      const { data, error } = await supabase.functions.invoke('alegra-pricelists', { body: {} })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      setListasPrecios(data?.items || [])
+    } catch (e) { toast('No se pudieron cargar las listas: ' + e.message, 'error'); setListasPrecios([]) }
+    finally { setCargandoListas(false) }
+  }
   const guardarConfig = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from('alegra_config').upsert({ id: 1, email: cfgForm.email || null, token: cfgForm.token || null, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+      const { error } = await supabase.from('alegra_config').upsert({ id: 1, email: cfgForm.email || null, token: cfgForm.token || null, price_list_mayor: cfgForm.price_list_mayor || null, price_list_detal: cfgForm.price_list_detal || null, updated_at: new Date().toISOString() }, { onConflict: 'id' })
       if (error) throw error
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['alegra_config'] }); toast('Credenciales de Alegra guardadas ✓') },
@@ -330,7 +343,7 @@ export default function ProductosTerminados() {
                             <button className="btn btn-xs btn-secondary" onClick={() => setKardexDe(p)}>📜 Kardex</button>
                             <button className="btn btn-xs btn-secondary" title={p.alegra_item_id ? 'Sincronizar stock y costo con Alegra' : 'Falta el ID del ítem en Alegra'} disabled={!p.alegra_item_id || sincronizarUno.isPending} onClick={() => sincronizarUno.mutate(p)}>🔗 Sincronizar</button>
                             {p.tipo === 'base' && <button className="btn btn-xs btn-secondary" title={p.alegra_item_id ? 'Enviar la imagen de la ficha a Alegra (experimental)' : 'Falta el ID del ítem en Alegra'} disabled={!p.alegra_item_id || enviarImagen.isPending} onClick={() => enviarImagen.mutate(p)}>🖼 Imagen</button>}
-                            <button className="btn btn-xs btn-secondary" onClick={() => { setPForm({ nombre: p.nombre, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '', tipo: p.tipo || 'base', stock_min: p.stock_min || '', costo_unitario: p.costo_unitario || '', precio_mayor: p.precio_mayor || '', imagen_url: p.imagen_url || '', activo: p.activo !== false }); setPEditId(p.id); setModalProd(true) }}>✏</button>
+                            <button className="btn btn-xs btn-secondary" onClick={() => { setPForm({ nombre: p.nombre, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '', tipo: p.tipo || 'base', stock_min: p.stock_min || '', costo_unitario: p.costo_unitario || '', precio_mayor: p.precio_mayor || '', precio_detal: p.precio_detal || '', imagen_url: p.imagen_url || '', activo: p.activo !== false }); setPEditId(p.id); setModalProd(true) }}>✏</button>
                             {esAdmin && <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Quitar "${p.nombre}" SOLO del catálogo de Producto Terminado?\n\nEsto NO elimina la ficha de producto ni su costo. Podrás recrearlo desde la ficha cuando quieras.`).then(ok => ok && delProd.mutate(p.id))}>✕</button>}
                           </div>
                         </td>
@@ -355,6 +368,7 @@ export default function ProductosTerminados() {
           <div className="form-group"><label className="form-label">ID ítem en Alegra</label><input className="form-control" value={pForm.alegra_item_id} onChange={e => setPForm(f => ({ ...f, alegra_item_id: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Stock mínimo (alerta)</label><input type="number" className="form-control" value={pForm.stock_min} onChange={e => setPForm(f => ({ ...f, stock_min: e.target.value }))} min={0} /></div>
           <div className="form-group"><label className="form-label">Precio venta mayor</label><input type="number" className="form-control" value={pForm.precio_mayor} onChange={e => setPForm(f => ({ ...f, precio_mayor: e.target.value }))} min={0} /></div>
+          <div className="form-group"><label className="form-label">Precio detal / distribuidores</label><input type="number" className="form-control" value={pForm.precio_detal} onChange={e => setPForm(f => ({ ...f, precio_detal: e.target.value }))} min={0} /></div>
           <div className="form-group" style={{ gridColumn: '1 / -1' }}>
             <label className="form-label">Imagen del producto</label>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
@@ -413,6 +427,30 @@ export default function ProductosTerminados() {
         <div className="form-group"><label className="form-label">Correo de Alegra</label><input className="form-control" value={cfgForm.email} onChange={e => setCfgForm(f => ({ ...f, email: e.target.value }))} placeholder="tu-correo@dominio.com" /></div>
         <div className="form-group"><label className="form-label">Token de API</label><input className="form-control" type="password" value={cfgForm.token} onChange={e => setCfgForm(f => ({ ...f, token: e.target.value }))} placeholder="Pega aquí el token de Alegra" /></div>
         {pruebaMsg && <div className="alert" style={{ fontSize: '0.85rem', color: pruebaMsg.ok ? 'var(--selva)' : 'var(--rojo)', background: pruebaMsg.ok ? 'rgba(124,179,66,0.10)' : 'rgba(192,57,43,0.08)' }}>{pruebaMsg.txt}</div>}
+
+        <div style={{ borderTop: '1px solid var(--crema-oscuro)', marginTop: 12, paddingTop: 12 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <strong style={{ fontSize: '0.88rem', color: 'var(--selva)' }}>Listas de precios</strong>
+            <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={cargarListas} disabled={cargandoListas || !cfgForm.email || !cfgForm.token}>{cargandoListas ? 'Cargando...' : '🔄 Cargar listas de Alegra'}</button>
+          </div>
+          <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', marginTop: 0 }}>Indica qué lista de Alegra recibe el precio <strong>mayor</strong> y cuál el <strong>detal/distribuidores</strong>. Se enviarán desde la ficha.</p>
+          {listasPrecios && (
+            <div className="form-grid">
+              <div className="form-group"><label className="form-label">Lista "por mayor"</label>
+                <select className="form-control" value={cfgForm.price_list_mayor} onChange={e => setCfgForm(f => ({ ...f, price_list_mayor: e.target.value }))}>
+                  <option value="">— Sin asignar —</option>
+                  {listasPrecios.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </select>
+              </div>
+              <div className="form-group"><label className="form-label">Lista "detal / distribuidores"</label>
+                <select className="form-control" value={cfgForm.price_list_detal} onChange={e => setCfgForm(f => ({ ...f, price_list_detal: e.target.value }))}>
+                  <option value="">— Sin asignar —</option>
+                  {listasPrecios.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
+                </select>
+              </div>
+            </div>
+          )}
+        </div>
         <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Tras guardar, usa "🔌 Enlazar con Alegra" para mapear cada producto.</small>
       </Modal>
 
