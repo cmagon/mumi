@@ -48,7 +48,7 @@ export default function ProductosTerminados() {
   // Fichas de producto: el costo del surtido se promedia desde el costo de la FICHA (no del catálogo)
   const { data: fichas = [] } = useQuery({
     queryKey: ['fichas_costo_terminado'],
-    queryFn: async () => { const { data } = await supabase.from('products_costing').select('id, nombre, tipo, costo_final').order('nombre'); return data || [] },
+    queryFn: async () => { const { data } = await supabase.from('products_costing').select('id, nombre, tipo, costo_final, precio_mayor, precio_detal').order('nombre'); return data || [] },
   })
   const costoFicha = (p) => {
     const f = fichas.find(x => x.id === p.product_id) || fichas.find(x => x.nombre === p.nombre)
@@ -133,6 +133,12 @@ export default function ProductosTerminados() {
     onError: (e) => toast('Crear en Alegra: ' + e.message, 'error'),
   })
 
+  const desenlazar = useMutation({
+    mutationFn: async (p) => { const { error } = await supabase.from('finished_products').update({ alegra_item_id: null }).eq('id', p.id); if (error) throw error; return p.nombre },
+    onSuccess: (nombre) => { qc.invalidateQueries({ queryKey: ['finished_products'] }); toast(`"${nombre}" desenlazado de Alegra ✓`) },
+    onError: (e) => toast(e.message, 'error'),
+  })
+
   const enviarImagen = useMutation({
     mutationFn: async (p) => {
       if (!p.alegra_item_id) throw new Error('Enlázalo primero con un ítem de Alegra')
@@ -189,27 +195,42 @@ export default function ProductosTerminados() {
   const baseProds = useMemo(() => fichas.filter(f => (f.tipo || '') !== 'subproducto'), [fichas])
   const previewGen = useMemo(() => {
     const base = baseProds.filter(p => selGen.includes(p.id))
-    const existentes = new Set(productos.map(p => (p.nombre || '').toLowerCase()))
+    const avg = (x, y) => Math.round(((Number(x) || 0) + (Number(y) || 0)) / 2)
+    const seen = new Set()
     const out = []
     for (let i = 0; i < base.length; i++) for (let j = i + 1; j < base.length; j++) {
       const a = base[i], b = base[j]
       const nombre = componerSurtido(a.nombre, b.nombre)
-      if (!nombre || existentes.has(nombre.toLowerCase())) continue
-      existentes.add(nombre.toLowerCase())
-      out.push({ nombre, costo: Math.round(((Number(a.costo_final) || 0) + (Number(b.costo_final) || 0)) / 2) })
+      if (!nombre || seen.has(nombre.toLowerCase())) continue
+      seen.add(nombre.toLowerCase())
+      const ya = productos.find(p => (p.nombre || '').toLowerCase() === nombre.toLowerCase())
+      out.push({
+        nombre, existeId: ya?.id || null,
+        costo: avg(a.costo_final, b.costo_final),
+        precio_mayor: avg(a.precio_mayor, b.precio_mayor),
+        precio_detal: avg(a.precio_detal, b.precio_detal),
+      })
     }
     return out
   }, [baseProds, selGen, productos, fichas])
 
   const generarSurtidos = useMutation({
     mutationFn: async () => {
-      if (!previewGen.length) throw new Error('No hay combinaciones nuevas para crear')
-      const rows = previewGen.map(c => ({ nombre: c.nombre, tipo: 'surtido', costo_unitario: c.costo, stock: 0, activo: true }))
-      const { error } = await supabase.from('finished_products').insert(rows)
-      if (error) throw error
-      return rows.length
+      if (!previewGen.length) throw new Error('No hay combinaciones para aplicar')
+      let creados = 0, actualizados = 0
+      const nuevos = []
+      for (const c of previewGen) {
+        if (c.existeId) {
+          await supabase.from('finished_products').update({ costo_unitario: c.costo, precio_mayor: c.precio_mayor, precio_detal: c.precio_detal }).eq('id', c.existeId)
+          actualizados++
+        } else {
+          nuevos.push({ nombre: c.nombre, tipo: 'surtido', costo_unitario: c.costo, precio_mayor: c.precio_mayor, precio_detal: c.precio_detal, stock: 0, activo: true })
+        }
+      }
+      if (nuevos.length) { const { error } = await supabase.from('finished_products').insert(nuevos); if (error) throw error; creados = nuevos.length }
+      return { creados, actualizados }
     },
-    onSuccess: (n) => { qc.invalidateQueries({ queryKey: ['finished_products'] }); setModalGen(false); toast(`${n} surtido(s) creado(s) ✓`) },
+    onSuccess: ({ creados, actualizados }) => { qc.invalidateQueries({ queryKey: ['finished_products'] }); setModalGen(false); toast(`Surtidos: ${creados} creado(s), ${actualizados} actualizado(s) ✓`) },
     onError: (e) => toast(e.message, 'error'),
   })
 
@@ -530,9 +551,9 @@ export default function ProductosTerminados() {
       <Modal open={modalGen} onClose={() => setModalGen(false)} title="🔀 Generar surtidos (combinaciones de sabores)" size="modal-lg"
         footer={<>
           <button className="btn btn-secondary" onClick={() => setModalGen(false)}>Cancelar</button>
-          <button className="btn btn-primary" onClick={() => generarSurtidos.mutate()} disabled={generarSurtidos.isPending || !previewGen.length}>{generarSurtidos.isPending ? 'Creando...' : `Crear ${previewGen.length} surtido(s)`}</button>
+          <button className="btn btn-primary" onClick={() => generarSurtidos.mutate()} disabled={generarSurtidos.isPending || !previewGen.length}>{generarSurtidos.isPending ? 'Aplicando...' : `Aplicar (${previewGen.length})`}</button>
         </>}>
-        <p style={{ fontSize: '0.85rem', color: 'var(--texto-suave)' }}>Elige los productos base (dulces) a combinar. Se crearán todas las parejas posibles con el <strong>costo promedio</strong> de los dos sabores. Las que ya existen se omiten.</p>
+        <p style={{ fontSize: '0.85rem', color: 'var(--texto-suave)' }}>Elige los productos base (dulces) a combinar. Se crean todas las parejas con el <strong>costo y precios promedio</strong> de los dos sabores. Las que ya existen se <strong>actualizan</strong> con esos valores.</p>
         <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
           <button className="btn btn-xs btn-secondary" onClick={() => setSelGen(baseProds.map(p => p.id))}>Todos</button>
           <button className="btn btn-xs btn-secondary" onClick={() => setSelGen([])}>Ninguno</button>
@@ -549,11 +570,17 @@ export default function ProductosTerminados() {
         </div>
         <div className="table-wrap" style={{ maxHeight: 220, overflowY: 'auto' }}>
           <table>
-            <thead><tr><th>Surtido a crear ({previewGen.length})</th><th className="td-number">Costo promedio</th></tr></thead>
+            <thead><tr><th>Surtido ({previewGen.length})</th><th className="td-number">Costo</th><th className="td-number">P. mayor</th><th className="td-number">P. detal</th><th></th></tr></thead>
             <tbody>
               {previewGen.length === 0
-                ? <tr><td colSpan={2} className="empty-table">Selecciona 2+ productos para ver las combinaciones.</td></tr>
-                : previewGen.map((c, i) => <tr key={i}><td>🔀 {c.nombre}</td><td className="td-number">$ {Number(c.costo).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td></tr>)}
+                ? <tr><td colSpan={5} className="empty-table">Selecciona 2+ productos para ver las combinaciones.</td></tr>
+                : previewGen.map((c, i) => <tr key={i}>
+                    <td>🔀 {c.nombre}</td>
+                    <td className="td-number">$ {Number(c.costo).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td className="td-number">$ {Number(c.precio_mayor).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td className="td-number">$ {Number(c.precio_detal).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                    <td>{c.existeId ? <span className="badge badge-dorado" style={{ fontSize: '0.6rem' }}>actualizar</span> : <span className="badge badge-verde" style={{ fontSize: '0.6rem' }}>nuevo</span>}</td>
+                  </tr>)}
             </tbody>
           </table>
         </div>
