@@ -29,15 +29,15 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
   const { email, token, listaMayor, listaDetal } = await getCreds(supabase)
-  if (!email || !token) return json({ error: 'Configura el correo y el token de Alegra en la app.' }, 400)
+  if (!email || !token) return json({ error: 'Configura el correo y el token de Alegra en la app.' })
   const authHeader = 'Basic ' + btoa(`${email}:${token}`)
 
   try {
     const { finished_id } = await req.json().catch(() => ({}))
     const { data: p } = await supabase.from('finished_products')
       .select('id, nombre, sku, alegra_item_id, stock, costo_unitario, precio_mayor, precio_detal').eq('id', finished_id).maybeSingle()
-    if (!p) return json({ error: 'Producto no encontrado' }, 404)
-    if (p.alegra_item_id) return json({ error: 'Este producto ya está enlazado a Alegra' }, 400)
+    if (!p) return json({ error: 'Producto no encontrado' })
+    if (p.alegra_item_id) return json({ error: 'Este producto ya está enlazado a Alegra' })
 
     // Precio: arreglo por listas si están mapeadas; si no, el mayor como número
     const price: any[] = []
@@ -65,6 +65,6 @@ Deno.serve(async (req) => {
     if (newId) await supabase.from('finished_products').update({ alegra_item_id: newId }).eq('id', p.id)
     return json({ ok: true, id: newId, nombre: p.nombre })
   } catch (e) {
-    return json({ error: String((e as Error)?.message || e) }, 500)
+    return json({ error: String((e as Error)?.message || e) })
   }
 })
