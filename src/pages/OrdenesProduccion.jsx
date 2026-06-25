@@ -1856,6 +1856,15 @@ export default function OrdenesProduccion() {
                 <D et="Empaque">{o.empaque || '—'}</D>
                 <D et="Horario">{(o.inicio || '—')} a {(o.fin || '—')}</D>
                 <D et="Enviada">{o.fecha_envio ? fFecha(o.fecha_envio.split('T')[0]) : '—'}</D>
+                {(o.cant_subporciones != null || o.peso_subporcion != null) && (
+                  <D et="Subporciones">{fNum(parseFloat(o.cant_subporciones) || 0)}{o.peso_subporcion ? ` de ${fNum(parseFloat(o.peso_subporcion))} g c/u` : ''}</D>
+                )}
+                {o.surtido && (
+                  <D et="Empacado surtido">{o.producto_surtido || 'Sí'}{o.surtido_cantidad != null ? ` · ${fNum(parseFloat(o.surtido_cantidad))} und` : ''}{o.lote_mezcla ? ` · lote(s) ${o.lote_mezcla}` : ''}</D>
+                )}
+                {o.hay_sobrante && (
+                  <D et="Sobró producción">{o.sobrante_peso != null ? `${fCant(o.sobrante_peso)} ${o.sobrante_unidad || ''}` : 'Sí'}</D>
+                )}
               </div>
               {/* Auditoría de creación — solo visible para administradores */}
               {esAdmin && (
