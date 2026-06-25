@@ -29,6 +29,7 @@ export default function ProductosTerminados() {
   const [alegraItems, setAlegraItems] = useState(null)   // null = no cargado
   const [cargandoAlegra, setCargandoAlegra] = useState(false)
   const [enlaces, setEnlaces] = useState({})             // { finished_id: alegra_item_id }
+  const [ocultarFact, setOcultarFact] = useState(false)  // ocultar ítems de solo facturación
   const [modalConfig, setModalConfig] = useState(false)  // configurar credenciales Alegra
   const [cfgForm, setCfgForm] = useState({ email: '', token: '' })
   const [probando, setProbando] = useState(false)
@@ -230,7 +231,9 @@ export default function ProductosTerminados() {
   const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim()
   const abrirEnlace = async () => {
     setModalEnlace(true)
-    if (alegraItems) return
+    if (!alegraItems) await escanearAlegra()
+  }
+  const escanearAlegra = async () => {
     setCargandoAlegra(true)
     try {
       const { data, error } = await supabase.functions.invoke('alegra-items', { body: {} })
@@ -239,9 +242,8 @@ export default function ProductosTerminados() {
       const items = data?.items || []
       setAlegraItems(items)
       // Autosugerencia: por referencia=SKU, o por nombre igual
-      // Prefiere SIEMPRE los ítems que manejan inventario (los correctos para sincronizar stock)
-      const conInv = (arr) => arr.filter(it => it.inventoriable)
-      const pick = (arr) => (conInv(arr)[0] || arr[0])
+      // Prefiere los ítems que NO son de solo facturación (los correctos para sincronizar stock)
+      const pick = (arr) => (arr.find(it => !it.esServicio) || arr[0])
       const sug = {}
       for (const p of productos) {
         if (p.alegra_item_id) { sug[p.id] = String(p.alegra_item_id); continue }
@@ -418,6 +420,7 @@ export default function ProductosTerminados() {
       <Modal open={modalEnlace} onClose={() => setModalEnlace(false)} title="🔌 Enlazar productos con Alegra" size="modal-xl"
         footer={<>
           <button className="btn btn-secondary" onClick={() => setModalEnlace(false)}>Cerrar</button>
+          <button className="btn btn-secondary" onClick={escanearAlegra} disabled={cargandoAlegra}>{cargandoAlegra ? 'Escaneando...' : '🔄 Volver a escanear'}</button>
           <button className="btn btn-primary" onClick={() => guardarEnlaces.mutate()} disabled={guardarEnlaces.isPending || cargandoAlegra || !alegraItems}>Guardar enlaces</button>
         </>}>
         {cargandoAlegra
@@ -428,7 +431,12 @@ export default function ProductosTerminados() {
               ? <div className="alert alert-warning" style={{ fontSize: '0.85rem' }}>Conexión establecida pero Alegra no devolvió ítems. Crea ítems en Alegra o revisa el token.</div>
               : (
                 <>
-                  <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>✓ Conectado con Alegra. Mostrando solo los <strong>{alegraItems.filter(it => it.inventoriable).length}</strong> ítems con <strong>📦 inventario</strong> (los de solo facturación se ocultan). Elige el equivalente de cada producto.</div>
+                  <div className="alert alert-info" style={{ fontSize: '0.82rem', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                    <span>✓ Conectado con Alegra ({alegraItems.length} ítems). Elige el equivalente de cada producto. Los 📦 manejan inventario (sincronizan stock); los 🧾 son de solo facturación.</span>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 4, marginLeft: 'auto', whiteSpace: 'nowrap' }}>
+                      <input type="checkbox" checked={ocultarFact} onChange={e => setOcultarFact(e.target.checked)} /> Ocultar solo facturación
+                    </label>
+                  </div>
                   <div className="table-wrap" style={{ maxHeight: 420, overflowY: 'auto' }}>
                     <table>
                       <thead><tr><th>Producto (app)</th><th>SKU</th><th>Ítem en Alegra</th></tr></thead>
@@ -443,10 +451,10 @@ export default function ProductosTerminados() {
                               <td>
                                 <select className="form-control" value={sel} onChange={e => setEnlaces(m => ({ ...m, [p.id]: e.target.value }))} style={{ borderColor: yaUsado(sel) ? 'var(--rojo)' : undefined }}>
                                   <option value="">— Sin enlazar —</option>
-                                  {alegraItems.filter(it => it.inventoriable || it.id === sel).map(it => <option key={it.id} value={it.id}>{it.inventoriable ? '📦 ' : '🧾 '}{it.name}{it.reference ? ` · ${it.reference}` : ''}{it.inventoriable ? ` · stock ${it.available ?? 0}` : ' · solo facturación'}</option>)}
+                                  {alegraItems.filter(it => it.id === sel || !(ocultarFact && it.esServicio)).map(it => <option key={it.id} value={it.id}>{it.esServicio ? '🧾 ' : '📦 '}{it.name}{it.reference ? ` · ${it.reference}` : ''}{it.esServicio ? ' · solo facturación' : ` · stock ${it.available ?? 0}`}</option>)}
                                 </select>
                                 {yaUsado(sel) && <small style={{ color: 'var(--rojo)', fontSize: '0.68rem' }}>⚠ ese ítem ya está asignado a otro producto</small>}
-                                {sel && !(alegraItems.find(it => it.id === sel)?.inventoriable) && <small style={{ color: 'var(--tierra)', fontSize: '0.68rem' }}>⚠ este ítem no maneja inventario — el stock no se sincronizará. Elige el de 📦 inventario.</small>}
+                                {sel && alegraItems.find(it => it.id === sel)?.esServicio && <small style={{ color: 'var(--tierra)', fontSize: '0.68rem' }}>⚠ es un ítem de solo facturación — el stock no se sincronizará.</small>}
                               </td>
                             </tr>
                           )
