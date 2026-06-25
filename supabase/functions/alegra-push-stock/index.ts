@@ -34,21 +34,39 @@ async function getCreds(supabase: any) {
   return { email, token }
 }
 
-// Sincroniza nombre, precio, costo y stock de un ítem en Alegra
-async function pushItem(authHeader: string, itemId: string, cantidad: number, costo?: number, nombre?: string, precio?: number) {
-  const inventory: Record<string, number> = { availableQuantity: cantidad }
-  if (typeof costo === 'number' && costo > 0) inventory.unitCost = costo
-  const body: Record<string, unknown> = { inventory }
+// 1) Actualiza nombre, precio y costo del ítem (PUT /items). El stock NO se setea aquí.
+async function pushDatos(authHeader: string, itemId: string, costo?: number, nombre?: string, precio?: number) {
+  const body: Record<string, unknown> = {}
   if (nombre && nombre.trim()) body.name = nombre.trim()
   if (typeof precio === 'number' && precio > 0) body.price = precio
+  if (typeof costo === 'number' && costo > 0) body.inventory = { unitCost: costo }
+  if (Object.keys(body).length === 0) return
   const res = await fetch(`${ALEGRA_BASE}/items/${itemId}`, {
-    method: 'PUT',
-    headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
+    method: 'PUT', headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   })
   const txt = await res.text()
-  if (!res.ok) throw new Error(`Alegra item ${itemId}: ${res.status} ${txt}`)
-  return true
+  if (!res.ok) throw new Error(`PUT item ${itemId}: ${res.status} ${txt}`)
+}
+
+// 2) Ajusta el stock vía ajuste de inventario (Alegra usa DELTA in/out, no valor absoluto).
+//    Lee la cantidad actual del ítem y crea el movimiento para igualar al stock de la app.
+async function ajustarStock(authHeader: string, itemId: string, objetivo: number, costo?: number) {
+  const r = await fetch(`${ALEGRA_BASE}/items/${itemId}`, { headers: { 'Authorization': authHeader } })
+  const it = await r.json().catch(() => ({}))
+  const actual = Number(it?.inventory?.availableQuantity ?? 0)
+  const delta = Math.round((objetivo - actual) * 1000) / 1000
+  if (delta === 0) return { actual, objetivo, delta: 0 }
+  const body = {
+    date: new Date().toISOString().slice(0, 10),
+    observations: 'Sincronización de stock desde Mumi',
+    items: [{ id: itemId, type: delta > 0 ? 'in' : 'out', quantity: Math.abs(delta), unitCost: Number(costo || it?.inventory?.unitCost || 0) }],
+  }
+  const res = await fetch(`${ALEGRA_BASE}/inventory-adjustments`, {
+    method: 'POST', headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
+  })
+  const txt = await res.text()
+  if (!res.ok) throw new Error(`Ajuste stock ${itemId}: ${res.status} ${txt}`)
+  return { actual, objetivo, delta }
 }
 
 Deno.serve(async (req) => {
@@ -70,8 +88,10 @@ Deno.serve(async (req) => {
     for (const p of prods) {
       if (!p.alegra_item_id) { resultados.push({ producto: p.nombre, estado: 'sin alegra_item_id' }); continue }
       try {
-        await pushItem(authHeader, String(p.alegra_item_id), Number(p.stock || 0), Number(p.costo_unitario || 0), p.nombre, Number(p.precio_mayor || 0))
-        resultados.push({ producto: p.nombre, cantidad: Number(p.stock || 0), costo: Number(p.costo_unitario || 0), estado: 'ok' })
+        const id = String(p.alegra_item_id)
+        await pushDatos(authHeader, id, Number(p.costo_unitario || 0), p.nombre, Number(p.precio_mayor || 0))
+        const stockRes = await ajustarStock(authHeader, id, Number(p.stock || 0), Number(p.costo_unitario || 0))
+        resultados.push({ producto: p.nombre, stock: Number(p.stock || 0), ajuste: stockRes, estado: 'ok' })
       } catch (e) {
         resultados.push({ producto: p.nombre, estado: 'error', detalle: String((e as Error)?.message || e) })
       }

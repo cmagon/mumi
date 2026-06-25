@@ -52,17 +52,19 @@ Deno.serve(async (req) => {
     if (!imgRes.ok) return json({ error: 'No se pudo descargar la imagen de la app' }, 400)
     const ct = imgRes.headers.get('content-type') || 'image/jpeg'
     const ext = ct.includes('png') ? 'png' : ct.includes('webp') ? 'webp' : 'jpg'
-    const data = b64(await imgRes.arrayBuffer())
+    const bytes = new Uint8Array(await imgRes.arrayBuffer())
     const nombreArchivo = `${(fp.nombre || 'producto').replace(/[^a-z0-9]/gi, '_')}.${ext}`
 
-    // Alegra: subir imagen al ítem (formato base64). Se prueba el campo 'images'.
+    // Alegra: la imagen del ítem se sube por multipart/form-data en el campo 'image'
+    const form = new FormData()
+    form.append('image', new Blob([bytes], { type: ct }), nombreArchivo)
     const res = await fetch(`${ALEGRA_BASE}/items/${fp.alegra_item_id}`, {
       method: 'PUT',
-      headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ images: [{ name: nombreArchivo, data: `data:${ct};base64,${data}` }] }),
+      headers: { 'Authorization': authHeader },   // sin Content-Type: fetch fija el boundary del multipart
+      body: form,
     })
     const txt = await res.text()
-    return json({ ok: res.ok, status: res.status, alegra: txt.slice(0, 1500) }, res.ok ? 200 : 200)
+    return json({ ok: res.ok, status: res.status, alegra: txt.slice(0, 1500) })
   } catch (e) {
     return json({ error: String((e as Error)?.message || e) }, 500)
   }
