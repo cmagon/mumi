@@ -52,16 +52,14 @@ Deno.serve(async (req) => {
     if (!imgRes.ok) return json({ error: 'No se pudo descargar la imagen de la app' }, 400)
     const ct = imgRes.headers.get('content-type') || 'image/jpeg'
     const ext = ct.includes('png') ? 'png' : ct.includes('webp') ? 'webp' : 'jpg'
-    const bytes = new Uint8Array(await imgRes.arrayBuffer())
-    const nombreArchivo = `${(fp.nombre || 'producto').replace(/[^a-z0-9]/gi, '_')}.${ext}`
+    const dataUri = `data:${ct};base64,${b64(await imgRes.arrayBuffer())}`
+    void ext
 
-    // Alegra: la imagen del ítem se sube por multipart/form-data en el campo 'image'
-    const form = new FormData()
-    form.append('image', new Blob([bytes], { type: ct }), nombreArchivo)
+    // Alegra: la imagen del ítem se envía en el campo 'image' como data URI base64 (JSON)
     const res = await fetch(`${ALEGRA_BASE}/items/${fp.alegra_item_id}`, {
       method: 'PUT',
-      headers: { 'Authorization': authHeader },   // sin Content-Type: fetch fija el boundary del multipart
-      body: form,
+      headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: dataUri }),
     })
     const txt = await res.text()
     return json({ ok: res.ok, status: res.status, alegra: txt.slice(0, 1500) })

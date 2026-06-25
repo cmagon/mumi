@@ -45,6 +45,8 @@ Deno.serve(async (req) => {
       try { pagina = JSON.parse(txt) } catch { pagina = [] }
       if (!Array.isArray(pagina) || pagina.length === 0) break
       for (const it of pagina) {
+        // Omite los ítems inactivos en Alegra
+        if (String(it.status || '').toLowerCase() === 'inactive') continue
         items.push({
           id: String(it.id),
           name: it.name || '',

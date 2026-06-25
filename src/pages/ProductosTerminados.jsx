@@ -122,6 +122,17 @@ export default function ProductosTerminados() {
     onError: (e) => toast(e.message, 'error'),
   })
 
+  const crearEnAlegra = useMutation({
+    mutationFn: async (p) => {
+      const { data, error } = await supabase.functions.invoke('alegra-create-item', { body: { finished_id: p.id } })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      return p.nombre
+    },
+    onSuccess: (nombre) => { qc.invalidateQueries({ queryKey: ['finished_products'] }); toast(`"${nombre}" creado en Alegra como inventariable ✓`) },
+    onError: (e) => toast('Crear en Alegra: ' + e.message, 'error'),
+  })
+
   const enviarImagen = useMutation({
     mutationFn: async (p) => {
       if (!p.alegra_item_id) throw new Error('Enlázalo primero con un ítem de Alegra')
@@ -341,6 +352,7 @@ export default function ProductosTerminados() {
                           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                             <button className="btn btn-xs btn-primary" onClick={() => { setModalAjuste(p); setAForm(EMPTY_AJUSTE) }}>⚖ Ajustar</button>
                             <button className="btn btn-xs btn-secondary" onClick={() => setKardexDe(p)}>📜 Kardex</button>
+                            {!p.alegra_item_id && esAdmin && <button className="btn btn-xs btn-dorado" title="Crear este producto en Alegra (inventariable, con todos sus datos)" disabled={crearEnAlegra.isPending} onClick={() => confirmar(`¿Crear "${p.nombre}" en Alegra como producto inventariable?\n\nSolo hazlo si NO existe ya en Alegra (para no duplicar).`).then(ok => ok && crearEnAlegra.mutate(p))}>➕ Crear en Alegra</button>}
                             <button className="btn btn-xs btn-secondary" title={p.alegra_item_id ? 'Sincronizar stock y costo con Alegra' : 'Falta el ID del ítem en Alegra'} disabled={!p.alegra_item_id || sincronizarUno.isPending} onClick={() => sincronizarUno.mutate(p)}>🔗 Sincronizar</button>
                             {p.tipo === 'base' && <button className="btn btn-xs btn-secondary" title={p.alegra_item_id ? 'Enviar la imagen de la ficha a Alegra (experimental)' : 'Falta el ID del ítem en Alegra'} disabled={!p.alegra_item_id || enviarImagen.isPending} onClick={() => enviarImagen.mutate(p)}>🖼 Imagen</button>}
                             <button className="btn btn-xs btn-secondary" onClick={() => { setPForm({ nombre: p.nombre, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '', tipo: p.tipo || 'base', stock_min: p.stock_min || '', costo_unitario: p.costo_unitario || '', precio_mayor: p.precio_mayor || '', precio_detal: p.precio_detal || '', imagen_url: p.imagen_url || '', activo: p.activo !== false }); setPEditId(p.id); setModalProd(true) }}>✏</button>
@@ -367,8 +379,18 @@ export default function ProductosTerminados() {
           <div className="form-group"><label className="form-label">SKU / Referencia (Alegra)</label><input className="form-control" value={pForm.sku} onChange={e => setPForm(f => ({ ...f, sku: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">ID ítem en Alegra</label><input className="form-control" value={pForm.alegra_item_id} onChange={e => setPForm(f => ({ ...f, alegra_item_id: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Stock mínimo (alerta)</label><input type="number" className="form-control" value={pForm.stock_min} onChange={e => setPForm(f => ({ ...f, stock_min: e.target.value }))} min={0} /></div>
-          <div className="form-group"><label className="form-label">Precio venta mayor</label><input type="number" className="form-control" value={pForm.precio_mayor} onChange={e => setPForm(f => ({ ...f, precio_mayor: e.target.value }))} min={0} /></div>
-          <div className="form-group"><label className="form-label">Precio detal / distribuidores</label><input type="number" className="form-control" value={pForm.precio_detal} onChange={e => setPForm(f => ({ ...f, precio_detal: e.target.value }))} min={0} /></div>
+          <div className="form-group">
+            <label className="form-label">Precio venta mayor {pForm.tipo === 'base' ? '(desde la ficha)' : ''}</label>
+            {pForm.tipo === 'base'
+              ? <div className="form-control" style={{ background: 'var(--crema)', color: 'var(--texto-suave)' }}>$ {Number(pForm.precio_mayor || 0).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              : <input type="number" className="form-control" value={pForm.precio_mayor} onChange={e => setPForm(f => ({ ...f, precio_mayor: e.target.value }))} min={0} />}
+          </div>
+          <div className="form-group">
+            <label className="form-label">Precio detal / distribuidores {pForm.tipo === 'base' ? '(desde la ficha)' : ''}</label>
+            {pForm.tipo === 'base'
+              ? <div className="form-control" style={{ background: 'var(--crema)', color: 'var(--texto-suave)' }}>$ {Number(pForm.precio_detal || 0).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              : <input type="number" className="form-control" value={pForm.precio_detal} onChange={e => setPForm(f => ({ ...f, precio_detal: e.target.value }))} min={0} />}
+          </div>
           <div className="form-group" style={{ gridColumn: '1 / -1' }}>
             <label className="form-label">Imagen del producto</label>
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
