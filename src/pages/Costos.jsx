@@ -493,12 +493,20 @@ export default function Costos() {
             tipo: 'base', costo_unitario: Math.round(r.costoFinal || 0),
             precio_mayor: parseFloat(formProd.precio_mayor) || 0, precio_detal: parseFloat(formProd.precio_detal) || 0, imagen_url: imagenUrl || null,
           }
-          let actualizado = false
+          let ftId = null
           if (pid) {
             const { data: ya } = await supabase.from('finished_products').select('id').eq('product_id', pid).maybeSingle()
-            if (ya) { await supabase.from('finished_products').update(campos).eq('id', ya.id); actualizado = true }
+            if (ya) { await supabase.from('finished_products').update(campos).eq('id', ya.id); ftId = ya.id }
           }
-          if (!actualizado) await supabase.from('finished_products').upsert({ ...campos, product_id: pid }, { onConflict: 'nombre' })
+          if (!ftId) {
+            const { data: up } = await supabase.from('finished_products').upsert({ ...campos, product_id: pid }, { onConflict: 'nombre' }).select('id').maybeSingle()
+            ftId = up?.id || null
+          }
+          // Si ese terminado está enlazado a Alegra, empuja costo/precio/nombre automáticamente
+          if (ftId) {
+            const { data: ft } = await supabase.from('finished_products').select('alegra_item_id').eq('id', ftId).maybeSingle()
+            if (ft?.alegra_item_id) { try { await supabase.functions.invoke('alegra-push-stock', { body: { finished_id: ftId } }) } catch (e) { console.warn('No se pudo sincronizar con Alegra:', e) } }
+          }
         } catch (e) { console.warn('No se pudo sincronizar el catálogo de terminados:', e) }
       }
 
