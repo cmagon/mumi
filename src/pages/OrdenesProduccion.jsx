@@ -34,18 +34,21 @@ const BASE_RECETA = 10000
 // Fecha LOCAL en 'YYYY-MM-DD' (evita el desfase de un día por zona horaria que da toISOString en UTC)
 const fechaLocalISO = (d = new Date()) => { const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` }
 const desdeHoyMeses = (meses) => { const d = new Date(); d.setMonth(d.getMonth() + meses); return fechaLocalISO(d) }
+// Vencimiento = fecha base (fabricación) + N meses. Si no hay base, usa hoy.
+const desdeFechaMeses = (base, meses) => { const d = base ? new Date(base + 'T00:00:00') : new Date(); d.setMonth(d.getMonth() + meses); return fechaLocalISO(d) }
 const horaAhora = () => new Date().toTimeString().slice(0, 5)
 const hoyISO = () => fechaLocalISO()
 const labelMeses = (m) => m % 12 === 0 ? `${m / 12} año${m / 12 > 1 ? 's' : ''}` : `${m} mes${m > 1 ? 'es' : ''}`
 const VENCE_OPTS_DEFAULT = [1, 2, 3, 6, 12, 24]
 const getVenceOpts = () => { try { const v = JSON.parse(localStorage.getItem('mumi_vence_opts')); return Array.isArray(v) && v.length ? v : VENCE_OPTS_DEFAULT } catch { return VENCE_OPTS_DEFAULT } }
 // Botones rápidos (configurables) para fijar la fecha de vencimiento
-function QuickVence({ onPick, opts, onEdit }) {
+function QuickVence({ onPick, opts, onEdit, base }) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4, alignItems: 'center' }}>
       {opts.map(m => (
-        <button key={m} type="button" className="btn btn-xs btn-secondary" onClick={() => onPick(desdeHoyMeses(m))}>+{labelMeses(m)}</button>
+        <button key={m} type="button" className="btn btn-xs btn-secondary" onClick={() => onPick(desdeFechaMeses(base, m))}>+{labelMeses(m)}</button>
       ))}
+      {base && <span style={{ fontSize: '0.66rem', color: 'var(--texto-suave)' }}>(desde fabricación)</span>}
       {onEdit && <button type="button" className="btn btn-xs btn-secondary" title="Personalizar opciones" onClick={onEdit}>⚙</button>}
     </div>
   )
@@ -98,8 +101,11 @@ export default function OrdenesProduccion() {
   // Cada uno: { lote, vence, unidades, conforme, saldo_id, surtido, lote_mezcla }
   const [prepLotesExtra, setPrepLotesExtra] = useState([])
   // Sobrante de mezcla que NO se empacó y queda como saldo en proceso (en peso)
+  const [prepHaySobrante, setPrepHaySobrante] = useState(false)
   const [prepSobrantePeso, setPrepSobrantePeso] = useState('')
   const [prepSobranteUnidad, setPrepSobranteUnidad] = useState('g')
+  // Cantidad de unidades/cajas empacadas surtidas (stock del producto terminado surtido)
+  const [prepSurtidoCantidad, setPrepSurtidoCantidad] = useState('')
   // Mano de obra por destajo (operarios extra de un día puntual): [{ nombre, modo, cantidad, tarifa }]
   const [prepDestajo, setPrepDestajo] = useState([])
   const destajoTotal = (arr = prepDestajo) => arr.reduce((s, d) => s + (parseFloat(d.cantidad) || 0) * (parseFloat(d.tarifa) || 0), 0)
@@ -198,6 +204,8 @@ export default function OrdenesProduccion() {
     return o?.producto || ''
   }
   const autoSurtido = (base, loteMezcla) => { const otro = productoDeLote(loteMezcla); return otro ? componerSurtido(base, otro) : '' }
+  // Lote de la caja del surtido = el ÚLTIMO lote con el que se empacó (no la fecha de rotulado)
+  const loteCaja = (mezcla) => { const ts = String(mezcla || '').split(/[,;]/).map(s => s.trim()).filter(Boolean); return ts[ts.length - 1] || '' }
   const reiniciarNumeracion = async () => {
     const r = await pedir('Número inicial para la numeración de órdenes (la primera orden mostrará este número):', { defaultValue: String(ordenStartNum) })
     if (r == null) return
@@ -376,7 +384,9 @@ export default function OrdenesProduccion() {
     setPrepSurtido(!!o.surtido); setPrepLoteMezcla(o.lote_mezcla || ''); setPrepProductoSurtido(o.producto_surtido || '')
     setPrepPorciona(false); setPrepCantSubp(o.cant_subporciones || '')
     setPrepFotoFile(null); setPrepFotoPrev(o.foto_url || '')
-    setPrepLotesExtra([]); setPrepSobrantePeso(''); setPrepSobranteUnidad('g')
+    setPrepLotesExtra([])
+    setPrepHaySobrante(!!o.hay_sobrante); setPrepSobrantePeso(o.sobrante_peso || ''); setPrepSobranteUnidad(o.sobrante_unidad || 'g')
+    setPrepSurtidoCantidad(o.surtido_cantidad != null ? String(o.surtido_cantidad) : '')
     await prepararDatos(o); setModalProceso(true)
   }
 
@@ -413,6 +423,8 @@ export default function OrdenesProduccion() {
         peso_subporcion: prepPorciona && prepPesoSubp !== '' ? (parseFloat(prepPesoSubp) || 0) : null,
         cant_subporciones: prepPorciona && prepCantSubp !== '' ? (parseFloat(prepCantSubp) || 0) : null,
         obs_result: prepObs || null, surtido: prepSurtido, lote_mezcla: prepSurtido ? (prepLoteMezcla || null) : null, producto_surtido: prepSurtido ? (prepProductoSurtido || null) : null,
+        surtido_cantidad: prepSurtido && prepSurtidoCantidad !== '' ? (parseFloat(prepSurtidoCantidad) || 0) : null,
+        hay_sobrante: prepHaySobrante, sobrante_peso: prepHaySobrante && prepSobrantePeso !== '' ? (parseFloat(prepSobrantePeso) || 0) : null, sobrante_unidad: prepHaySobrante ? prepSobranteUnidad : null,
         destajo: prepDestajo.filter(d => d.nombre?.trim() || d.cantidad || d.tarifa),
       } })
       setAutoSavedAt(new Date().toLocaleTimeString('es-CO'))
@@ -427,7 +439,7 @@ export default function OrdenesProduccion() {
     const t = setTimeout(() => guardarProcesoData(true), 1200)
     return () => clearTimeout(t)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prepLote, prepVence, prepFechaInicio, prepProcesos, prepUnidades, prepPesoFinal, prepPesoDesp, prepPesoSubp, prepCantSubp, prepObs, prepSurtido, prepLoteMezcla, prepDestajo, autoguardar, modalProceso])
+  }, [prepLote, prepVence, prepFechaInicio, prepProcesos, prepUnidades, prepPesoFinal, prepPesoDesp, prepPesoSubp, prepCantSubp, prepObs, prepSurtido, prepLoteMezcla, prepProductoSurtido, prepSurtidoCantidad, prepHaySobrante, prepSobrantePeso, prepSobranteUnidad, prepResp, prepConforme, prepLotesExtra, prepDestajo, autoguardar, modalProceso])
 
   // Registra la orden en el libro "Orden de Producción" (PTZ-OR-01) con la evidencia firmada.
   const registrarOrdenEnLibro = async (o, file, firma) => {
@@ -501,7 +513,7 @@ export default function OrdenesProduccion() {
       <table class="campos">
         ${esSurtido ? `
           <tr><td class="lbl">Lote producto</td><td><b>${rotLote || '(lote original)'}</b> — mantiene el formato del lote original</td></tr>
-          <tr><td class="lbl">Lote empaque final</td><td><b>${ddmmaa(fabIni)}</b> (fecha de fabricación, ddmmaa)</td></tr>
+          <tr><td class="lbl">Lote de la caja</td><td><b>${loteCaja(loteMezcla) || rotLote || '(sin especificar)'}</b> (último lote del surtido)</td></tr>
           <tr><td class="lbl">Empacado surtido con lote(s)</td><td><b>${loteMezcla || '(sin especificar)'}</b></td></tr>
           <tr><td class="lbl">Vence (Exp.)</td><td><b>${ddmmaa(rotVence)}</b> (ddmmaa)</td></tr>
         ` : `
@@ -564,10 +576,11 @@ export default function OrdenesProduccion() {
       <table class="campos">
         <tr><td class="lbl">Orden de Producción N°</td><td>OP-${opNum(o.id)}</td><td class="lbl">Lote</td><td>${o.lote || ''}</td></tr>
         <tr><td class="lbl">Nombre comercial</td><td>${o.producto || ''}</td><td class="lbl">Presentación</td><td>${prepInfo?.pesoUnidad ? g(prepInfo.pesoUnidad) + ' gr' : ''}</td></tr>
-        <tr><td class="lbl">Fecha de fabricación</td><td>${fabricacion}</td><td class="lbl">Fecha de vencimiento</td><td>${o.vence ? new Date(o.vence).toLocaleDateString('es-CO') : ''}</td></tr>
+        <tr><td class="lbl">Fecha de fabricación</td><td>${fabricacion}</td><td class="lbl">Fecha de vencimiento</td><td>${rotVence ? new Date(rotVence + 'T00:00:00').toLocaleDateString('es-CO') : ''}</td></tr>
         <tr><td class="lbl">Unidades a producir</td><td>${o.cantidad_plan || ''} ${o.unidad || ''}</td><td class="lbl">Operario</td><td>${o.operario || ''}</td></tr>
         <tr><td class="lbl">Unidades producidas</td><td style="height:22px"></td><td class="lbl">Cant. empaque utilizado</td><td></td></tr>
         ${prepPorciona ? `<tr><td class="lbl">Peso subporción</td><td>${prepPesoSubp ? g(prepPesoSubp) + ' g' : ''}</td><td class="lbl">Cant. subporciones</td><td>${prepCantSubp ? fNum(prepCantSubp) : ''}</td></tr>` : ''}
+        <tr><td class="lbl">¿Empacó surtido?</td><td>${esSurtido ? `Sí — lote(s): <b>${loteMezcla || '(sin especificar)'}</b>` : 'No'}</td><td class="lbl">¿Sobró producción?</td><td>${prepHaySobrante ? `Sí — ${prepSobrantePeso || ''} ${prepSobranteUnidad || ''}` : 'No'}</td></tr>
       </table>
 
       <div class="seccion">LISTA DE INGREDIENTES</div>
@@ -627,7 +640,11 @@ export default function OrdenesProduccion() {
   const abrirConfirmEnvio = () => {
     if (!prepLote.trim()) { toast('Completa el LOTE', 'warning'); return }
     if (!prepVence) { toast('Completa la FECHA DE VENCIMIENTO', 'warning'); return }
+    if (!prepFechaInicio) { toast('Completa la FECHA DE INICIO DE FABRICACIÓN', 'warning'); return }
     if (!(parseFloat(prepUnidades) >= 0) || prepUnidades === '') { toast('Ingresa las unidades obtenidas', 'warning'); return }
+    if (prepPorciona && !(parseFloat(prepCantSubp) > 0)) { toast('Ingresa la CANTIDAD DE SUBPORCIONES', 'warning'); return }
+    if (prepSurtido && !(parseFloat(prepSurtidoCantidad) > 0)) { toast('Ingresa la CANTIDAD EMPACADA SURTIDA', 'warning'); return }
+    if (prepHaySobrante && !(parseFloat(prepSobrantePeso) > 0)) { toast('Marcaste que sobró: ingresa la CANTIDAD SOBRANTE', 'warning'); return }
     setModalConfirmEnvio(true)
   }
 
@@ -697,9 +714,24 @@ export default function OrdenesProduccion() {
         cant_subporciones: prepPorciona ? (parseFloat(prepCantSubp) || 0) : null,
         surtido: prepSurtido, lote_mezcla: prepSurtido ? (prepLoteMezcla || null) : null,
         producto_surtido: prepSurtido ? (prepProductoSurtido || null) : null,
+        surtido_cantidad: prepSurtido && prepSurtidoCantidad !== '' ? (parseFloat(prepSurtidoCantidad) || 0) : null,
+        hay_sobrante: prepHaySobrante, sobrante_peso: prepHaySobrante ? (parseFloat(prepSobrantePeso) || 0) : null, sobrante_unidad: prepHaySobrante ? prepSobranteUnidad : null,
         obs_result: prepObs || '', foto_url, fecha_envio: new Date().toISOString(),
         destajo: prepDestajo.filter(d => d.nombre?.trim() || d.cantidad || d.tarifa),
       } })
+      // (8) Si se empacó surtido con otro(s) lote(s), marca también ESA orden como empacada surtida
+      //     con este lote — aunque ya esté cerrada. Solo en línea.
+      if (!r.queued && prepSurtido && prepLoteMezcla) {
+        try {
+          const lotesComb = String(prepLoteMezcla).split(/[,;]/).map(s => s.trim()).filter(Boolean)
+          for (const lt of lotesComb) {
+            const otras = ordenes.filter(x => x.id !== o.id && String(x.lote || '').trim() === lt)
+            for (const ot of otras) {
+              await supabase.from('production_orders').update({ surtido: true, lote_mezcla: prepLote || ot.lote_mezcla || null }).eq('id', ot.id)
+            }
+          }
+        } catch (e) { console.warn('No se pudo marcar el lote combinado como surtido:', e) }
+      }
       // Consumo definitivo de la MP reservada (solo en línea; offline se reconcilia al sincronizar)
       if (!r.queued) { try { await consumirMP(o) } catch (e) { console.warn('No se pudo consumir MP:', e) } }
       // Si un subproducto se auto-aprueba (admin), genera la entrada de inventario MP igual que al aprobar
@@ -716,8 +748,13 @@ export default function OrdenesProduccion() {
           await supabase.from('raw_materials').update(upd).eq('id', o.mp_id)
         } catch (e) { console.warn('No se pudo sumar el subproducto a inventario:', e) }
       }
-      // Si el admin auto-aprueba un producto terminado, súmalo al inventario de terminados
-      if (!r.queued && autoAprob) await sumarProductoTerminado(o, unidadesTotal, prepSurtido && prepProductoSurtido ? prepProductoSurtido : o.producto)
+      // Si el admin auto-aprueba un producto terminado, súmalo al inventario de terminados.
+      // En surtido: el stock es la cantidad empacada surtida y el lote de la caja = último lote combinado.
+      if (!r.queued && autoAprob) {
+        const esSurt = prepSurtido && prepProductoSurtido
+        const cantStock = esSurt ? (parseFloat(prepSurtidoCantidad) || 0) : unidadesTotal
+        await sumarProductoTerminado(o, cantStock, esSurt ? prepProductoSurtido : o.producto, esSurt ? (loteCaja(prepLoteMezcla) || prepLote) : prepLote)
+      }
       // Saldos de mezcla en proceso (solo en línea): descontar los consumidos y crear el sobrante nuevo
       if (!r.queued) {
         try {
@@ -732,7 +769,7 @@ export default function OrdenesProduccion() {
           }
           // b) Crear el saldo nuevo con el sobrante de esta orden
           const sobrante = parseFloat(prepSobrantePeso) || 0
-          if (sobrante > 0) {
+          if (prepHaySobrante && sobrante > 0) {
             await supabase.from('mezcla_saldos').insert({
               producto: o.producto, origen_id: o.origen_id || null, lote: prepLote || '', vencimiento: prepVence || null,
               peso: sobrante, unidad: prepSobranteUnidad, orden_origen: o.id, estado: 'disponible', creado_por: profile?.nombre || '',
@@ -956,7 +993,7 @@ export default function OrdenesProduccion() {
 
   // SUMA stock de PRODUCTO TERMINADO al aprobar una producción (fuente de verdad del inventario
   // que luego Alegra descuenta al facturar). No aplica a subproductos (van a MP) ni a pruebas.
-  const sumarProductoTerminado = async (o, cantidad, nombreDestino) => {
+  const sumarProductoTerminado = async (o, cantidad, nombreDestino, loteOverride) => {
     if (o.es_subproducto || o.es_prueba) return
     if (o.origen !== 'producto' || !o.origen_id) return
     if (!(cantidad > 0)) return
@@ -969,7 +1006,7 @@ export default function OrdenesProduccion() {
       if (!fp) { console.warn('Producto terminado no encontrado en el catálogo:', nombre); return }
       await supabase.from('finished_products').update({ stock: (Number(fp.stock) || 0) + cantidad }).eq('id', fp.id)
       await supabase.from('finished_movements').insert({
-        finished_id: fp.id, product_id: o.origen_id, tipo: 'entrada', cantidad, lote: o.lote || '',
+        finished_id: fp.id, product_id: o.origen_id, tipo: 'entrada', cantidad, lote: loteOverride || o.lote || '',
         fecha: o.fecha_prod || new Date().toISOString().split('T')[0],
         origen: 'produccion', ref: String(o.id), obs: `OP-${opNum(o.id)} (${nombre || o.producto})`, creado_por: profile?.nombre || '',
       })
@@ -1021,7 +1058,11 @@ export default function OrdenesProduccion() {
           })
         }
         // Suma al inventario de producto terminado (lo que Alegra descuenta al facturar)
-        await sumarProductoTerminado(o, o.cantidad_result || 0, o.surtido && o.producto_surtido ? o.producto_surtido : o.producto)
+        {
+          const esSurt = o.surtido && o.producto_surtido
+          const cantStock = esSurt ? (Number(o.surtido_cantidad) || 0) : (o.cantidad_result || 0)
+          await sumarProductoTerminado(o, cantStock, esSurt ? o.producto_surtido : o.producto, esSurt ? (loteCaja(o.lote_mezcla) || o.lote) : o.lote)
+        }
       }
       // Notificar al operario que su orden fue aprobada
       if (o.operario) await notificar({ destinatario: o.operario, tipo: 'orden_aprobada', mensaje: `Tu orden #${opNum(o.id)} (${o.producto}) fue aprobada ✓`, link: '/ordenes', ref_id: o.id })
@@ -1523,8 +1564,8 @@ export default function OrdenesProduccion() {
           <>
             <div className="form-grid-2" style={{ background: 'rgba(124,179,66,0.06)', padding: 10, borderRadius: 'var(--radio)', marginBottom: 12 }}>
               <div className="form-group" style={{ margin: 0 }}><label className="form-label">Lote *</label><input className="form-control" value={prepLote} onChange={e => setPrepLote(e.target.value)} placeholder="Ej: L-2026-001" /></div>
-              <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de vencimiento *</label><input type="date" className="form-control" value={prepVence} onChange={e => setPrepVence(e.target.value)} /><QuickVence opts={venceOpts} onEdit={editarVenceOpts} onPick={setPrepVence} /></div>
-              <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de inicio de fabricación</label>
+              <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de vencimiento *</label><input type="date" className="form-control" value={prepVence} onChange={e => setPrepVence(e.target.value)} /><QuickVence opts={venceOpts} onEdit={editarVenceOpts} onPick={setPrepVence} base={prepFechaInicio} /></div>
+              <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de inicio de fabricación *</label>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <input type="date" className="form-control" value={prepFechaInicio} onChange={e => setPrepFechaInicio(e.target.value)} />
                   <button type="button" className="btn btn-xs btn-secondary" onClick={() => setPrepFechaInicio(hoyISO())}>Hoy</button>
@@ -1567,8 +1608,8 @@ export default function OrdenesProduccion() {
                 <div className="form-group" style={{ margin: 0 }}><label className="form-label">Peso final (g/Kg)</label><input type="number" className="form-control" value={prepPesoFinal} onChange={e => setPrepPesoFinal(e.target.value)} min={0} placeholder="Peso conforme obtenido" /></div>
                 <div className="form-group" style={{ margin: 0 }}><label className="form-label">Peso desperdicio</label><input type="number" className="form-control" value={prepPesoDesp} onChange={e => setPrepPesoDesp(e.target.value)} min={0} placeholder="Dañado / quemado" /></div>
                 {prepPorciona && <>
-                  <div className="form-group" style={{ margin: 0 }}><label className="form-label">Peso subporción (g)</label><input type="number" className="form-control" value={prepPesoSubp} onChange={e => setPrepPesoSubp(e.target.value)} min={0} /></div>
-                  <div className="form-group" style={{ margin: 0 }}><label className="form-label">Cantidad subporciones</label><input type="number" className="form-control" value={prepCantSubp} onChange={e => {
+                  <div className="form-group" style={{ margin: 0 }}><label className="form-label">Peso subporción (g) <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(de la ficha)</small></label><input type="number" className="form-control" value={prepPesoSubp} readOnly style={{ background: 'var(--crema)' }} /></div>
+                  <div className="form-group" style={{ margin: 0 }}><label className="form-label">Cantidad subporciones *</label><input type="number" className="form-control" value={prepCantSubp} onChange={e => {
                     const v = e.target.value; setPrepCantSubp(v)
                     const pu = parseFloat(prepInfo?.pesoUnidad) || 0, psub = parseFloat(prepPesoSubp) || 0
                     if (pu > 0 && psub > 0 && v !== '') setPrepUnidades(String(Math.round((parseFloat(v) || 0) * psub / pu)))
@@ -1601,6 +1642,11 @@ export default function OrdenesProduccion() {
                   {prepProductoSurtido && !terminados.some(t => t.nombre === prepProductoSurtido) && (
                     <small style={{ color: 'var(--rojo)', fontSize: '0.72rem' }}>⚠ "{prepProductoSurtido}" no existe en el catálogo. Créalo en <strong>Producto Terminado</strong> para no afectar el stock.</small>
                   )}
+                  <label className="form-label" style={{ marginTop: 8 }}>Cantidad empacada surtida (unidades/cajas) *</label>
+                  <input type="number" className="form-control" value={prepSurtidoCantidad} onChange={e => setPrepSurtidoCantidad(e.target.value)} min={0} placeholder="Unidades o cajas empacadas surtidas" />
+                  <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
+                    Es el <strong>stock</strong> que se suma al producto terminado surtido. El <strong>lote de la caja</strong> será el último lote del surtido: <strong>{loteCaja(prepLoteMezcla) || '(elige el lote arriba)'}</strong>.
+                  </small>
                 </div>
               )}
 
@@ -1655,24 +1701,29 @@ export default function OrdenesProduccion() {
                 )
               })()}
 
-              {/* 📦 Sobrante que NO se empacó → queda como saldo en proceso.
-                  El usuario elige la unidad: la mezcla a granel (infusiones) va en peso (g/Kg),
-                  aunque el producto se porcione; los dulces suelen ir en porciones/subporciones/unidades. */}
+              {/* 📦 ¿Sobró producción? → check que despliega el acordeón para registrar el saldo */}
               <div className="form-group" style={{ background: 'rgba(200,169,74,0.06)', borderRadius: 'var(--radio)', padding: 10 }}>
-                <label className="form-label">📦 Sobrante sin empacar (queda para después)</label>
-                <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                  <input type="number" className="form-control" style={{ maxWidth: 140 }} value={prepSobrantePeso} onChange={e => setPrepSobrantePeso(e.target.value)} min={0} step="any" placeholder="Cantidad sobrante" />
-                  <select className="form-control" style={{ maxWidth: 140 }} value={prepSobranteUnidad} onChange={e => setPrepSobranteUnidad(e.target.value)}>
-                    <option value="g">g</option>
-                    <option value="Kg">Kg</option>
-                    {prepPorciona && <option value="porciones">porciones</option>}
-                    {prepPorciona && <option value="subporciones">subporciones</option>}
-                    <option value="unidades">unidades</option>
-                  </select>
-                </div>
-                <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
-                  Elige la unidad real del sobrante: mezcla a granel en <strong>g/Kg</strong> (aunque el producto se porcione), o en porciones/unidades si así queda. Se guardará como saldo con el lote <strong>{prepLote || '(principal)'}</strong> y vencimiento {fmtVence(prepVence) || '—'}.
-                </small>
+                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600 }}>
+                  <input type="checkbox" checked={prepHaySobrante} onChange={e => setPrepHaySobrante(e.target.checked)} /> ¿Sobró producción para después?
+                </label>
+                {prepHaySobrante && (
+                  <div style={{ marginTop: 10 }}>
+                    <label className="form-label">Cantidad sobrante *</label>
+                    <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                      <input type="number" className="form-control" style={{ maxWidth: 140 }} value={prepSobrantePeso} onChange={e => setPrepSobrantePeso(e.target.value)} min={0} step="any" placeholder="Cantidad sobrante" />
+                      <select className="form-control" style={{ maxWidth: 140 }} value={prepSobranteUnidad} onChange={e => setPrepSobranteUnidad(e.target.value)}>
+                        <option value="g">g</option>
+                        <option value="Kg">Kg</option>
+                        {prepPorciona && <option value="porciones">porciones</option>}
+                        {prepPorciona && <option value="subporciones">subporciones</option>}
+                        <option value="unidades">unidades</option>
+                      </select>
+                    </div>
+                    <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
+                      Elige la unidad real del sobrante: mezcla a granel en <strong>g/Kg</strong> (aunque el producto se porcione), o en porciones/unidades. Se guardará como saldo con el lote <strong>{prepLote || '(principal)'}</strong> y vencimiento {fmtVence(prepVence) || '—'}.
+                    </small>
+                  </div>
+                )}
               </div>
               {/* Mano de obra por destajo (operarios extra de un día puntual) */}
               <div className="form-group" style={{ background: 'rgba(124,179,66,0.07)', borderRadius: 'var(--radio)', padding: 10 }}>
