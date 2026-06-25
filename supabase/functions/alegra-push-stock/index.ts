@@ -40,12 +40,29 @@ async function pushDatos(authHeader: string, itemId: string, costo?: number, nom
   unidad?: string, unspsc?: string, catId?: string) {
   const body: Record<string, unknown> = {}
   if (nombre && nombre.trim()) body.name = nombre.trim()
-  // Precios: si hay listas mapeadas, se envía un arreglo {idPriceList, price}; si no, el mayor como precio general
-  const price: any[] = []
-  if (listaMayor && (precioMayor || 0) > 0) price.push({ idPriceList: Number(listaMayor), price: precioMayor })
-  if (listaDetal && (precioDetal || 0) > 0) price.push({ idPriceList: Number(listaDetal), price: precioDetal })
-  if (price.length) body.price = price
-  else if ((precioMayor || 0) > 0) body.price = precioMayor
+  // Precios: lee la estructura actual del ítem y actualiza el precio de cada lista mapeada,
+  // preservando las demás listas (más robusto que enviar un arreglo nuevo).
+  const hayListas = (listaMayor && (precioMayor || 0) > 0) || (listaDetal && (precioDetal || 0) > 0)
+  if (hayListas) {
+    let priceArr: any[] = []
+    try {
+      const cur = await fetch(`${ALEGRA_BASE}/items/${itemId}`, { headers: { 'Authorization': authHeader } })
+      const it = await cur.json()
+      if (Array.isArray(it?.price)) priceArr = it.price.map((p: any) => ({ ...p }))
+    } catch { /* sin estructura previa */ }
+    const setP = (listId?: string, val?: number) => {
+      if (!listId || !(val && val > 0)) return
+      const id = Number(listId)
+      const e = priceArr.find((x: any) => Number(x.idPriceList ?? x.id) === id)
+      if (e) e.price = val
+      else priceArr.push({ idPriceList: id, price: val })
+    }
+    setP(listaMayor, precioMayor)
+    setP(listaDetal, precioDetal)
+    if (priceArr.length) body.price = priceArr
+  } else if ((precioMayor || 0) > 0) {
+    body.price = precioMayor
+  }
   // Inventario: costo, venta en negativo y unidad de medida
   const inv: Record<string, unknown> = { negativeSale: true }
   if (typeof costo === 'number' && costo > 0) inv.unitCost = costo

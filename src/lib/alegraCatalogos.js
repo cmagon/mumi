@@ -1,6 +1,7 @@
 // Unidades de medida aceptadas por Alegra (valor API → etiqueta en español)
 export const UNIDADES_ALEGRA = [
   { v: 'unit', l: 'Unidad' },
+  { v: 'unit', l: 'Caja (se factura como unidad)' },
   { v: 'kilogram', l: 'Kilogramo (Kg)' },
   { v: 'gram', l: 'Gramo (g)' },
   { v: 'pound', l: 'Libra' },

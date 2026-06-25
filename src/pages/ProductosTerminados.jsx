@@ -500,7 +500,7 @@ export default function ProductosTerminados() {
           <div className="form-group">
             <label className="form-label">Unidad de medida (Alegra)</label>
             <select className="form-control" value={pForm.unidad_medida} onChange={e => setPForm(f => ({ ...f, unidad_medida: e.target.value }))}>
-              {UNIDADES_ALEGRA.map(u => <option key={u.v} value={u.v}>{u.l}</option>)}
+              {UNIDADES_ALEGRA.map(u => <option key={u.l} value={u.v}>{u.l}</option>)}
             </select>
           </div>
           <div className="form-group">
