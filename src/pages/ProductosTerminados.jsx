@@ -208,13 +208,16 @@ export default function ProductosTerminados() {
       const items = data?.items || []
       setAlegraItems(items)
       // Autosugerencia: por referencia=SKU, o por nombre igual
+      // Prefiere SIEMPRE los ítems que manejan inventario (los correctos para sincronizar stock)
+      const conInv = (arr) => arr.filter(it => it.inventoriable)
+      const pick = (arr) => (conInv(arr)[0] || arr[0])
       const sug = {}
       for (const p of productos) {
         if (p.alegra_item_id) { sug[p.id] = String(p.alegra_item_id); continue }
-        const porRef = items.find(it => p.sku && norm(it.reference) === norm(p.sku))
-        const porNom = items.find(it => norm(it.name) === norm(p.nombre))
-        if (porRef) sug[p.id] = porRef.id
-        else if (porNom) sug[p.id] = porNom.id
+        const porRef = items.filter(it => p.sku && norm(it.reference) === norm(p.sku))
+        const porNom = items.filter(it => norm(it.name) === norm(p.nombre))
+        const m = porRef.length ? pick(porRef) : (porNom.length ? pick(porNom) : null)
+        if (m) sug[p.id] = m.id
       }
       setEnlaces(sug)
     } catch (e) { toast('No se pudo conectar con Alegra: ' + e.message, 'error'); setAlegraItems([]) }
@@ -381,7 +384,7 @@ export default function ProductosTerminados() {
               ? <div className="alert alert-warning" style={{ fontSize: '0.85rem' }}>Conexión establecida pero Alegra no devolvió ítems. Crea ítems en Alegra o revisa el token.</div>
               : (
                 <>
-                  <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>✓ Conectado con Alegra ({alegraItems.length} ítems). Para cada producto de la app, elige su equivalente en Alegra. Se sugiere automáticamente por SKU o nombre.</div>
+                  <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>✓ Conectado con Alegra. Mostrando solo los <strong>{alegraItems.filter(it => it.inventoriable).length}</strong> ítems con <strong>📦 inventario</strong> (los de solo facturación se ocultan). Elige el equivalente de cada producto.</div>
                   <div className="table-wrap" style={{ maxHeight: 420, overflowY: 'auto' }}>
                     <table>
                       <thead><tr><th>Producto (app)</th><th>SKU</th><th>Ítem en Alegra</th></tr></thead>
@@ -396,9 +399,10 @@ export default function ProductosTerminados() {
                               <td>
                                 <select className="form-control" value={sel} onChange={e => setEnlaces(m => ({ ...m, [p.id]: e.target.value }))} style={{ borderColor: yaUsado(sel) ? 'var(--rojo)' : undefined }}>
                                   <option value="">— Sin enlazar —</option>
-                                  {alegraItems.map(it => <option key={it.id} value={it.id}>{it.name}{it.reference ? ` · ${it.reference}` : ''}{it.available != null ? ` · stock ${it.available}` : ''}</option>)}
+                                  {alegraItems.filter(it => it.inventoriable || it.id === sel).map(it => <option key={it.id} value={it.id}>{it.inventoriable ? '📦 ' : '🧾 '}{it.name}{it.reference ? ` · ${it.reference}` : ''}{it.inventoriable ? ` · stock ${it.available ?? 0}` : ' · solo facturación'}</option>)}
                                 </select>
                                 {yaUsado(sel) && <small style={{ color: 'var(--rojo)', fontSize: '0.68rem' }}>⚠ ese ítem ya está asignado a otro producto</small>}
+                                {sel && !(alegraItems.find(it => it.id === sel)?.inventoriable) && <small style={{ color: 'var(--tierra)', fontSize: '0.68rem' }}>⚠ este ítem no maneja inventario — el stock no se sincronizará. Elige el de 📦 inventario.</small>}
                               </td>
                             </tr>
                           )

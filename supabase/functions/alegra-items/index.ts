@@ -51,6 +51,9 @@ Deno.serve(async (req) => {
           reference: it.reference || it.code || '',
           price: Array.isArray(it.price) ? (it.price[0]?.price ?? 0) : (it.price ?? 0),
           available: it.inventory?.availableQuantity ?? null,
+          // ¿Maneja inventario? (es el ítem correcto para sincronizar stock)
+          inventoriable: !!it.inventory,
+          type: it.type || '',
         })
       }
       if (pagina.length < limit) break
