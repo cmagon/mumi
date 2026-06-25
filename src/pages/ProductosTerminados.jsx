@@ -164,8 +164,6 @@ export default function ProductosTerminados() {
       if (error) throw error
       const r = (data?.resultados || [])[0]
       if (r && r.estado === 'error') throw new Error(r.detalle || 'Error en Alegra')
-      // Si tiene imagen (propia o de la ficha), también la envía
-      if (p.imagen_url || p.product_id) { try { await supabase.functions.invoke('alegra-push-image', { body: { finished_id: p.id } }) } catch (e) { console.warn('Imagen:', e) } }
       return p.nombre
     },
     onSuccess: (nombre) => toast(`"${nombre}" sincronizado con Alegra ✓`),
@@ -381,7 +379,6 @@ export default function ProductosTerminados() {
                             {!p.alegra_item_id && esAdmin && <button className="btn btn-xs btn-dorado" title="Crear este producto en Alegra (inventariable, con todos sus datos)" disabled={crearEnAlegra.isPending} onClick={() => confirmar(`¿Crear "${p.nombre}" en Alegra como producto inventariable?\n\nSolo hazlo si NO existe ya en Alegra (para no duplicar).`).then(ok => ok && crearEnAlegra.mutate(p))}>➕ Crear en Alegra</button>}
                             <button className="btn btn-xs btn-secondary" title={p.alegra_item_id ? 'Sincronizar stock y costo con Alegra' : 'Falta el ID del ítem en Alegra'} disabled={!p.alegra_item_id || sincronizarUno.isPending} onClick={() => sincronizarUno.mutate(p)}>🔗 Sincronizar</button>
                             {p.alegra_item_id && esAdmin && <button className="btn btn-xs btn-secondary" title="Quitar el enlace con Alegra (para re-enlazar o crear de nuevo)" disabled={desenlazar.isPending} onClick={() => confirmar(`¿Desenlazar "${p.nombre}" de Alegra?\nNo borra nada en Alegra; solo quita el enlace en la app.`).then(ok => ok && desenlazar.mutate(p))}>🔌✕ Desenlazar</button>}
-                            {p.tipo === 'base' && <button className="btn btn-xs btn-secondary" title={p.alegra_item_id ? 'Enviar la imagen de la ficha a Alegra (experimental)' : 'Falta el ID del ítem en Alegra'} disabled={!p.alegra_item_id || enviarImagen.isPending} onClick={() => enviarImagen.mutate(p)}>🖼 Imagen</button>}
                             <button className="btn btn-xs btn-secondary" onClick={() => { setPForm({ nombre: p.nombre, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '', tipo: p.tipo || 'base', stock_min: p.stock_min || '', costo_unitario: p.costo_unitario || '', precio_mayor: p.precio_mayor || '', precio_detal: p.precio_detal || '', imagen_url: p.imagen_url || '', activo: p.activo !== false }); setPEditId(p.id); setModalProd(true) }}>✏</button>
                             {esAdmin && (p.alegra_item_id
                               ? <button className="btn btn-xs btn-danger" disabled title="Está enlazado a Alegra. Desenlázalo primero para poder eliminarlo." style={{ opacity: 0.5 }}>✕</button>
