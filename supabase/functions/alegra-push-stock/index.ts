@@ -36,7 +36,8 @@ async function getCreds(supabase: any) {
 
 // 1) Actualiza nombre, precios (por lista) y costo del ítem (PUT /items). El stock NO se setea aquí.
 async function pushDatos(authHeader: string, itemId: string, costo?: number, nombre?: string,
-  precioMayor?: number, precioDetal?: number, listaMayor?: string, listaDetal?: string) {
+  precioMayor?: number, precioDetal?: number, listaMayor?: string, listaDetal?: string,
+  unidad?: string, unspsc?: string, catId?: string) {
   const body: Record<string, unknown> = {}
   if (nombre && nombre.trim()) body.name = nombre.trim()
   // Precios: si hay listas mapeadas, se envía un arreglo {idPriceList, price}; si no, el mayor como precio general
@@ -45,9 +46,14 @@ async function pushDatos(authHeader: string, itemId: string, costo?: number, nom
   if (listaDetal && (precioDetal || 0) > 0) price.push({ idPriceList: Number(listaDetal), price: precioDetal })
   if (price.length) body.price = price
   else if ((precioMayor || 0) > 0) body.price = precioMayor
-  // Mantiene el costo y habilita venta en negativo
-  body.inventory = { negativeSale: true }
-  if (typeof costo === 'number' && costo > 0) (body.inventory as any).unitCost = costo
+  // Inventario: costo, venta en negativo y unidad de medida
+  const inv: Record<string, unknown> = { negativeSale: true }
+  if (typeof costo === 'number' && costo > 0) inv.unitCost = costo
+  if (unidad && unidad.trim()) inv.unit = unidad.trim()
+  body.inventory = inv
+  // Categoría y código UNSPSC (Colombia)
+  if (catId) body.itemCategory = { id: Number(catId) }
+  if (unspsc && unspsc.trim()) body.productKey = unspsc.trim()
   if (Object.keys(body).length === 0) return
   const res = await fetch(`${ALEGRA_BASE}/items/${itemId}`, {
     method: 'PUT', headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
@@ -86,7 +92,7 @@ Deno.serve(async (req) => {
   const authHeader = 'Basic ' + btoa(`${email}:${token}`)
   try {
     const { finished_id, all } = await req.json().catch(() => ({}))
-    let query = supabase.from('finished_products').select('id, nombre, sku, alegra_item_id, stock, costo_unitario, precio_mayor, precio_detal')
+    let query = supabase.from('finished_products').select('id, nombre, sku, alegra_item_id, stock, costo_unitario, precio_mayor, precio_detal, unidad_medida, codigo_unspsc, categoria_alegra_id')
     if (!all) query = query.eq('id', finished_id)
     else query = query.not('alegra_item_id', 'is', null)
     const { data: prods } = await query
@@ -97,7 +103,7 @@ Deno.serve(async (req) => {
       if (!p.alegra_item_id) { resultados.push({ producto: p.nombre, estado: 'sin alegra_item_id' }); continue }
       try {
         const id = String(p.alegra_item_id)
-        await pushDatos(authHeader, id, Number(p.costo_unitario || 0), p.nombre, Number(p.precio_mayor || 0), Number(p.precio_detal || 0), listaMayor, listaDetal)
+        await pushDatos(authHeader, id, Number(p.costo_unitario || 0), p.nombre, Number(p.precio_mayor || 0), Number(p.precio_detal || 0), listaMayor, listaDetal, p.unidad_medida, p.codigo_unspsc, p.categoria_alegra_id)
         const stockRes = await ajustarStock(authHeader, id, Number(p.stock || 0), Number(p.costo_unitario || 0))
         resultados.push({ producto: p.nombre, stock: Number(p.stock || 0), ajuste: stockRes, estado: 'ok' })
       } catch (e) {

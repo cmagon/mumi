@@ -7,8 +7,9 @@ import { useConfirm } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
 import MoneyInput from '../components/ui/MoneyInput'
+import { UNIDADES_ALEGRA, UNSPSC_ALIMENTOS } from '../lib/alegraCatalogos'
 
-const EMPTY_PROD = { nombre: '', sku: '', alegra_item_id: '', tipo: 'base', stock_min: '', costo_unitario: '', precio_mayor: '', precio_detal: '', imagen_url: '', activo: true }
+const EMPTY_PROD = { nombre: '', sku: '', alegra_item_id: '', tipo: 'base', stock_min: '', costo_unitario: '', precio_mayor: '', precio_detal: '', imagen_url: '', activo: true, unidad_medida: 'unit', codigo_unspsc: '', categoria_alegra_id: '', categoria_alegra_nombre: '', surtido_a: '', surtido_b: '' }
 const EMPTY_AJUSTE = { tipo: 'entrada', cantidad: '', lote: '', motivo: '' }
 
 export default function ProductosTerminados() {
@@ -45,6 +46,12 @@ export default function ProductosTerminados() {
   const { data: movimientos = [] } = useQuery({
     queryKey: ['finished_movements'],
     queryFn: async () => { const { data } = await supabase.from('finished_movements').select('*').order('created_at', { ascending: false }).limit(500); return data || [] },
+  })
+  // Categorías de Alegra (para asignarlas a los productos)
+  const { data: alegraCategorias = [] } = useQuery({
+    queryKey: ['alegra_categories'],
+    queryFn: async () => { const { data } = await supabase.functions.invoke('alegra-categories', { body: {} }); return data?.items || [] },
+    enabled: esAdmin, retry: false, staleTime: 5 * 60 * 1000,
   })
   // Fichas de producto: el costo del surtido se promedia desde el costo de la FICHA (no del catálogo)
   const { data: fichas = [] } = useQuery({
@@ -116,6 +123,20 @@ export default function ProductosTerminados() {
     finally { setSubiendoImg(false) }
   }
 
+  // Promedio de costo/precios de dos fichas (para surtidos)
+  const promedioFichas = (aId, bId) => {
+    const a = fichas.find(f => String(f.id) === String(aId))
+    const b = fichas.find(f => String(f.id) === String(bId))
+    if (!a || !b) return null
+    const avg = (x, y) => Math.round(((Number(x) || 0) + (Number(y) || 0)) / 2)
+    return { costo_unitario: avg(a.costo_final, b.costo_final), precio_mayor: avg(a.precio_mayor, b.precio_mayor), precio_detal: avg(a.precio_detal, b.precio_detal) }
+  }
+  const setSaborSurtido = (cual, id) => setPForm(f => {
+    const next = { ...f, [cual]: id }
+    const prom = promedioFichas(cual === 'surtido_a' ? id : f.surtido_a, cual === 'surtido_b' ? id : f.surtido_b)
+    return prom ? { ...next, ...prom } : next
+  })
+
   const pushAlegra = async (finished_id) => {
     try { await supabase.functions.invoke('alegra-push-stock', { body: { finished_id } }) } catch (e) { console.warn('No se pudo sincronizar con Alegra:', e) }
   }
@@ -123,7 +144,7 @@ export default function ProductosTerminados() {
   const saveProd = useMutation({
     mutationFn: async () => {
       if (!pForm.nombre.trim()) throw new Error('Indica el nombre del producto terminado')
-      const payload = { nombre: pForm.nombre.trim(), sku: pForm.sku || null, alegra_item_id: pForm.alegra_item_id || null, tipo: pForm.tipo, stock_min: parseFloat(pForm.stock_min) || 0, costo_unitario: parseFloat(pForm.costo_unitario) || 0, precio_mayor: parseFloat(pForm.precio_mayor) || 0, precio_detal: parseFloat(pForm.precio_detal) || 0, imagen_url: pForm.imagen_url || null, activo: pForm.activo }
+      const payload = { nombre: pForm.nombre.trim(), sku: pForm.sku || null, alegra_item_id: pForm.alegra_item_id || null, tipo: pForm.tipo, stock_min: parseFloat(pForm.stock_min) || 0, costo_unitario: parseFloat(pForm.costo_unitario) || 0, precio_mayor: parseFloat(pForm.precio_mayor) || 0, precio_detal: parseFloat(pForm.precio_detal) || 0, imagen_url: pForm.imagen_url || null, activo: pForm.activo, unidad_medida: pForm.unidad_medida || 'unit', codigo_unspsc: pForm.codigo_unspsc || null, categoria_alegra_id: pForm.categoria_alegra_id || null, categoria_alegra_nombre: pForm.categoria_alegra_nombre || null, surtido_a: pForm.surtido_a ? Number(pForm.surtido_a) : null, surtido_b: pForm.surtido_b ? Number(pForm.surtido_b) : null }
       if (pEditId) { const { error } = await supabase.from('finished_products').update(payload).eq('id', pEditId); if (error) throw error }
       else { const { error } = await supabase.from('finished_products').insert(payload); if (error) throw error }
     },
@@ -243,11 +264,13 @@ export default function ProductosTerminados() {
     for (let i = 0; i < base.length; i++) for (let j = i + 1; j < base.length; j++) {
       const a = base[i], b = base[j]
       const nombre = componerSurtido(a.nombre, b.nombre)
-      if (!nombre || seen.has(nombre.toLowerCase())) continue
-      seen.add(nombre.toLowerCase())
-      const ya = productos.find(p => (p.nombre || '').toLowerCase() === nombre.toLowerCase())
+      const key = `${a.id}-${b.id}`
+      if (seen.has(key)) continue
+      seen.add(key)
+      // Empareja por par de sabores (sobrevive a renombrar) o por nombre compuesto
+      const ya = productos.find(p => (p.surtido_a === a.id && p.surtido_b === b.id) || (p.surtido_a === b.id && p.surtido_b === a.id) || (p.nombre || '').toLowerCase() === (nombre || '').toLowerCase())
       out.push({
-        nombre, existeId: ya?.id || null,
+        nombre, existeId: ya?.id || null, a_id: a.id, b_id: b.id,
         costo: avg(a.costo_final, b.costo_final),
         precio_mayor: avg(a.precio_mayor, b.precio_mayor),
         precio_detal: avg(a.precio_detal, b.precio_detal),
@@ -263,10 +286,11 @@ export default function ProductosTerminados() {
       const nuevos = []
       for (const c of previewGen) {
         if (c.existeId) {
-          await supabase.from('finished_products').update({ costo_unitario: c.costo, precio_mayor: c.precio_mayor, precio_detal: c.precio_detal }).eq('id', c.existeId)
+          // No pisa el nombre comercial que el usuario haya puesto; solo costo/precios y enlace de sabores
+          await supabase.from('finished_products').update({ costo_unitario: c.costo, precio_mayor: c.precio_mayor, precio_detal: c.precio_detal, surtido_a: c.a_id, surtido_b: c.b_id }).eq('id', c.existeId)
           actualizados++
         } else {
-          nuevos.push({ nombre: c.nombre, tipo: 'surtido', costo_unitario: c.costo, precio_mayor: c.precio_mayor, precio_detal: c.precio_detal, stock: 0, activo: true })
+          nuevos.push({ nombre: c.nombre, tipo: 'surtido', costo_unitario: c.costo, precio_mayor: c.precio_mayor, precio_detal: c.precio_detal, surtido_a: c.a_id, surtido_b: c.b_id, stock: 0, activo: true })
         }
       }
       if (nuevos.length) { const { error } = await supabase.from('finished_products').insert(nuevos); if (error) throw error; creados = nuevos.length }
@@ -420,7 +444,7 @@ export default function ProductosTerminados() {
                             {!p.alegra_item_id && esAdmin && <button className="btn btn-xs btn-dorado" title="Crear este producto en Alegra (inventariable, con todos sus datos)" disabled={crearEnAlegra.isPending} onClick={() => confirmar(`¿Crear "${p.nombre}" en Alegra como producto inventariable?\n\nSolo hazlo si NO existe ya en Alegra (para no duplicar).`).then(ok => ok && crearEnAlegra.mutate(p))}>➕ Crear en Alegra</button>}
                             <button className="btn btn-xs btn-secondary" title={p.alegra_item_id ? 'Sincronizar stock y costo con Alegra' : 'Falta el ID del ítem en Alegra'} disabled={!p.alegra_item_id || sincronizarUno.isPending} onClick={() => sincronizarUno.mutate(p)}>🔗 Sincronizar</button>
                             {p.alegra_item_id && esAdmin && <button className="btn btn-xs btn-secondary" title="Quitar el enlace con Alegra (para re-enlazar o crear de nuevo)" disabled={desenlazar.isPending} onClick={() => confirmar(`¿Desenlazar "${p.nombre}" de Alegra?\nNo borra nada en Alegra; solo quita el enlace en la app.`).then(ok => ok && desenlazar.mutate(p))}>🔌✕ Desenlazar</button>}
-                            <button className="btn btn-xs btn-secondary" onClick={() => { setPForm({ nombre: p.nombre, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '', tipo: p.tipo || 'base', stock_min: p.stock_min || '', costo_unitario: p.costo_unitario || '', precio_mayor: p.precio_mayor || '', precio_detal: p.precio_detal || '', imagen_url: p.imagen_url || '', activo: p.activo !== false }); setPEditId(p.id); setModalProd(true) }}>✏</button>
+                            <button className="btn btn-xs btn-secondary" onClick={() => { setPForm({ nombre: p.nombre, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '', tipo: p.tipo || 'base', stock_min: p.stock_min || '', costo_unitario: p.costo_unitario || '', precio_mayor: p.precio_mayor || '', precio_detal: p.precio_detal || '', imagen_url: p.imagen_url || '', activo: p.activo !== false, unidad_medida: p.unidad_medida || 'unit', codigo_unspsc: p.codigo_unspsc || '', categoria_alegra_id: p.categoria_alegra_id || '', categoria_alegra_nombre: p.categoria_alegra_nombre || '', surtido_a: p.surtido_a || '', surtido_b: p.surtido_b || '' }); setPEditId(p.id); setModalProd(true) }}>✏</button>
                             {esAdmin && (p.alegra_item_id
                               ? <button className="btn btn-xs btn-danger" disabled title="Está enlazado a Alegra. Desenlázalo primero para poder eliminarlo." style={{ opacity: 0.5 }}>✕</button>
                               : <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Quitar "${p.nombre}" SOLO del catálogo de Producto Terminado?\n\nEsto NO elimina la ficha de producto ni su costo. Podrás recrearlo desde la ficha cuando quieras.`).then(ok => ok && delProd.mutate(p.id))}>✕</button>)}
@@ -446,17 +470,52 @@ export default function ProductosTerminados() {
           <div className="form-group"><label className="form-label">SKU / Referencia (Alegra)</label><input className="form-control" value={pForm.sku} onChange={e => setPForm(f => ({ ...f, sku: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">ID ítem en Alegra</label><input className="form-control" value={pForm.alegra_item_id} onChange={e => setPForm(f => ({ ...f, alegra_item_id: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Stock mínimo (alerta)</label><input type="number" className="form-control" value={pForm.stock_min} onChange={e => setPForm(f => ({ ...f, stock_min: e.target.value }))} min={0} /></div>
+          {pForm.tipo === 'surtido' && (
+            <div className="form-group" style={{ gridColumn: '1 / -1', background: 'rgba(124,179,66,0.07)', borderRadius: 6, padding: 10 }}>
+              <label className="form-label">Sabores combinados <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(definen costo y precios = promedio de las dos fichas)</small></label>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <select className="form-control" style={{ maxWidth: 220 }} value={pForm.surtido_a} onChange={e => setSaborSurtido('surtido_a', e.target.value)}>
+                  <option value="">Sabor 1...</option>
+                  {fichas.filter(f => (f.tipo || '') !== 'subproducto').map(f => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+                </select>
+                <select className="form-control" style={{ maxWidth: 220 }} value={pForm.surtido_b} onChange={e => setSaborSurtido('surtido_b', e.target.value)}>
+                  <option value="">Sabor 2...</option>
+                  {fichas.filter(f => (f.tipo || '') !== 'subproducto').map(f => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+                </select>
+              </div>
+            </div>
+          )}
           <div className="form-group">
-            <label className="form-label">Precio venta mayor {pForm.tipo === 'base' ? '(desde la ficha)' : ''}</label>
-            {pForm.tipo === 'base'
+            <label className="form-label">Precio venta mayor {pForm.tipo === 'base' ? '(desde la ficha)' : pForm.tipo === 'surtido' ? '(promedio)' : ''}</label>
+            {(pForm.tipo === 'base' || pForm.tipo === 'surtido')
               ? <div className="form-control" style={{ background: 'var(--crema)', color: 'var(--texto-suave)' }}>$ {Number(pForm.precio_mayor || 0).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
               : <MoneyInput value={pForm.precio_mayor} onChange={v => setPForm(f => ({ ...f, precio_mayor: v }))} />}
           </div>
           <div className="form-group">
-            <label className="form-label">Precio detal / distribuidores {pForm.tipo === 'base' ? '(desde la ficha)' : ''}</label>
-            {pForm.tipo === 'base'
+            <label className="form-label">Precio detal / distribuidores {pForm.tipo === 'base' ? '(desde la ficha)' : pForm.tipo === 'surtido' ? '(promedio)' : ''}</label>
+            {(pForm.tipo === 'base' || pForm.tipo === 'surtido')
               ? <div className="form-control" style={{ background: 'var(--crema)', color: 'var(--texto-suave)' }}>$ {Number(pForm.precio_detal || 0).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
               : <MoneyInput value={pForm.precio_detal} onChange={v => setPForm(f => ({ ...f, precio_detal: v }))} />}
+          </div>
+          <div className="form-group">
+            <label className="form-label">Unidad de medida (Alegra)</label>
+            <select className="form-control" value={pForm.unidad_medida} onChange={e => setPForm(f => ({ ...f, unidad_medida: e.target.value }))}>
+              {UNIDADES_ALEGRA.map(u => <option key={u.v} value={u.v}>{u.l}</option>)}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Categoría (Alegra)</label>
+            <select className="form-control" value={pForm.categoria_alegra_id} onChange={e => { const id = e.target.value; const c = alegraCategorias.find(x => x.id === id); setPForm(f => ({ ...f, categoria_alegra_id: id, categoria_alegra_nombre: c?.name || '' })) }}>
+              <option value="">— Sin categoría —</option>
+              {alegraCategorias.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            {alegraCategorias.length === 0 && <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Configura Alegra para cargar las categorías (Dulces, Galletas, Infusiones...).</small>}
+          </div>
+          <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+            <label className="form-label">Código del producto/servicio (UNSPSC — Colombia Compra Eficiente)</label>
+            <input className="form-control" list="dl-unspsc" value={pForm.codigo_unspsc} onChange={e => setPForm(f => ({ ...f, codigo_unspsc: e.target.value }))} placeholder="Elige o escribe el código (ej: 50181900)" />
+            <datalist id="dl-unspsc">{UNSPSC_ALIMENTOS.map(u => <option key={u.codigo} value={u.codigo}>{u.codigo} — {u.desc}</option>)}</datalist>
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>{(UNSPSC_ALIMENTOS.find(u => u.codigo === pForm.codigo_unspsc)?.desc) || 'Selecciona del catálogo o escribe tu código.'}</small>
           </div>
           <div className="form-group" style={{ gridColumn: '1 / -1' }}>
             <label className="form-label">Imagen del producto</label>
@@ -470,11 +529,9 @@ export default function ProductosTerminados() {
             {subiendoImg && <small style={{ color: 'var(--texto-suave)' }}>Subiendo…</small>}
           </div>
           <div className="form-group">
-            <label className="form-label">Costo unitario {pForm.tipo === 'base' ? '(desde la ficha)' : '(editable)'}</label>
-            {pForm.tipo === 'base'
-              ? <div className="form-control" style={{ background: 'var(--crema)', color: 'var(--texto-suave)' }}>$ {Number(pForm.costo_unitario || 0).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-              : <MoneyInput value={pForm.costo_unitario} onChange={v => setPForm(f => ({ ...f, costo_unitario: v }))} />}
-            {pForm.tipo === 'base' && <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Se sincroniza automáticamente desde la ficha.</small>}
+            <label className="form-label">Costo unitario {pForm.tipo === 'base' ? '(desde la ficha)' : pForm.tipo === 'surtido' ? '(promedio de las fichas)' : ''}</label>
+            <div className="form-control" style={{ background: 'var(--crema)', color: 'var(--texto-suave)' }}>$ {Number(pForm.costo_unitario || 0).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>{pForm.tipo === 'base' ? 'Se sincroniza automáticamente desde la ficha.' : pForm.tipo === 'surtido' ? 'Promedio del costo de las dos fichas combinadas (no editable).' : 'No editable.'}</small>
           </div>
           <div className="form-group" style={{ gridColumn: '1 / -1' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}><input type="checkbox" checked={pForm.activo} onChange={e => setPForm(f => ({ ...f, activo: e.target.checked }))} /> Activo</label>

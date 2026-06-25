@@ -35,7 +35,7 @@ Deno.serve(async (req) => {
   try {
     const { finished_id } = await req.json().catch(() => ({}))
     const { data: p } = await supabase.from('finished_products')
-      .select('id, nombre, sku, alegra_item_id, stock, costo_unitario, precio_mayor, precio_detal').eq('id', finished_id).maybeSingle()
+      .select('id, nombre, sku, alegra_item_id, stock, costo_unitario, precio_mayor, precio_detal, unidad_medida, codigo_unspsc, categoria_alegra_id').eq('id', finished_id).maybeSingle()
     if (!p) return json({ error: 'Producto no encontrado' })
     if (p.alegra_item_id) return json({ error: 'Este producto ya está enlazado a Alegra' })
 
@@ -49,12 +49,14 @@ Deno.serve(async (req) => {
       reference: p.sku || undefined,
       price: price.length ? price : (Number(p.precio_mayor) || 0),
       inventory: {
-        unit: 'unit',
+        unit: p.unidad_medida || 'unit',
         unitCost: Number(p.costo_unitario) || 0,
         initialQuantity: Number(p.stock) || 0,
         negativeSale: true,            // permite venta en negativo
       },
     }
+    if (p.categoria_alegra_id) body.itemCategory = { id: Number(p.categoria_alegra_id) }
+    if (p.codigo_unspsc) body.productKey = String(p.codigo_unspsc)
     const res = await fetch(`${ALEGRA_BASE}/items`, {
       method: 'POST', headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     })
