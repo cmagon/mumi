@@ -45,7 +45,9 @@ async function pushDatos(authHeader: string, itemId: string, costo?: number, nom
   if (listaDetal && (precioDetal || 0) > 0) price.push({ idPriceList: Number(listaDetal), price: precioDetal })
   if (price.length) body.price = price
   else if ((precioMayor || 0) > 0) body.price = precioMayor
-  if (typeof costo === 'number' && costo > 0) body.inventory = { unitCost: costo }
+  // Mantiene el costo y habilita venta en negativo
+  body.inventory = { negativeSale: true }
+  if (typeof costo === 'number' && costo > 0) (body.inventory as any).unitCost = costo
   if (Object.keys(body).length === 0) return
   const res = await fetch(`${ALEGRA_BASE}/items/${itemId}`, {
     method: 'PUT', headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' }, body: JSON.stringify(body),

@@ -52,6 +52,7 @@ Deno.serve(async (req) => {
         unit: 'unit',
         unitCost: Number(p.costo_unitario) || 0,
         initialQuantity: Number(p.stock) || 0,
+        negativeSale: true,            // permite venta en negativo
       },
     }
     const res = await fetch(`${ALEGRA_BASE}/items`, {
