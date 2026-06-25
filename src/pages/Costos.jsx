@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import {
-  fCOP, fNum, getCIFTotalMensual, getCIFMensual, getCostoMinuto,
+  fCOP, fNum, fFecha, getCIFTotalMensual, getCIFMensual, getCostoMinuto,
   calcularCostosProducto, getCIFDistribucion, calcularReceta, getPEqMultiproducto,
   getCostoNominaMensual, PARAMS_NOMINA_DEFAULT,
 } from '../lib/businessLogic'
@@ -20,7 +20,7 @@ import { CATALOGO_PARAMS, PARAM_UNIDAD, PRESENTACIONES } from '../lib/calidad'
 const EMPTY_PROD = {
   nombre: '', tipo: 'galleta', bache: 70, baches_mes: 3,
   merma: 0, comision: 3, precio_mayor: 10000, precio_detal: 15000,
-  presentacion: 'Unidad',
+  presentacion: 'Unidad', activo: true, sku: '', alegra_item_id: '',
 }
 const EMPTY_ING = { mpId: '', nombre: '', modo: 'lista', precio: '', presentacion: 1000, pct: '', cantidad: '', tipo: 'normal', base: '' }
 
@@ -167,6 +167,9 @@ export default function Costos() {
   const opcionesTipo = [...new Set([...tiposProducto.map(t => t.nombre), 'subproducto', 'otro'])]
   const [tiposModal, setTiposModal] = useState(false)
   const [nuevoTipo, setNuevoTipo] = useState('')
+  const [confirmDel, setConfirmDel] = useState(null)   // ficha a eliminar (confirmación reforzada)
+  const [delText, setDelText] = useState('')
+  const [modalPapelera, setModalPapelera] = useState(false)
   const addTipo = async () => {
     const n = nuevoTipo.trim().toLowerCase()
     if (!n) { toast('Escribe un nombre', 'warning'); return }
@@ -187,10 +190,13 @@ export default function Costos() {
   const costoMin = getCostoMinuto(cifTotal, operariosActivos, op.dias, op.jornadaHoras, op.improductividad)
   // Minutos productivos disponibles al mes (denominador del costo/minuto)
   const minsDisponibles = operariosActivos * (parseFloat(op.dias) || 0) * (parseFloat(op.jornadaHoras) || 0) * 60 * (1 - (parseFloat(op.improductividad) || 0))
-  const cifDist  = getCIFDistribucion(cifTotal, productos)
+  // Solo los productos ACTIVOS participan en la distribución del CIF (los inactivos no producen,
+  // así no desacomodan el costo/CIF de los demás).
+  const productosActivos = productos.filter(p => p.activo !== false)
+  const cifDist  = getCIFDistribucion(cifTotal, productosActivos)
 
-  // Unidades/mes totales del portafolio (para % CIF en vivo)
-  const totalUnidsPortafolio = productos.reduce((s, p) => s + (p.bache * p.baches_mes * (1 - (p.merma||0)/100)), 0)
+  // Unidades/mes totales del portafolio activo (para % CIF en vivo)
+  const totalUnidsPortafolio = productosActivos.reduce((s, p) => s + (p.bache * p.baches_mes * (1 - (p.merma||0)/100)), 0)
 
   // Precio vigente de un ingrediente: si viene de la lista (mpId) usa el precio ACTUAL de la MP
   // (canónico por Kg) para que el costo y el margen se actualicen solos al cambiar el precio de la MP.
@@ -207,7 +213,7 @@ export default function Costos() {
   // Recalcula EN VIVO el costo de un producto guardado usando el portafolio y los PRECIOS de MP actuales.
   const recomputeProducto = (p) => {
     const parse = (v) => { try { return Array.isArray(v) ? v : JSON.parse(v || '[]') } catch { return [] } }
-    const otros = productos.filter(x => x.id !== p.id)   // evita doble conteo
+    const otros = productosActivos.filter(x => x.id !== p.id)   // solo activos reparten CIF; evita doble conteo
     const ings = parse(p.ingredientes).map(i => ({ ...i, precio: precioActualIng(i) }))
     return calcularCostosProducto({
       bache:        parseFloat(p.bache)        || 1,
@@ -222,9 +228,9 @@ export default function Costos() {
     })
   }
 
-  // Punto de equilibrio multiproducto (CF / MCPT × participación) sobre todo el portafolio
+  // Punto de equilibrio multiproducto (CF / MCPT × participación) sobre el portafolio activo
   const peqMultiproducto = useMemo(() => {
-    const items = productos.map(p => ({
+    const items = productosActivos.map(p => ({
       nombre: p.nombre, precio_mayor: parseFloat(p.precio_mayor) || 0,
       cvu: recomputeProducto(p).costoTotalUnit,
       bache: parseFloat(p.bache) || 0, baches_mes: parseFloat(p.baches_mes) || 0, merma: parseFloat(p.merma) || 0,
@@ -267,7 +273,7 @@ export default function Costos() {
   // ---- Recalcular costos del formulario ----
   // Al editar, se EXCLUYE el propio producto del portafolio para no contarlo dos veces en U
   const recalcular = useCallback(() => {
-    const portafolio = editingId ? productos.filter(p => p.id !== editingId) : productos
+    const portafolio = productosActivos.filter(p => p.id !== editingId)
     setCalcResult(calcularCostosProducto({
       bache:        parseFloat(formProd.bache)       || 1,
       bachesMes:    parseFloat(formProd.baches_mes)  || 1,
@@ -355,7 +361,7 @@ export default function Costos() {
     if (!p) return
     setEditingId(p.id)
     setSelFuente(`prod-${p.id}`)
-    setFormProd({ nombre: p.nombre, tipo: p.tipo, bache: p.bache, baches_mes: p.baches_mes, merma: p.merma, comision: p.comision, precio_mayor: p.precio_mayor, precio_detal: p.precio_detal, presentacion: p.presentacion || 'Unidad' })
+    setFormProd({ nombre: p.nombre, tipo: p.tipo, bache: p.bache, baches_mes: p.baches_mes, merma: p.merma, comision: p.comision, precio_mayor: p.precio_mayor, precio_detal: p.precio_detal, presentacion: p.presentacion || 'Unidad', activo: p.activo !== false, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '' })
     setCamposExtra(parseJSON(p.campos_personalizados, []))
     setIngredientes(parseJSON(p.ingredientes, []).map(i => ({ ...EMPTY_ING, _id: Date.now() + Math.random(), mpId: i.mpId||'', nombre: i.nombre||'', modo: i.mpId ? 'lista' : 'manual', precio: i.precio||'', precioOverride: !!i.precioOverride, presentacion: i.presentacion||1000, pct: i.pct||'', cantidad: i.cantidad||'', tipo: i.tipo||'normal', base: i.base||'' })))
     setProcesos(parseJSON(p.procesos, []).map(pr => ({ ...pr, _id: Date.now() + Math.random() })))
@@ -375,6 +381,8 @@ export default function Costos() {
     mutationFn: async ({ actualizarMP = false, cambiosMP = [] } = {}) => {
       if (!formProd.nombre.trim()) throw new Error('Ingresa el nombre del producto')
       const r = calcResult || {}
+      // MPs cuyo precio se replicará al inventario (y por ende a todas las recetas)
+      const mpsCambiadas = new Set((actualizarMP ? cambiosMP : []).map(c => String(c.mpId)))
 
       // Subir imagen si hay nueva
       let imagenUrl = imgData
@@ -407,7 +415,8 @@ export default function Costos() {
         const esRel = (i.tipo || 'normal') === 'relativo'
         return {
           mpId: i.mpId || '', nombre: i.nombre || '', modo: i.modo || 'lista',
-          precio: i.precio || '', presentacion: i.presentacion || 1000, precioOverride: !!i.precioOverride,
+          // Si el precio se replicó al inventario, deja de ser override: la ficha pasa a seguir el precio canónico de la MP
+          precio: i.precio || '', presentacion: i.presentacion || 1000, precioOverride: mpsCambiadas.has(String(i.mpId)) ? false : !!i.precioOverride,
           tipo: i.tipo || 'normal', base: i.base || '',
           cantidad: i.cantidad ? Number(i.cantidad).toFixed(1) : '',
           pct: esRel ? (i.pct || '') : (i.pctReceta ? i.pctReceta.toFixed(3) : ''),
@@ -469,45 +478,121 @@ export default function Costos() {
           } catch { /* si la tabla no está, no bloquea el guardado */ }
         }
       } else {
-        const { error } = await supabase.from('products_costing').insert(datos)
+        const { data: ins, error } = await supabase.from('products_costing').insert(datos).select('id').single()
         if (error) throw error
+        datos._newId = ins?.id
       }
 
-      // Si el usuario confirmó, actualizar los costos en el inventario de Materias Primas
+      // Sincroniza el catálogo de PRODUCTO TERMINADO (base) con la ficha (no toca el stock existente)
+      if ((formProd.tipo || '') !== 'subproducto' && formProd.nombre.trim()) {
+        try {
+          await supabase.from('finished_products').upsert(
+            { nombre: formProd.nombre.trim(), product_id: editingId || datos._newId || null, sku: formProd.sku || null, alegra_item_id: formProd.alegra_item_id || null, tipo: 'base', costo_unitario: Math.round(r.costoFinal || 0) },
+            { onConflict: 'nombre' }
+          )
+        } catch (e) { console.warn('No se pudo sincronizar el catálogo de terminados:', e) }
+      }
+
+      // Replicar el nuevo costo de MP al inventario y a TODAS las recetas que usan ese ingrediente
+      let recetasAfectadas = []
       if (actualizarMP && cambiosMP.length) {
+        const mapNuevo = new Map(cambiosMP.map(c => [String(c.mpId), c.nuevo]))
+        // 1) Inventario de Materias Primas (precio canónico por Kg)
         for (const c of cambiosMP) {
           await supabase.from('raw_materials').update({ precio: c.nuevo }).eq('id', c.mpId)
         }
+        // 2) Propagar a cada producto/receta guardada que contenga esos ingredientes
+        for (const p of productos) {
+          if (p.id === editingId) continue   // el editado ya se guardó con sus datos arriba
+          const ings = parseJSON(p.ingredientes, [])
+          let changed = false
+          const nuevosIngs = ings.map(i => {
+            if (i.mpId && mapNuevo.has(String(i.mpId))) {
+              const np = mapNuevo.get(String(i.mpId))
+              if (Math.round(parseFloat(i.precio) || 0) !== Math.round(np)) changed = true
+              // Replica el precio y quita el override para que siga el precio canónico de la MP
+              return { ...i, precio: np, precioOverride: false }
+            }
+            return i
+          })
+          if (!changed) continue
+          // Recalcular costos y márgenes del producto con el nuevo precio (CIF solo entre activos)
+          const otros = productosActivos.filter(x => x.id !== p.id)
+          const calc = calcularCostosProducto({
+            bache: parseFloat(p.bache) || 1, bachesMes: parseFloat(p.baches_mes) || 1,
+            merma: parseFloat(p.merma) || 0, comision: parseFloat(p.comision) || 0,
+            precioMayor: parseFloat(p.precio_mayor) || 0, precioDetal: parseFloat(p.precio_detal) || 0,
+            ingredientes: nuevosIngs, procesos: parseJSON(p.procesos, []), empaque: parseJSON(p.empaque, []),
+            cifTotal, productosGuardados: otros, cifUnidadesFallback, operariosActivos,
+            diasHabiles: op.dias, jornadaHoras: op.jornadaHoras, improductividad: op.improductividad,
+          })
+          await supabase.from('products_costing').update({
+            ingredientes: JSON.stringify(nuevosIngs),
+            costo_final: calc.costoFinal || 0, costo_variable: calc.cvu || 0, cif_unit: calc.cifUnit || 0,
+            util_mayor: calc.utilMayor || 0, util_detal: calc.utilDetal || 0, pe: calc.pe || 0,
+          }).eq('id', p.id)
+          recetasAfectadas.push(p.nombre)
+        }
       }
+      return { recetasAfectadas }
     },
-    onSuccess: () => {
+    onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['products_costing'] })
       qc.invalidateQueries({ queryKey: ['product_cost_history'] })
       qc.invalidateQueries({ queryKey: ['raw_materials'] })
+      qc.invalidateQueries({ queryKey: ['finished_products'] })
+      const n = res?.recetasAfectadas?.length || 0
       toast(editingId ? 'Producto actualizado ✓' : 'Producto guardado ✓')
+      if (n > 0) toast(`Precio replicado a ${n} receta(s): ${res.recetasAfectadas.join(', ')}`, 'success')
       limpiarForm(); setTab('lista')
     },
     onError: (e) => toast(e.message, 'error'),
   })
 
-  // Guardar la ficha; si se editó el costo de alguna MP de lista, pregunta si actualizar el inventario
+  // Guardar la ficha; si se editó el costo de alguna MP de lista, el nuevo precio se replica
+  // automáticamente al inventario de MP y a todas las recetas que usan ese ingrediente.
   const guardarFicha = async () => {
     const cambiosMP = ingredientes
       .filter(i => i.mpId && i.precioOverride)
       .map(i => { const mp = mps.find(m => String(m.id) === String(i.mpId)); return mp ? { mpId: mp.id, nombre: mp.nombre, nuevo: parseFloat(i.precio) || 0, actual: mp.precio || 0 } : null })
       .filter(c => c && Math.round(c.nuevo) !== Math.round(c.actual))
-    let actualizarMP = false
-    if (cambiosMP.length) {
-      const lista = cambiosMP.map(c => `• ${c.nombre}: ${fCOP(c.actual)} → ${fCOP(c.nuevo)}`).join('\n')
-      actualizarMP = await confirmar(`Cambiaste el costo de ${cambiosMP.length} materia(s) prima(s) respecto al inventario:\n${lista}\n\n¿Deseas actualizar también esos costos en el inventario de Materias Primas?`,
-        { title: 'Actualizar costos de MP', confirmText: 'Sí, actualizar inventario', cancelText: 'No, solo esta ficha' })
-    }
-    saveProducto.mutate({ actualizarMP, cambiosMP })
+    saveProducto.mutate({ actualizarMP: cambiosMP.length > 0, cambiosMP })
   }
 
+  // Borrado SEGURO: guarda un respaldo completo en la papelera antes de eliminar (restaurable)
   const deleteProducto = useMutation({
-    mutationFn: async (id) => { const { error } = await supabase.from('products_costing').delete().eq('id', id); if (error) throw error },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['products_costing'] }); toast('Ficha eliminada') },
+    mutationFn: async (id) => {
+      const { data: row, error: e1 } = await supabase.from('products_costing').select('*').eq('id', id).single()
+      if (e1) throw e1
+      const { error: e2 } = await supabase.from('productos_papelera').insert({ product_id: id, nombre: row?.nombre || '', snapshot: row, eliminado_por: profile?.nombre || '' })
+      if (e2) throw e2
+      const { error } = await supabase.from('products_costing').delete().eq('id', id)
+      if (error) throw error
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['products_costing'] }); qc.invalidateQueries({ queryKey: ['productos_papelera'] }); toast('Ficha movida a la papelera (recuperable) 🗑') },
+    onError: (e) => toast(e.message, 'error'),
+  })
+
+  // Papelera de fichas
+  const { data: papelera = [] } = useQuery({
+    queryKey: ['productos_papelera'],
+    queryFn: async () => { const { data } = await supabase.from('productos_papelera').select('*').order('eliminado_at', { ascending: false }); return data || [] },
+  })
+  const restaurarFicha = useMutation({
+    mutationFn: async (p) => {
+      const snap = { ...(p.snapshot || {}) }
+      delete snap._newId
+      const { error } = await supabase.from('products_costing').upsert(snap, { onConflict: 'id' })
+      if (error) throw error
+      await supabase.from('productos_papelera').delete().eq('id', p.id)
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['products_costing'] }); qc.invalidateQueries({ queryKey: ['productos_papelera'] }); qc.invalidateQueries({ queryKey: ['finished_products'] }); toast('Ficha restaurada ✓') },
+    onError: (e) => toast(e.message, 'error'),
+  })
+  const purgarFicha = useMutation({
+    mutationFn: async (id) => { const { error } = await supabase.from('productos_papelera').delete().eq('id', id); if (error) throw error },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['productos_papelera'] }); toast('Eliminada definitivamente') },
+    onError: (e) => toast(e.message, 'error'),
   })
 
   // Recalcular y persistir el CIF/costo de TODAS las fichas según el portafolio actual
@@ -523,9 +608,13 @@ export default function Costos() {
           pe: rc.pe || 0,
         }).eq('id', p.id)
         if (error) throw error
+        // Mantiene sincronizado el costo del producto terminado (base) con la ficha
+        if ((p.tipo || '') !== 'subproducto') {
+          await supabase.from('finished_products').update({ costo_unitario: Math.round(rc.costoFinal || 0) }).eq('product_id', p.id)
+        }
       }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['products_costing'] }); toast('CIF actualizado en todas las fichas ✓') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['products_costing'] }); qc.invalidateQueries({ queryKey: ['finished_products'] }); toast('CIF actualizado en todas las fichas ✓') },
     onError: (e) => toast(e.message, 'error'),
   })
 
@@ -536,12 +625,40 @@ export default function Costos() {
       const { error } = await supabase.from('products_costing').insert({
         ...resto,
         nombre: `${p.nombre} (copia)`,
+        sku: null, stock_terminado: 0,   // el SKU es único por producto; el stock no se copia
         fecha_creado: new Date().toISOString().split('T')[0],
       })
       if (error) throw error
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['products_costing'] }); toast('Producto duplicado ✓') },
     onError: (e) => toast(e.message, 'error'),
+  })
+
+  // Activar / inactivar un producto (los inactivos no reparten CIF)
+  const toggleActivoProducto = useMutation({
+    mutationFn: async (p) => {
+      const nuevo = p.activo === false
+      const { error } = await supabase.from('products_costing').update({ activo: nuevo }).eq('id', p.id)
+      if (error) throw error
+      return nuevo
+    },
+    onSuccess: (nuevo) => { qc.invalidateQueries({ queryKey: ['products_costing'] }); toast(nuevo ? 'Producto activado ✓' : 'Producto inactivado (no reparte CIF) ✓') },
+    onError: (e) => toast(e.message, 'error'),
+  })
+
+  // Empuja el stock terminado de todos los productos enlazados hacia Alegra
+  const sincronizarAlegra = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke('alegra-push-stock', { body: { all: true } })
+      if (error) throw error
+      return data
+    },
+    onSuccess: (data) => {
+      const ok = (data?.resultados || []).filter(r => r.estado === 'ok').length
+      const err = (data?.resultados || []).filter(r => r.estado === 'error').length
+      toast(`Stock sincronizado con Alegra: ${ok} ok${err ? `, ${err} con error` : ''} ✓`, err ? 'warning' : 'success')
+    },
+    onError: (e) => toast('No se pudo sincronizar con Alegra: ' + e.message, 'error'),
   })
 
   // ---- CIF CRUD ----
@@ -667,6 +784,7 @@ export default function Costos() {
         {!soloReceta && (
           <div className="page-actions">
             <button className="btn btn-secondary btn-sm" onClick={() => setTab('lista')}>📋 Productos</button>
+            {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalPapelera(true)}>🗑 Papelera{papelera.length > 0 ? ` (${papelera.length})` : ''}</button>}
             <button className="btn btn-dorado btn-sm" onClick={() => { limpiarForm(); setTab('nuevo') }}>+ Nueva Ficha</button>
           </div>
         )}
@@ -735,9 +853,10 @@ export default function Costos() {
                       const unidsMes = p.bache * p.baches_mes * (1 - (p.merma||0)/100)
                       const pctCIF = totalUnidsPortafolio > 0 ? unidsMes/totalUnidsPortafolio*100 : 0
                       const margen = p.precio_mayor > 0 ? rc.utilMayor/p.precio_mayor*100 : null
+                      const inactivo = p.activo === false
                       return (
-                        <tr key={p.id}>
-                          <td><strong>{p.nombre}</strong></td>
+                        <tr key={p.id} style={inactivo ? { opacity: 0.6 } : undefined}>
+                          <td><strong>{p.nombre}</strong> {inactivo && <span className="badge badge-gris" style={{ fontSize:'0.65rem' }}>⏸ Inactivo</span>}</td>
                           <td>
                             {p.imagen_url
                               ? <img src={p.imagen_url} alt={p.nombre} style={{ width:32, height:32, borderRadius:3, objectFit:'cover' }} />
@@ -756,8 +875,9 @@ export default function Costos() {
                               <button className="btn btn-xs btn-secondary" onClick={() => { setVerProd(p); setVerModal(true) }}>Ver</button>
                               <button className="btn btn-xs btn-primary" onClick={() => cargarProducto(p.id)}>✏ Editar</button>
                               <button className="btn btn-xs btn-secondary" onClick={() => duplicarProducto.mutate(p)} disabled={duplicarProducto.isPending} title="Duplicar producto">⧉ Duplicar</button>
+                              <button className={`btn btn-xs ${inactivo ? 'btn-success' : 'btn-secondary'}`} onClick={() => toggleActivoProducto.mutate(p)} disabled={toggleActivoProducto.isPending} title={inactivo ? 'Activar (vuelve a repartir CIF)' : 'Inactivar (no reparte CIF)'}>{inactivo ? '▶ Activar' : '⏸ Inactivar'}</button>
                               <button className="btn btn-xs btn-dorado" onClick={() => exportarFichaExcel(p)}>Excel</button>
-                              <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar la ficha del producto "${p.nombre}"?\nEsta acción no se puede deshacer.`).then(ok => ok && deleteProducto.mutate(p.id))}>✕</button>
+                              <button className="btn btn-xs btn-danger" onClick={() => { setConfirmDel(p); setDelText('') }}>✕</button>
                             </div>
                           </td>
                         </tr>
@@ -768,7 +888,10 @@ export default function Costos() {
             </table>
           </div>
           {productos.length > 1 && (
-            <div style={{ marginTop:12, display:'flex', justifyContent:'flex-end' }}>
+            <div style={{ marginTop:12, display:'flex', justifyContent:'flex-end', gap:8, flexWrap:'wrap' }}>
+              <button className="btn btn-sm btn-secondary" onClick={() => sincronizarAlegra.mutate()} disabled={sincronizarAlegra.isPending} title="Empuja el stock terminado de todos los productos enlazados hacia Alegra">
+                {sincronizarAlegra.isPending ? 'Sincronizando...' : '🔗 Sincronizar stock con Alegra'}
+              </button>
               <button className="btn btn-sm btn-dorado" onClick={() => recalcularTodos.mutate()} disabled={recalcularTodos.isPending}>
                 {recalcularTodos.isPending ? 'Recalculando...' : '🔄 Guardar CIF actualizado en todas las fichas'}
               </button>
@@ -821,6 +944,14 @@ export default function Costos() {
               <div className="form-grid">
                 <div className="form-group"><label className="form-label">Nombre del Producto</label><input className="form-control" value={formProd.nombre} onChange={e => setFormProd(f=>({...f,nombre:e.target.value}))} placeholder="Nombre de mi producto" /></div>
                 <div className="form-group">
+                  <label className="form-label">Estado del producto</label>
+                  <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', padding:'8px 0' }}>
+                    <input type="checkbox" checked={formProd.activo !== false} onChange={e => setFormProd(f=>({...f, activo: e.target.checked}))} />
+                    <span style={{ fontWeight:600, color: formProd.activo !== false ? 'var(--selva)' : 'var(--texto-suave)' }}>{formProd.activo !== false ? '✓ Activo (en producción)' : '⏸ Inactivo (no reparte CIF)'}</span>
+                  </label>
+                  <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Los inactivos no participan en la distribución del CIF de los demás productos.</small>
+                </div>
+                <div className="form-group">
                   <label className="form-label" style={{ display:'flex', alignItems:'center' }}>
                     Tipo
                     {esAdmin && <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft:'auto' }} onClick={() => setTiposModal(true)}>⚙ Gestionar</button>}
@@ -833,6 +964,16 @@ export default function Costos() {
                   <label className="form-label">Presentación <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(elige o escribe una)</small></label>
                   <input className="form-control" list="dl-presentaciones" value={formProd.presentacion || ''} onChange={e => setFormProd(f=>({...f,presentacion:e.target.value}))} placeholder="Ej: Caja, Unidad, Kilo..." />
                   <datalist id="dl-presentaciones">{PRESENTACIONES.map(p => <option key={p} value={p} />)}</datalist>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">SKU / Referencia <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(igual que en Alegra)</small></label>
+                  <input className="form-control" value={formProd.sku || ''} onChange={e => setFormProd(f=>({...f,sku:e.target.value}))} placeholder="Ej: INF-001" />
+                  <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Puente con Alegra: debe coincidir con la "referencia" del ítem para descontar stock al facturar.</small>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">ID ítem en Alegra <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(opcional)</small></label>
+                  <input className="form-control" value={formProd.alegra_item_id || ''} onChange={e => setFormProd(f=>({...f,alegra_item_id:e.target.value}))} placeholder="Ej: 45" />
+                  <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Permite que la app empuje el stock a Alegra al producir. Lo ves en la URL/API del ítem en Alegra.</small>
                 </div>
                 <div className="form-group"><label className="form-label">{presLabel}s por bache</label><input type="number" className="form-control" value={formProd.bache} onChange={e => setFormProd(f=>({...f,bache:e.target.value}))} min={1} /></div>
                 <div className="form-group"><label className="form-label">Baches por mes</label><input type="number" className="form-control" value={formProd.baches_mes} onChange={e => setFormProd(f=>({...f,baches_mes:e.target.value}))} min={1} /></div>
@@ -928,8 +1069,8 @@ export default function Costos() {
                           ))}
                         </div>
                         {modo === 'manual'
-                          ? <input className="form-control" placeholder="Nombre ingrediente" value={r.nombre||''} onChange={e => updIng(r._id,'nombre',e.target.value)} style={{ borderColor: accent }} />
-                          : <select className="form-control" value={r.mpId||''} onChange={e => handleSelectMP(r._id, e.target.value)} style={{ borderColor: accent }}>
+                          ? <input key={`ing-man-${r._id}`} className="form-control" placeholder="Nombre ingrediente" value={r.nombre||''} onChange={e => updIng(r._id,'nombre',e.target.value)} style={{ borderColor: accent }} />
+                          : <select key={`ing-lst-${r._id}`} className="form-control" value={r.mpId||''} onChange={e => handleSelectMP(r._id, e.target.value)} style={{ borderColor: accent }}>
                               <option value="">Seleccionar MP...</option>
                               {mpsIngredientes.map(m => <option key={m.id} value={m.id}>{m.nombre} — {fCOP(m.precio)}/{m.unidad}</option>)}
                             </select>
@@ -1134,8 +1275,8 @@ export default function Costos() {
                           ))}
                         </div>
                         {modo === 'manual'
-                          ? <input className="form-control" placeholder="Ítem (caja, bolsa...)" value={r.nombre||''} onChange={e => updEmp(r._id,'nombre',e.target.value)} />
-                          : <select className="form-control" value={r.mpId||''} onChange={e => handleSelectEmpaqueMP(r._id, e.target.value)}>
+                          ? <input key={`emp-man-${r._id}`} className="form-control" placeholder="Ítem (caja, bolsa...)" value={r.nombre||''} onChange={e => updEmp(r._id,'nombre',e.target.value)} />
+                          : <select key={`emp-lst-${r._id}`} className="form-control" value={r.mpId||''} onChange={e => handleSelectEmpaqueMP(r._id, e.target.value)}>
                               <option value="">Seleccionar empaque...</option>
                               {mpsEmpaque.map(m => <option key={m.id} value={m.id}>{m.nombre} — {fCOP(m.precio)}/{m.unidad}</option>)}
                               {mpsEmpaque.length === 0 && <option value="" disabled>No hay insumos de empaque — usa modo ✏ Manual o créalos en Inventario MP</option>}
@@ -1247,6 +1388,7 @@ export default function Costos() {
                 <div className="row"><span>Costo MP por unidad</span><span>{fCOP(calcResult.mpUnit)}</span></div>
                 <div className="row"><span>Costo empaque por unidad</span><span>{fCOP(calcResult.empUnit)}</span></div>
                 <div className="row"><span>+ Mano de obra/overhead por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>({calcResult.totalMinutos} min × {fCOP(calcResult.costoMin)}/min ÷ unidades)</small></span><span style={{color:'var(--dorado)'}}>{fCOP(calcResult.moUnit)}</span></div>
+                <div className="row" style={{ borderTop:'1px dashed rgba(245,240,232,0.2)', paddingTop:6, marginTop:4 }}><span>Costo por bache <small style={{opacity:0.6,fontSize:'0.72rem'}}>(MP {fCOP(calcResult.totalMPBache||0)} + MO {fCOP(calcResult.totalMOBache||0)})</small></span><span style={{color:'var(--lima)'}}>{fCOP((calcResult.totalMPBache||0)+(calcResult.totalMOBache||0))}</span></div>
                 <div className="total">
                   <div className="row"><span><strong>Costo TOTAL por unidad</strong></span><span><strong>{fCOP(calcResult.costoTotalUnit)}</strong></span></div>
                   <div className="row ganancia"><span>Ganancia mayor <small style={{opacity:0.6,fontSize:'0.72rem'}}>(precio − costo)</small></span><span>{fCOP(calcResult.utilMayor)} ({parseFloat(formProd.precio_mayor)>0?(calcResult.utilMayor/parseFloat(formProd.precio_mayor)*100).toFixed(1)+'%':'-'})</span></div>
@@ -1496,6 +1638,48 @@ export default function Costos() {
       {tab === 'receta' && <Receta embedded productos={productos} onConvertir={(id) => cargarRecetaComoProducto(id)} />}
 
       {/* Modal ver ficha de costo */}
+      {/* Confirmación reforzada de borrado de ficha */}
+      <Modal open={!!confirmDel} onClose={() => setConfirmDel(null)} title="🗑 Eliminar ficha de producto"
+        footer={<>
+          <button className="btn btn-secondary" onClick={() => setConfirmDel(null)}>Cancelar</button>
+          <button className="btn btn-danger" disabled={delText.trim() !== (confirmDel?.nombre || '').trim()} onClick={() => { deleteProducto.mutate(confirmDel.id); setConfirmDel(null) }}>Eliminar</button>
+        </>}>
+        {confirmDel && (
+          <div style={{ fontSize: '0.9rem' }}>
+            <div className="alert alert-warning" style={{ fontSize: '0.82rem' }}>Vas a eliminar la ficha <strong>{confirmDel.nombre}</strong>. Se guardará un respaldo en la <strong>papelera</strong> (recuperable). Esto <strong>no</strong> afecta el producto terminado ni Alegra.</div>
+            <label className="form-label">Para confirmar, escribe el nombre exacto del producto:</label>
+            <input className="form-control" value={delText} onChange={e => setDelText(e.target.value)} placeholder={confirmDel.nombre} />
+          </div>
+        )}
+      </Modal>
+
+      {/* Papelera de fichas */}
+      <Modal open={modalPapelera} onClose={() => setModalPapelera(false)} title={`🗑 Papelera de fichas (${papelera.length})`} size="modal-lg"
+        footer={<button className="btn btn-secondary" onClick={() => setModalPapelera(false)}>Cerrar</button>}>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Producto</th><th>Eliminada</th><th>Por</th><th>Acciones</th></tr></thead>
+            <tbody>
+              {papelera.length === 0
+                ? <tr><td colSpan={4} className="empty-table">Papelera vacía.</td></tr>
+                : papelera.map(p => (
+                    <tr key={p.id}>
+                      <td><strong>{p.nombre}</strong></td>
+                      <td>{p.eliminado_at ? fFecha(p.eliminado_at.slice(0, 10)) : '—'}</td>
+                      <td>{p.eliminado_por || '—'}</td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button className="btn btn-xs btn-success" onClick={() => restaurarFicha.mutate(p)} disabled={restaurarFicha.isPending}>↩ Restaurar</button>
+                          <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar definitivamente "${p.nombre}" de la papelera? Esto ya no se puede recuperar.`).then(ok => ok && purgarFicha.mutate(p.id))}>✕</button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+            </tbody>
+          </table>
+        </div>
+      </Modal>
+
       <Modal open={verModal} onClose={() => setVerModal(false)} title={`Ficha — ${verProd?.nombre}`} size="modal-xl"
         footer={
           <>

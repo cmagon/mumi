@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, uploadFile } from '../lib/supabase'
 import { writeOrQueue } from '../lib/offlineQueue'
-import { fFecha, fNum, fCOP } from '../lib/businessLogic'
+import { fFecha, fNum, fCOP, componerSurtido } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
@@ -27,7 +27,7 @@ const EMPTY = {
   lote: '', vence: '', empaque: 'UNIDADES', cantidad: '',
   inicio: '', fin: '', labor: 'PRODUCCION', responsable: '', obs: '',
   completado: false, conforme: true, peso_final: '', peso_desperdicio: '', lotes_origen: '',
-  peso_subporcion: '', cant_subporciones: '', surtido: false, lote_mezcla: '',
+  peso_subporcion: '', cant_subporciones: '', surtido: false, lote_mezcla: '', producto_surtido: '',
 }
 
 const MESES = ['','Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov','Dic']
@@ -103,6 +103,11 @@ export default function Produccion() {
       const { data } = await supabase.from('products_costing').select('nombre, tipo, costo_final, costo_variable, cif_unit, porciona, peso_subporcion, peso_unidad').order('nombre')
       return data || []
     },
+  })
+  // Catálogo de productos terminados (para elegir el nombre del surtido — no texto libre)
+  const { data: terminados = [] } = useQuery({
+    queryKey: ['finished_products'],
+    queryFn: async () => { const { data } = await supabase.from('finished_products').select('id, nombre, tipo, activo').eq('activo', true).order('nombre'); return data || [] },
   })
   // Órdenes (para trazabilidad de MP consumida en el detalle del registro) — solo admin
   const { data: ordenesMp = [] } = useQuery({
@@ -207,7 +212,7 @@ export default function Produccion() {
           subprocesos: procs,
           peso_subporcion: form.peso_subporcion !== '' ? (parseFloat(form.peso_subporcion) || 0) : null,
           cant_subporciones: form.cant_subporciones !== '' ? (parseFloat(form.cant_subporciones) || 0) : null,
-          surtido: form.surtido, lote_mezcla: form.surtido ? (form.lote_mezcla || null) : null,
+          surtido: form.surtido, lote_mezcla: form.surtido ? (form.lote_mezcla || null) : null, producto_surtido: form.surtido ? (form.producto_surtido || null) : null,
         }
         const r = await writeOrQueue({ table: 'production_records', action: 'update', payload: datos, match: { id: editId } })
         toast(r.queued ? 'Registro guardado sin conexión — se sincronizará 📴' : 'Registro actualizado ✓')
@@ -229,7 +234,7 @@ export default function Produccion() {
             subprocesos: [...(Array.isArray(existente.subprocesos) ? existente.subprocesos : []), ...procs],
             peso_subporcion: form.peso_subporcion !== '' ? (parseFloat(form.peso_subporcion) || 0) : existente.peso_subporcion,
             cant_subporciones: form.cant_subporciones !== '' ? (parseFloat(form.cant_subporciones) || 0) : existente.cant_subporciones,
-            surtido: form.surtido || existente.surtido, lote_mezcla: form.lote_mezcla || existente.lote_mezcla || null,
+            surtido: form.surtido || existente.surtido, lote_mezcla: form.lote_mezcla || existente.lote_mezcla || null, producto_surtido: form.producto_surtido || existente.producto_surtido || null,
           } })
           toast(r.queued ? `Etapa guardada sin conexión — se sincronizará 📴` : `Etapa "${form.labor}" agregada al lote ${form.lote} ✓`)
         } else {
@@ -246,7 +251,7 @@ export default function Produccion() {
             orden_id: ordenLink || null, subprocesos: procs,
             peso_subporcion: form.peso_subporcion !== '' ? (parseFloat(form.peso_subporcion) || 0) : null,
             cant_subporciones: form.cant_subporciones !== '' ? (parseFloat(form.cant_subporciones) || 0) : null,
-            surtido: form.surtido, lote_mezcla: form.surtido ? (form.lote_mezcla || null) : null,
+            surtido: form.surtido, lote_mezcla: form.surtido ? (form.lote_mezcla || null) : null, producto_surtido: form.surtido ? (form.producto_surtido || null) : null,
           } })
           if (esOperario && !r.queued) await notificar({ destinatario: 'admin', tipo: 'registro_pendiente', mensaje: `Registro de producción pendiente de aprobación: ${form.producto} (lote ${form.lote}) por ${profile?.nombre || 'operario'}`, link: '/produccion' })
           toast(r.queued ? 'Registro guardado sin conexión — se sincronizará 📴' : (esOperario ? 'Registro creado — pendiente de aprobación del administrador' : 'Registro de lote creado ✓'))
@@ -273,7 +278,7 @@ export default function Produccion() {
           estado: form.conforme ? 'conforme' : 'no conforme', completado: form.completado,
           peso_subporcion: form.peso_subporcion !== '' ? (parseFloat(form.peso_subporcion) || 0) : null,
           cant_subporciones: form.cant_subporciones !== '' ? (parseFloat(form.cant_subporciones) || 0) : null,
-          surtido: form.surtido, lote_mezcla: form.surtido ? (form.lote_mezcla || null) : null,
+          surtido: form.surtido, lote_mezcla: form.surtido ? (form.lote_mezcla || null) : null, producto_surtido: form.surtido ? (form.producto_surtido || null) : null,
           subprocesos: subprocs.filter(p => p.nombre?.trim() || p.inicio || p.fin || p.fecha),
         }).eq('id', editId)
         setAutoSavedAt(new Date().toLocaleTimeString('es-CO'))
@@ -285,7 +290,7 @@ export default function Produccion() {
   }, [form, subprocs, modal, editId])
 
   const openEdit = (r) => {
-    setForm({ tipo_registro: r.tipo_registro || 'final', producto: r.producto, fecha: r.fecha, lote: r.lote || '', vence: r.vence || '', empaque: r.empaque || 'UNIDADES', cantidad: r.cantidad, inicio: r.inicio || '', fin: r.fin || '', labor: r.labor || 'PRODUCCION', responsable: r.responsable || '', obs: r.obs || '', completado: !!r.completado, conforme: r.estado !== 'no conforme', peso_final: r.peso_final || '', peso_desperdicio: r.peso_desperdicio || '', lotes_origen: '', peso_subporcion: r.peso_subporcion || '', cant_subporciones: r.cant_subporciones || '', surtido: !!r.surtido, lote_mezcla: r.lote_mezcla || '' })
+    setForm({ tipo_registro: r.tipo_registro || 'final', producto: r.producto, fecha: r.fecha, lote: r.lote || '', vence: r.vence || '', empaque: r.empaque || 'UNIDADES', cantidad: r.cantidad, inicio: r.inicio || '', fin: r.fin || '', labor: r.labor || 'PRODUCCION', responsable: r.responsable || '', obs: r.obs || '', completado: !!r.completado, conforme: r.estado !== 'no conforme', peso_final: r.peso_final || '', peso_desperdicio: r.peso_desperdicio || '', lotes_origen: '', peso_subporcion: r.peso_subporcion || '', cant_subporciones: r.cant_subporciones || '', surtido: !!r.surtido, lote_mezcla: r.lote_mezcla || '', producto_surtido: r.producto_surtido || '' })
     setDetalleRec(r)
     setEditId(r.id)
     setSubprocs(Array.isArray(r.subprocesos) ? r.subprocesos : [])
@@ -377,6 +382,19 @@ export default function Produccion() {
       (Array.isArray(r.etapas) ? r.etapas : []).some(e => /produccion|empacado/i.test(e.labor || '')))
     .map(r => r.lote).filter(l => l && l !== form.lote))]
 
+  // Producto de un lote (para autocompletar el nombre del surtido según el lote combinado)
+  const productoDeLote = (lote) => {
+    const k = String(lote || '').trim().split(/[,;]/)[0].trim()
+    if (!k) return ''
+    const r = registros.find(x => String(x.lote || '').trim() === k)
+    return r?.producto || ''
+  }
+  // Autocompleta el nombre del producto surtido cuando hay surtido + lote de mezcla
+  const autoSurtido = (productoBase, loteMezcla) => {
+    const otro = productoDeLote(loteMezcla)
+    return otro ? componerSurtido(productoBase, otro) : ''
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -458,7 +476,7 @@ export default function Produccion() {
                   ? <tr><td colSpan={10} className="empty-table">Sin registros</td></tr>
                   : filtrados.map(p => (
                     <tr key={p.id}>
-                      <td><strong>{p.producto}</strong></td>
+                      <td><strong>{p.producto}</strong>{p.surtido && p.producto_surtido && <div style={{ fontSize: '0.72rem', color: 'var(--tierra)' }}>🔀 {p.producto_surtido}</div>}</td>
                       <td><span className={`badge ${p.tipo_registro === 'subproducto' ? 'badge-dorado' : 'badge-azul'}`}>{p.tipo_registro === 'subproducto' ? 'Subprod.' : 'Final'}</span></td>
                       <td><strong>{p.lote || '—'}</strong></td>
                       <td className="td-number">{Array.isArray(p.etapas) ? p.etapas.length : 0}</td>
@@ -621,11 +639,26 @@ export default function Produccion() {
           <input type="checkbox" checked={form.surtido} onChange={e => setForm(f => ({ ...f, surtido: e.target.checked }))} /> 📦 Empacado surtido / mezclado con otro lote
         </label>
         {form.surtido && (
-          <div className="form-group">
-            <label className="form-label">¿Con qué lote(s) se mezcló?</label>
-            <input className="form-control" list="dl-lotes-mezcla" value={form.lote_mezcla} onChange={e => setForm(f => ({ ...f, lote_mezcla: e.target.value }))} placeholder="Elige o escribe (ej: 160626)" />
-            <datalist id="dl-lotes-mezcla">{lotesCombinables.map(l => <option key={l} value={l} />)}</datalist>
-          </div>
+          <>
+            <div className="form-group">
+              <label className="form-label">¿Con qué lote(s) se mezcló?</label>
+              <input className="form-control" list="dl-lotes-mezcla" value={form.lote_mezcla}
+                onChange={e => { const v = e.target.value; setForm(f => ({ ...f, lote_mezcla: v, producto_surtido: autoSurtido(f.producto, v) || f.producto_surtido })) }}
+                placeholder="Elige o escribe (ej: 160626)" />
+              <datalist id="dl-lotes-mezcla">{lotesCombinables.map(l => <option key={l} value={l} />)}</datalist>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Producto surtido resultante <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(elige del catálogo de Producto Terminado; se sugiere según el lote)</small></label>
+              <select className="form-control" value={form.producto_surtido} onChange={e => setForm(f => ({ ...f, producto_surtido: e.target.value }))}>
+                <option value="">Seleccionar producto terminado...</option>
+                {terminados.map(t => <option key={t.id} value={t.nombre}>{t.tipo === 'surtido' ? '🔀 ' : ''}{t.nombre}</option>)}
+                {form.producto_surtido && !terminados.some(t => t.nombre === form.producto_surtido) && <option value={form.producto_surtido}>⚠ {form.producto_surtido} (sin registrar)</option>}
+              </select>
+              {form.producto_surtido && !terminados.some(t => t.nombre === form.producto_surtido) && (
+                <small style={{ color: 'var(--rojo)', fontSize: '0.72rem' }}>⚠ "{form.producto_surtido}" no existe en el catálogo. Créalo en <strong>Producto Terminado</strong>.</small>
+              )}
+            </div>
+          </>
         )}
         {/* Lotes combinados (solo rotulado: ej. surtido de varios sabores) */}
         {esRotulado(form.labor) && (

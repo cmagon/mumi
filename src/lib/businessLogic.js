@@ -13,6 +13,21 @@ export const fFecha = (s) => {
     return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
   } catch { return s }
 }
+// Compone el nombre de un producto SURTIDO entre dos sabores tomando como base el prefijo común.
+// Ej: ("Bocadillo Mumi Seje", "Bocadillo Mumi Araza") -> "Bocadillo Mumi Surt. Seje - Araza"
+export const componerSurtido = (nombreA, nombreB) => {
+  const a = String(nombreA || '').trim(), b = String(nombreB || '').trim()
+  if (!a || !b) return ''
+  if (a.toLowerCase() === b.toLowerCase()) return a
+  const wa = a.split(/\s+/), wb = b.split(/\s+/)
+  let i = 0
+  while (i < wa.length && i < wb.length && wa[i].toLowerCase() === wb[i].toLowerCase()) i++
+  const base = wa.slice(0, i).join(' ')
+  const sa = wa.slice(i).join(' ') || a
+  const sb = wb.slice(i).join(' ') || b
+  return `${base ? base + ' ' : ''}Surt. ${sa} - ${sb}`.replace(/\s+/g, ' ').trim()
+}
+
 // Roles base + etiquetas personalizadas (roles creados por el admin)
 const ROL_LABELS_BASE = { admin: 'Administrador', operario: 'Operario de Producción', auxiliar: 'Auxiliar de Producción', ventas: 'Ventas', readonly: 'Solo lectura' }
 let _rolLabels = {}

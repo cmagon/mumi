@@ -31,14 +31,20 @@ export async function consumirPEPS({ mp_id, cantidad }) {
 
 // RESERVA `cantidad` aplicando PEPS: mueve de "disponible" (cantidad_actual) a "reservado"
 // (cantidad_reservada). Se usa cuando una orden inicia producción. Devuelve los lotes tomados.
-export async function reservarPEPS({ mp_id, cantidad }) {
-  const { data: lotes } = await supabase.from('raw_material_lots').select('*')
+export async function reservarPEPS({ mp_id, cantidad, preferLoteId = null }) {
+  const { data: raw } = await supabase.from('raw_material_lots').select('*')
     .eq('mp_id', mp_id).gt('cantidad_actual', 0)
     .order('vencimiento', { ascending: true, nullsFirst: false })
     .order('fecha_entrada', { ascending: true })
-  let restante = cantidad
+  let lotes = raw || []
+  // Si el usuario eligió un lote específico, se consume primero (luego PEPS para el resto si falta)
+  if (preferLoteId) {
+    const pref = lotes.filter(l => String(l.id) === String(preferLoteId))
+    const resto = lotes.filter(l => String(l.id) !== String(preferLoteId))
+    lotes = [...pref, ...resto]
+  }
   const reservados = []
-  for (const l of (lotes || [])) {
+  for (const l of lotes) {
     if (restante <= 0) break
     const toma = Math.min(l.cantidad_actual, restante)
     await supabase.from('raw_material_lots').update({
