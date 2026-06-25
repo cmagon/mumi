@@ -51,6 +51,27 @@ export default function ProductosTerminados() {
     queryKey: ['fichas_costo_terminado'],
     queryFn: async () => { const { data } = await supabase.from('products_costing').select('id, nombre, tipo, costo_final, precio_mayor, precio_detal').order('nombre'); return data || [] },
   })
+  // Materias primas marcadas como vendibles (para crearlas como producto terminado)
+  const { data: mpsVendibles = [] } = useQuery({
+    queryKey: ['mps_vendibles'],
+    queryFn: async () => { const { data } = await supabase.from('raw_materials').select('id, nombre, precio, precio_venta, stock, unidad').eq('vendible', true).order('nombre'); return data || [] },
+  })
+  const [modalMp, setModalMp] = useState(false)
+  const mpsDisponibles = mpsVendibles.filter(m => !productos.some(p => p.mp_id === m.id || (p.nombre || '').toLowerCase() === (m.nombre || '').toLowerCase()))
+  const crearDesdeMp = useMutation({
+    mutationFn: async (m) => {
+      const { error } = await supabase.from('finished_products').insert({
+        nombre: m.nombre, tipo: 'mp', mp_id: m.id,
+        costo_unitario: Math.round(Number(m.precio) || 0), precio_mayor: Math.round(Number(m.precio_venta) || 0),
+        stock: Number(m.stock) || 0, activo: true,
+      })
+      if (error) throw error
+      return m.nombre
+    },
+    onSuccess: (nombre) => { qc.invalidateQueries({ queryKey: ['finished_products'] }); toast(`"${nombre}" agregado como producto terminado ✓`) },
+    onError: (e) => toast(e.message, 'error'),
+  })
+
   const costoFicha = (p) => {
     const f = fichas.find(x => x.id === p.product_id) || fichas.find(x => x.nombre === p.nombre)
     return Number(f?.costo_final) || 0
@@ -333,6 +354,7 @@ export default function ProductosTerminados() {
           {esAdmin && <button className="btn btn-secondary btn-sm" onClick={abrirEnlace}>🔌 Enlazar con Alegra</button>}
           <button className="btn btn-secondary btn-sm" onClick={() => actualizarCostos.mutate()} disabled={actualizarCostos.isPending}>{actualizarCostos.isPending ? 'Actualizando...' : '💲 Actualizar costos desde fichas'}</button>
           {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => sincronizarTodo.mutate()} disabled={sincronizarTodo.isPending}>{sincronizarTodo.isPending ? 'Sincronizando...' : '🔗 Sincronizar todo con Alegra'}</button>}
+          {mpsDisponibles.length > 0 && <button className="btn btn-secondary btn-sm" onClick={() => setModalMp(true)}>🧪 Agregar MP vendible ({mpsDisponibles.length})</button>}
           <button className="btn btn-secondary btn-sm" onClick={() => { setSelGen(baseProds.map(p => p.id)); setModalGen(true) }}>🔀 Generar surtidos</button>
           <button className="btn btn-primary btn-sm" onClick={() => { setPForm(EMPTY_PROD); setPEditId(null); setModalProd(true) }}>+ Nuevo producto</button>
         </div>
@@ -358,7 +380,7 @@ export default function ProductosTerminados() {
                     return (
                       <tr key={p.id} style={p.activo === false ? { opacity: 0.55 } : undefined}>
                         <td><strong>{p.nombre}</strong></td>
-                        <td><span className={`badge ${p.tipo === 'surtido' ? 'badge-dorado' : 'badge-azul'}`}>{p.tipo === 'surtido' ? '🔀 Surtido' : 'Base'}</span></td>
+                        <td><span className={`badge ${p.tipo === 'surtido' ? 'badge-dorado' : p.tipo === 'mp' ? 'badge-gris' : 'badge-azul'}`}>{p.tipo === 'surtido' ? '🔀 Surtido' : p.tipo === 'mp' ? '🧪 MP' : 'Base'}</span></td>
                         <td>{p.sku || '—'}</td>
                         <td>{p.alegra_item_id ? '✓' : '—'}</td>
                         <td className="td-number"><strong style={{ color: bajo ? 'var(--rojo)' : undefined }}>{fNum(p.stock)}</strong>{bajo && <div style={{ fontSize: '0.65rem', color: 'var(--rojo)' }}>⚠ bajo</div>}</td>
@@ -552,6 +574,30 @@ export default function ProductosTerminados() {
                   </div>
                 </>
               )}
+      </Modal>
+
+      {/* Modal agregar MP vendibles */}
+      <Modal open={modalMp} onClose={() => setModalMp(false)} title="🧪 Agregar materias primas vendibles" size="modal-lg"
+        footer={<button className="btn btn-secondary" onClick={() => setModalMp(false)}>Cerrar</button>}>
+        <p style={{ fontSize: '0.85rem', color: 'var(--texto-suave)' }}>MPs marcadas como <strong>vendibles</strong> en Inventario que aún no están en el catálogo. Al agregarlas se crean como producto terminado (luego puedes enlazarlas/crearlas en Alegra).</p>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Materia prima</th><th className="td-number">Costo</th><th className="td-number">P. venta</th><th className="td-number">Stock</th><th></th></tr></thead>
+            <tbody>
+              {mpsDisponibles.length === 0
+                ? <tr><td colSpan={5} className="empty-table">No hay MPs vendibles pendientes.</td></tr>
+                : mpsDisponibles.map(m => (
+                    <tr key={m.id}>
+                      <td><strong>{m.nombre}</strong></td>
+                      <td className="td-number">$ {Number(m.precio || 0).toLocaleString('es-CO')}</td>
+                      <td className="td-number">$ {Number(m.precio_venta || 0).toLocaleString('es-CO')}</td>
+                      <td className="td-number">{fNum(m.stock)} {m.unidad}</td>
+                      <td><button className="btn btn-xs btn-primary" disabled={crearDesdeMp.isPending} onClick={() => crearDesdeMp.mutate(m)}>+ Agregar</button></td>
+                    </tr>
+                  ))}
+            </tbody>
+          </table>
+        </div>
       </Modal>
 
       {/* Modal generar surtidos */}

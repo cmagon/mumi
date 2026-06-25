@@ -12,7 +12,7 @@ import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import { crearLoteEntrada, consumirPEPS, consumirLote, estadoLote } from '../lib/lotes'
 import * as XLSX from 'xlsx'
 
-const EMPTY_MP = { nombre: '', categoria: 'pulpa', tipo: 'comprado', unidad: 'Kg', precio: '', stock_min: 0, stock: 0, lote: '', vencimiento: '', obs: '', extra: {} }
+const EMPTY_MP = { nombre: '', categoria: 'pulpa', tipo: 'comprado', unidad: 'Kg', precio: '', stock_min: 0, stock: 0, lote: '', vencimiento: '', obs: '', extra: {}, vendible: false, precio_venta: '' }
 const EMPTY_MOV = { mp_id: '', tipo: 'entrada', cantidad: '', fecha: new Date().toISOString().split('T')[0], responsable: '', obs: '', lote: '', vencimiento: '', extra: {}, costo: '', motivo: 'consumo', lote_id: '' }
 // Motivos de salida/ajuste manual de inventario
 const MOTIVOS_SALIDA = [
@@ -123,6 +123,8 @@ export default function Inventario() {
         stock: parseFloat(datos.stock) || 0,
         vencimiento: datos.vencimiento || null,
         extra: datos.extra || {},
+        vendible: !!datos.vendible,
+        precio_venta: parseFloat(datos.precio_venta) || 0,
       }
       // Asegurar que la categoría exista en la tabla (no debe bloquear el guardado de la MP)
       if (payload.categoria) { try { await supabase.from('mp_categories').upsert({ nombre: payload.categoria }, { onConflict: 'nombre' }) } catch { /* ignora si la tabla/política no está */ } }
@@ -239,7 +241,7 @@ export default function Inventario() {
   })
 
   const openEditMP = (mp) => {
-    setFormMP({ nombre: mp.nombre, categoria: mp.categoria, tipo: mp.tipo, unidad: mp.unidad, precio: mp.precio, stock_min: mp.stock_min, stock: mp.stock || 0, lote: mp.lote || '', vencimiento: mp.vencimiento || '', obs: mp.obs || '', extra: mp.extra || {} })
+    setFormMP({ nombre: mp.nombre, categoria: mp.categoria, tipo: mp.tipo, unidad: mp.unidad, precio: mp.precio, stock_min: mp.stock_min, stock: mp.stock || 0, lote: mp.lote || '', vencimiento: mp.vencimiento || '', obs: mp.obs || '', extra: mp.extra || {}, vendible: !!mp.vendible, precio_venta: mp.precio_venta || '' })
     setEditMPId(mp.id); setModalMP(true)
   }
   const openMovimiento = (mpId = '', tipo = 'entrada') => {
@@ -443,6 +445,18 @@ export default function Inventario() {
         <div className="form-grid-2">
           <div className="form-group"><label className="form-label">Stock mínimo</label><input type="number" className="form-control" value={formMP.stock_min} onChange={e => setFormMP(f => ({ ...f, stock_min: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Stock actual</label><input type="number" className="form-control" value={formMP.stock} onChange={e => setFormMP(f => ({ ...f, stock: e.target.value }))} /></div>
+        </div>
+        <div className="form-group" style={{ background: 'rgba(124,179,66,0.07)', borderRadius: 'var(--radio)', padding: 10 }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600 }}>
+            <input type="checkbox" checked={!!formMP.vendible} onChange={e => setFormMP(f => ({ ...f, vendible: e.target.checked }))} /> 🏷️ Se puede vender (producto terminado)
+          </label>
+          {formMP.vendible && (
+            <div style={{ marginTop: 8 }}>
+              <label className="form-label">Precio de venta</label>
+              <MoneyInput value={formMP.precio_venta} onChange={v => setFormMP(f => ({ ...f, precio_venta: v }))} />
+              <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Podrás crearla como producto terminado y enviarla a Alegra desde el módulo de Producto Terminado.</small>
+            </div>
+          )}
         </div>
         <div className="form-grid-2">
           {!esEmpaque(formMP.categoria) && <>

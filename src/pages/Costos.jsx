@@ -492,6 +492,7 @@ export default function Costos() {
             nombre: formProd.nombre.trim(), sku: formProd.sku || null, alegra_item_id: formProd.alegra_item_id || null,
             tipo: 'base', costo_unitario: Math.round(r.costoFinal || 0),
             precio_mayor: parseFloat(formProd.precio_mayor) || 0, precio_detal: parseFloat(formProd.precio_detal) || 0, imagen_url: imagenUrl || null,
+            activo: formProd.activo !== false,
           }
           let ftId = null
           if (pid) {
