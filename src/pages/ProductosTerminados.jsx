@@ -92,7 +92,11 @@ export default function ProductosTerminados() {
   })
 
   const delProd = useMutation({
-    mutationFn: async (id) => { const { error } = await supabase.from('finished_products').delete().eq('id', id); if (error) throw error },
+    mutationFn: async (id) => {
+      const prod = productos.find(p => p.id === id)
+      if (prod?.alegra_item_id) throw new Error('Está enlazado a Alegra. Desenlázalo primero.')
+      const { error } = await supabase.from('finished_products').delete().eq('id', id); if (error) throw error
+    },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['finished_products'] }); toast('Producto eliminado ✓') },
     onError: (e) => toast(e.message, 'error'),
   })
@@ -378,7 +382,9 @@ export default function ProductosTerminados() {
                             {p.alegra_item_id && esAdmin && <button className="btn btn-xs btn-secondary" title="Quitar el enlace con Alegra (para re-enlazar o crear de nuevo)" disabled={desenlazar.isPending} onClick={() => confirmar(`¿Desenlazar "${p.nombre}" de Alegra?\nNo borra nada en Alegra; solo quita el enlace en la app.`).then(ok => ok && desenlazar.mutate(p))}>🔌✕ Desenlazar</button>}
                             {p.tipo === 'base' && <button className="btn btn-xs btn-secondary" title={p.alegra_item_id ? 'Enviar la imagen de la ficha a Alegra (experimental)' : 'Falta el ID del ítem en Alegra'} disabled={!p.alegra_item_id || enviarImagen.isPending} onClick={() => enviarImagen.mutate(p)}>🖼 Imagen</button>}
                             <button className="btn btn-xs btn-secondary" onClick={() => { setPForm({ nombre: p.nombre, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '', tipo: p.tipo || 'base', stock_min: p.stock_min || '', costo_unitario: p.costo_unitario || '', precio_mayor: p.precio_mayor || '', precio_detal: p.precio_detal || '', imagen_url: p.imagen_url || '', activo: p.activo !== false }); setPEditId(p.id); setModalProd(true) }}>✏</button>
-                            {esAdmin && <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Quitar "${p.nombre}" SOLO del catálogo de Producto Terminado?\n\nEsto NO elimina la ficha de producto ni su costo. Podrás recrearlo desde la ficha cuando quieras.`).then(ok => ok && delProd.mutate(p.id))}>✕</button>}
+                            {esAdmin && (p.alegra_item_id
+                              ? <button className="btn btn-xs btn-danger" disabled title="Está enlazado a Alegra. Desenlázalo primero para poder eliminarlo." style={{ opacity: 0.5 }}>✕</button>
+                              : <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Quitar "${p.nombre}" SOLO del catálogo de Producto Terminado?\n\nEsto NO elimina la ficha de producto ni su costo. Podrás recrearlo desde la ficha cuando quieras.`).then(ok => ok && delProd.mutate(p.id))}>✕</button>)}
                           </div>
                         </td>
                       </tr>
