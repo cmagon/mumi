@@ -23,6 +23,7 @@ export default function ProductosTerminados() {
   const [modalAjuste, setModalAjuste] = useState(null)   // producto al que se ajusta
   const [aForm, setAForm] = useState(EMPTY_AJUSTE)
   const [kardexDe, setKardexDe] = useState(null)
+  const [precSabor, setPrecSabor] = useState({ a: '', b: '' })   // precarga de surtido (ids de fichas)
   const [modalGen, setModalGen] = useState(false)        // generar surtidos
   const [selGen, setSelGen] = useState([])               // ids de base seleccionados
   const [modalEnlace, setModalEnlace] = useState(false)  // enlazar con Alegra
@@ -74,6 +75,22 @@ export default function ProductosTerminados() {
       toast('Imagen cargada ✓')
     } catch (e) { toast('No se pudo subir la imagen: ' + e.message, 'error') }
     finally { setSubiendoImg(false) }
+  }
+
+  // Precarga costo y precios de un surtido como promedio de dos fichas (queda editable)
+  const precargarSurtido = () => {
+    const a = fichas.find(f => String(f.id) === precSabor.a)
+    const b = fichas.find(f => String(f.id) === precSabor.b)
+    if (!a || !b) { toast('Elige los dos sabores', 'warning'); return }
+    const avg = (x, y) => Math.round(((Number(x) || 0) + (Number(y) || 0)) / 2)
+    setPForm(f => ({
+      ...f,
+      nombre: f.nombre?.trim() ? f.nombre : componerSurtido(a.nombre, b.nombre),
+      costo_unitario: avg(a.costo_final, b.costo_final),
+      precio_mayor: avg(a.precio_mayor, b.precio_mayor),
+      precio_detal: avg(a.precio_detal, b.precio_detal),
+    }))
+    toast('Valores precargados (puedes ajustarlos) ✓')
   }
 
   const pushAlegra = async (finished_id) => {
@@ -335,7 +352,7 @@ export default function ProductosTerminados() {
           <button className="btn btn-secondary btn-sm" onClick={() => actualizarCostos.mutate()} disabled={actualizarCostos.isPending}>{actualizarCostos.isPending ? 'Actualizando...' : '💲 Actualizar costos desde fichas'}</button>
           {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => sincronizarTodo.mutate()} disabled={sincronizarTodo.isPending}>{sincronizarTodo.isPending ? 'Sincronizando...' : '🔗 Sincronizar todo con Alegra'}</button>}
           <button className="btn btn-secondary btn-sm" onClick={() => { setSelGen(baseProds.map(p => p.id)); setModalGen(true) }}>🔀 Generar surtidos</button>
-          <button className="btn btn-primary btn-sm" onClick={() => { setPForm(EMPTY_PROD); setPEditId(null); setModalProd(true) }}>+ Nuevo producto</button>
+          <button className="btn btn-primary btn-sm" onClick={() => { setPForm(EMPTY_PROD); setPEditId(null); setPrecSabor({ a: '', b: '' }); setModalProd(true) }}>+ Nuevo producto</button>
         </div>
       </div>
 
@@ -407,6 +424,23 @@ export default function ProductosTerminados() {
           <div className="form-group"><label className="form-label">SKU / Referencia (Alegra)</label><input className="form-control" value={pForm.sku} onChange={e => setPForm(f => ({ ...f, sku: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">ID ítem en Alegra</label><input className="form-control" value={pForm.alegra_item_id} onChange={e => setPForm(f => ({ ...f, alegra_item_id: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Stock mínimo (alerta)</label><input type="number" className="form-control" value={pForm.stock_min} onChange={e => setPForm(f => ({ ...f, stock_min: e.target.value }))} min={0} /></div>
+          {pForm.tipo === 'surtido' && (
+            <div className="form-group" style={{ gridColumn: '1 / -1', background: 'rgba(124,179,66,0.07)', borderRadius: 6, padding: 10 }}>
+              <label className="form-label">↺ Precargar promedio de dos sabores</label>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                <select className="form-control" style={{ maxWidth: 200 }} value={precSabor.a} onChange={e => setPrecSabor(s => ({ ...s, a: e.target.value }))}>
+                  <option value="">Sabor 1...</option>
+                  {fichas.filter(f => (f.tipo || '') !== 'subproducto').map(f => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+                </select>
+                <select className="form-control" style={{ maxWidth: 200 }} value={precSabor.b} onChange={e => setPrecSabor(s => ({ ...s, b: e.target.value }))}>
+                  <option value="">Sabor 2...</option>
+                  {fichas.filter(f => (f.tipo || '') !== 'subproducto').map(f => <option key={f.id} value={f.id}>{f.nombre}</option>)}
+                </select>
+                <button type="button" className="btn btn-sm btn-secondary" onClick={precargarSurtido}>Precargar</button>
+              </div>
+              <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Carga costo y precios como promedio de las dos fichas; luego puedes ajustarlos manualmente.</small>
+            </div>
+          )}
           <div className="form-group">
             <label className="form-label">Precio venta mayor {pForm.tipo === 'base' ? '(desde la ficha)' : ''}</label>
             {pForm.tipo === 'base'
@@ -431,9 +465,11 @@ export default function ProductosTerminados() {
             {subiendoImg && <small style={{ color: 'var(--texto-suave)' }}>Subiendo…</small>}
           </div>
           <div className="form-group">
-            <label className="form-label">Costo unitario {pForm.tipo === 'base' ? '(desde la ficha)' : '(promedio de las fichas)'}</label>
-            <div className="form-control" style={{ background: 'var(--crema)', color: 'var(--texto-suave)' }}>$ {Number(pForm.costo_unitario || 0).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>{pForm.tipo === 'base' ? 'Se sincroniza automáticamente desde la ficha de producto.' : 'Es el promedio del costo de las dos fichas combinadas (no editable).'}</small>
+            <label className="form-label">Costo unitario {pForm.tipo === 'base' ? '(desde la ficha)' : '(editable)'}</label>
+            {pForm.tipo === 'base'
+              ? <div className="form-control" style={{ background: 'var(--crema)', color: 'var(--texto-suave)' }}>$ {Number(pForm.costo_unitario || 0).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
+              : <input type="number" className="form-control" value={pForm.costo_unitario} onChange={e => setPForm(f => ({ ...f, costo_unitario: e.target.value }))} min={0} step="any" />}
+            {pForm.tipo === 'base' && <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Se sincroniza automáticamente desde la ficha.</small>}
           </div>
           <div className="form-group" style={{ gridColumn: '1 / -1' }}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer' }}><input type="checkbox" checked={pForm.activo} onChange={e => setPForm(f => ({ ...f, activo: e.target.checked }))} /> Activo</label>
