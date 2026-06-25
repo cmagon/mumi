@@ -52,14 +52,14 @@ Deno.serve(async (req) => {
     if (!imgRes.ok) return json({ error: 'No se pudo descargar la imagen de la app' }, 400)
     const ct = imgRes.headers.get('content-type') || 'image/jpeg'
     const ext = ct.includes('png') ? 'png' : ct.includes('webp') ? 'webp' : 'jpg'
-    const dataUri = `data:${ct};base64,${b64(await imgRes.arrayBuffer())}`
-    void ext
+    const base64 = b64(await imgRes.arrayBuffer())
+    const nombreArchivo = `${(fp.nombre || 'producto').replace(/[^a-z0-9]/gi, '_')}.${ext}`
 
-    // Alegra: la imagen del ítem se envía en el campo 'image' como data URI base64 (JSON)
+    // Alegra: imagen como objeto { name, data } con base64 puro
     const res = await fetch(`${ALEGRA_BASE}/items/${fp.alegra_item_id}`, {
       method: 'PUT',
       headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: dataUri }),
+      body: JSON.stringify({ image: { name: nombreArchivo, data: base64 } }),
     })
     const txt = await res.text()
     return json({ ok: res.ok, status: res.status, alegra: txt.slice(0, 1500) })
