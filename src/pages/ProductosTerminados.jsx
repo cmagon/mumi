@@ -224,6 +224,12 @@ export default function ProductosTerminados() {
       if (error) throw error
       const r = (data?.resultados || [])[0]
       if (r && r.estado === 'error') throw new Error(r.detalle || 'Error en Alegra')
+      console.log('Sincronización Alegra:', r?.debug)
+      const d = r?.debug
+      if (d) {
+        if (d.lista_detal === '(sin mapear)') toast('⚠ No hay lista "Detal" mapeada en ⚙ Configurar Alegra', 'warning')
+        else if (!(d.precio_detal > 0)) toast('⚠ Este producto tiene precio detal en $0', 'warning')
+      }
       return p.nombre
     },
     onSuccess: (nombre) => toast(`"${nombre}" sincronizado con Alegra ✓`),

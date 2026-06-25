@@ -71,12 +71,13 @@ async function pushDatos(authHeader: string, itemId: string, costo?: number, nom
   // Categoría y código UNSPSC (Colombia)
   if (catId) body.itemCategory = { id: Number(catId) }
   if (unspsc && unspsc.trim()) body.productKey = unspsc.trim()
-  if (Object.keys(body).length === 0) return
+  if (Object.keys(body).length === 0) return { precio_enviado: null, status: 'sin cambios' }
   const res = await fetch(`${ALEGRA_BASE}/items/${itemId}`, {
     method: 'PUT', headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
   })
   const txt = await res.text()
   if (!res.ok) throw new Error(`PUT item ${itemId}: ${res.status} ${txt}`)
+  return { precio_enviado: body.price ?? null, status: res.status }
 }
 
 // 2) Ajusta el stock vía ajuste de inventario (Alegra usa DELTA in/out, no valor absoluto).
@@ -120,9 +121,10 @@ Deno.serve(async (req) => {
       if (!p.alegra_item_id) { resultados.push({ producto: p.nombre, estado: 'sin alegra_item_id' }); continue }
       try {
         const id = String(p.alegra_item_id)
-        await pushDatos(authHeader, id, Number(p.costo_unitario || 0), p.nombre, Number(p.precio_mayor || 0), Number(p.precio_detal || 0), listaMayor, listaDetal, p.unidad_medida, p.codigo_unspsc, p.categoria_alegra_id)
+        const datosRes = await pushDatos(authHeader, id, Number(p.costo_unitario || 0), p.nombre, Number(p.precio_mayor || 0), Number(p.precio_detal || 0), listaMayor, listaDetal, p.unidad_medida, p.codigo_unspsc, p.categoria_alegra_id)
         const stockRes = await ajustarStock(authHeader, id, Number(p.stock || 0), Number(p.costo_unitario || 0))
-        resultados.push({ producto: p.nombre, stock: Number(p.stock || 0), ajuste: stockRes, estado: 'ok' })
+        resultados.push({ producto: p.nombre, stock: Number(p.stock || 0), ajuste: stockRes, estado: 'ok',
+          debug: { precio_detal: Number(p.precio_detal || 0), lista_mayor: listaMayor || '(sin mapear)', lista_detal: listaDetal || '(sin mapear)', precio_enviado: datosRes?.precio_enviado } })
       } catch (e) {
         resultados.push({ producto: p.nombre, estado: 'error', detalle: String((e as Error)?.message || e) })
       }
