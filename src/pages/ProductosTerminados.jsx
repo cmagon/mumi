@@ -6,6 +6,7 @@ import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
+import MoneyInput from '../components/ui/MoneyInput'
 
 const EMPTY_PROD = { nombre: '', sku: '', alegra_item_id: '', tipo: 'base', stock_min: '', costo_unitario: '', precio_mayor: '', precio_detal: '', imagen_url: '', activo: true }
 const EMPTY_AJUSTE = { tipo: 'entrada', cantidad: '', lote: '', motivo: '' }
@@ -445,13 +446,13 @@ export default function ProductosTerminados() {
             <label className="form-label">Precio venta mayor {pForm.tipo === 'base' ? '(desde la ficha)' : ''}</label>
             {pForm.tipo === 'base'
               ? <div className="form-control" style={{ background: 'var(--crema)', color: 'var(--texto-suave)' }}>$ {Number(pForm.precio_mayor || 0).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-              : <input type="number" className="form-control" value={pForm.precio_mayor} onChange={e => setPForm(f => ({ ...f, precio_mayor: e.target.value }))} min={0} />}
+              : <MoneyInput value={pForm.precio_mayor} onChange={v => setPForm(f => ({ ...f, precio_mayor: v }))} />}
           </div>
           <div className="form-group">
             <label className="form-label">Precio detal / distribuidores {pForm.tipo === 'base' ? '(desde la ficha)' : ''}</label>
             {pForm.tipo === 'base'
               ? <div className="form-control" style={{ background: 'var(--crema)', color: 'var(--texto-suave)' }}>$ {Number(pForm.precio_detal || 0).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-              : <input type="number" className="form-control" value={pForm.precio_detal} onChange={e => setPForm(f => ({ ...f, precio_detal: e.target.value }))} min={0} />}
+              : <MoneyInput value={pForm.precio_detal} onChange={v => setPForm(f => ({ ...f, precio_detal: v }))} />}
           </div>
           <div className="form-group" style={{ gridColumn: '1 / -1' }}>
             <label className="form-label">Imagen del producto</label>
@@ -468,7 +469,7 @@ export default function ProductosTerminados() {
             <label className="form-label">Costo unitario {pForm.tipo === 'base' ? '(desde la ficha)' : '(editable)'}</label>
             {pForm.tipo === 'base'
               ? <div className="form-control" style={{ background: 'var(--crema)', color: 'var(--texto-suave)' }}>$ {Number(pForm.costo_unitario || 0).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-              : <input type="number" className="form-control" value={pForm.costo_unitario} onChange={e => setPForm(f => ({ ...f, costo_unitario: e.target.value }))} min={0} step="any" />}
+              : <MoneyInput value={pForm.costo_unitario} onChange={v => setPForm(f => ({ ...f, costo_unitario: v }))} />}
             {pForm.tipo === 'base' && <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Se sincroniza automáticamente desde la ficha.</small>}
           </div>
           <div className="form-group" style={{ gridColumn: '1 / -1' }}>
