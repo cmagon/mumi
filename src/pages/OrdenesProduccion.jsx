@@ -204,8 +204,15 @@ export default function OrdenesProduccion() {
     return o?.producto || ''
   }
   const autoSurtido = (base, loteMezcla) => { const otro = productoDeLote(loteMezcla); return otro ? componerSurtido(base, otro) : '' }
-  // Lote de la caja del surtido = el ÚLTIMO lote con el que se empacó (no la fecha de rotulado)
-  const loteCaja = (mezcla) => { const ts = String(mezcla || '').split(/[,;]/).map(s => s.trim()).filter(Boolean); return ts[ts.length - 1] || '' }
+  // Lote de la caja (rótulo final) = el lote MÁS RECIENTE entre el propio y los combinados.
+  // Formato NNAA (numeroaño): los últimos 2 dígitos son el año y el resto el consecutivo.
+  // Ej.: entre 6926 y 7026 → 7026 (mayor consecutivo en el mismo año).
+  const loteCaja = (mezcla, principal) => {
+    const ts = [principal, ...String(mezcla || '').split(/[,;]/)].map(s => String(s || '').trim()).filter(Boolean)
+    if (!ts.length) return ''
+    const rank = (l) => { const m = l.match(/^(\d+)(\d{2})$/); return m ? (parseInt(m[2]) * 100000 + parseInt(m[1])) : -1 }
+    return ts.slice().sort((a, b) => { const ra = rank(a), rb = rank(b); if (ra !== rb) return rb - ra; return a < b ? 1 : -1 })[0]
+  }
   const reiniciarNumeracion = async () => {
     const r = await pedir('Número inicial para la numeración de órdenes (la primera orden mostrará este número):', { defaultValue: String(ordenStartNum) })
     if (r == null) return
@@ -513,7 +520,7 @@ export default function OrdenesProduccion() {
       <table class="campos">
         ${esSurtido ? `
           <tr><td class="lbl">Lote producto</td><td><b>${rotLote || '(lote original)'}</b> — mantiene el formato del lote original</td></tr>
-          <tr><td class="lbl">Lote de la caja</td><td><b>${loteCaja(loteMezcla) || rotLote || '(sin especificar)'}</b> (último lote del surtido)</td></tr>
+          <tr><td class="lbl">Lote de la caja</td><td><b>${loteCaja(loteMezcla, rotLote) || rotLote || '(sin especificar)'}</b> (lote más reciente del surtido)</td></tr>
           <tr><td class="lbl">Empacado surtido con lote(s)</td><td><b>${loteMezcla || '(sin especificar)'}</b></td></tr>
           <tr><td class="lbl">Vence (Exp.)</td><td><b>${ddmmaa(rotVence)}</b> (ddmmaa)</td></tr>
         ` : `
@@ -753,7 +760,7 @@ export default function OrdenesProduccion() {
       if (!r.queued && autoAprob) {
         const esSurt = prepSurtido && prepProductoSurtido
         const cantStock = esSurt ? (parseFloat(prepSurtidoCantidad) || 0) : unidadesTotal
-        await sumarProductoTerminado(o, cantStock, esSurt ? prepProductoSurtido : o.producto, esSurt ? (loteCaja(prepLoteMezcla) || prepLote) : prepLote)
+        await sumarProductoTerminado(o, cantStock, esSurt ? prepProductoSurtido : o.producto, esSurt ? (loteCaja(prepLoteMezcla, prepLote) || prepLote) : prepLote)
       }
       // Saldos de mezcla en proceso (solo en línea): descontar los consumidos y crear el sobrante nuevo
       if (!r.queued) {
@@ -1061,7 +1068,7 @@ export default function OrdenesProduccion() {
         {
           const esSurt = o.surtido && o.producto_surtido
           const cantStock = esSurt ? (Number(o.surtido_cantidad) || 0) : (o.cantidad_result || 0)
-          await sumarProductoTerminado(o, cantStock, esSurt ? o.producto_surtido : o.producto, esSurt ? (loteCaja(o.lote_mezcla) || o.lote) : o.lote)
+          await sumarProductoTerminado(o, cantStock, esSurt ? o.producto_surtido : o.producto, esSurt ? (loteCaja(o.lote_mezcla, o.lote) || o.lote) : o.lote)
         }
       }
       // Notificar al operario que su orden fue aprobada
@@ -1645,7 +1652,7 @@ export default function OrdenesProduccion() {
                   <label className="form-label" style={{ marginTop: 8 }}>Cantidad empacada surtida (unidades/cajas) *</label>
                   <input type="number" className="form-control" value={prepSurtidoCantidad} onChange={e => setPrepSurtidoCantidad(e.target.value)} min={0} placeholder="Unidades o cajas empacadas surtidas" />
                   <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
-                    Es el <strong>stock</strong> que se suma al producto terminado surtido. El <strong>lote de la caja</strong> será el último lote del surtido: <strong>{loteCaja(prepLoteMezcla) || '(elige el lote arriba)'}</strong>.
+                    Es el <strong>stock</strong> que se suma al producto terminado surtido. El <strong>lote de la caja (rótulo final)</strong> será el más reciente: <strong>{loteCaja(prepLoteMezcla, prepLote) || '(elige el lote arriba)'}</strong>.
                   </small>
                 </div>
               )}
