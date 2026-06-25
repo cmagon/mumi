@@ -483,13 +483,22 @@ export default function Costos() {
         datos._newId = ins?.id
       }
 
-      // Sincroniza el catálogo de PRODUCTO TERMINADO (base) con la ficha (no toca el stock existente)
+      // Sincroniza el catálogo de PRODUCTO TERMINADO (base) con la ficha (no toca el stock existente).
+      // Si la ficha se renombró, se actualiza por product_id (no crea duplicado).
       if ((formProd.tipo || '') !== 'subproducto' && formProd.nombre.trim()) {
         try {
-          await supabase.from('finished_products').upsert(
-            { nombre: formProd.nombre.trim(), product_id: editingId || datos._newId || null, sku: formProd.sku || null, alegra_item_id: formProd.alegra_item_id || null, tipo: 'base', costo_unitario: Math.round(r.costoFinal || 0) },
-            { onConflict: 'nombre' }
-          )
+          const pid = editingId || datos._newId || null
+          const campos = {
+            nombre: formProd.nombre.trim(), sku: formProd.sku || null, alegra_item_id: formProd.alegra_item_id || null,
+            tipo: 'base', costo_unitario: Math.round(r.costoFinal || 0),
+            precio_mayor: parseFloat(formProd.precio_mayor) || 0, imagen_url: imagenUrl || null,
+          }
+          let actualizado = false
+          if (pid) {
+            const { data: ya } = await supabase.from('finished_products').select('id').eq('product_id', pid).maybeSingle()
+            if (ya) { await supabase.from('finished_products').update(campos).eq('id', ya.id); actualizado = true }
+          }
+          if (!actualizado) await supabase.from('finished_products').upsert({ ...campos, product_id: pid }, { onConflict: 'nombre' })
         } catch (e) { console.warn('No se pudo sincronizar el catálogo de terminados:', e) }
       }
 

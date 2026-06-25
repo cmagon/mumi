@@ -7,7 +7,7 @@ import { useConfirm } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
 
-const EMPTY_PROD = { nombre: '', sku: '', alegra_item_id: '', tipo: 'base', stock_min: '', costo_unitario: '', activo: true }
+const EMPTY_PROD = { nombre: '', sku: '', alegra_item_id: '', tipo: 'base', stock_min: '', costo_unitario: '', precio_mayor: '', imagen_url: '', activo: true }
 const EMPTY_AJUSTE = { tipo: 'entrada', cantidad: '', lote: '', motivo: '' }
 
 export default function ProductosTerminados() {
@@ -57,6 +57,22 @@ export default function ProductosTerminados() {
     return productos.filter(p => !q || (p.nombre || '').toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q))
   }, [productos, buscar])
 
+  const [subiendoImg, setSubiendoImg] = useState(false)
+  const subirImagen = async (file) => {
+    if (!file) return
+    setSubiendoImg(true)
+    try {
+      const ext = file.name.split('.').pop()
+      const path = `terminados/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`
+      const { error } = await supabase.storage.from('product-images').upload(path, file, { upsert: true })
+      if (error) throw error
+      const { data } = supabase.storage.from('product-images').getPublicUrl(path)
+      setPForm(f => ({ ...f, imagen_url: data.publicUrl }))
+      toast('Imagen cargada ✓')
+    } catch (e) { toast('No se pudo subir la imagen: ' + e.message, 'error') }
+    finally { setSubiendoImg(false) }
+  }
+
   const pushAlegra = async (finished_id) => {
     try { await supabase.functions.invoke('alegra-push-stock', { body: { finished_id } }) } catch (e) { console.warn('No se pudo sincronizar con Alegra:', e) }
   }
@@ -64,7 +80,7 @@ export default function ProductosTerminados() {
   const saveProd = useMutation({
     mutationFn: async () => {
       if (!pForm.nombre.trim()) throw new Error('Indica el nombre del producto terminado')
-      const payload = { nombre: pForm.nombre.trim(), sku: pForm.sku || null, alegra_item_id: pForm.alegra_item_id || null, tipo: pForm.tipo, stock_min: parseFloat(pForm.stock_min) || 0, costo_unitario: parseFloat(pForm.costo_unitario) || 0, activo: pForm.activo }
+      const payload = { nombre: pForm.nombre.trim(), sku: pForm.sku || null, alegra_item_id: pForm.alegra_item_id || null, tipo: pForm.tipo, stock_min: parseFloat(pForm.stock_min) || 0, costo_unitario: parseFloat(pForm.costo_unitario) || 0, precio_mayor: parseFloat(pForm.precio_mayor) || 0, imagen_url: pForm.imagen_url || null, activo: pForm.activo }
       if (pEditId) { const { error } = await supabase.from('finished_products').update(payload).eq('id', pEditId); if (error) throw error }
       else { const { error } = await supabase.from('finished_products').insert(payload); if (error) throw error }
     },
@@ -103,6 +119,19 @@ export default function ProductosTerminados() {
     onError: (e) => toast(e.message, 'error'),
   })
 
+  const enviarImagen = useMutation({
+    mutationFn: async (p) => {
+      if (!p.alegra_item_id) throw new Error('Enlázalo primero con un ítem de Alegra')
+      const { data, error } = await supabase.functions.invoke('alegra-push-image', { body: { finished_id: p.id } })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      if (!data?.ok) throw new Error('Alegra respondió ' + (data?.status || '') + ': ' + (data?.alegra || '').slice(0, 200))
+      return p.nombre
+    },
+    onSuccess: (nombre) => toast(`Imagen enviada a Alegra para "${nombre}" ✓`),
+    onError: (e) => toast('Imagen: ' + e.message, 'error'),
+  })
+
   const sincronizarUno = useMutation({
     mutationFn: async (p) => {
       if (!p.alegra_item_id) throw new Error('Asigna primero el ID del ítem en Alegra')
@@ -110,6 +139,8 @@ export default function ProductosTerminados() {
       if (error) throw error
       const r = (data?.resultados || [])[0]
       if (r && r.estado === 'error') throw new Error(r.detalle || 'Error en Alegra')
+      // Si tiene imagen (propia o de la ficha), también la envía
+      if (p.imagen_url || p.product_id) { try { await supabase.functions.invoke('alegra-push-image', { body: { finished_id: p.id } }) } catch (e) { console.warn('Imagen:', e) } }
       return p.nombre
     },
     onSuccess: (nombre) => toast(`"${nombre}" sincronizado con Alegra ✓`),
@@ -296,7 +327,8 @@ export default function ProductosTerminados() {
                             <button className="btn btn-xs btn-primary" onClick={() => { setModalAjuste(p); setAForm(EMPTY_AJUSTE) }}>⚖ Ajustar</button>
                             <button className="btn btn-xs btn-secondary" onClick={() => setKardexDe(p)}>📜 Kardex</button>
                             <button className="btn btn-xs btn-secondary" title={p.alegra_item_id ? 'Sincronizar stock y costo con Alegra' : 'Falta el ID del ítem en Alegra'} disabled={!p.alegra_item_id || sincronizarUno.isPending} onClick={() => sincronizarUno.mutate(p)}>🔗 Sincronizar</button>
-                            <button className="btn btn-xs btn-secondary" onClick={() => { setPForm({ nombre: p.nombre, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '', tipo: p.tipo || 'base', stock_min: p.stock_min || '', costo_unitario: p.costo_unitario || '', activo: p.activo !== false }); setPEditId(p.id); setModalProd(true) }}>✏</button>
+                            {p.tipo === 'base' && <button className="btn btn-xs btn-secondary" title={p.alegra_item_id ? 'Enviar la imagen de la ficha a Alegra (experimental)' : 'Falta el ID del ítem en Alegra'} disabled={!p.alegra_item_id || enviarImagen.isPending} onClick={() => enviarImagen.mutate(p)}>🖼 Imagen</button>}
+                            <button className="btn btn-xs btn-secondary" onClick={() => { setPForm({ nombre: p.nombre, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '', tipo: p.tipo || 'base', stock_min: p.stock_min || '', costo_unitario: p.costo_unitario || '', precio_mayor: p.precio_mayor || '', imagen_url: p.imagen_url || '', activo: p.activo !== false }); setPEditId(p.id); setModalProd(true) }}>✏</button>
                             {esAdmin && <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Quitar "${p.nombre}" SOLO del catálogo de Producto Terminado?\n\nEsto NO elimina la ficha de producto ni su costo. Podrás recrearlo desde la ficha cuando quieras.`).then(ok => ok && delProd.mutate(p.id))}>✕</button>}
                           </div>
                         </td>
@@ -320,6 +352,18 @@ export default function ProductosTerminados() {
           <div className="form-group"><label className="form-label">SKU / Referencia (Alegra)</label><input className="form-control" value={pForm.sku} onChange={e => setPForm(f => ({ ...f, sku: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">ID ítem en Alegra</label><input className="form-control" value={pForm.alegra_item_id} onChange={e => setPForm(f => ({ ...f, alegra_item_id: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Stock mínimo (alerta)</label><input type="number" className="form-control" value={pForm.stock_min} onChange={e => setPForm(f => ({ ...f, stock_min: e.target.value }))} min={0} /></div>
+          <div className="form-group"><label className="form-label">Precio venta mayor</label><input type="number" className="form-control" value={pForm.precio_mayor} onChange={e => setPForm(f => ({ ...f, precio_mayor: e.target.value }))} min={0} /></div>
+          <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+            <label className="form-label">Imagen del producto</label>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              {pForm.imagen_url
+                ? <img src={pForm.imagen_url} alt="" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6 }} />
+                : <div style={{ width: 56, height: 56, borderRadius: 6, background: 'var(--crema)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--texto-suave)' }}>🖼</div>}
+              <input type="file" accept="image/*" onChange={e => subirImagen(e.target.files?.[0])} disabled={subiendoImg} />
+              {pForm.imagen_url && <button type="button" className="btn btn-xs btn-secondary" onClick={() => setPForm(f => ({ ...f, imagen_url: '' }))}>Quitar</button>}
+            </div>
+            {subiendoImg && <small style={{ color: 'var(--texto-suave)' }}>Subiendo…</small>}
+          </div>
           <div className="form-group">
             <label className="form-label">Costo unitario {pForm.tipo === 'base' ? '(desde la ficha)' : '(promedio de las fichas)'}</label>
             <div className="form-control" style={{ background: 'var(--crema)', color: 'var(--texto-suave)' }}>$ {Number(pForm.costo_unitario || 0).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>

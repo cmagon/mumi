@@ -34,14 +34,17 @@ async function getCreds(supabase: any) {
   return { email, token }
 }
 
-// Actualiza la cantidad disponible (y el costo unitario si se envía) de un ítem en Alegra
-async function pushItem(authHeader: string, itemId: string, cantidad: number, costo?: number) {
+// Sincroniza nombre, precio, costo y stock de un ítem en Alegra
+async function pushItem(authHeader: string, itemId: string, cantidad: number, costo?: number, nombre?: string, precio?: number) {
   const inventory: Record<string, number> = { availableQuantity: cantidad }
   if (typeof costo === 'number' && costo > 0) inventory.unitCost = costo
+  const body: Record<string, unknown> = { inventory }
+  if (nombre && nombre.trim()) body.name = nombre.trim()
+  if (typeof precio === 'number' && precio > 0) body.price = precio
   const res = await fetch(`${ALEGRA_BASE}/items/${itemId}`, {
     method: 'PUT',
     headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ inventory }),
+    body: JSON.stringify(body),
   })
   const txt = await res.text()
   if (!res.ok) throw new Error(`Alegra item ${itemId}: ${res.status} ${txt}`)
@@ -57,7 +60,7 @@ Deno.serve(async (req) => {
   const authHeader = 'Basic ' + btoa(`${email}:${token}`)
   try {
     const { finished_id, all } = await req.json().catch(() => ({}))
-    let query = supabase.from('finished_products').select('id, nombre, sku, alegra_item_id, stock, costo_unitario')
+    let query = supabase.from('finished_products').select('id, nombre, sku, alegra_item_id, stock, costo_unitario, precio_mayor')
     if (!all) query = query.eq('id', finished_id)
     else query = query.not('alegra_item_id', 'is', null)
     const { data: prods } = await query
@@ -67,7 +70,7 @@ Deno.serve(async (req) => {
     for (const p of prods) {
       if (!p.alegra_item_id) { resultados.push({ producto: p.nombre, estado: 'sin alegra_item_id' }); continue }
       try {
-        await pushItem(authHeader, String(p.alegra_item_id), Number(p.stock || 0), Number(p.costo_unitario || 0))
+        await pushItem(authHeader, String(p.alegra_item_id), Number(p.stock || 0), Number(p.costo_unitario || 0), p.nombre, Number(p.precio_mayor || 0))
         resultados.push({ producto: p.nombre, cantidad: Number(p.stock || 0), costo: Number(p.costo_unitario || 0), estado: 'ok' })
       } catch (e) {
         resultados.push({ producto: p.nombre, estado: 'error', detalle: String((e as Error)?.message || e) })
