@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Routes, Route, Navigate, Outlet, useNavigate } from 'react-router-dom'
-import { useQuery, useIsFetching } from '@tanstack/react-query'
+import { useQuery } from '@tanstack/react-query'
 import { useAuth } from './context/AuthContext'
 import { supabase } from './lib/supabase'
 import { puedeVer } from './lib/permisos'
@@ -56,23 +56,6 @@ function useResponsiveTableLabels() {
   }, [])
 }
 
-// Indicador global de carga: aparece cuando alguna consulta está trayendo datos
-function GlobalLoading() {
-  const fetching = useIsFetching()
-  if (!fetching) return null
-  return (
-    <div style={{
-      position: 'fixed', top: 12, right: 12, zIndex: 3000,
-      background: 'var(--selva)', color: 'var(--crema)', borderRadius: 20,
-      padding: '6px 14px', fontSize: '0.8rem', fontWeight: 600,
-      boxShadow: '0 4px 14px rgba(0,0,0,0.25)', display: 'flex', alignItems: 'center', gap: 8,
-    }}>
-      <span style={{ display: 'inline-block', width: 14, height: 14, border: '2px solid rgba(245,240,232,0.4)', borderTopColor: 'var(--dorado)', borderRadius: '50%', animation: 'spin 0.7s linear infinite' }} />
-      Cargando…
-    </div>
-  )
-}
-
 function ProtectedLayout() {
   const { user, profile, loading, signOut } = useAuth()
   const navigate = useNavigate()
@@ -113,7 +96,6 @@ function ProtectedLayout() {
 
   return (
     <div id="app">
-      <GlobalLoading />
       <Sidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}

@@ -157,9 +157,11 @@ body {
 .btn-logout:hover { background: rgba(192,57,43,0.2); border-color: var(--rojo); color: #ff7675; }
 
 /* Header mÃ³vil */
+/* Header superior SIEMPRE visible (contiene las notificaciones). En escritorio empieza después
+   del menú lateral; cuando el menú se colapsa (≤1480) ocupa todo el ancho. */
 .mobile-header {
-  display: none;
-  position: fixed; top: 0; left: 0; right: 0;
+  display: flex;
+  position: fixed; top: 0; left: var(--sidebar-w); right: 0;
   height: var(--header-h);
   background: var(--selva);
   z-index: 200;
@@ -167,6 +169,11 @@ body {
   padding: 0 16px;
   gap: 12px;
   border-bottom: 1px solid rgba(200,169,74,0.2);
+}
+/* En escritorio (menú fijo visible) el header solo muestra las notificaciones a la derecha */
+@media (min-width: 1481px) {
+  .mobile-header .hamburger, .mobile-header .mobile-brand { display: none; }
+  .mobile-header { justify-content: flex-end; height: 52px; }
 }
 .hamburger {
   background: none; border: none; cursor: pointer;
@@ -187,7 +194,7 @@ body {
   flex: 1;
   min-width: 0;            /* clave: permite que las tablas anchas hagan scroll en vez de empujar la pÃ¡gina */
   max-width: 100%;
-  padding: 32px;
+  padding: 64px 32px 32px;   /* deja espacio para el header superior fijo (notificaciones) */
   background: var(--crema);
 }
 
@@ -475,7 +482,7 @@ html { -webkit-text-size-adjust: 100%; }
 @media (max-width: 1480px) {
   .sidebar { transform: translateX(-100%); }
   .sidebar.open { transform: translateX(0); }
-  .mobile-header { display: flex; }
+  .mobile-header { left: 0; }
   .main-content { margin-left: 0; padding: 76px 28px 28px; }
 }
 /* Escritorio intermedio (1025–1480px con menú colapsado): tabla ligeramente compacta para que quepa. */

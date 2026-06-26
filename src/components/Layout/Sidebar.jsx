@@ -4,7 +4,6 @@ import { useAuth } from '../../context/AuthContext'
 import { getRolLabel } from '../../lib/businessLogic'
 import { puedeVer, RUTA_MODULO } from '../../lib/permisos'
 import { getConfig, loadConfig } from '../../lib/appConfig'
-import NotificationBell from '../NotificationBell'
 import ChangePasswordModal from '../ChangePasswordModal'
 
 const NAV_ITEMS = [
@@ -95,10 +94,6 @@ export default function Sidebar({ open, onClose, onLogout, puedeFichar, onRegist
                   {item.label}
                 </NavLink>
               )
-              // Las notificaciones aparecen justo debajo del Tablero Principal
-              if (item.to === '/dashboard') {
-                out.push(<NotificationBell key="notif-nav" variant="nav" />)
-              }
             })
             return out
           })()}

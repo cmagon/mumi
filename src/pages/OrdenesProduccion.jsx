@@ -9,6 +9,7 @@ import { useReorder } from '../hooks/useReorder'
 import TimeField from '../components/ui/TimeField'
 import { fFecha, fNum, fCOP, componerSurtido } from '../lib/businessLogic'
 import { setBusy } from '../lib/busy'
+import Cargando from '../components/ui/Cargando'
 import { useToast } from '../hooks/useToast'
 import { useConfirm, usePrompt } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
@@ -81,6 +82,10 @@ export default function OrdenesProduccion() {
   const [prepFechaInicio, setPrepFechaInicio] = useState('')
   const [prepProcesos, setPrepProcesos] = useState([{ nombre: '', inicio: '', fin: '' }])
   const ordProc = useReorder(setPrepProcesos)
+  // Modo de tiempos: básico (solo hora inicio/fin) o avanzado (todos los procesos)
+  const [prepModoAvanzado, setPrepModoAvanzado] = useState(false)
+  const [prepHoraInicio, setPrepHoraInicio] = useState('')
+  const [prepHoraFin, setPrepHoraFin] = useState('')
   const [autoguardar, setAutoguardar] = useState(true)
   const [autoSavedAt, setAutoSavedAt] = useState('')
   const [modalProceso, setModalProceso] = useState(false)
@@ -93,6 +98,7 @@ export default function OrdenesProduccion() {
   const [prepConforme, setPrepConforme] = useState(true)
   const [prepSurtido, setPrepSurtido] = useState(false)
   const [prepLoteMezcla, setPrepLoteMezcla] = useState('')
+  const [nuevoLoteMezcla, setNuevoLoteMezcla] = useState('')
   const [prepProductoSurtido, setPrepProductoSurtido] = useState('')
   // Subporciones (solo si el producto "se porciona")
   const [prepPorciona, setPrepPorciona] = useState(false)
@@ -148,10 +154,11 @@ export default function OrdenesProduccion() {
   const [fotoPrev, setFotoPrev] = useState('')
   const [saving, setSaving] = useState(false)
 
-  const { data: ordenes = [] } = useQuery({
+  const { data: ordenes = [], isLoading: loadingOrdenes, isFetching: fetchingOrdenes, isSuccess: okOrdenes } = useQuery({
     queryKey: ['production_orders'],
     queryFn: async () => { const { data } = await supabase.from('production_orders').select('*').order('created_at', { ascending: false }); return data || [] },
   })
+  const cargandoOrdenes = loadingOrdenes || (fetchingOrdenes && !okOrdenes)
 
   // Lotes de MP en stock (para sugerencia PEPS y alertas de vencimiento al crear la orden)
   const { data: lotesMP = [] } = useQuery({
@@ -210,6 +217,9 @@ export default function OrdenesProduccion() {
   // Lote de la caja (rótulo final) = el lote MÁS RECIENTE entre el propio y los combinados.
   // Formato NNAA (numeroaño): los últimos 2 dígitos son el año y el resto el consecutivo.
   // Ej.: entre 6926 y 7026 → 7026 (mayor consecutivo en el mismo año).
+  // Si la cantidad planeada equivale (±10%) a un número entero de baches, lo redondea a entero
+  // para que los ingredientes calculen exacto (ej: poner 87 = 1 bache → baches = 1, no 1.0035).
+  const snapBaches = (b) => { if (!(b > 0)) return b; const r = Math.round(b); return Math.abs(b - r) <= 0.1 ? r : b }
   const loteCaja = (mezcla, principal) => {
     const ts = [principal, ...String(mezcla || '').split(/[,;]/)].map(s => String(s || '').trim()).filter(Boolean)
     if (!ts.length) return ''
@@ -319,8 +329,9 @@ export default function OrdenesProduccion() {
   // Carga datos de la orden (ingredientes calculados + lote/vence/fecha/procesos)
   const prepararDatos = async (o) => {
     setOrdenPrep(o); setPrepIngs([]); setPrepInfo(null); setPrepDatos(null); setPrepFicha(null)
-    setPrepLote(o.lote || ''); setPrepVence(o.vence || '')
+    setPrepLote(o.lote || siguienteLoteSugerido || ''); setPrepVence(o.vence || '')
     setPrepFechaInicio(o.fecha_inicio || '')
+    setPrepModoAvanzado(!!o.modo_avanzado); setPrepHoraInicio(o.inicio || ''); setPrepHoraFin(o.fin || '')
     setPrepDestajo(Array.isArray(o.destajo) ? o.destajo : [])
     // Para recetas (sin ficha) se usan los tiempos guardados; para productos se arman desde la ficha más abajo
     setPrepProcesos(Array.isArray(o.procesos_tiempos) ? o.procesos_tiempos : [])
@@ -350,7 +361,7 @@ export default function OrdenesProduccion() {
         // Si la orden se planeó por ingrediente disponible, se usan los baches exactos guardados
         // (evita desajustes por redondeo). Si no, se calculan desde la cantidad pedida.
         const bachesPlan = parseFloat(o.baches_plan) || 0
-        const baches = bachesPlan > 0 ? bachesPlan : (unidsBacheNet > 0 ? cantidad / unidsBacheNet : ((parseFloat(prod.bache) || 0) > 0 ? cantidad / parseFloat(prod.bache) : 0))
+        const baches = bachesPlan > 0 ? bachesPlan : snapBaches(unidsBacheNet > 0 ? cantidad / unidsBacheNet : ((parseFloat(prod.bache) || 0) > 0 ? cantidad / parseFloat(prod.bache) : 0))
         const ings = ingsRaw.map(i => {
           const gramos = (parseFloat(i.cantidad) || 0) * baches
           const costo = ((parseFloat(i.precio) || 0) / (parseFloat(i.presentacion) || 1000)) * gramos
@@ -420,13 +431,12 @@ export default function OrdenesProduccion() {
   // Guarda TODOS los campos del proceso (datos + resultado) en la orden
   const guardarProcesoData = async (silent = true) => {
     if (!ordenPrep) return
-    const procs = prepProcesos.filter(p => p.nombre?.trim() || p.inicio || p.fin || p.fecha)
-    const inicios = procs.map(p => p.inicio).filter(Boolean).sort()
-    const fines = procs.map(p => p.fin).filter(Boolean).sort()
+    const { procs, inicioGlobal, finGlobal } = tiemposGlobal()
     try {
       const r = await writeOrQueue({ table: 'production_orders', action: 'update', match: { id: ordenPrep.id }, payload: {
         lote: prepLote, vence: prepVence || null, fecha_inicio: prepFechaInicio || null,
-        inicio: inicios[0] || null, fin: fines.length ? fines[fines.length - 1] : null,
+        modo_avanzado: prepModoAvanzado,
+        inicio: inicioGlobal || null, fin: finGlobal || null,
         procesos_tiempos: procs,
         cantidad_result: prepUnidades !== '' ? (parseFloat(prepUnidades) || 0) : null,
         peso_final: prepPesoFinal !== '' ? (parseFloat(prepPesoFinal) || 0) : null,
@@ -450,7 +460,7 @@ export default function OrdenesProduccion() {
     const t = setTimeout(() => guardarProcesoData(true), 1200)
     return () => clearTimeout(t)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prepLote, prepVence, prepFechaInicio, prepProcesos, prepUnidades, prepPesoFinal, prepPesoDesp, prepPesoSubp, prepCantSubp, prepObs, prepSurtido, prepLoteMezcla, prepProductoSurtido, prepSurtidoCantidad, prepHaySobrante, prepSobrantePeso, prepSobranteUnidad, prepResp, prepConforme, prepLotesExtra, prepDestajo, autoguardar, modalProceso])
+  }, [prepLote, prepVence, prepFechaInicio, prepModoAvanzado, prepHoraInicio, prepHoraFin, prepProcesos, prepUnidades, prepPesoFinal, prepPesoDesp, prepPesoSubp, prepCantSubp, prepObs, prepSurtido, prepLoteMezcla, prepProductoSurtido, prepSurtidoCantidad, prepHaySobrante, prepSobrantePeso, prepSobranteUnidad, prepResp, prepConforme, prepLotesExtra, prepDestajo, autoguardar, modalProceso])
 
   // Registra la orden en el libro "Orden de Producción" (PTZ-OR-01) con la evidencia firmada.
   const registrarOrdenEnLibro = async (o, file, firma) => {
@@ -540,11 +550,16 @@ export default function OrdenesProduccion() {
       </tbody></table>` : ''
     const procRows = (prepProcesos || []).filter(p => p.nombre?.trim() || p.inicio || p.fin)
     const fmtF = (f) => f ? new Date(f + 'T00:00:00').toLocaleDateString('es-CO') : ''
-    const filasProc = procRows.length ? `<div class="seccion">TIEMPOS POR PROCESO / SUBPROCESO</div>
-      <table class="ingr"><thead><tr><th>Proceso / Subproceso</th><th>Fecha</th><th>Hora inicio</th><th>Hora fin</th></tr></thead>
-      <tbody>${procRows.map(p => `<tr><td>${p.nombre || ''}</td><td>${fmtF(p.fecha)}</td><td>${p.inicio || ''}</td><td>${p.fin || ''}</td></tr>`).join('')}</tbody></table>` : ''
+    // Modo básico: solo hora inicio/fin. Modo avanzado: tabla de procesos con fecha y horas.
+    const filasProc = prepModoAvanzado
+      ? (procRows.length ? `<div class="seccion">TIEMPOS POR PROCESO / SUBPROCESO</div>
+          <table class="ingr"><thead><tr><th>Proceso / Subproceso</th><th>Fecha</th><th>Hora inicio</th><th>Hora fin</th></tr></thead>
+          <tbody>${procRows.map(p => `<tr><td>${p.nombre || ''}</td><td>${fmtF(p.fecha)}</td><td>${p.inicio || ''}</td><td>${p.fin || ''}</td></tr>`).join('')}</tbody></table>` : '')
+      : `<div class="seccion">TIEMPOS</div>
+          <table class="campos"><tr><td class="lbl">Hora inicio</td><td>${prepHoraInicio || ''}</td><td class="lbl">Hora fin</td><td>${prepHoraFin || ''}</td></tr></table>`
+    const archivoNombre = `OP-${opNum(o.id)} - ${(o.producto || 'PRODUCTO').toUpperCase()} - PTZ-OR-01`
     const w = window.open('', '_blank')
-    w.document.write(`<html><head><title>PTZ-OR-01 Orden #${opNum(o.id)}</title><style>
+    w.document.write(`<html><head><title>${archivoNombre}</title><style>
       @page { size: letter; margin: 10mm; }
       * { box-sizing: border-box; }
       html,body { margin:0; }
@@ -591,7 +606,7 @@ export default function OrdenesProduccion() {
         <tr><td class="lbl">Unidades a producir</td><td>${o.cantidad_plan || ''} ${o.unidad || ''}</td><td class="lbl">Operario</td><td>${o.operario || ''}</td></tr>
         <tr><td class="lbl">Unidades producidas</td><td style="height:22px"></td><td class="lbl">Cant. empaque utilizado</td><td></td></tr>
         ${prepPorciona ? `<tr><td class="lbl">Peso subporción</td><td>${prepPesoSubp ? g(prepPesoSubp) + ' g' : ''}</td><td class="lbl">Cant. subporciones</td><td>${prepCantSubp ? fNum(prepCantSubp) : ''}</td></tr>` : ''}
-        <tr><td class="lbl">¿Empacó surtido?</td><td>${esSurtido ? `Sí — lote(s): <b>${loteMezcla || '(sin especificar)'}</b>` : 'No'}</td><td class="lbl">¿Quedó sin empacar?</td><td>${prepHaySobrante ? `Sí — ${prepSobrantePeso || ''} ${prepSobranteUnidad || ''}` : 'No'}</td></tr>
+        <tr><td class="lbl">¿Empacó surtido?</td><td>SI <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle"></span> &nbsp; NO <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle"></span> &nbsp; CANT: <span style="display:inline-block;min-width:60px;border-bottom:1px solid #555">&nbsp;</span></td><td class="lbl">¿Quedó sin empacar?</td><td>SI <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle"></span> &nbsp; NO <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle"></span> &nbsp; CANT: <span style="display:inline-block;min-width:60px;border-bottom:1px solid #555">&nbsp;</span></td></tr>
       </table>
 
       <div class="seccion">LISTA DE INGREDIENTES</div>
@@ -641,6 +656,8 @@ export default function OrdenesProduccion() {
   // Ir al módulo de Producción a registrar los lotes (precargado desde la orden)
   // Calcula inicio/fin global desde los procesos
   const tiemposGlobal = () => {
+    // Modo básico: hora inicio/fin globales, sin procesos detallados
+    if (!prepModoAvanzado) return { procs: [], inicioGlobal: prepHoraInicio || '', finGlobal: prepHoraFin || '' }
     const procs = prepProcesos.filter(p => p.nombre?.trim() || p.inicio || p.fin)
     const inicios = procs.map(p => p.inicio).filter(Boolean).sort()
     const fines = procs.map(p => p.fin).filter(Boolean).sort()
@@ -714,6 +731,7 @@ export default function OrdenesProduccion() {
         cant_subporciones: prepPorciona ? (parseFloat(prepCantSubp) || 0) : null,
         surtido: prepSurtido, lote_mezcla: prepSurtido ? (prepLoteMezcla || null) : null,
         producto_surtido: prepSurtido ? (prepProductoSurtido || null) : null,
+        surtido_cantidad: prepSurtido && prepSurtidoCantidad !== '' ? (parseFloat(prepSurtidoCantidad) || 0) : null,
         lotes_origen: prepSurtido ? (prepLoteMezcla || '') : '',
       }
       if (recExist) await writeOrQueue({ table: 'production_records', action: 'update', match: { id: recExist.id }, payload: regData })
@@ -729,6 +747,7 @@ export default function OrdenesProduccion() {
           tipo_registro: o.es_subproducto ? 'subproducto' : 'final', subprocesos: procs,
           surtido: !!ex.surtido, lote_mezcla: ex.surtido ? (ex.lote_mezcla || null) : null,
           producto_surtido: ex.surtido ? (autoSurtido(o.producto, ex.lote_mezcla) || prepProductoSurtido || null) : null,
+          surtido_cantidad: ex.surtido ? exUnid : null,
           lotes_origen: ex.surtido ? (ex.lote_mezcla || '') : '',
         } })
       }
@@ -738,7 +757,7 @@ export default function OrdenesProduccion() {
         estado: autoAprob ? 'aprobada' : 'ejecutada',
         ...(autoAprob ? { aprobado_por: profile?.nombre || 'admin', fecha_aprob: new Date().toISOString() } : {}),
         cantidad_result: unidadesTotal, lote: prepLote, vence: prepVence || null,
-        fecha_inicio: fechaIni, inicio: inicioGlobal || null, fin: finGlobal || null, procesos_tiempos: procs,
+        fecha_inicio: fechaIni, modo_avanzado: prepModoAvanzado, inicio: inicioGlobal || null, fin: finGlobal || null, procesos_tiempos: procs,
         peso_final: parseFloat(prepPesoFinal) || 0, peso_desperdicio: parseFloat(prepPesoDesp) || 0,
         peso_subporcion: prepPorciona ? (parseFloat(prepPesoSubp) || 0) : null,
         cant_subporciones: prepPorciona ? (parseFloat(prepCantSubp) || 0) : null,
@@ -798,15 +817,39 @@ export default function OrdenesProduccion() {
             if (!ex.saldo_id) continue
             const consumido = parseFloat(ex.peso_consumido) || 0
             if (consumido <= 0) continue
-            const { data: sal } = await supabase.from('mezcla_saldos').select('peso').eq('id', ex.saldo_id).single()
+            const { data: sal } = await supabase.from('mezcla_saldos').select('peso, lote, producto').eq('id', ex.saldo_id).single()
             const restante = Math.max(0, (sal?.peso || 0) - consumido)
             await supabase.from('mezcla_saldos').update({ peso: restante, estado: restante <= 0 ? 'agotado' : 'disponible' }).eq('id', ex.saldo_id)
+            // Si este lote extra (que estaba en saldo, de una orden ya cerrada) se empaca surtido,
+            // se marca y enlaza automáticamente su registro original con esta caja surtida.
+            if (ex.surtido && sal?.lote) {
+              try {
+                const nombreSurtido = autoSurtido(o.producto, ex.lote_mezcla) || prepProductoSurtido || null
+                let q = supabase.from('production_records').update({
+                  surtido: true, producto_surtido: nombreSurtido, lote_mezcla: prepLote || null,
+                }).eq('lote', sal.lote)
+                if (sal.producto) q = q.eq('producto', sal.producto)
+                await q
+              } catch (e) { console.warn('No se pudo enlazar el lote extra en saldo con el surtido:', e) }
+            }
           }
           // a2) Descontar de los saldos de los lotes combinados en el surtido
           for (const sc of surtidoConsumos) {
-            const { data: sal } = await supabase.from('mezcla_saldos').select('peso').eq('id', sc.saldo_id).single()
+            const { data: sal } = await supabase.from('mezcla_saldos').select('peso, lote, producto, orden_origen').eq('id', sc.saldo_id).single()
             const rest = Math.max(0, (sal?.peso || 0) - sc.cantidad)
             await supabase.from('mezcla_saldos').update({ peso: rest, estado: rest <= 0 ? 'agotado' : 'disponible' }).eq('id', sc.saldo_id)
+            // Conectar el lote YA CERRADO (que estaba en saldo) con este surtido: aunque su orden ya
+            // estuviera cerrada y enviada, se marca automáticamente que TAMBIÉN se empacó surtido y se
+            // enlaza con esta caja, para que ambos queden conectados en el registro de producción.
+            if (sal?.lote) {
+              try {
+                let q = supabase.from('production_records').update({
+                  surtido: true, producto_surtido: prepProductoSurtido || null, lote_mezcla: prepLote || null,
+                }).eq('lote', sal.lote)
+                if (sal.producto) q = q.eq('producto', sal.producto)
+                await q
+              } catch (e) { console.warn('No se pudo enlazar el lote en saldo con el surtido:', e) }
+            }
           }
           // b) Crear el saldo nuevo con el sobrante de esta orden
           const sobrante = parseFloat(prepSobrantePeso) || 0
@@ -1327,6 +1370,7 @@ export default function OrdenesProduccion() {
 
       <div className="card">
         <div className="card-title">📋 {esAdmin ? 'Todas las órdenes' : 'Mis órdenes asignadas'}</div>
+        {cargandoOrdenes ? <Cargando texto="Cargando órdenes…" /> : (
         <div className="table-wrap">
           <table>
             <thead><tr><th>#</th><th className="col-opcional">Emitida</th><th>Producto</th><th>Lote</th><th className="col-opcional">Tipo</th><th>Cant. plan</th><th className="col-opcional-2">Operario</th><th>Estado</th><th className="col-opcional-2">Resultado</th><th>Acciones</th></tr></thead>
@@ -1389,6 +1433,7 @@ export default function OrdenesProduccion() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       {/* Modal Nueva / Editar Orden (admin) */}
@@ -1451,18 +1496,7 @@ export default function OrdenesProduccion() {
             <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Calcula cuántas unidades saldrían con la cantidad que tienes de ese ingrediente (considera rendimiento y desperdicio).</small>
           </div>
         )}
-        <div className="form-grid-2">
-          <div className="form-group"><label className="form-label">Lote <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(N°+año, ej. {siguienteLoteSugerido})</small></label><input className="form-control" value={form.lote} onChange={e => setForm(f => ({ ...f, lote: e.target.value }))} placeholder={`Ej: ${siguienteLoteSugerido}`} />
-            <small style={{ color: 'var(--texto-suave)', fontSize: '0.73rem', display: 'block', marginTop: 4 }}>
-              {ultimoLoteOrden && <>Último lote usado: <strong>{ultimoLoteOrden}</strong> · </>}
-              <button type="button" className="btn btn-xs btn-secondary" onClick={() => setForm(f => ({ ...f, lote: siguienteLoteSugerido }))}>Usar siguiente: {siguienteLoteSugerido}</button>
-            </small>
-          </div>
-          <div className="form-group"><label className="form-label">Fecha de vencimiento</label>
-            <input type="date" className="form-control" value={form.vence} onChange={e => setForm(f => ({ ...f, vence: e.target.value }))} />
-            <QuickVence opts={venceOpts} onEdit={editarVenceOpts} onPick={(v) => setForm(f => ({ ...f, vence: v }))} />
-          </div>
-        </div>
+        <div className="alert alert-info" style={{ fontSize: '0.8rem' }}>El <strong>lote</strong> y la <strong>fecha de vencimiento</strong> se definen al <strong>diligenciar el proceso</strong> (con el lote sugerido automáticamente).</div>
         {/* Lotes de MP en stock: sugerencia PEPS (cuál gastar primero) + alertas de vencimiento */}
         {form.origen === 'producto' && prodReceta && prodReceta.ings.some(i => i.mpId) && (
           <div className="form-group" style={{ background: 'rgba(124,179,66,0.06)', padding: 10, borderRadius: 'var(--radio)' }}>
@@ -1614,7 +1648,6 @@ export default function OrdenesProduccion() {
         footer={<>
           <button className="btn btn-secondary" onClick={() => setModalPrep(false)}>Cerrar</button>
           {prepFicha && <button className="btn btn-secondary" onClick={() => descargarFicha(prepFicha.url, prepFicha.nombre)}>⬇ Ficha técnica</button>}
-          <button className="btn btn-dorado" onClick={imprimirOrden}>🖨 Imprimir orden</button>
           {ordenPrep?.operario === profile?.nombre && <button className="btn btn-primary" onClick={() => { setModalPrep(false); openProceso(ordenPrep) }}>▶ Iniciar proceso</button>}
         </>}
       >
@@ -1661,37 +1694,57 @@ export default function OrdenesProduccion() {
       </Modal>
 
       {/* Modal Iniciar proceso — fecha de inicio + tiempos por subproceso (autoguardado) */}
-      <Modal open={modalProceso} onClose={() => setModalProceso(false)} title={`▶ Proceso — ${ordenPrep?.producto || ''}`} size="modal-lg"
+      <Modal open={modalProceso} onClose={() => setModalProceso(false)} guard={false}
+        title={<span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>▶ Proceso — {ordenPrep?.producto || ''}
+          <button type="button" className="btn btn-xs btn-dorado" title="Imprimir orden" onClick={imprimirOrden}>🖨</button></span>}
+        size="modal-lg"
         footer={<>
-          <button className="btn btn-secondary" onClick={() => setModalProceso(false)}>Cerrar</button>
-          <button className="btn btn-secondary" onClick={() => guardarProcesoData(false)}>💾 Guardar</button>
-          <button className="btn btn-dorado" onClick={imprimirOrden}>🖨 Imprimir</button>
-          <button className="btn btn-success" onClick={abrirConfirmEnvio}>✅ Enviar y cerrar</button>
+          <button className="btn btn-secondary" onClick={async () => { await guardarProcesoData(false); setModalProceso(false) }}>💾 Guardar</button>
+          <button className="btn btn-secondary" onClick={imprimirOrden}>⬇ Descargar PDF</button>
+          <button className="btn btn-success" onClick={abrirConfirmEnvio}>📤 Enviar</button>
         </>}>
         {ordenPrep && (
           <>
             <div className="form-grid-2" style={{ background: 'rgba(124,179,66,0.06)', padding: 10, borderRadius: 'var(--radio)', marginBottom: 12 }}>
-              <div className="form-group" style={{ margin: 0 }}><label className="form-label">Lote *</label><input className="form-control" value={prepLote} onChange={e => setPrepLote(e.target.value)} placeholder="Ej: L-2026-001" /></div>
-              <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de vencimiento *</label><input type="date" className="form-control" value={prepVence} onChange={e => setPrepVence(e.target.value)} /><QuickVence opts={venceOpts} onEdit={editarVenceOpts} onPick={setPrepVence} base={prepFechaInicio} /></div>
               <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de inicio de fabricación *</label>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <input type="date" className="form-control" value={prepFechaInicio} onChange={e => setPrepFechaInicio(e.target.value)} />
                   <button type="button" className="btn btn-xs btn-secondary" onClick={() => setPrepFechaInicio(hoyISO())}>Hoy</button>
                 </div>
               </div>
+              <div className="form-group" style={{ margin: 0 }}><label className="form-label">Lote *</label><input className="form-control" value={prepLote} onChange={e => setPrepLote(e.target.value)} placeholder={`Ej: ${siguienteLoteSugerido}`} />
+                <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 3 }}>
+                  <button type="button" className="btn btn-xs btn-secondary" onClick={() => setPrepLote(siguienteLoteSugerido)}>Usar siguiente: {siguienteLoteSugerido}</button>
+                </small>
+              </div>
+              <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de vencimiento *</label><input type="date" className="form-control" value={prepVence} onChange={e => setPrepVence(e.target.value)} disabled={!prepFechaInicio} />{prepFechaInicio ? <QuickVence opts={venceOpts} onEdit={editarVenceOpts} onPick={setPrepVence} base={prepFechaInicio} /> : <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Llena primero la fecha de fabricación.</small>}</div>
             </div>
 
             <div style={{ background: 'rgba(0,0,0,0.02)', padding: 10, borderRadius: 'var(--radio)', marginBottom: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                <strong style={{ fontSize: '0.9rem' }}>⏱ Tiempos por proceso / subproceso</strong>
+                <strong style={{ fontSize: '0.9rem' }}>⏱ Tiempos</strong>
+                {/* Toggle modo básico / avanzado */}
+                <div style={{ display: 'flex', border: '1px solid var(--crema-oscuro)', borderRadius: 6, overflow: 'hidden', marginLeft: 4 }}>
+                  {[['basico', 'Básico'], ['avanzado', 'Avanzado']].map(([k, l]) => (
+                    <button key={k} type="button" onClick={() => setPrepModoAvanzado(k === 'avanzado')} style={{ padding: '3px 10px', fontSize: '0.72rem', fontWeight: 600, cursor: 'pointer', border: 'none', background: (prepModoAvanzado === (k === 'avanzado')) ? 'var(--selva)' : 'transparent', color: (prepModoAvanzado === (k === 'avanzado')) ? 'var(--crema)' : 'var(--texto-suave)' }}>{l}</button>
+                  ))}
+                </div>
                 <label style={{ fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 4, marginLeft: 8 }}>
                   <input type="checkbox" checked={autoguardar} onChange={e => setAutoguardar(e.target.checked)} /> Autoguardar
                 </label>
                 {autoSavedAt && autoguardar && <span style={{ fontSize: '0.7rem', color: 'var(--selva)' }}>✓ guardado {autoSavedAt}</span>}
-                <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => setPrepProcesos(p => [...p, { nombre: '', inicio: '', fin: '' }])}>+ Proceso</button>
+                {prepModoAvanzado && <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => setPrepProcesos(p => [...p, { nombre: '', inicio: '', fin: '' }])}>+ Proceso</button>}
               </div>
-              {prepProcesos.length === 0 && <p style={{ fontSize: '0.8rem', color: 'var(--texto-suave)' }}>Sin procesos definidos en la ficha. Usa "+ Proceso" para agregar.</p>}
-              {prepProcesos.map((p, i) => {
+              {/* MODO BÁSICO: solo hora inicio y hora fin */}
+              {!prepModoAvanzado && (
+                <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                  <div><label style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Hora inicio</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><TimeField value={prepHoraInicio} onChange={setPrepHoraInicio} /><button type="button" className="btn btn-xs btn-secondary" title="Ahora" onClick={() => setPrepHoraInicio(horaAhora())}>⏱</button></div></div>
+                  <div><label style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Hora fin</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><TimeField value={prepHoraFin} onChange={setPrepHoraFin} /><button type="button" className="btn btn-xs btn-secondary" title="Ahora" onClick={() => setPrepHoraFin(horaAhora())}>⏱</button></div></div>
+                </div>
+              )}
+              {/* MODO AVANZADO: todos los procesos con fecha, hora inicio y fin */}
+              {prepModoAvanzado && prepProcesos.length === 0 && <p style={{ fontSize: '0.8rem', color: 'var(--texto-suave)' }}>Sin procesos definidos en la ficha. Usa "+ Proceso" para agregar.</p>}
+              {prepModoAvanzado && prepProcesos.map((p, i) => {
                 const upd = (k, v) => setPrepProcesos(arr => arr.map((x, idx) => idx === i ? { ...x, [k]: v } : x))
                 return (
                   <div key={i} className={ordProc.rowClassName(i)} {...ordProc.rowProps(i)} style={{ display: 'grid', gridTemplateColumns: 'auto 1.3fr 1.2fr 1.1fr 1.1fr auto', gap: 8, alignItems: 'end', marginBottom: 8, borderBottom: '1px dashed var(--crema-oscuro)', paddingBottom: 8 }}>
@@ -1704,7 +1757,7 @@ export default function OrdenesProduccion() {
                   </div>
                 )
               })}
-              <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Usa ⏱ para fijar la hora actual. Se guarda automáticamente.</small>
+              <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Usa ⏱ para fijar la hora actual. {prepModoAvanzado ? 'Avanzado: registra fecha y horas de cada proceso.' : 'Básico: solo hora de inicio y fin.'} Se guarda automáticamente.</small>
             </div>
 
             {/* Resultado de producción */}
@@ -1735,12 +1788,31 @@ export default function OrdenesProduccion() {
               </div>
               {prepSurtido && (
                 <div className="form-group" style={{ background: 'rgba(200,169,74,0.10)', borderRadius: 'var(--radio)', padding: 10 }}>
-                  <label className="form-label">¿Con qué lote(s) se mezcló?</label>
-                  <input className="form-control" list="dl-lotes-mezcla" value={prepLoteMezcla}
-                    onChange={e => { const v = e.target.value; setPrepLoteMezcla(v); const auto = autoSurtido(ordenPrep.producto, v); if (auto) setPrepProductoSurtido(auto) }}
-                    placeholder="Elige de la lista o escribe (ej: 160626, 170626)" />
-                  <datalist id="dl-lotes-mezcla">{ultimos5Lotes.map(l => <option key={l} value={l} />)}</datalist>
-                  <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Últimos lotes: {ultimos5Lotes.join(', ') || '—'}</small>
+                  <label className="form-label">¿Con qué lote(s) se mezcló? <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(agrega uno o varios)</small></label>
+                  {(() => {
+                    const tokens = String(prepLoteMezcla).split(/[,;]/).map(s => s.trim()).filter(Boolean)
+                    const aplicarAuto = (next) => { setPrepLoteMezcla(next); const auto = autoSurtido(ordenPrep.producto, next); if (auto) setPrepProductoSurtido(auto) }
+                    const addLote = (l) => { const v = String(l || '').trim(); if (!v || tokens.includes(v)) { setNuevoLoteMezcla(''); return } aplicarAuto([...tokens, v].join(', ')); setNuevoLoteMezcla('') }
+                    const removeLote = (l) => aplicarAuto(tokens.filter(t => t !== l).join(', '))
+                    return <>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
+                        {tokens.map(t => (
+                          <span key={t} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--selva)', color: 'var(--crema)', borderRadius: 14, padding: '2px 6px 2px 10px', fontSize: '0.78rem', fontWeight: 600 }}>
+                            {t}<button type="button" onClick={() => removeLote(t)} style={{ border: 'none', background: 'transparent', color: 'var(--crema)', cursor: 'pointer', fontSize: '0.85rem', lineHeight: 1 }} title="Quitar">✕</button>
+                          </span>
+                        ))}
+                        {tokens.length === 0 && <span style={{ color: 'var(--texto-suave)', fontSize: '0.75rem' }}>Aún no agregaste lotes.</span>}
+                      </div>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <input className="form-control" list="dl-lotes-mezcla" value={nuevoLoteMezcla} onChange={e => setNuevoLoteMezcla(e.target.value)}
+                          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addLote(nuevoLoteMezcla) } }}
+                          placeholder="Escribe o elige un lote y pulsa Agregar (ej: 160626)" />
+                        <datalist id="dl-lotes-mezcla">{ultimos5Lotes.map(l => <option key={l} value={l} />)}</datalist>
+                        <button type="button" className="btn btn-secondary" style={{ whiteSpace: 'nowrap' }} onClick={() => addLote(nuevoLoteMezcla)}>+ Agregar</button>
+                      </div>
+                      <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Últimos lotes: {ultimos5Lotes.join(', ') || '—'}</small>
+                    </>
+                  })()}
                   <label className="form-label" style={{ marginTop: 8 }}>Producto surtido resultante <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(elige del catálogo de Producto Terminado; se sugiere según el lote)</small></label>
                   <select className="form-control" value={prepProductoSurtido} onChange={e => setPrepProductoSurtido(e.target.value)}>
                     <option value="">Seleccionar producto terminado...</option>

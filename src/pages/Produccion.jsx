@@ -53,6 +53,7 @@ export default function Produccion() {
   const [filtroMes, setFiltroMes] = useState('')
   const [filtroAño, setFiltroAño] = useState(String(new Date().getFullYear()))
   const [filtroProd, setFiltroProd] = useState('')
+  const [anioAnalisis, setAnioAnalisis] = useState(String(new Date().getFullYear()))
   const [modal, setModal] = useState(false)
   const [form, setForm] = useState(EMPTY)
   const [editId, setEditId] = useState(null)
@@ -87,6 +88,17 @@ export default function Produccion() {
       const { data } = await supabase.from('production_records').select('*').order('fecha', { ascending: false })
       return data || []
     },
+  })
+
+  // Para el Análisis mensual: entradas reales a stock terminado (cajas finales empacadas).
+  // Esto excluye automáticamente lo que va a SALDO y usa el nombre del producto (surtido incluido).
+  const { data: finishedProds = [] } = useQuery({
+    queryKey: ['finished_products_nombres'],
+    queryFn: async () => { const { data } = await supabase.from('finished_products').select('id, nombre'); return data || [] },
+  })
+  const { data: entradasTerminado = [] } = useQuery({
+    queryKey: ['finished_movements_entradas'],
+    queryFn: async () => { const { data } = await supabase.from('finished_movements').select('finished_id, cantidad, fecha, tipo, origen').eq('tipo', 'entrada').eq('origen', 'produccion'); return data || [] },
   })
 
   const { data: empleados = [] } = useQuery({
@@ -356,15 +368,32 @@ export default function Produccion() {
     } catch { return false }
   })
 
-  // Análisis por producto/mes — SOLO registros aprobados (no alimenta hasta que el admin aprueba)
   const aprobados = registros.filter(r => r.aprobado !== false)
   const prodNames = [...new Set(registros.map(r => r.producto))].sort()
-  const analisis = [...new Set(aprobados.map(r => r.producto))].sort().map(pr => {
+  // Año/mes tomados del texto 'YYYY-MM-DD' para evitar el desfase de zona horaria
+  const anioDe = (f) => String(f || '').slice(0, 4)
+  const mesDe = (f) => (parseInt(String(f || '').slice(5, 7), 10) || 0) - 1   // 0-11
+
+  // ===== Análisis mensual: CANTIDAD EMPACADA FINAL =====
+  // Fuente = entradas a stock terminado (cajas finales empacadas, surtido con su nombre; lo que va a
+  // saldo NO entra aquí) + producción de subproductos (MP fabricadas internamente, que no son producto
+  // terminado y por eso no generan entrada de terminado).
+  const nombreFP = Object.fromEntries(finishedProds.map(p => [p.id, p.nombre]))
+  const entradasAnalisis = [
+    ...entradasTerminado.map(m => ({ nombre: nombreFP[m.finished_id] || '(producto terminado)', fecha: m.fecha, cant: Number(m.cantidad) || 0 })),
+    ...aprobados.filter(r => r.tipo_registro === 'subproducto').map(r => ({ nombre: r.producto, fecha: r.fecha, cant: Number(r.cantidad) || 0 })),
+  ].filter(e => e.nombre)
+  const aniosDisponibles = [...new Set(entradasAnalisis.map(e => anioDe(e.fecha)).filter(Boolean))].sort((a, b) => b.localeCompare(a))
+  const entradasAnio = entradasAnalisis.filter(e => anioDe(e.fecha) === anioAnalisis)
+  const analisis = [...new Set(entradasAnio.map(e => e.nombre))].sort().map(pr => {
     const meses = Array.from({ length: 12 }, (_, m) =>
-      aprobados.filter(r => r.producto === pr && new Date(r.fecha).getMonth() === m).reduce((s, r) => s + (r.cantidad || 0), 0)
+      entradasAnio.filter(e => e.nombre === pr && mesDe(e.fecha) === m).reduce((s, e) => s + e.cant, 0)
     )
     return { nombre: pr, meses, total: meses.reduce((s, v) => s + v, 0) }
   })
+  // Totales por mes (fila de cierre) y total general del año
+  const totalesMes = Array.from({ length: 12 }, (_, m) => analisis.reduce((s, row) => s + (row.meses[m] || 0), 0))
+  const totalAnio = totalesMes.reduce((s, v) => s + v, 0)
 
   const exportarExcel = () => {
     const ws = XLSX.utils.aoa_to_sheet([
@@ -476,7 +505,11 @@ export default function Produccion() {
                   ? <tr><td colSpan={10} className="empty-table">Sin registros</td></tr>
                   : filtrados.map(p => (
                     <tr key={p.id}>
-                      <td><strong>{p.producto}</strong>{p.surtido && p.producto_surtido && <div style={{ fontSize: '0.72rem', color: 'var(--tierra)' }}>🔀 {p.producto_surtido}</div>}</td>
+                      <td><strong>{p.producto}</strong>{p.surtido && (() => {
+                        const rankLote = (l) => { const m = String(l || '').match(/^(\d+)(\d{2})$/); return m ? (parseInt(m[2]) * 100000 + parseInt(m[1])) : (parseInt(l) || 0) }
+                        const lotes = [...new Set([p.lote, ...String(p.lote_mezcla || '').split(/[,;+]/)].map(l => String(l || '').trim()).filter(Boolean))].sort((a, b) => rankLote(a) - rankLote(b))
+                        return lotes.length > 0 ? <div style={{ fontSize: '0.72rem', color: 'var(--tierra)' }}>🔀 {lotes.join(' + ')}</div> : null
+                      })()}</td>
                       <td className="col-opcional"><span className={`badge ${p.tipo_registro === 'subproducto' ? 'badge-dorado' : 'badge-azul'}`}>{p.tipo_registro === 'subproducto' ? 'Subprod.' : 'Final'}</span></td>
                       <td><strong>{p.lote || '—'}</strong></td>
                       <td className="td-number col-opcional">{Array.isArray(p.etapas) ? p.etapas.length : 0}</td>
@@ -509,7 +542,11 @@ export default function Produccion() {
 
       {tab === 'analisis' && (
         <div className="card">
-          <div className="card-title">📊 Resumen de Producción por Mes</div>
+          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>📊 Resumen de Producción por Mes
+            <select className="form-control" style={{ width: 120, marginLeft: 'auto' }} value={anioAnalisis} onChange={e => setAnioAnalisis(e.target.value)}>
+              {(aniosDisponibles.length ? aniosDisponibles : [anioAnalisis]).map(a => <option key={a} value={a}>{a}</option>)}
+            </select>
+          </div>
 
           {/* ===== Versión móvil: acordeón (un producto por tarjeta, meses con producción) ===== */}
           <div className="solo-movil">
@@ -530,13 +567,22 @@ export default function Produccion() {
             <table>
               <thead><tr><th>Producto</th>{MESES.slice(1).map(m => <th key={m}>{m}</th>)}<th>Total</th></tr></thead>
               <tbody>
-                {analisis.map(row => (
+                {analisis.length === 0
+                  ? <tr><td colSpan={14} className="empty-table">Sin producción aprobada en {anioAnalisis}</td></tr>
+                  : analisis.map(row => (
                   <tr key={row.nombre}>
                     <td><strong>{row.nombre}</strong></td>
-                    {row.meses.map((v, i) => <td key={i} className="td-number">{v > 0 ? v : '—'}</td>)}
-                    <td className="td-number"><strong>{row.total}</strong></td>
+                    {row.meses.map((v, i) => <td key={i} className="td-number">{v > 0 ? fNum(v) : '—'}</td>)}
+                    <td className="td-number"><strong>{fNum(row.total)}</strong></td>
                   </tr>
                 ))}
+                {analisis.length > 0 && (
+                  <tr style={{ background: 'rgba(45,90,61,0.06)', fontWeight: 700 }}>
+                    <td><strong>Total mes</strong></td>
+                    {totalesMes.map((v, i) => <td key={i} className="td-number">{v > 0 ? fNum(v) : '—'}</td>)}
+                    <td className="td-number"><strong>{fNum(totalAnio)}</strong></td>
+                  </tr>
+                )}
               </tbody>
             </table>
           </div>

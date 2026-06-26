@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { fNum, fFecha, componerSurtido } from '../lib/businessLogic'
@@ -7,6 +7,7 @@ import { useConfirm } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
 import MoneyInput from '../components/ui/MoneyInput'
+import Cargando from '../components/ui/Cargando'
 import { UNIDADES_ALEGRA, UNSPSC_ALIMENTOS } from '../lib/alegraCatalogos'
 
 const EMPTY_PROD = { nombre: '', sku: '', alegra_item_id: '', tipo: 'base', stock_min: '', costo_unitario: '', precio_mayor: '', precio_detal: '', imagen_url: '', activo: true, unidad_medida: 'unit', codigo_unspsc: '', categoria_alegra_id: '', categoria_alegra_nombre: '', surtido_a: '', surtido_b: '' }
@@ -39,9 +40,10 @@ export default function ProductosTerminados() {
   const [listasPrecios, setListasPrecios] = useState(null)
   const [cargandoListas, setCargandoListas] = useState(false)
 
-  const { data: productos = [], isLoading: loadingProds, isFetching: fetchingProds, isSuccess: okProds } = useQuery({
+  const { data: productos = [], isFetching: fetchingProds, isSuccess: okProds } = useQuery({
     queryKey: ['finished_products'],
     queryFn: async () => { const { data } = await supabase.from('finished_products').select('*').order('nombre'); return data || [] },
+    staleTime: 1000 * 60 * 5, refetchOnWindowFocus: false,
   })
   const { data: movimientos = [] } = useQuery({
     queryKey: ['finished_movements'],
@@ -54,13 +56,16 @@ export default function ProductosTerminados() {
     enabled: esAdmin, retry: false, staleTime: 5 * 60 * 1000,
   })
   // Fichas de producto: el costo del surtido se promedia desde el costo de la FICHA (no del catálogo)
-  const { data: fichas = [], isLoading: loadingFichas, isFetching: fetchingFichas, isSuccess: okFichas } = useQuery({
+  const { data: fichas = [], isFetching: fetchingFichas, isSuccess: okFichas } = useQuery({
     queryKey: ['fichas_costo_terminado'],
     queryFn: async () => { const { data } = await supabase.from('products_costing').select('id, nombre, tipo, costo_final, precio_mayor, precio_detal, activo, imagen_url').order('nombre'); return data || [] },
+    staleTime: 1000 * 60 * 5, refetchOnWindowFocus: false,
   })
-  // Spinner hasta que productos Y costos de ficha tengan su primera respuesta real
-  // (evita mostrar valores/costos vacíos o "sin sincronizar" mientras llegan los datos)
-  const cargandoProds = loadingProds || loadingFichas || (fetchingProds && !okProds) || (fetchingFichas && !okFichas)
+  // Loader SOLO en la primera carga (hasta tener datos frescos: stock + estado de Alegra).
+  // Una vez cargado se queda en caché y no vuelve a mostrar el loader en refrescos en segundo plano.
+  const [yaCargo, setYaCargo] = useState(false)
+  useEffect(() => { if (okProds && okFichas && !fetchingProds && !fetchingFichas) setYaCargo(true) }, [okProds, okFichas, fetchingProds, fetchingFichas])
+  const cargandoProds = !yaCargo
   // Materias primas marcadas como vendibles (para crearlas como producto terminado)
   const { data: mpsVendibles = [] } = useQuery({
     queryKey: ['mps_vendibles'],
@@ -420,12 +425,7 @@ export default function ProductosTerminados() {
           🏷️ Stock de productos terminados
           <input className="form-control" style={{ marginLeft: 'auto', maxWidth: 240 }} placeholder="Buscar nombre o SKU..." value={buscar} onChange={e => setBuscar(e.target.value)} />
         </div>
-        {cargandoProds ? (
-          <div style={{ padding: 40, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, color: 'var(--texto-suave)' }}>
-            <div style={{ width: 38, height: 38, border: '4px solid var(--crema-oscuro)', borderTopColor: 'var(--selva)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-            <span>Cargando productos terminados…</span>
-          </div>
-        ) : (
+        {cargandoProds ? <Cargando texto="Cargando productos terminados…" /> : (
         <div className="table-wrap">
           <table>
             <thead><tr><th>Producto</th><th className="col-opcional-2">Tipo</th><th className="col-opcional">SKU</th><th className="col-opcional-2">Alegra</th><th className="td-number">Stock</th><th className="td-number col-opcional">Costo unit.</th><th className="col-opcional-2">Estado</th><th>Acciones</th></tr></thead>
