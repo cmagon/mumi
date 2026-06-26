@@ -14,6 +14,7 @@ const NAV_ITEMS = [
   { to: '/costos',     icon: '🧮', label: 'Calculadora de Costos' },
   { to: '/inventario', icon: '📦', label: 'Inventario MP' },
   { to: '/terminados', icon: '🏷️', label: 'Producto Terminado' },
+  { to: '/porempacar', icon: '♻', label: 'Productos por Empacar' },
   { to: '/ordenes',    icon: '📝', label: 'Órdenes de Producción' },
   { to: '/produccion', icon: '🏭', label: 'Registro de Producción' },
   { section: 'Personal' },

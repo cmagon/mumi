@@ -17,6 +17,7 @@ import Costos from './pages/Costos'
 import Receta from './pages/Receta'
 import Inventario from './pages/Inventario'
 import ProductosTerminados from './pages/ProductosTerminados'
+import ProductosPorEmpacar from './pages/ProductosPorEmpacar'
 import Produccion from './pages/Produccion'
 import OrdenesProduccion from './pages/OrdenesProduccion'
 import Nomina from './pages/Nomina'
@@ -162,6 +163,7 @@ export default function App() {
         <Route path="/receta"      element={<ModRoute modulo="costos"><Receta /></ModRoute>} />
         <Route path="/inventario"  element={<ModRoute modulo="inventario"><Inventario /></ModRoute>} />
         <Route path="/terminados"  element={<ModRoute modulo="terminados"><ProductosTerminados /></ModRoute>} />
+        <Route path="/porempacar"  element={<ModRoute modulo="porempacar"><ProductosPorEmpacar /></ModRoute>} />
         <Route path="/produccion"  element={<ModRoute modulo="produccion"><Produccion /></ModRoute>} />
         <Route path="/ordenes"     element={<ModRoute modulo="ordenes"><OrdenesProduccion /></ModRoute>} />
         <Route path="/nomina"      element={<ModRoute modulo="nomina"><Nomina /></ModRoute>} />
