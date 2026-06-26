@@ -43,8 +43,6 @@ export default function ProductosTerminados() {
     queryKey: ['finished_products'],
     queryFn: async () => { const { data } = await supabase.from('finished_products').select('*').order('nombre'); return data || [] },
   })
-  // Muestra el spinner hasta tener la primera respuesta real (no hay datos asentados todavía)
-  const cargandoProds = loadingProds || (fetchingProds && !okProds)
   const { data: movimientos = [] } = useQuery({
     queryKey: ['finished_movements'],
     queryFn: async () => { const { data } = await supabase.from('finished_movements').select('*').order('created_at', { ascending: false }).limit(500); return data || [] },
@@ -56,10 +54,13 @@ export default function ProductosTerminados() {
     enabled: esAdmin, retry: false, staleTime: 5 * 60 * 1000,
   })
   // Fichas de producto: el costo del surtido se promedia desde el costo de la FICHA (no del catálogo)
-  const { data: fichas = [] } = useQuery({
+  const { data: fichas = [], isLoading: loadingFichas, isFetching: fetchingFichas, isSuccess: okFichas } = useQuery({
     queryKey: ['fichas_costo_terminado'],
     queryFn: async () => { const { data } = await supabase.from('products_costing').select('id, nombre, tipo, costo_final, precio_mayor, precio_detal, activo, imagen_url').order('nombre'); return data || [] },
   })
+  // Spinner hasta que productos Y costos de ficha tengan su primera respuesta real
+  // (evita mostrar valores/costos vacíos o "sin sincronizar" mientras llegan los datos)
+  const cargandoProds = loadingProds || loadingFichas || (fetchingProds && !okProds) || (fetchingFichas && !okFichas)
   // Materias primas marcadas como vendibles (para crearlas como producto terminado)
   const { data: mpsVendibles = [] } = useQuery({
     queryKey: ['mps_vendibles'],
@@ -404,8 +405,7 @@ export default function ProductosTerminados() {
           {esAdmin && <button className="btn btn-secondary btn-sm" onClick={abrirEnlace}>🔌 Enlazar con Alegra</button>}
           <button className="btn btn-secondary btn-sm" onClick={() => actualizarCostos.mutate()} disabled={actualizarCostos.isPending}>{actualizarCostos.isPending ? 'Actualizando...' : '💲 Actualizar costos desde fichas'}</button>
           {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => sincronizarTodo.mutate()} disabled={sincronizarTodo.isPending}>{sincronizarTodo.isPending ? 'Sincronizando...' : '🔗 Sincronizar todo con Alegra'}</button>}
-          {fichasDisponibles.length > 0 && <button className="btn btn-secondary btn-sm" onClick={() => setModalFicha(true)}>📋 Agregar ficha ({fichasDisponibles.length})</button>}
-          {mpsDisponibles.length > 0 && <button className="btn btn-secondary btn-sm" onClick={() => setModalMp(true)}>🧪 Agregar MP vendible ({mpsDisponibles.length})</button>}
+          {fichasDisponibles.length > 0 && <button className="btn btn-secondary btn-sm" onClick={() => setModalFicha(true)}>📋 Agregar producto ({fichasDisponibles.length})</button>}
           <button className="btn btn-secondary btn-sm" onClick={() => { setSelGen(baseProds.map(p => p.id)); setModalGen(true) }}>🔀 Generar surtidos</button>
           <button className="btn btn-primary btn-sm" onClick={() => { setPForm(EMPTY_PROD); setPEditId(null); setModalProd(true) }}>+ Nuevo producto</button>
         </div>

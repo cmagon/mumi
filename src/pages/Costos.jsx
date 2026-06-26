@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import {
@@ -29,6 +30,8 @@ export default function Costos() {
   const confirmar = useConfirm()
   const qc = useQueryClient()
   const imgInputRef = useRef()
+  const location = useLocation()
+  const navigate = useNavigate()
   const { profile } = useAuth()
   const soloReceta = profile?.rol && profile.rol !== 'admin'   // operario/auxiliar: solo Calculadora de Receta
 
@@ -289,6 +292,19 @@ export default function Costos() {
   }, [formProd, ingredientesEff, procesos, empaque, cifTotal, productos, editingId, cifUnidadesFallback, operariosActivos, op])
 
   useEffect(() => { recalcular() }, [recalcular])
+
+  // Al llegar desde una MP vendible: abre una ficha NUEVA prellenada con su nombre y precio de venta
+  useEffect(() => {
+    const st = location.state
+    if (st?.nuevaFichaNombre) {
+      setEditingId(null); setSelFuente('')
+      setIngredientes([]); setProcesos([]); setEmpaque([])
+      setFormProd({ ...EMPTY_PROD, nombre: st.nuevaFichaNombre, precio_mayor: st.nuevaFichaPrecio || EMPTY_PROD.precio_mayor })
+      setTab('nuevo')
+      navigate(location.pathname, { replace: true, state: {} })
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.state])
 
   const parseJSON = (v, def) => { try { return Array.isArray(v) ? v : JSON.parse(v || '[]') } catch { return def } }
 
@@ -907,9 +923,6 @@ export default function Costos() {
           </div>
           {productos.length > 1 && (
             <div style={{ marginTop:12, display:'flex', justifyContent:'flex-end', gap:8, flexWrap:'wrap' }}>
-              <button className="btn btn-sm btn-secondary" onClick={() => sincronizarAlegra.mutate()} disabled={sincronizarAlegra.isPending} title="Empuja el stock terminado de todos los productos enlazados hacia Alegra">
-                {sincronizarAlegra.isPending ? 'Sincronizando...' : '🔗 Sincronizar stock con Alegra'}
-              </button>
               <button className="btn btn-sm btn-dorado" onClick={() => recalcularTodos.mutate()} disabled={recalcularTodos.isPending}>
                 {recalcularTodos.isPending ? 'Recalculando...' : '🔄 Guardar CIF actualizado en todas las fichas'}
               </button>

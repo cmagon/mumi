@@ -454,7 +454,10 @@ export default function Inventario() {
             <div style={{ marginTop: 8 }}>
               <label className="form-label">Precio de venta</label>
               <MoneyInput value={formMP.precio_venta} onChange={v => setFormMP(f => ({ ...f, precio_venta: v }))} />
-              <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Podrás crearla como producto terminado y enviarla a Alegra desde el módulo de Producto Terminado.</small>
+              <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Como la fabricas tú, lo ideal es crearla como <strong>ficha de producto</strong> para configurar sus costos. Desde ahí se vuelve producto terminado y se sincroniza con Alegra.</small>
+              <div style={{ marginTop: 8 }}>
+                <button type="button" className="btn btn-sm btn-dorado" disabled={!formMP.nombre.trim()} onClick={() => navigate('/costos', { state: { nuevaFichaNombre: formMP.nombre.trim(), nuevaFichaPrecio: parseFloat(formMP.precio_venta) || 0 } })}>📋 Crear ficha de producto</button>
+              </div>
             </div>
           )}
         </div>

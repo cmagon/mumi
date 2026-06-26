@@ -1766,15 +1766,24 @@ export default function OrdenesProduccion() {
                     return (
                       <div style={{ marginTop: 8 }}>
                         {desconocidos.length > 0 && <div style={{ fontSize: '0.72rem', color: 'var(--tierra)' }}>⚠ Lote(s) no encontrado(s) en el sistema: <strong>{desconocidos.join(', ')}</strong></div>}
-                        {matches.map(s => (
-                          <div key={s.id} style={{ fontSize: '0.78rem', marginTop: 4 }}>
-                            <label style={{ color: 'var(--texto-suave)' }}>Consumido del saldo lote {s.lote} ({s.unidad}, disp. {fCant(s.peso)}): </label>
-                            <input type="number" className="form-control" style={{ display: 'inline-block', width: 110 }}
-                              value={prepSurtidoConsumos[s.id] !== undefined ? prepSurtidoConsumos[s.id] : (matches.length === 1 ? prepSurtidoCantidad : '')}
-                              onChange={e => setPrepSurtidoConsumos(m => ({ ...m, [s.id]: e.target.value }))} min={0} max={s.peso} step="any" />
+                        {matches.length === 1 && (
+                          <div style={{ fontSize: '0.74rem', color: 'var(--selva)', marginTop: 4 }}>
+                            ↳ Se descontarán <strong>{fCant(parseFloat(prepSurtidoCantidad) || 0)}</strong> del saldo del lote <strong>{matches[0].lote}</strong> ({matches[0].unidad}, disp. {fCant(matches[0].peso)}).
                           </div>
-                        ))}
-                        {matches.length > 0 && <small style={{ color: 'var(--texto-suave)', fontSize: '0.7rem' }}>Cuántas subporciones de cada lote anterior se usaron en el surtido (se descuentan de su saldo). Con un solo lote, por defecto = la cantidad surtida.</small>}
+                        )}
+                        {matches.length > 1 && (
+                          <>
+                            {matches.map(s => (
+                              <div key={s.id} style={{ fontSize: '0.78rem', marginTop: 4 }}>
+                                <label style={{ color: 'var(--texto-suave)' }}>Consumido del saldo lote {s.lote} ({s.unidad}, disp. {fCant(s.peso)}): </label>
+                                <input type="number" className="form-control" style={{ display: 'inline-block', width: 110 }}
+                                  value={prepSurtidoConsumos[s.id] !== undefined ? prepSurtidoConsumos[s.id] : ''}
+                                  onChange={e => setPrepSurtidoConsumos(m => ({ ...m, [s.id]: e.target.value }))} min={0} max={s.peso} step="any" />
+                              </div>
+                            ))}
+                            <small style={{ color: 'var(--texto-suave)', fontSize: '0.7rem' }}>Combinaste varios lotes: indica cuántas subporciones se usaron de cada saldo.</small>
+                          </>
+                        )}
                       </div>
                     )
                   })()}
