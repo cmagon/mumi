@@ -9,6 +9,7 @@ import Sidebar from './components/Layout/Sidebar'
 import MobileHeader from './components/Layout/MobileHeader'
 import AttendanceModal from './components/AttendanceModal'
 import ConnStatus from './components/ConnStatus'
+import SavingOverlay from './components/ui/SavingOverlay'
 import Login from './pages/Login'
 import Compartido from './pages/Compartido'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -126,6 +127,7 @@ function ProtectedLayout() {
       </main>
       <div id="toast-container" />
       <ConnStatus />
+      <SavingOverlay />
       {asistModo && empVinculado && (
         <AttendanceModal
           emp={empVinculado}

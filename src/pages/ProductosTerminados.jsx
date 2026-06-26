@@ -39,7 +39,7 @@ export default function ProductosTerminados() {
   const [listasPrecios, setListasPrecios] = useState(null)
   const [cargandoListas, setCargandoListas] = useState(false)
 
-  const { data: productos = [] } = useQuery({
+  const { data: productos = [], isLoading: cargandoProds } = useQuery({
     queryKey: ['finished_products'],
     queryFn: async () => { const { data } = await supabase.from('finished_products').select('*').order('nombre'); return data || [] },
   })
@@ -418,6 +418,12 @@ export default function ProductosTerminados() {
           🏷️ Stock de productos terminados
           <input className="form-control" style={{ marginLeft: 'auto', maxWidth: 240 }} placeholder="Buscar nombre o SKU..." value={buscar} onChange={e => setBuscar(e.target.value)} />
         </div>
+        {cargandoProds ? (
+          <div style={{ padding: 40, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, color: 'var(--texto-suave)' }}>
+            <div style={{ width: 38, height: 38, border: '4px solid var(--crema-oscuro)', borderTopColor: 'var(--selva)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+            <span>Cargando productos terminados…</span>
+          </div>
+        ) : (
         <div className="table-wrap">
           <table>
             <thead><tr><th>Producto</th><th className="col-opcional-2">Tipo</th><th className="col-opcional">SKU</th><th className="col-opcional-2">Alegra</th><th className="td-number">Stock</th><th className="td-number col-opcional">Costo unit.</th><th className="col-opcional-2">Estado</th><th>Acciones</th></tr></thead>
@@ -462,6 +468,7 @@ export default function ProductosTerminados() {
             </tbody>
           </table>
         </div>
+        )}
       </div>
 
       {/* Modal crear/editar producto terminado */}
