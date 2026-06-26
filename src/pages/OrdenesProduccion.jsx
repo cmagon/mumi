@@ -676,10 +676,23 @@ export default function OrdenesProduccion() {
       }
       const unidades = parseFloat(prepUnidades) || 0
       const estado = prepConforme && unidades > 0 ? 'conforme' : 'no conforme'
-      // Saldos consumidos por esta orden (para poder reponerlos al devolverla)
-      const saldosConsumidos = []
-      if (prepSurtido) { for (const [sid, c] of Object.entries(prepSurtidoConsumos)) { const cant = parseFloat(c) || 0; if (cant > 0) saldosConsumidos.push({ saldo_id: sid, cantidad: cant }) } }
-      for (const ex of prepLotesExtra) { const cant = parseFloat(ex.peso_consumido) || 0; if (ex.saldo_id && cant > 0) saldosConsumidos.push({ saldo_id: ex.saldo_id, cantidad: cant }) }
+      // Consumo de saldos de los lotes combinados en el surtido.
+      // Si el campo quedó vacío y hay UN solo lote combinado, por defecto se consume la cantidad surtida.
+      const surtidoConsumos = []
+      if (prepSurtido) {
+        const tokens = String(prepLoteMezcla).split(/[,;]/).map(s => s.trim()).filter(Boolean)
+        const matchSaldos = saldosDeProducto(o.producto, o.origen_id).filter(s => tokens.includes(String(s.lote || '').trim()))
+        for (const s of matchSaldos) {
+          const v = prepSurtidoConsumos[s.id]
+          const cant = (v !== undefined && v !== '') ? (parseFloat(v) || 0) : (matchSaldos.length === 1 ? (parseFloat(prepSurtidoCantidad) || 0) : 0)
+          if (cant > 0) surtidoConsumos.push({ saldo_id: s.id, cantidad: cant })
+        }
+      }
+      // Saldos consumidos por esta orden (para poder reponerlos al devolverla): surtido + empaque de saldo
+      const saldosConsumidos = [
+        ...surtidoConsumos,
+        ...prepLotesExtra.filter(e => e.saldo_id && (parseFloat(e.peso_consumido) || 0) > 0).map(e => ({ saldo_id: e.saldo_id, cantidad: parseFloat(e.peso_consumido) || 0 })),
+      ]
       // Lotes empacados adicionales (saldos de mezcla / partes empacadas con otro lote)
       const extras = prepLotesExtra.filter(e => (parseFloat(e.unidades) || 0) > 0)
       const extrasUnid = extras.reduce((s, e) => s + (parseFloat(e.unidades) || 0), 0)
@@ -788,14 +801,10 @@ export default function OrdenesProduccion() {
             await supabase.from('mezcla_saldos').update({ peso: restante, estado: restante <= 0 ? 'agotado' : 'disponible' }).eq('id', ex.saldo_id)
           }
           // a2) Descontar de los saldos de los lotes combinados en el surtido
-          if (prepSurtido) {
-            for (const [sid, c] of Object.entries(prepSurtidoConsumos)) {
-              const cant = parseFloat(c) || 0
-              if (cant <= 0) continue
-              const { data: sal } = await supabase.from('mezcla_saldos').select('peso').eq('id', sid).single()
-              const rest = Math.max(0, (sal?.peso || 0) - cant)
-              await supabase.from('mezcla_saldos').update({ peso: rest, estado: rest <= 0 ? 'agotado' : 'disponible' }).eq('id', sid)
-            }
+          for (const sc of surtidoConsumos) {
+            const { data: sal } = await supabase.from('mezcla_saldos').select('peso').eq('id', sc.saldo_id).single()
+            const rest = Math.max(0, (sal?.peso || 0) - sc.cantidad)
+            await supabase.from('mezcla_saldos').update({ peso: rest, estado: rest <= 0 ? 'agotado' : 'disponible' }).eq('id', sc.saldo_id)
           }
           // b) Crear el saldo nuevo con el sobrante de esta orden
           const sobrante = parseFloat(prepSobrantePeso) || 0
@@ -1758,10 +1767,12 @@ export default function OrdenesProduccion() {
                         {matches.map(s => (
                           <div key={s.id} style={{ fontSize: '0.78rem', marginTop: 4 }}>
                             <label style={{ color: 'var(--texto-suave)' }}>Consumido del saldo lote {s.lote} ({s.unidad}, disp. {fCant(s.peso)}): </label>
-                            <input type="number" className="form-control" style={{ display: 'inline-block', width: 110 }} value={prepSurtidoConsumos[s.id] || ''} onChange={e => setPrepSurtidoConsumos(m => ({ ...m, [s.id]: e.target.value }))} min={0} max={s.peso} step="any" />
+                            <input type="number" className="form-control" style={{ display: 'inline-block', width: 110 }}
+                              value={prepSurtidoConsumos[s.id] !== undefined ? prepSurtidoConsumos[s.id] : (matches.length === 1 ? prepSurtidoCantidad : '')}
+                              onChange={e => setPrepSurtidoConsumos(m => ({ ...m, [s.id]: e.target.value }))} min={0} max={s.peso} step="any" />
                           </div>
                         ))}
-                        {matches.length > 0 && <small style={{ color: 'var(--texto-suave)', fontSize: '0.7rem' }}>Indica cuántas subporciones de cada lote anterior se usaron en el surtido; se descuentan de su saldo.</small>}
+                        {matches.length > 0 && <small style={{ color: 'var(--texto-suave)', fontSize: '0.7rem' }}>Cuántas subporciones de cada lote anterior se usaron en el surtido (se descuentan de su saldo). Con un solo lote, por defecto = la cantidad surtida.</small>}
                       </div>
                     )
                   })()}
