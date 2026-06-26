@@ -20,7 +20,9 @@ const queryClient = new QueryClient({
       refetchOnMount: true,                 // recarga al entrar a cada módulo si los datos están viejos
       refetchOnWindowFocus: true,           // recarga al volver a la pestaña del navegador
       refetchOnReconnect: true,             // recarga al recuperar la conexión
-      networkMode: 'always',
+      // 'online': sin conexión las consultas se PAUSAN y se muestra lo último cacheado
+      // (con 'always' se ejecutaban offline y devolvían [] pisando el caché).
+      networkMode: 'online',
     },
   },
 })
