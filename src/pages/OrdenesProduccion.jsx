@@ -1259,7 +1259,7 @@ export default function OrdenesProduccion() {
             <thead><tr><th>#</th><th>Emitida</th><th>Producto</th><th>Lote</th><th>Tipo</th><th>Cant. plan</th><th>Operario</th><th>Estado</th><th>Resultado</th><th>Acciones</th></tr></thead>
             <tbody>
               {visibles.length === 0
-                ? <tr><td colSpan={9} className="empty-table">No hay órdenes</td></tr>
+                ? <tr><td colSpan={10} className="empty-table">No hay órdenes</td></tr>
                 : visibles.map(o => {
                   const est = ESTADO_LABEL[o.estado] || ESTADO_LABEL.pendiente
                   const esMia = o.operario === profile?.nombre
