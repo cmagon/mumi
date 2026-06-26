@@ -8,6 +8,7 @@ import { getConfig } from '../lib/appConfig'
 import { useReorder } from '../hooks/useReorder'
 import TimeField from '../components/ui/TimeField'
 import { fFecha, fNum, fCOP, componerSurtido } from '../lib/businessLogic'
+import { setBusy } from '../lib/busy'
 import { useToast } from '../hooks/useToast'
 import { useConfirm, usePrompt } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
@@ -665,7 +666,7 @@ export default function OrdenesProduccion() {
     if (!navigator.onLine && prepFotoFile) {
       toast('Sin conexión: la foto requiere internet. Quítala para enviar la orden offline.', 'warning'); return
     }
-    setSavingEvid(true)
+    setSavingEvid(true); setBusy(true)
     try {
       const { procs, inicioGlobal, finGlobal } = tiemposGlobal()
       const fechaIni = prepFechaInicio || hoyISO()
@@ -824,7 +825,7 @@ export default function OrdenesProduccion() {
       qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['production_records'] }); qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] }); qc.invalidateQueries({ queryKey: ['inventory_movements'] }); qc.invalidateQueries({ queryKey: ['mezcla_saldos'] }); qc.invalidateQueries({ queryKey: ['products_costing'] }); qc.invalidateQueries({ queryKey: ['finished_movements'] })
       setModalConfirmEnvio(false); setModalProceso(false)
       toast(r.queued ? 'Orden guardada sin conexión — se enviará al sincronizar 📴' : (autoAprob ? 'Producción registrada, cerrada y aprobada ✓' : 'Producción registrada y orden enviada a aprobación ✓'))
-    } catch (e) { toast(e.message, 'error') } finally { setSavingEvid(false) }
+    } catch (e) { toast(e.message, 'error') } finally { setSavingEvid(false); setBusy(false) }
   }
 
   // Enviar y cerrar: requiere lotes completados; toma la cantidad de los registros vinculados

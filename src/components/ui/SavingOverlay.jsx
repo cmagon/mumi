@@ -1,20 +1,23 @@
 import { useIsMutating } from '@tanstack/react-query'
 import { useEffect, useState } from 'react'
+import { subscribeBusy, getBusy } from '../../lib/busy'
 
-// Overlay global de "Guardando…": mientras haya una mutación en curso bloquea TODA la pantalla
-// (evita doble clic o navegar y que la info no se sincronice). Aparece tras un breve retardo
-// para no parpadear en operaciones instantáneas.
+// Overlay global de "Guardando…": mientras haya una mutación (o un guardado manual marcado con
+// setBusy) en curso, bloquea TODA la pantalla. Aparece tras un breve retardo para no parpadear.
 export default function SavingOverlay() {
   const mutating = useIsMutating()
+  const [busy, setBusyState] = useState(getBusy())
   const [show, setShow] = useState(false)
 
+  useEffect(() => subscribeBusy(setBusyState), [])
+
   useEffect(() => {
-    if (mutating > 0) {
+    if (mutating > 0 || busy > 0) {
       const t = setTimeout(() => setShow(true), 250)
       return () => clearTimeout(t)
     }
     setShow(false)
-  }, [mutating])
+  }, [mutating, busy])
 
   if (!show) return null
   return (

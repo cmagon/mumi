@@ -39,10 +39,12 @@ export default function ProductosTerminados() {
   const [listasPrecios, setListasPrecios] = useState(null)
   const [cargandoListas, setCargandoListas] = useState(false)
 
-  const { data: productos = [], isLoading: cargandoProds } = useQuery({
+  const { data: productos = [], isLoading: loadingProds, isFetching: fetchingProds, isSuccess: okProds } = useQuery({
     queryKey: ['finished_products'],
     queryFn: async () => { const { data } = await supabase.from('finished_products').select('*').order('nombre'); return data || [] },
   })
+  // Muestra el spinner hasta tener la primera respuesta real (no hay datos asentados todavía)
+  const cargandoProds = loadingProds || (fetchingProds && !okProds)
   const { data: movimientos = [] } = useQuery({
     queryKey: ['finished_movements'],
     queryFn: async () => { const { data } = await supabase.from('finished_movements').select('*').order('created_at', { ascending: false }).limit(500); return data || [] },
