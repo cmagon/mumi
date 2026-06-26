@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Source+Sans+3:wght@300;400;600&display=swap');
+﻿@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Source+Sans+3:wght@300;400;600&display=swap');
 
 :root {
   --selva:        #084908;
@@ -114,7 +114,7 @@ body {
   font-weight: 600;
 }
 .nav-icon { font-size: 1.1rem; width: 22px; text-align: center; flex-shrink: 0; }
-/* Acción rápida: registrar asistencia */
+/* AcciÃ³n rÃ¡pida: registrar asistencia */
 .nav-fichar {
   width: calc(100% - 24px);
   font: inherit; cursor: pointer;
@@ -156,7 +156,7 @@ body {
 }
 .btn-logout:hover { background: rgba(192,57,43,0.2); border-color: var(--rojo); color: #ff7675; }
 
-/* Header móvil */
+/* Header mÃ³vil */
 .mobile-header {
   display: none;
   position: fixed; top: 0; left: 0; right: 0;
@@ -185,6 +185,8 @@ body {
   margin-left: var(--sidebar-w);
   min-height: 100vh;
   flex: 1;
+  min-width: 0;            /* clave: permite que las tablas anchas hagan scroll en vez de empujar la pÃ¡gina */
+  max-width: 100%;
   padding: 32px;
   background: var(--crema);
 }
@@ -215,6 +217,7 @@ body {
   padding: 24px;
   box-shadow: var(--sombra);
   margin-bottom: 20px;
+  min-width: 0;           /* evita que el contenido interno desborde el ancho disponible */
 }
 .card-title {
   font-family: 'Playfair Display', serif;
@@ -270,9 +273,13 @@ body {
 .form-control:focus { outline: none; border-color: var(--selva-claro); box-shadow: 0 0 0 3px rgba(61,122,82,0.1); }
 .form-control[readOnly] { background: var(--crema); }
 .form-control:disabled { background: var(--crema); opacity: 0.6; }
+/* Rejillas fluidas: se adaptan al ancho disponible (reflujo automÃ¡tico, no solo en 2 breakpoints) */
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
-.form-grid-3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
-.form-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+.form-grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
+.form-grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; }
+/* Permite que los campos se encojan dentro de rejillas/flex (sin esto desbordan por su min-content) */
+.form-grid > *, .form-grid-2 > *, .form-grid-3 > * { min-width: 0; }
+input, select, textarea, .form-control { min-width: 0; max-width: 100%; }
 
 /* ==================== TABLAS ==================== */
 .table-wrap { overflow-x: auto; }
@@ -349,7 +356,8 @@ tr:hover td { background: rgba(26,58,42,0.03); }
 .modal-title { font-family: 'Playfair Display', serif; font-size: 1.2rem; color: var(--selva); }
 .modal-close { background: none; border: none; font-size: 1.4rem; cursor: pointer; color: var(--texto-suave); padding: 4px; }
 .modal-close:hover { color: var(--rojo); }
-.modal-body { padding: 24px; }
+.modal-body { padding: 24px; overflow-x: hidden; }   /* nada se sale horizontalmente del modal */
+.modal-body .table-wrap { overflow-x: auto; }         /* las tablas dentro del modal hacen su propio scroll */
 .modal-footer { padding: 16px 24px; border-top: 1px solid var(--crema-oscuro); display: flex; gap: 8px; justify-content: flex-end; }
 
 /* ==================== TABS ==================== */
@@ -392,7 +400,7 @@ tr:hover td { background: rgba(26,58,42,0.03); }
 .foto-upload:hover { border-color: var(--selva-claro); background: rgba(26,58,42,0.03); }
 .foto-preview { max-width: 100%; max-height: 200px; border-radius: var(--radio); object-fit: cover; }
 
-/* Galería grid */
+/* GalerÃ­a grid */
 .foto-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 12px; }
 .foto-thumb {
   background: var(--crema-oscuro); border-radius: var(--radio);
@@ -455,18 +463,35 @@ tr:hover td { background: rgba(26,58,42,0.03); }
 img, video, canvas { max-width: 100%; height: auto; }
 html { -webkit-text-size-adjust: 100%; }
 .table-wrap { -webkit-overflow-scrolling: touch; }
-/* Utilidad: cualquier grid de 2 columnas que deba apilarse en móvil.
+/* Utilidad: cualquier grid de 2 columnas que deba apilarse en mÃ³vil.
    Usa !important para poder sobrescribir grid-template-columns puesto inline. */
 .grid-resp { display: grid; }
 
 @media (max-width: 1024px) {
   .grid-resp { grid-template-columns: 1fr !important; }
 }
-@media (max-width: 768px) {
+/* ≤1480px: el MENÚ se colapsa a hamburguesa para que el contenido (tablas) use TODO el ancho.
+   Las tablas siguen siendo tablas hasta 1024px; solo se libera el espacio del menú. */
+@media (max-width: 1480px) {
   .sidebar { transform: translateX(-100%); }
   .sidebar.open { transform: translateX(0); }
   .mobile-header { display: flex; }
-  .main-content { margin-left: 0; padding: 76px 12px 24px; overflow-x: hidden; }
+  .main-content { margin-left: 0; padding: 76px 28px 28px; }
+}
+/* Escritorio intermedio (1025–1480px con menú colapsado): tabla ligeramente compacta para que quepa. */
+@media (min-width: 1025px) and (max-width: 1480px) {
+  table { font-size: 0.86rem; }
+  th, td { padding: 8px 10px; }
+  /* Columnas marcadas como secundarias se OCULTAN aquí para que la tabla quepa sin scroll.
+     Sus datos siguen visibles en "Ver detalles" y en la versión tarjeta (≤1024px). */
+  th.col-opcional, td.col-opcional { display: none; }
+}
+/* En pantallas medianas-bajas se ocultan también las columnas de prioridad 2 */
+@media (min-width: 1025px) and (max-width: 1200px) {
+  th.col-opcional-2, td.col-opcional-2 { display: none; }
+}
+@media (max-width: 1024px) {
+  .main-content { padding: 76px 12px 24px; overflow-x: hidden; }
   .card { overflow-x: hidden; }   /* red de seguridad: ningún contenido desborda en móvil */
   .card { padding: 16px; }
   .card-title { font-size: 1rem; flex-wrap: wrap; }
@@ -478,7 +503,7 @@ html { -webkit-text-size-adjust: 100%; }
   .btn { font-size: 0.82rem; padding: 8px 14px; }
   .btn-sm { padding: 6px 10px; }
   .ingrediente-row { grid-template-columns: 1fr 1fr; }
-  /* Tablas: texto y padding más compactos (siguen con scroll horizontal vía .table-wrap) */
+  /* Tablas: texto y padding mÃ¡s compactos (siguen con scroll horizontal vÃ­a .table-wrap) */
   table { font-size: 0.82rem; }
   th, td { padding: 8px 10px; }
   /* Modales: ocupan casi toda la pantalla y el footer envuelve botones */
@@ -502,7 +527,7 @@ html { -webkit-text-size-adjust: 100%; }
 /* ===== EFECTO ARRASTRAR Y SOLTAR (reordenar filas) ===== */
 .ed-row { transition: box-shadow 0.15s ease, opacity 0.15s ease, transform 0.15s ease; border-radius: 6px; }
 .ed-row.ed-arrastrando { opacity: 0.4; filter: blur(0.4px); box-shadow: 0 4px 14px rgba(26,58,42,0.18); }
-/* Línea difuminada que indica dónde quedará la fila */
+/* LÃ­nea difuminada que indica dÃ³nde quedarÃ¡ la fila */
 .ed-row.ed-soltar-antes   { box-shadow: inset 0 3px 0 0 var(--lima), 0 0 8px rgba(124,179,66,0.4); background: rgba(124,179,66,0.06); }
 .ed-row.ed-soltar-despues { box-shadow: inset 0 -3px 0 0 var(--lima), 0 0 8px rgba(124,179,66,0.4); background: rgba(124,179,66,0.06); }
 
@@ -512,13 +537,13 @@ html { -webkit-text-size-adjust: 100%; }
   outline: 2px solid transparent; outline-offset: 3px; will-change: transform;
 }
 .docs-grid .doc-folder:hover { box-shadow: 0 4px 16px rgba(26,58,42,0.14); transform: translateY(-2px); }
-/* Tarjeta que se está arrastrando: se "levanta", se atenúa y rota un poco */
+/* Tarjeta que se estÃ¡ arrastrando: se "levanta", se atenÃºa y rota un poco */
 .docs-grid .doc-folder.ed-arrastrando {
   opacity: 0.55; filter: none; transform: scale(0.94) rotate(-1.5deg);
   box-shadow: 0 14px 30px rgba(26,58,42,0.28); cursor: grabbing; z-index: 5;
 }
-/* Tarjeta destino: se CORRE para abrir un hueco y marca con una barra dónde se insertará
-   (en vez de crecer, que parecía "caer dentro" de la carpeta) */
+/* Tarjeta destino: se CORRE para abrir un hueco y marca con una barra dÃ³nde se insertarÃ¡
+   (en vez de crecer, que parecÃ­a "caer dentro" de la carpeta) */
 .docs-grid .doc-folder.ed-soltar-antes {
   transform: translateX(10px);
   box-shadow: inset 5px 0 0 0 var(--lima), 0 4px 14px rgba(0,0,0,0.10);
@@ -529,7 +554,7 @@ html { -webkit-text-size-adjust: 100%; }
 }
 @keyframes spin { to { transform: rotate(360deg); } }
 /* Separador visible entre filas del editor (escritorio) */
-@media (min-width: 769px) {
+@media (min-width: 1025px) {
   .ed-row { border-bottom: 1px solid var(--crema-oscuro); padding-bottom: 8px; }
 }
 /* Que el valor (g/bache, $, %) se vea completo: menos padding y sin flechas del number */
@@ -538,10 +563,10 @@ html { -webkit-text-size-adjust: 100%; }
 .ed-row input[type=number]::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
 .ed-row input[type=number] { -moz-appearance: textfield; appearance: textfield; }
 
-/* ===== EDITOR DE FILAS (ingredientes / MO / empaque) EN MÓVIL =====
-   Cada fila de edición se vuelve una TARJETA con sus campos apilados (una sola columna),
+/* ===== EDITOR DE FILAS (ingredientes / MO / empaque) EN MÃ“VIL =====
+   Cada fila de ediciÃ³n se vuelve una TARJETA con sus campos apilados (una sola columna),
    garantizando que nada se desborde ni quede apretado en pantallas chicas. */
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
   .ed-wrap { min-width: 0 !important; width: 100%; }
   .ed-head { display: none !important; }
   .ed-row {
@@ -556,12 +581,12 @@ html { -webkit-text-size-adjust: 100%; }
   /* Subtotal con etiqueta visible */
   .ed-row .ed-sub { text-align: left !important; font-size: 1rem !important; padding-top: 0 !important; }
   .ed-row .ed-sub::before { content: 'Subtotal: '; font-weight: 600; color: var(--texto-suave); font-size: 0.78rem; }
-  /* La fila de controles (asa/↑↓/✕) en línea, alineada a la derecha */
+  /* La fila de controles (asa/â†‘â†“/âœ•) en lÃ­nea, alineada a la derecha */
   .ed-row .ed-controls { display: flex !important; justify-content: flex-end; gap: 4px; }
 }
 
-/* ===== PESTAÑAS COMO BOTONES EN MÓVIL (sin scroll horizontal) ===== */
-@media (max-width: 768px) {
+/* ===== PESTAÃ‘AS COMO BOTONES EN MÃ“VIL (sin scroll horizontal) ===== */
+@media (max-width: 1024px) {
   .tabs {
     overflow-x: visible;
     flex-wrap: wrap;
@@ -570,7 +595,7 @@ html { -webkit-text-size-adjust: 100%; }
     margin-bottom: 18px;
   }
   .tab-btn {
-    flex: 1 1 calc(50% - 6px);   /* dos por fila, se acomodan según el texto */
+    flex: 1 1 calc(50% - 6px);   /* dos por fila, se acomodan segÃºn el texto */
     text-align: center;
     border: 1.5px solid var(--crema-oscuro);
     border-radius: var(--radio);
@@ -589,12 +614,12 @@ html { -webkit-text-size-adjust: 100%; }
 
 /* ===== VISIBILIDAD POR DISPOSITIVO ===== */
 .solo-movil { display: none; }
-@media (max-width: 768px) {
+@media (max-width: 1024px) {
   .solo-desktop { display: none !important; }
   .solo-movil { display: block; }
 }
 
-/* ===== ACORDEÓN MÓVIL ===== */
+/* ===== ACORDEÃ“N MÃ“VIL ===== */
 .acordeon-item {
   border: 1px solid var(--crema-oscuro); border-radius: 8px;
   margin-bottom: 10px; background: var(--blanco); overflow: hidden;
@@ -618,10 +643,10 @@ html { -webkit-text-size-adjust: 100%; }
 .acordeon-fila .et { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; font-size: 0.68rem; letter-spacing: 0.4px; }
 .acordeon-acciones { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 
-/* ===== TABLAS COMO TARJETAS EN MÓVIL =====
+/* ===== TABLAS COMO TARJETAS EN MÃ“VIL =====
    Cada fila se convierte en una tarjeta y cada celda muestra su encabezado
-   (vía data-label, que añade automáticamente el hook useResponsiveTableLabels). */
-@media (max-width: 768px) {
+   (vÃ­a data-label, que aÃ±ade automÃ¡ticamente el hook useResponsiveTableLabels). */
+@media (max-width: 1024px) {
   .table-wrap { overflow-x: visible; }
   .table-wrap table,
   .table-wrap tbody,
@@ -651,13 +676,13 @@ html { -webkit-text-size-adjust: 100%; }
     text-transform: uppercase; font-size: 0.66rem; letter-spacing: 0.4px;
     text-align: left; flex: 0 0 42%; padding-right: 8px;
   }
-  /* Celdas sin etiqueta (acciones, columnas con encabezado vacío) y filas especiales */
+  /* Celdas sin etiqueta (acciones, columnas con encabezado vacÃ­o) y filas especiales */
   .table-wrap td:not([data-label])::before,
   .table-wrap td[data-label=""]::before { display: none; }
   .table-wrap td:not([data-label]) { justify-content: flex-end; }
   .table-wrap td.empty-table { text-align: center; justify-content: center; }
   .table-wrap td.empty-table::before { display: none; }
-  /* Botones de acción que envuelvan sin desbordar */
+  /* Botones de acciÃ³n que envuelvan sin desbordar */
   .table-wrap td > div { flex-wrap: wrap; justify-content: flex-end; }
 }
 @media print {
@@ -666,3 +691,4 @@ html { -webkit-text-size-adjust: 100%; }
   body { background: white; }
   .card { box-shadow: none; border: 1px solid #ddd; }
 }
+

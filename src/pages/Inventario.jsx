@@ -335,7 +335,7 @@ export default function Inventario() {
         {/* ===== Versión desktop: tabla ===== */}
         <div className="table-wrap solo-desktop">
           <table>
-            <thead><tr><th>Materia Prima</th><th>Categoría</th><th>Unidad</th><th>Precio</th><th>Stock</th><th>Mín.</th><th>Lote</th><th>Vence</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>Materia Prima</th><th className="col-opcional-2">Categoría</th><th className="col-opcional-2">Unidad</th><th>Precio</th><th>Stock</th><th className="col-opcional-2">Mín.</th><th className="col-opcional">Lote</th><th className="col-opcional">Vence</th><th className="col-opcional">Estado</th><th>Acciones</th></tr></thead>
             <tbody>
               {mpsFiltrados.length === 0
                 ? <tr><td colSpan={10} className="empty-table">Sin materias primas en esta categoría</td></tr>
@@ -348,14 +348,14 @@ export default function Inventario() {
                         <strong>{m.nombre}</strong>
                         {m.tipo === 'interno' && <span className="badge badge-dorado" style={{ marginLeft: 6, fontSize: '0.7rem' }}>interno</span>}
                       </td>
-                      <td><span className="badge badge-gris">{m.categoria}</span></td>
-                      <td>{m.unidad}</td>
+                      <td className="col-opcional-2"><span className="badge badge-gris">{m.categoria}</span></td>
+                      <td className="col-opcional-2">{m.unidad}</td>
                       <td className="td-number">${fNum(m.precio || 0)}<small style={{ color: 'var(--texto-suave)' }}>{sufijoUnidad(m.unidad)}</small></td>
                       <td className="td-number"><strong>{fNum(m.stock || 0)}</strong></td>
-                      <td className="td-number">{fNum(m.stock_min || 0)}</td>
-                      <td>{lv.lote || '—'}</td>
-                      <td>{lv.vence ? fFecha(lv.vence) : '—'}</td>
-                      <td><span className={`badge ${badge}`}>{label}</span></td>
+                      <td className="td-number col-opcional-2">{fNum(m.stock_min || 0)}</td>
+                      <td className="col-opcional">{lv.lote || '—'}</td>
+                      <td className="col-opcional">{lv.vence ? fFecha(lv.vence) : '—'}</td>
+                      <td className="col-opcional"><span className={`badge ${badge}`}>{label}</span></td>
                       <td onClick={e => e.stopPropagation()}>
                         <div style={{ display: 'flex', gap: 4 }}>
                           {puedeEditarInv && <button className="btn btn-xs btn-primary" onClick={() => openMovimiento(m.id, 'entrada')}>+ Ent.</button>}

@@ -80,7 +80,7 @@ export default function ProductosPorEmpacar() {
           </div>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Producto</th><th>Lote</th><th className="td-number">Disponible</th><th>Vence</th><th>Origen</th><th></th></tr></thead>
+              <thead><tr><th>Producto</th><th>Lote</th><th className="td-number">Disponible</th><th className="col-opcional">Vence</th><th className="col-opcional-2">Origen</th><th></th></tr></thead>
               <tbody>
                 {filtrados.length === 0
                   ? <tr><td colSpan={6} className="empty-table">No hay productos por empacar.</td></tr>
@@ -91,8 +91,8 @@ export default function ProductosPorEmpacar() {
                           <td><strong>{s.producto}</strong></td>
                           <td>{s.lote || '(s/n)'}</td>
                           <td className="td-number">{fCant(s.peso)} {s.unidad}</td>
-                          <td style={{ color: est === 'vencido' ? 'var(--rojo)' : est === 'por_vencer' ? 'var(--tierra)' : undefined }}>{fmtV(s.vencimiento)} {est === 'vencido' ? '⛔' : est === 'por_vencer' ? '⚠' : ''}</td>
-                          <td style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>{s.created_at ? fFecha(s.created_at.slice(0, 10)) : '—'}</td>
+                          <td className="col-opcional" style={{ color: est === 'vencido' ? 'var(--rojo)' : est === 'por_vencer' ? 'var(--tierra)' : undefined }}>{fmtV(s.vencimiento)} {est === 'vencido' ? '⛔' : est === 'por_vencer' ? '⚠' : ''}</td>
+                          <td className="col-opcional-2" style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>{s.created_at ? fFecha(s.created_at.slice(0, 10)) : '—'}</td>
                           <td><button className="btn btn-xs btn-danger" onClick={() => abrirBaja(s)}>🗑 Dar de baja</button></td>
                         </tr>
                       )

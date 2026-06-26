@@ -100,7 +100,7 @@ export default function Clientes() {
       <div className="card">
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Nombre / Empresa</th><th>Contacto</th><th>Canal</th><th>Ciudad</th><th>Fecha Reg.</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>Nombre / Empresa</th><th>Contacto</th><th className="col-opcional">Canal</th><th className="col-opcional">Ciudad</th><th className="col-opcional-2">Fecha Reg.</th><th>Acciones</th></tr></thead>
             <tbody>
               {filtrados.length === 0
                 ? <tr><td colSpan={6} className="empty-table">Sin clientes registrados</td></tr>
@@ -108,9 +108,9 @@ export default function Clientes() {
                   <tr key={c.id}>
                     <td><strong>{c.nombre}</strong></td>
                     <td>{c.contacto || '—'}<br /><small style={{ color: 'var(--texto-suave)' }}>{c.telefono}</small></td>
-                    <td><span className="badge badge-azul">{CANALES[c.canal] || c.canal}</span></td>
-                    <td>{c.ciudad || '—'}</td>
-                    <td>{fFecha(c.fecha_reg)}</td>
+                    <td className="col-opcional"><span className="badge badge-azul">{CANALES[c.canal] || c.canal}</span></td>
+                    <td className="col-opcional">{c.ciudad || '—'}</td>
+                    <td className="col-opcional-2">{fFecha(c.fecha_reg)}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>
                         <button className="btn btn-xs btn-secondary" onClick={() => openEdit(c)}>✏</button>

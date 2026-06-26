@@ -470,20 +470,20 @@ export default function Produccion() {
           {/* ===== Versión desktop: tabla ===== */}
           <div className="table-wrap solo-desktop">
             <table>
-              <thead><tr><th>Producto</th><th>Tipo</th><th>Lote</th><th>Etapas</th><th>Fecha</th><th>Empaque</th><th>Cant. final</th><th>Avance</th><th>Estado</th><th>Acciones</th></tr></thead>
+              <thead><tr><th>Producto</th><th className="col-opcional">Tipo</th><th>Lote</th><th className="col-opcional">Etapas</th><th className="col-opcional-2">Fecha</th><th className="col-opcional">Empaque</th><th>Cant. final</th><th className="col-opcional-2">Avance</th><th>Estado</th><th>Acciones</th></tr></thead>
               <tbody>
                 {filtrados.length === 0
                   ? <tr><td colSpan={10} className="empty-table">Sin registros</td></tr>
                   : filtrados.map(p => (
                     <tr key={p.id}>
                       <td><strong>{p.producto}</strong>{p.surtido && p.producto_surtido && <div style={{ fontSize: '0.72rem', color: 'var(--tierra)' }}>🔀 {p.producto_surtido}</div>}</td>
-                      <td><span className={`badge ${p.tipo_registro === 'subproducto' ? 'badge-dorado' : 'badge-azul'}`}>{p.tipo_registro === 'subproducto' ? 'Subprod.' : 'Final'}</span></td>
+                      <td className="col-opcional"><span className={`badge ${p.tipo_registro === 'subproducto' ? 'badge-dorado' : 'badge-azul'}`}>{p.tipo_registro === 'subproducto' ? 'Subprod.' : 'Final'}</span></td>
                       <td><strong>{p.lote || '—'}</strong></td>
-                      <td className="td-number">{Array.isArray(p.etapas) ? p.etapas.length : 0}</td>
-                      <td>{fFecha(p.fecha)}</td>
-                      <td>{p.empaque || '—'}</td>
+                      <td className="td-number col-opcional">{Array.isArray(p.etapas) ? p.etapas.length : 0}</td>
+                      <td className="col-opcional-2">{fFecha(p.fecha)}</td>
+                      <td className="col-opcional">{p.empaque || '—'}</td>
                       <td className="td-number"><strong>{fNum(p.cantidad)}</strong></td>
-                      <td>{p.completado ? <span className="badge badge-verde">Completado</span> : <span className="badge badge-dorado">En proceso</span>}</td>
+                      <td className="col-opcional-2">{p.completado ? <span className="badge badge-verde">Completado</span> : <span className="badge badge-dorado">En proceso</span>}</td>
                       <td>
                         <span className={`badge ${p.estado === 'no conforme' ? 'badge-rojo' : 'badge-verde'}`}>{p.estado || 'conforme'}</span>
                         {p.aprobado === false && <div><span className="badge badge-dorado" style={{ fontSize: '0.62rem' }}>Pendiente aprob.</span></div>}

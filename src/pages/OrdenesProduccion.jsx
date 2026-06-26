@@ -106,6 +106,8 @@ export default function OrdenesProduccion() {
   const [prepSobranteUnidad, setPrepSobranteUnidad] = useState('g')
   // Cantidad de unidades/cajas empacadas surtidas (stock del producto terminado surtido)
   const [prepSurtidoCantidad, setPrepSurtidoCantidad] = useState('')
+  // Consumo del saldo de cada lote combinado en el surtido { saldoId: cantidad }
+  const [prepSurtidoConsumos, setPrepSurtidoConsumos] = useState({})
   // Mano de obra por destajo (operarios extra de un día puntual): [{ nombre, modo, cantidad, tarifa }]
   const [prepDestajo, setPrepDestajo] = useState([])
   const destajoTotal = (arr = prepDestajo) => arr.reduce((s, d) => s + (parseFloat(d.cantidad) || 0) * (parseFloat(d.tarifa) || 0), 0)
@@ -394,6 +396,7 @@ export default function OrdenesProduccion() {
     setPrepLotesExtra([])
     setPrepHaySobrante(!!o.hay_sobrante); setPrepSobrantePeso(o.sobrante_peso || ''); setPrepSobranteUnidad(o.sobrante_unidad || 'g')
     setPrepSurtidoCantidad(o.surtido_cantidad != null ? String(o.surtido_cantidad) : '')
+    setPrepSurtidoConsumos({})
     await prepararDatos(o); setModalProceso(true)
   }
 
@@ -673,6 +676,10 @@ export default function OrdenesProduccion() {
       }
       const unidades = parseFloat(prepUnidades) || 0
       const estado = prepConforme && unidades > 0 ? 'conforme' : 'no conforme'
+      // Saldos consumidos por esta orden (para poder reponerlos al devolverla)
+      const saldosConsumidos = []
+      if (prepSurtido) { for (const [sid, c] of Object.entries(prepSurtidoConsumos)) { const cant = parseFloat(c) || 0; if (cant > 0) saldosConsumidos.push({ saldo_id: sid, cantidad: cant }) } }
+      for (const ex of prepLotesExtra) { const cant = parseFloat(ex.peso_consumido) || 0; if (ex.saldo_id && cant > 0) saldosConsumidos.push({ saldo_id: ex.saldo_id, cantidad: cant }) }
       // Lotes empacados adicionales (saldos de mezcla / partes empacadas con otro lote)
       const extras = prepLotesExtra.filter(e => (parseFloat(e.unidades) || 0) > 0)
       const extrasUnid = extras.reduce((s, e) => s + (parseFloat(e.unidades) || 0), 0)
@@ -724,6 +731,7 @@ export default function OrdenesProduccion() {
         producto_surtido: prepSurtido ? (prepProductoSurtido || null) : null,
         surtido_cantidad: prepSurtido && prepSurtidoCantidad !== '' ? (parseFloat(prepSurtidoCantidad) || 0) : null,
         hay_sobrante: prepHaySobrante, sobrante_peso: prepHaySobrante ? (parseFloat(prepSobrantePeso) || 0) : null, sobrante_unidad: prepHaySobrante ? prepSobranteUnidad : null,
+        saldos_consumidos: saldosConsumidos.length ? saldosConsumidos : null,
         obs_result: prepObs || '', foto_url, fecha_envio: new Date().toISOString(),
         destajo: prepDestajo.filter(d => d.nombre?.trim() || d.cantidad || d.tarifa),
       } })
@@ -778,6 +786,16 @@ export default function OrdenesProduccion() {
             const { data: sal } = await supabase.from('mezcla_saldos').select('peso').eq('id', ex.saldo_id).single()
             const restante = Math.max(0, (sal?.peso || 0) - consumido)
             await supabase.from('mezcla_saldos').update({ peso: restante, estado: restante <= 0 ? 'agotado' : 'disponible' }).eq('id', ex.saldo_id)
+          }
+          // a2) Descontar de los saldos de los lotes combinados en el surtido
+          if (prepSurtido) {
+            for (const [sid, c] of Object.entries(prepSurtidoConsumos)) {
+              const cant = parseFloat(c) || 0
+              if (cant <= 0) continue
+              const { data: sal } = await supabase.from('mezcla_saldos').select('peso').eq('id', sid).single()
+              const rest = Math.max(0, (sal?.peso || 0) - cant)
+              await supabase.from('mezcla_saldos').update({ peso: rest, estado: rest <= 0 ? 'agotado' : 'disponible' }).eq('id', sid)
+            }
           }
           // b) Crear el saldo nuevo con el sobrante de esta orden
           const sobrante = parseFloat(prepSobrantePeso) || 0
@@ -881,6 +899,62 @@ export default function OrdenesProduccion() {
       if (error) throw error
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['production_orders'] }); toast('Envío anulado — puedes corregir y reenviar') },
+    onError: (e) => toast(e.message, 'error'),
+  })
+
+  // Devolver orden (admin): elimina el registro de producción, DEVUELVE el stock terminado que sumó
+  // y regresa la orden a 'en_proceso' para reeditarla.
+  const devolverOrden = useMutation({
+    mutationFn: async (o) => {
+      // 1) Devolver el stock terminado sumado por esta orden (entradas de producción)
+      const { data: movs } = await supabase.from('finished_movements').select('finished_id, cantidad, tipo').eq('ref', String(o.id)).eq('origen', 'produccion')
+      const porFp = {}
+      for (const m of (movs || [])) { if (m.tipo === 'entrada' && m.finished_id) porFp[m.finished_id] = (porFp[m.finished_id] || 0) + Number(m.cantidad || 0) }
+      for (const fpId of Object.keys(porFp)) {
+        const { data: fp } = await supabase.from('finished_products').select('stock, alegra_item_id').eq('id', fpId).maybeSingle()
+        const nuevo = Math.max(0, Number(fp?.stock || 0) - porFp[fpId])
+        await supabase.from('finished_products').update({ stock: nuevo }).eq('id', fpId)
+        if (fp?.alegra_item_id) { try { await supabase.functions.invoke('alegra-push-stock', { body: { finished_id: fpId } }) } catch { /* offline */ } }
+      }
+      await supabase.from('finished_movements').delete().eq('ref', String(o.id)).eq('origen', 'produccion')
+      // 2) Eliminar el saldo (sobrante) que creó esta orden
+      await supabase.from('mezcla_saldos').delete().eq('orden_origen', o.id)
+      // 2b) Reponer los saldos que esta orden había CONSUMIDO (surtido / empaque de saldo)
+      if (Array.isArray(o.saldos_consumidos)) {
+        for (const sc of o.saldos_consumidos) {
+          if (!sc.saldo_id || !(Number(sc.cantidad) > 0)) continue
+          const { data: sal } = await supabase.from('mezcla_saldos').select('peso').eq('id', sc.saldo_id).maybeSingle()
+          if (sal) await supabase.from('mezcla_saldos').update({ peso: Number(sal.peso || 0) + Number(sc.cantidad), estado: 'disponible' }).eq('id', sc.saldo_id)
+        }
+      }
+      // 3) Borrar los registros de producción de la orden
+      await supabase.from('production_records').delete().eq('orden_id', o.id)
+      // 4) Devolver la MP a estado RESERVADA (revierte el consumo definitivo, para que al reeditar no se duplique)
+      let lotesReservados = null
+      if (Array.isArray(o.lotes_mp) && o.lotes_mp.length) {
+        for (const it of o.lotes_mp) {
+          for (const l of (it.lotes || [])) {
+            if (!l.id) continue
+            const { data: lote } = await supabase.from('raw_material_lots').select('cantidad_reservada').eq('id', l.id).single()
+            await supabase.from('raw_material_lots').update({ cantidad_reservada: (lote?.cantidad_reservada || 0) + (l.cantidad || 0) }).eq('id', l.id)
+          }
+        }
+        // Elimina las salidas de inventario que generó esta orden
+        try { await supabase.from('inventory_movements').delete().eq('extra->>orden_id', String(o.id)) } catch { /* sin soporte de filtro jsonb */ }
+        lotesReservados = o.lotes_mp
+      }
+      // 5) Regresar la orden a 'en_proceso' para reeditarla, con la MP de nuevo reservada
+      const { error } = await supabase.from('production_orders').update({
+        estado: 'en_proceso', fecha_envio: null, aprobado_por: null, fecha_aprob: null,
+        lotes_reservados: lotesReservados, lotes_mp: null,
+      }).eq('id', o.id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['production_records'] })
+      qc.invalidateQueries({ queryKey: ['finished_products'] }); qc.invalidateQueries({ queryKey: ['finished_movements'] }); qc.invalidateQueries({ queryKey: ['mezcla_saldos'] })
+      toast('Orden devuelta — registro eliminado y stock devuelto ✓')
+    },
     onError: (e) => toast(e.message, 'error'),
   })
 
@@ -1244,7 +1318,7 @@ export default function OrdenesProduccion() {
         <div className="card-title">📋 {esAdmin ? 'Todas las órdenes' : 'Mis órdenes asignadas'}</div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>#</th><th>Emitida</th><th>Producto</th><th>Lote</th><th>Tipo</th><th>Cant. plan</th><th>Operario</th><th>Estado</th><th>Resultado</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>#</th><th className="col-opcional">Emitida</th><th>Producto</th><th>Lote</th><th className="col-opcional">Tipo</th><th>Cant. plan</th><th className="col-opcional-2">Operario</th><th>Estado</th><th className="col-opcional-2">Resultado</th><th>Acciones</th></tr></thead>
             <tbody>
               {visibles.length === 0
                 ? <tr><td colSpan={10} className="empty-table">No hay órdenes</td></tr>
@@ -1254,14 +1328,14 @@ export default function OrdenesProduccion() {
                   return (
                     <tr key={o.id} style={{ cursor: 'pointer' }} onClick={() => setOrdenDetalle(o)}>
                       <td>#{opNum(o.id)}</td>
-                      <td>{o.created_at ? fFecha(o.created_at.split('T')[0]) : '—'}</td>
+                      <td className="col-opcional">{o.created_at ? fFecha(o.created_at.split('T')[0]) : '—'}</td>
                       <td><strong>{o.producto}</strong>{o.notas_orden && <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>{o.notas_orden}</div>}</td>
                       <td>{o.lote || '—'}{o.surtido && o.lote_mezcla && <div style={{ fontSize: '0.7rem', color: 'var(--tierra)' }}>🔀 {o.lote_mezcla}</div>}</td>
-                      <td>{o.es_prueba ? <span className="badge badge-dorado">🧪 Prueba</span> : o.es_subproducto ? <span className="badge badge-dorado">Subproducto</span> : <span className="badge badge-azul">Terminado</span>}</td>
+                      <td className="col-opcional">{o.es_prueba ? <span className="badge badge-dorado">🧪 Prueba</span> : o.es_subproducto ? <span className="badge badge-dorado">Subproducto</span> : <span className="badge badge-azul">Terminado</span>}</td>
                       <td className="td-number">{fNum(o.cantidad_plan)} {o.unidad}</td>
-                      <td>{o.operario}</td>
+                      <td className="col-opcional-2">{o.operario}</td>
                       <td><span className={`badge ${est.badge}`}>{est.txt}</span>{o.estado === 'rechazada' && o.motivo_rechazo && <div style={{ fontSize: '0.72rem', color: 'var(--rojo)' }}>{o.motivo_rechazo}</div>}</td>
-                      <td className="td-number">{o.cantidad_result != null ? `${fNum(o.cantidad_result)}` : '—'}</td>
+                      <td className="td-number col-opcional-2">{o.cantidad_result != null ? `${fNum(o.cantidad_result)}` : '—'}</td>
                       <td onClick={e => e.stopPropagation()}>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           <button className="btn btn-xs btn-secondary" onClick={() => setOrdenDetalle(o)}>👁 Detalles</button>
@@ -1291,6 +1365,9 @@ export default function OrdenesProduccion() {
                             <button className="btn btn-xs btn-success" onClick={() => aprobar.mutate(o)} disabled={aprobar.isPending}>✓ Aprobar</button>
                             <button className="btn btn-xs btn-danger" onClick={() => pedir('Motivo del rechazo:', { title: 'Rechazar orden' }).then(motivo => { if (motivo !== null) rechazar.mutate({ o, motivo: motivo || '' }) })}>✕ Rechazar</button>
                           </>}
+                          {esAdmin && (o.estado === 'ejecutada' || o.estado === 'aprobada') && (
+                            <button className="btn btn-xs btn-secondary" title="Devolver orden: elimina el registro, devuelve el stock terminado y vuelve a 'en proceso' para reeditarla" disabled={devolverOrden.isPending} onClick={() => confirmar(`¿Devolver la orden #${opNum(o.id)}?\n\nSe ELIMINA su registro de producción, se DEVUELVE el stock que sumó al producto terminado y vuelve a "en proceso" para reeditarla.`).then(ok => ok && devolverOrden.mutate(o))}>↩ Devolver</button>
+                          )}
                           {esAdmin && o.estado !== 'ejecutada' && o.estado !== 'aprobada' && <button className="btn btn-xs btn-danger" title="Eliminar orden (solo admin)" onClick={() => confirmarEliminarOrden(o)}>🗑</button>}
                           {(o.estado === 'aprobada' || (esAdmin && o.estado !== 'ejecutada')) && o.foto_url && <button className="btn btn-xs btn-secondary" onClick={() => openEjecutar(o)}>📷</button>}
                         </div>
@@ -1667,6 +1744,27 @@ export default function OrdenesProduccion() {
                   <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
                     Es el <strong>stock</strong> que se suma al producto terminado surtido. El <strong>lote de la caja (rótulo final)</strong> será el más reciente: <strong>{loteCaja(prepLoteMezcla, prepLote) || '(elige el lote arriba)'}</strong>.
                   </small>
+                  {/* Validación de lote + consumo del saldo de cada lote combinado */}
+                  {(() => {
+                    const tokens = String(prepLoteMezcla).split(/[,;]/).map(s => s.trim()).filter(Boolean)
+                    if (!tokens.length) return null
+                    const lotesConocidos = new Set([...ordenes.map(x => String(x.lote || '').trim()), ...prodRecords.map(rr => String(rr.lote || '').trim()), ...saldosMezcla.map(s => String(s.lote || '').trim())].filter(Boolean))
+                    const desconocidos = tokens.filter(t => !lotesConocidos.has(t))
+                    const saldosProd = saldosDeProducto(ordenPrep.producto, ordenPrep.origen_id)
+                    const matches = saldosProd.filter(s => tokens.includes(String(s.lote || '').trim()))
+                    return (
+                      <div style={{ marginTop: 8 }}>
+                        {desconocidos.length > 0 && <div style={{ fontSize: '0.72rem', color: 'var(--tierra)' }}>⚠ Lote(s) no encontrado(s) en el sistema: <strong>{desconocidos.join(', ')}</strong></div>}
+                        {matches.map(s => (
+                          <div key={s.id} style={{ fontSize: '0.78rem', marginTop: 4 }}>
+                            <label style={{ color: 'var(--texto-suave)' }}>Consumido del saldo lote {s.lote} ({s.unidad}, disp. {fCant(s.peso)}): </label>
+                            <input type="number" className="form-control" style={{ display: 'inline-block', width: 110 }} value={prepSurtidoConsumos[s.id] || ''} onChange={e => setPrepSurtidoConsumos(m => ({ ...m, [s.id]: e.target.value }))} min={0} max={s.peso} step="any" />
+                          </div>
+                        ))}
+                        {matches.length > 0 && <small style={{ color: 'var(--texto-suave)', fontSize: '0.7rem' }}>Indica cuántas subporciones de cada lote anterior se usaron en el surtido; se descuentan de su saldo.</small>}
+                      </div>
+                    )
+                  })()}
                 </div>
               )}
 

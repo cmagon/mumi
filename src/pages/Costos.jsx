@@ -862,7 +862,7 @@ export default function Costos() {
           {/* ===== Versión desktop: tabla ===== */}
           <div className="table-wrap solo-desktop">
             <table>
-              <thead><tr><th>Producto</th><th>Imagen</th><th>Tipo</th><th>Unid/mes</th><th>MP+Emp</th><th>MO/overhead</th><th>Costo total/u</th><th>P. Mayor</th><th>% Utilidad</th><th>Acciones</th></tr></thead>
+              <thead><tr><th>Producto</th><th className="col-opcional-2">Imagen</th><th className="col-opcional-2">Tipo</th><th className="col-opcional">Unid/mes</th><th className="col-opcional">MP+Emp</th><th className="col-opcional">MO/overhead</th><th>Costo total/u</th><th>P. Mayor</th><th className="col-opcional-2">% Utilidad</th><th>Acciones</th></tr></thead>
               <tbody>
                 {productos.length === 0
                   ? <tr><td colSpan={10} className="empty-table">No hay fichas. Crea la primera →</td></tr>
@@ -875,19 +875,19 @@ export default function Costos() {
                       return (
                         <tr key={p.id} style={inactivo ? { opacity: 0.6 } : undefined}>
                           <td><strong>{p.nombre}</strong> {inactivo && <span className="badge badge-gris" style={{ fontSize:'0.65rem' }}>⏸ Inactivo</span>}</td>
-                          <td>
+                          <td className="col-opcional-2">
                             {p.imagen_url
                               ? <img src={p.imagen_url} alt={p.nombre} style={{ width:32, height:32, borderRadius:3, objectFit:'cover' }} />
                               : <span style={{ color:'var(--texto-suave)', fontSize:'0.8rem' }}>—</span>
                             }
                           </td>
-                          <td><span className="badge badge-gris">{p.tipo}</span></td>
-                          <td className="td-number">{fNum(unidsMes)}</td>
-                          <td className="td-number">{fCOP(rc.cvu)}</td>
-                          <td className="td-number text-dorado">{fCOP(rc.moUnit)}</td>
+                          <td className="col-opcional-2"><span className="badge badge-gris">{p.tipo}</span></td>
+                          <td className="td-number col-opcional">{fNum(unidsMes)}</td>
+                          <td className="td-number col-opcional">{fCOP(rc.cvu)}</td>
+                          <td className="td-number text-dorado col-opcional">{fCOP(rc.moUnit)}</td>
                           <td className="td-number"><strong>{fCOP(rc.costoTotalUnit)}</strong></td>
                           <td className="td-number">{fCOP(p.precio_mayor)}</td>
-                          <td className="td-number text-verde">{margen != null ? margen.toFixed(1)+'%' : '—'}</td>
+                          <td className="td-number text-verde col-opcional-2">{margen != null ? margen.toFixed(1)+'%' : '—'}</td>
                           <td>
                             <div style={{ display:'flex', gap:4 }}>
                               <button className="btn btn-xs btn-secondary" onClick={() => { setVerProd(p); setVerModal(true) }}>Ver</button>

@@ -420,7 +420,7 @@ export default function ProductosTerminados() {
         </div>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Producto</th><th>Tipo</th><th>SKU</th><th>Alegra</th><th className="td-number">Stock</th><th className="td-number">Costo unit.</th><th>Estado</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>Producto</th><th className="col-opcional-2">Tipo</th><th className="col-opcional">SKU</th><th className="col-opcional-2">Alegra</th><th className="td-number">Stock</th><th className="td-number col-opcional">Costo unit.</th><th className="col-opcional-2">Estado</th><th>Acciones</th></tr></thead>
             <tbody>
               {filtrados.length === 0
                 ? <tr><td colSpan={8} className="empty-table">Sin productos terminados.</td></tr>
@@ -429,20 +429,20 @@ export default function ProductosTerminados() {
                     return (
                       <tr key={p.id} style={p.activo === false ? { opacity: 0.55 } : undefined}>
                         <td><strong>{p.nombre}</strong></td>
-                        <td><span className={`badge ${p.tipo === 'surtido' ? 'badge-dorado' : p.tipo === 'mp' ? 'badge-gris' : 'badge-azul'}`}>{p.tipo === 'surtido' ? '🔀 Surtido' : p.tipo === 'mp' ? '🧪 MP' : 'Base'}</span></td>
-                        <td>{p.sku || '—'}</td>
-                        <td>{p.alegra_item_id ? '✓' : '—'}</td>
+                        <td className="col-opcional-2"><span className={`badge ${p.tipo === 'surtido' ? 'badge-dorado' : p.tipo === 'mp' ? 'badge-gris' : 'badge-azul'}`}>{p.tipo === 'surtido' ? '🔀 Surtido' : p.tipo === 'mp' ? '🧪 MP' : 'Base'}</span></td>
+                        <td className="col-opcional">{p.sku || '—'}</td>
+                        <td className="col-opcional-2">{p.alegra_item_id ? '✓' : '—'}</td>
                         <td className="td-number"><strong style={{ color: bajo ? 'var(--rojo)' : undefined }}>{fNum(p.stock)}</strong>{bajo && <div style={{ fontSize: '0.65rem', color: 'var(--rojo)' }}>⚠ bajo</div>}</td>
                         {(() => {
                           const costoMostrar = p.tipo === 'base' ? (Number(p.costo_unitario) || costoFicha(p)) : (Number(p.costo_unitario) || 0)
                           const desync = p.tipo === 'base' && costoFicha(p) > 0 && Math.round(costoFicha(p)) !== Math.round(Number(p.costo_unitario) || 0)
                           return (
-                            <td className="td-number">$ {costoMostrar.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+                            <td className="td-number col-opcional">$ {costoMostrar.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
                               {p.tipo === 'base' && <div style={{ fontSize: '0.62rem', color: desync ? 'var(--tierra)' : 'var(--texto-suave)' }}>{desync ? '⚠ ficha (sin guardar)' : 'desde ficha'}</div>}
                             </td>
                           )
                         })()}
-                        <td>{p.activo === false ? <span className="badge badge-gris">Inactivo</span> : <span className="badge badge-verde">Activo</span>}</td>
+                        <td className="col-opcional-2">{p.activo === false ? <span className="badge badge-gris">Inactivo</span> : <span className="badge badge-verde">Activo</span>}</td>
                         <td>
                           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                             <button className="btn btn-xs btn-primary" onClick={() => { setModalAjuste(p); setAForm(EMPTY_AJUSTE) }}>⚖ Ajustar</button>
