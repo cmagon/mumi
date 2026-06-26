@@ -681,7 +681,8 @@ export default function OrdenesProduccion() {
       const surtidoConsumos = []
       if (prepSurtido) {
         const tokens = String(prepLoteMezcla).split(/[,;]/).map(s => s.trim()).filter(Boolean)
-        const matchSaldos = saldosDeProducto(o.producto, o.origen_id).filter(s => tokens.includes(String(s.lote || '').trim()))
+        // El lote combinado puede ser de OTRO producto (surtido de sabores): se busca por lote en cualquier producto
+        const matchSaldos = saldosMezcla.filter(s => (s.peso > 0) && tokens.includes(String(s.lote || '').trim()))
         for (const s of matchSaldos) {
           const v = prepSurtidoConsumos[s.id]
           const cant = (v !== undefined && v !== '') ? (parseFloat(v) || 0) : (matchSaldos.length === 1 ? (parseFloat(prepSurtidoCantidad) || 0) : 0)
@@ -1759,8 +1760,8 @@ export default function OrdenesProduccion() {
                     if (!tokens.length) return null
                     const lotesConocidos = new Set([...ordenes.map(x => String(x.lote || '').trim()), ...prodRecords.map(rr => String(rr.lote || '').trim()), ...saldosMezcla.map(s => String(s.lote || '').trim())].filter(Boolean))
                     const desconocidos = tokens.filter(t => !lotesConocidos.has(t))
-                    const saldosProd = saldosDeProducto(ordenPrep.producto, ordenPrep.origen_id)
-                    const matches = saldosProd.filter(s => tokens.includes(String(s.lote || '').trim()))
+                    // El lote combinado puede ser de OTRO producto (surtido de sabores): se busca por lote en cualquier producto
+                    const matches = saldosMezcla.filter(s => (s.peso > 0) && tokens.includes(String(s.lote || '').trim()))
                     return (
                       <div style={{ marginTop: 8 }}>
                         {desconocidos.length > 0 && <div style={{ fontSize: '0.72rem', color: 'var(--tierra)' }}>⚠ Lote(s) no encontrado(s) en el sistema: <strong>{desconocidos.join(', ')}</strong></div>}
