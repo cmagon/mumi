@@ -37,9 +37,10 @@ async function getCreds(supabase: any) {
 // 1) Actualiza nombre, precios (por lista) y costo del ítem (PUT /items). El stock NO se setea aquí.
 async function pushDatos(authHeader: string, itemId: string, costo?: number, nombre?: string,
   precioMayor?: number, precioDetal?: number, listaMayor?: string, listaDetal?: string,
-  unidad?: string, unspsc?: string, catId?: string) {
+  unidad?: string, unspsc?: string, catId?: string, sku?: string) {
   const body: Record<string, unknown> = {}
   if (nombre && nombre.trim()) body.name = nombre.trim()
+  if (sku && String(sku).trim()) body.reference = String(sku).trim()   // SKU / referencia
   // Precios: lee la estructura actual del ítem y actualiza el precio de cada lista mapeada,
   // preservando las demás listas (más robusto que enviar un arreglo nuevo).
   const hayListas = (listaMayor && (precioMayor || 0) > 0) || (listaDetal && (precioDetal || 0) > 0)
@@ -68,7 +69,9 @@ async function pushDatos(authHeader: string, itemId: string, costo?: number, nom
   if (typeof costo === 'number' && costo > 0) inv.unitCost = costo
   if (unidad && unidad.trim()) inv.unit = unidad.trim()
   body.inventory = inv
-  // Categoría y código UNSPSC (Colombia)
+  // Categoría y código del producto/servicio (UNSPSC / productKey). Solo se envía si está definido,
+  // para no borrar nunca el código que ya tenga el ítem. Los códigos del catálogo de la app son
+  // UNSPSC reales (válidos para la DIAN), así que la factura los acepta.
   if (catId) body.itemCategory = { id: Number(catId) }
   if (unspsc && unspsc.trim()) body.productKey = unspsc.trim()
   if (Object.keys(body).length === 0) return { precio_enviado: null, status: 'sin cambios' }
@@ -121,7 +124,7 @@ Deno.serve(async (req) => {
       if (!p.alegra_item_id) { resultados.push({ producto: p.nombre, estado: 'sin alegra_item_id' }); continue }
       try {
         const id = String(p.alegra_item_id)
-        const datosRes = await pushDatos(authHeader, id, Number(p.costo_unitario || 0), p.nombre, Number(p.precio_mayor || 0), Number(p.precio_detal || 0), listaMayor, listaDetal, p.unidad_medida, p.codigo_unspsc, p.categoria_alegra_id)
+        const datosRes = await pushDatos(authHeader, id, Number(p.costo_unitario || 0), p.nombre, Number(p.precio_mayor || 0), Number(p.precio_detal || 0), listaMayor, listaDetal, p.unidad_medida, p.codigo_unspsc, p.categoria_alegra_id, p.sku)
         const stockRes = await ajustarStock(authHeader, id, Number(p.stock || 0), Number(p.costo_unitario || 0))
         resultados.push({ producto: p.nombre, stock: Number(p.stock || 0), ajuste: stockRes, estado: 'ok',
           debug: { precio_detal: Number(p.precio_detal || 0), lista_mayor: listaMayor || '(sin mapear)', lista_detal: listaDetal || '(sin mapear)', precio_enviado: datosRes?.precio_enviado } })

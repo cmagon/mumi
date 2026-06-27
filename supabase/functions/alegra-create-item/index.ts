@@ -56,7 +56,7 @@ Deno.serve(async (req) => {
       },
     }
     if (p.categoria_alegra_id) body.itemCategory = { id: Number(p.categoria_alegra_id) }
-    if (p.codigo_unspsc) body.productKey = String(p.codigo_unspsc)
+    if (p.codigo_unspsc) body.productKey = String(p.codigo_unspsc)   // UNSPSC real del catálogo de la app
     const res = await fetch(`${ALEGRA_BASE}/items`, {
       method: 'POST', headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' }, body: JSON.stringify(body),
     })

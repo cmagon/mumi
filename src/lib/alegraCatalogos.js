@@ -14,17 +14,29 @@ export const UNIDADES_ALEGRA = [
   { v: 'notApplicable', l: 'No aplica' },
 ]
 
-// Catálogo curado de códigos UNSPSC (Colombia Compra Eficiente) relevantes para alimentos.
-// El usuario puede elegir uno o escribir el suyo. Códigos a nivel "commodity" (8 dígitos).
+// Catálogo de códigos UNSPSC REALES a nivel PRODUCTO (commodity, 8 dígitos que NO terminan en "00").
+// IMPORTANTE: la DIAN/Alegra rechaza los códigos terminados en "00" porque son encabezados de
+// clase/familia, no productos. Aquí solo van códigos específicos válidos para facturar.
 export const UNSPSC_ALIMENTOS = [
-  { codigo: '50181900', desc: 'Pan, galletas y pastelitos dulces (galletas, bocadillos, dulces de panadería)' },
-  { codigo: '50181700', desc: 'Productos de panadería' },
-  { codigo: '50182000', desc: 'Productos de pastelería' },
-  { codigo: '50161800', desc: 'Productos de chocolate' },
-  { codigo: '50161900', desc: 'Productos de confitería y dulces (caramelos, gomas)' },
-  { codigo: '50192300', desc: 'Snacks / pasabocas' },
-  { codigo: '50201700', desc: 'Café y té (infusiones, aromáticas)' },
-  { codigo: '50202300', desc: 'Bebidas no alcohólicas (té e infusiones listas para beber)' },
-  { codigo: '50221300', desc: 'Frutas deshidratadas o en conserva' },
-  { codigo: '50171553', desc: 'Mermeladas y jaleas' },
+  // Galletas y panadería dulce
+  { codigo: '50181905', desc: 'Galletas dulces' },
+  { codigo: '50181902', desc: 'Galletas (tipo cracker / saladas)' },
+  // Bocadillo / mermeladas / dulces de fruta
+  { codigo: '50171904', desc: 'Conservas de frutas (bocadillo, mermeladas, dulces de fruta)' },
+  // Confitería / dulces / gomas
+  { codigo: '50161814', desc: 'Confite de azúcar (gomitas, dulces)' },
+  { codigo: '50161813', desc: 'Confite de chocolate' },
+  { codigo: '50161511', desc: 'Chocolate o sustituto de chocolate' },
+  // Té / infusiones / aromáticas
+  { codigo: '50201715', desc: 'Té de frutas (infusiones de fruta)' },
+  { codigo: '50201710', desc: 'Té de hoja' },
+  { codigo: '50201713', desc: 'Bolsas de té (sobres / filtros)' },
+  { codigo: '50201712', desc: 'Bebidas de té (listas para beber)' },
+  { codigo: '50171554', desc: 'Hierbas y semillas para infusiones (aromáticas)' },
+  // Jugos / bebidas
+  { codigo: '50202305', desc: 'Jugo fresco (zumo de frutas)' },
+  { codigo: '50202306', desc: 'Refrescos / bebidas no alcohólicas' },
+  // Cereales / barras
+  { codigo: '50221202', desc: 'Barras de desayuno o de salud (cereal/nueces)' },
+  { codigo: '50221201', desc: 'Cereal listo para comer' },
 ]

@@ -527,10 +527,13 @@ export default function ProductosTerminados() {
             {alegraCategorias.length === 0 && <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Configura Alegra para cargar las categorías (Dulces, Galletas, Infusiones...).</small>}
           </div>
           <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-            <label className="form-label">Código del producto/servicio (UNSPSC — Colombia Compra Eficiente)</label>
-            <input className="form-control" list="dl-unspsc" value={pForm.codigo_unspsc} onChange={e => setPForm(f => ({ ...f, codigo_unspsc: e.target.value }))} placeholder="Elige o escribe el código (ej: 50181900)" />
+            <label className="form-label">Código del producto/servicio (UNSPSC — clasificador DIAN) *</label>
+            <input className="form-control" list="dl-unspsc" value={pForm.codigo_unspsc} onChange={e => setPForm(f => ({ ...f, codigo_unspsc: e.target.value }))} placeholder="Elige del catálogo o escribe el código (ej: 50181900)" />
             <datalist id="dl-unspsc">{UNSPSC_ALIMENTOS.map(u => <option key={u.codigo} value={u.codigo}>{u.codigo} — {u.desc}</option>)}</datalist>
-            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>{(UNSPSC_ALIMENTOS.find(u => u.codigo === pForm.codigo_unspsc)?.desc) || 'Selecciona del catálogo o escribe tu código.'}</small>
+            <small style={{ color: pForm.codigo_unspsc ? 'var(--texto-suave)' : 'var(--rojo)', fontSize: '0.72rem' }}>
+              {(UNSPSC_ALIMENTOS.find(u => u.codigo === pForm.codigo_unspsc)?.desc)
+                || (pForm.codigo_unspsc ? 'Código personalizado.' : '⚠ Obligatorio para facturar. Estos códigos son UNSPSC reales (válidos para la DIAN); al sincronizar se envían a Alegra.')}
+            </small>
           </div>
           <div className="form-group" style={{ gridColumn: '1 / -1' }}>
             <label className="form-label">Imagen del producto</label>

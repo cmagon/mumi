@@ -26,6 +26,13 @@ const motivoLabel = (m) => (MOTIVOS_SALIDA.find(x => x.value === m)?.label || m)
 const UNIDADES = ['Kg','Litro','Unidad']
 // Sufijo corto para mostrar el precio según la unidad
 const sufijoUnidad = (u) => u === 'Kg' ? '/Kg' : u === 'Litro' ? '/L' : u === 'Unidad' ? '/u' : `/${u || 'u'}`
+// Cantidad de un movimiento expresada en gramos/ml (Kg→g, Litro→ml); las unidades sueltas quedan igual
+const fCantMov = (cant, unidad) => {
+  const v = Number(cant) || 0
+  if (unidad === 'Kg') return `${fNum(v * 1000)} g`
+  if (unidad === 'Litro') return `${fNum(v * 1000)} ml`
+  return `${fNum(v)} ${unidad || ''}`.trim()
+}
 // Los empaques no requieren lote, vencimiento ni campos adicionales
 const esEmpaque = (categoria) => /empaque|envase/i.test(categoria || '')
 
@@ -392,7 +399,7 @@ export default function Inventario() {
                         <td>{fFecha(mv.fecha)}</td>
                         <td>{mp?.nombre || `MP #${mv.mp_id}`}</td>
                         <td><span className={`badge ${mv.tipo === 'entrada' ? 'badge-verde' : mv.tipo === 'salida' ? 'badge-rojo' : 'badge-gris'}`}>{mv.tipo}</span></td>
-                        <td className="td-number">{mv.cantidad}</td>
+                        <td className="td-number">{fCantMov(mv.cantidad, mp?.unidad)}</td>
                         <td>{mv.lote || '—'}</td>
                         <td>{mv.responsable || '—'}</td>
                         <td>{mv.obs || '—'}</td>
@@ -664,7 +671,7 @@ export default function Inventario() {
                       <tr key={mv.id}>
                         <td>{fFecha(mv.fecha)}</td>
                         <td><span className={`badge ${mv.tipo === 'entrada' ? 'badge-verde' : mv.tipo === 'salida' ? 'badge-rojo' : 'badge-gris'}`}>{mv.tipo}</span></td>
-                        <td className="td-number">{mv.cantidad}</td>
+                        <td className="td-number">{fCantMov(mv.cantidad, histMP?.unidad)}</td>
                         <td>{mv.lote || '—'}</td>
                         <td>{mv.vencimiento ? fFecha(mv.vencimiento) : '—'}</td>
                         <td>{mv.responsable || '—'}</td>
