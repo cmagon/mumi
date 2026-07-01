@@ -237,11 +237,11 @@ export const getCostoNominaMensual = (empleados = [], params = PARAMS_NOMINA_DEF
   let salarios = 0, auxilios = 0, prestaciones = 0, parafiscales = 0, honorarios = 0
   for (const e of empleados) {
     if (e.estado && e.estado !== 'activo') continue
-    // El destajo por hora es variable/ocasional → no entra al CIF mensual fijo (su costo real se ve en la liquidación)
-    if (e.tipo_pago === 'destajo_hora') continue
     const sal = parseFloat(e.salario) || 0
     if (sal <= 0) continue
-    if (e.tipo_pago === 'cps') { honorarios += sal; continue }
+    // CPS y pago por hora informal entran al CIF con su SALARIO BASE establecido (sin prestaciones ni parafiscales).
+    // En la liquidación de nómina, el destajo_hora se paga por horas asistidas (ver calcularNomina); aquí es solo el costo fijo del CIF.
+    if (e.tipo_pago === 'cps' || e.tipo_pago === 'destajo_hora') { honorarios += sal; continue }
     salarios += sal
     const incluyeAux = sal <= P.topeAuxSMLMV * P.smlmv
     auxilios += incluyeAux ? P.auxTransporte : 0
@@ -253,6 +253,15 @@ export const getCostoNominaMensual = (empleados = [], params = PARAMS_NOMINA_DEF
   }
   const total = salarios + auxilios + prestaciones + parafiscales + honorarios
   return { salarios, auxilios, prestaciones, parafiscales, honorarios, total }
+}
+
+// Formatea horas decimales a "HH:MM" (horas:minutos). Ej: 8.5 → "8:30".
+export const fmtHoras = (h) => {
+  const totMin = Math.round((Number(h) || 0) * 60)
+  const neg = totMin < 0
+  const a = Math.abs(totMin)
+  const hh = Math.floor(a / 60), mm = a % 60
+  return `${neg ? '-' : ''}${hh}:${String(mm).padStart(2, '0')}`
 }
 
 export const calcHoras = (entrada, salida) => {

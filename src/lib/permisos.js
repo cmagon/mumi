@@ -33,6 +33,7 @@ export const CATALOGO_MODULOS = [
   ] },
   { modulo: 'nomina',     label: 'Asistencia & Nómina',     secciones: [
       { id: 'asistencia', label: 'Asistencia' },
+      { id: 'asistencia_otros', label: 'Registrar asistencia de otras personas' },
       { id: 'empleados',  label: 'Empleados' },
       { id: 'liquidacion',label: 'Liquidación' },
   ] },

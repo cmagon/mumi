@@ -2,8 +2,10 @@ import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { writeOrQueue } from '../lib/offlineQueue'
-import { fFecha, calcHoras } from '../lib/businessLogic'
+import { fFecha, calcHoras, fmtHoras } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
+import { useAuth } from '../context/AuthContext'
+import { puedeVerSeccion } from '../lib/permisos'
 import Modal from './ui/Modal'
 import TimeField from './ui/TimeField'
 
@@ -15,20 +17,34 @@ const horaAhora = () => new Date().toTimeString().slice(0, 5)   // HH:MM
 export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegistrarVarios }) {
   const toast = useToast()
   const qc = useQueryClient()
+  const { profile } = useAuth()
   const hoy = hoyStr()
   const esLogout = modo === 'logout'
   const [hora, setHora] = useState(horaAhora())
   const [fecha, setFecha] = useState(hoy)   // fecha que se está registrando (no aplica en logout)
 
+  // ¿Puede registrar la asistencia de OTRA persona? (admin siempre; otros por permiso de sección)
+  const puedeOtros = !esLogout && !!profile && (profile.rol === 'admin' || puedeVerSeccion(profile.rol, 'nomina', 'asistencia_otros'))
+  const [empSel, setEmpSel] = useState(emp)   // empleado sobre el que se registra (por defecto, uno mismo)
+  const objetivo = esLogout ? emp : (empSel || emp)   // en logout siempre soy yo
+  const esOtro = objetivo?.id !== emp?.id
+
+  // Lista de empleados para el selector (solo si tiene el permiso)
+  const { data: empleados = [] } = useQuery({
+    queryKey: ['empleados_asist'],
+    queryFn: async () => { const { data } = await supabase.from('employees').select('id, nombre, estado').order('nombre'); return (data || []).filter(e => !e.estado || e.estado === 'activo') },
+    enabled: puedeOtros,
+  })
+
   const { data: filas = [], refetch } = useQuery({
-    queryKey: ['attendance_emp', emp?.id],
+    queryKey: ['attendance_emp', objetivo?.id],
     queryFn: async () => {
-      if (!emp?.id) return []
+      if (!objetivo?.id) return []
       const { data } = await supabase.from('attendance').select('*')
-        .eq('emp_id', emp.id).order('fecha', { ascending: false }).order('id', { ascending: false })
+        .eq('emp_id', objetivo.id).order('fecha', { ascending: false }).order('id', { ascending: false })
       return data || []
     },
-    enabled: !!emp?.id,
+    enabled: !!objetivo?.id,
   })
 
   // Estado de fichaje
@@ -43,7 +59,7 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
       if (abiertaDia) throw new Error('Ya hay una llegada sin salida en esta fecha')
       return writeOrQueue({
         table: 'attendance', action: 'insert',
-        payload: { emp_id: emp.id, fecha, entrada: hora, entrada_ts: new Date().toISOString() },
+        payload: { emp_id: objetivo.id, fecha, entrada: hora, entrada_ts: new Date().toISOString(), ...(esOtro ? { editado_por: profile?.nombre || '' } : {}) },
       })
     },
     onSuccess: (r) => { refetch(); qc.invalidateQueries({ queryKey: ['attendance'] }); toast(r?.queued ? 'Llegada guardada sin conexión — se sincronizará 📴' : 'Llegada registrada ✓'); setHora(horaAhora()) },
@@ -57,7 +73,7 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
       if (obj.entrada && hora < obj.entrada) throw new Error(`La salida no puede ser anterior a la entrada (${obj.entrada})`)
       return writeOrQueue({
         table: 'attendance', action: 'update',
-        payload: { salida: hora, salida_ts: new Date().toISOString() },
+        payload: { salida: hora, salida_ts: new Date().toISOString(), ...(esOtro ? { editado_por: profile?.nombre || '' } : {}) },
         match: { id: obj.id },
       })
     },
@@ -112,8 +128,20 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
       }
     >
       <div style={{ marginBottom: 14 }}>
-        <strong style={{ color: 'var(--selva)' }}>{emp?.nombre}</strong>
+        <strong style={{ color: 'var(--selva)' }}>{objetivo?.nombre}</strong>
+        {esOtro && <span className="badge badge-dorado" style={{ marginLeft: 8, fontSize: '0.7rem' }}>registrando por otra persona</span>}
       </div>
+
+      {/* Registrar la asistencia de otra persona (si tiene el permiso) */}
+      {puedeOtros && (
+        <div className="form-group">
+          <label className="form-label">Registrar asistencia de</label>
+          <select className="form-control" value={objetivo?.id || ''} onChange={e => { const id = e.target.value; setEmpSel(String(id) === String(emp?.id) ? emp : (empleados.find(x => String(x.id) === String(id)) || emp)); setHora(horaAhora()) }}>
+            {emp && <option value={emp.id}>{emp.nombre} (yo)</option>}
+            {empleados.filter(x => String(x.id) !== String(emp?.id)).map(x => <option key={x.id} value={x.id}>{x.nombre}</option>)}
+          </select>
+        </div>
+      )}
 
       {/* Fecha (seleccionable salvo al cerrar sesión) */}
       {!esLogout
@@ -141,14 +169,14 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
       {/* Sesiones de la fecha */}
       <div style={{ marginTop: 16 }}>
         <div style={{ fontWeight: 600, color: 'var(--selva)', fontSize: '0.85rem', marginBottom: 6 }}>
-          Sesiones del {esFechaHoy ? 'día' : fFecha(fecha)} {totalDia > 0 && <span style={{ fontWeight: 400, color: 'var(--texto-suave)' }}>· Total {totalDia.toFixed(2)} h</span>}
+          Sesiones del {esFechaHoy ? 'día' : fFecha(fecha)} {totalDia > 0 && <span style={{ fontWeight: 400, color: 'var(--texto-suave)' }}>· Total {fmtHoras(totalDia)} h</span>}
         </div>
         {sesionesDia.length === 0
           ? <p style={{ fontSize: '0.82rem', color: 'var(--texto-suave)' }}>Aún no hay sesiones en esta fecha.</p>
           : sesionesDia.map(f => (
             <div key={f.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', padding: '4px 0', borderBottom: '1px solid rgba(0,0,0,0.05)' }}>
               <span>Entrada {f.entrada || '—'} → Salida {f.salida || <span style={{ color: 'var(--tierra)' }}>pendiente</span>}</span>
-              <strong>{f.salida ? calcHoras(f.entrada, f.salida).toFixed(2) + ' h' : ''}</strong>
+              <strong>{f.salida ? fmtHoras(calcHoras(f.entrada, f.salida)) + ' h' : ''}</strong>
             </div>
           ))}
       </div>

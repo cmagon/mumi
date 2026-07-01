@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
-import { fFecha, fCOP, fNum, calcularNomina, calcHoras, SMV, getRolLabel, PARAMS_NOMINA_DEFAULT, TIPOS_PAGO, getTipoPagoLabel } from '../lib/businessLogic'
+import { fFecha, fCOP, fNum, calcularNomina, calcHoras, fmtHoras, SMV, getRolLabel, PARAMS_NOMINA_DEFAULT, TIPOS_PAGO, getTipoPagoLabel } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
@@ -411,9 +411,9 @@ export default function Nomina() {
                 <table><tbody>
                   <tr><td>{nomResultado.esCPS ? 'Honorarios' : nomResultado.esDestajoHora ? 'Pago por horas (destajo)' : nomResultado.tipo === 'destajo' ? 'Pago por producción (destajo)' : 'Salario base'} ({nomPeriodo})</td><td className="td-number">{fCOP(nomResultado.salBase)}</td></tr>
                   {nomResultado.tipo === 'destajo' && <tr><td style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>↳ {fNum(nomResultado.unidadesDestajo)} unidades × {fCOP(nomResultado.tarifaDestajo)}</td><td></td></tr>}
-                  {nomResultado.esDestajoHora && <tr><td style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>↳ {nomResultado.horas.toFixed(2)} h × {fCOP(nomResultado.valorHora)}</td><td></td></tr>}
+                  {nomResultado.esDestajoHora && <tr><td style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>↳ {fmtHoras(nomResultado.horas)} h × {fCOP(nomResultado.valorHora)}</td><td></td></tr>}
                   {nomResultado.incluyeAux && <tr><td>Auxilio de transporte</td><td className="td-number">{fCOP(nomResultado.auxTransp)}</td></tr>}
-                  <tr><td>Horas trabajadas <small style={{ color: 'var(--texto-suave)' }}>(según asistencia)</small></td><td className="td-number">{nomResultado.horas.toFixed(2)} h</td></tr>
+                  <tr><td>Horas trabajadas <small style={{ color: 'var(--texto-suave)' }}>(según asistencia)</small></td><td className="td-number">{fmtHoras(nomResultado.horas)} h</td></tr>
                   <tr><td>Días trabajados <small style={{ color: 'var(--texto-suave)' }}>(según asistencia)</small></td><td className="td-number">{nomResultado.diasTrab}</td></tr>
                   {nomResultado.esCPS && <tr><td>IBC (40%)</td><td className="td-number">{fCOP(nomResultado.ibc)}</td></tr>}
                   <tr style={{ color: 'var(--rojo)' }}><td>(-) Salud {nomResultado.esCPS ? `(${(params.cps.salud * 100).toFixed(1)}% sobre IBC)` : `(${(params.empleado.salud * 100).toFixed(1)}%)`}</td><td className="td-number">{fCOP(nomResultado.salud)}</td></tr>
@@ -436,7 +436,7 @@ export default function Nomina() {
                       Modalidad <strong>sin prestaciones ni aportes</strong> (no contemplada en el CST para contrato laboral). El costo para la empresa es el mismo que se le paga.
                     </div>
                     <table><tbody>
-                      <tr><td>Horas trabajadas</td><td className="td-number">{nomResultado.horas.toFixed(2)} h</td></tr>
+                      <tr><td>Horas trabajadas</td><td className="td-number">{fmtHoras(nomResultado.horas)} h</td></tr>
                       <tr><td>Valor hora</td><td className="td-number">{fCOP(nomResultado.valorHora)}</td></tr>
                       <tr style={{ fontWeight: 700 }}><td>Costo para la empresa</td><td className="td-number">{fCOP(nomResultado.costoEmpleador)}</td></tr>
                     </tbody></table>
@@ -642,16 +642,18 @@ export default function Nomina() {
                 : (
                   <div className="table-wrap">
                     <table>
-                      <thead><tr><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Horas</th><th>Estado</th>{esAdmin && <th>Acción</th>}</tr></thead>
+                      <thead><tr><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Horas</th>{esAdmin && <th>Registrado</th>}<th>Estado</th>{esAdmin && <th>Acción</th>}</tr></thead>
                       <tbody>
                         {filas.map(reg => {
                           const ausencia = !reg.entrada   // fila sin entrada = ausencia marcada
+                          const regTs = reg.entrada_ts || reg.salida_ts || reg.editado_ts
                           return (
                           <tr key={reg.id}>
                             <td>{fFecha(reg.fecha)}</td>
                             <td>{reg.entrada || '—'}</td>
                             <td>{reg.salida || '—'}</td>
-                            <td className="td-number">{calcHoras(reg.entrada, reg.salida).toFixed(2)} h</td>
+                            <td className="td-number">{fmtHoras(calcHoras(reg.entrada, reg.salida))} h</td>
+                            {esAdmin && <td style={{ fontSize: '0.75rem', color: 'var(--texto-suave)', whiteSpace: 'nowrap' }}>{regTs ? new Date(regTs).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : '—'}{reg.editado_por ? <div style={{ fontSize: '0.68rem' }}>✎ {reg.editado_por}</div> : null}</td>}
                             <td>
                               {ausencia && esAdmin
                                 ? <select className="form-control" style={{ padding: '4px 6px', fontSize: '0.8rem' }} value={reg.estado_dia || 'injustificada'} onChange={e => setEstadoDia(reg, e.target.value)}>
@@ -667,6 +669,15 @@ export default function Nomina() {
                           </tr>
                         )})}
                       </tbody>
+                      <tfoot>
+                        <tr style={{ fontWeight: 700, background: 'rgba(45,90,61,0.06)' }}>
+                          <td colSpan={3}>Total horas</td>
+                          <td className="td-number">{fmtHoras(filas.reduce((s, r) => s + calcHoras(r.entrada, r.salida), 0))} h</td>
+                          <td>{esAdmin ? '' : null}</td>
+                          {esAdmin && <td></td>}
+                          {esAdmin && <td></td>}
+                        </tr>
+                      </tfoot>
                     </table>
                   </div>
                 )}

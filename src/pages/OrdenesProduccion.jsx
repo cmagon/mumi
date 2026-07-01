@@ -1401,7 +1401,7 @@ export default function OrdenesProduccion() {
           {esAdmin && pendientesAprob > 0 && <span className="badge badge-dorado" style={{ alignSelf: 'center' }}>{pendientesAprob} por aprobar</span>}
           {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalAudit(true)}><Ico as={ScrollText} size={14} />Registro de creación</button>}
           {esAdmin && <button className="btn btn-secondary btn-sm" onClick={reiniciarNumeracion}><Ico as={Hash} size={14} />Numeración</button>}
-          {(esAdmin || esOperario) && <button className="btn btn-primary btn-sm" onClick={() => { setEditOrdenId(null); setForm(EMPTY_ORDEN); setProdReceta(null); setIngIdx(''); setIngDisp(''); setEmpacarSaldo(null); setSaldoSelId(''); setSaldoCant(''); setModalNueva(true) }}><Ico as={Plus} size={14} />Nueva Orden</button>}
+          {(esAdmin || esOperario) && <button className="btn btn-primary btn-sm" onClick={() => { setEditOrdenId(null); setForm({ ...EMPTY_ORDEN, operario: esOperario ? (profile?.nombre || '') : '' }); setProdReceta(null); setIngIdx(''); setIngDisp(''); setEmpacarSaldo(null); setSaldoSelId(''); setSaldoCant(''); setModalNueva(true) }}><Ico as={Plus} size={14} />Nueva Orden</button>}
         </div>
       </div>
 
@@ -1652,7 +1652,7 @@ export default function OrdenesProduccion() {
           <label className="form-label">Operario asignado</label>
           <select className="form-control" value={form.operario} onChange={e => setForm(f => ({ ...f, operario: e.target.value }))}>
             <option value="">Seleccionar...</option>
-            {esAdmin && profile?.nombre && <option value={profile.nombre}>🧑‍💼 {profile.nombre} (yo — ejecutar yo mismo)</option>}
+            {(esAdmin || esOperario) && profile?.nombre && <option value={profile.nombre}>🧑‍💼 {profile.nombre} (yo — asignármela / ejecutar yo mismo)</option>}
             {empleados.filter(e => e.nombre !== profile?.nombre).map(e => <option key={e.id} value={e.nombre}>{e.nombre}</option>)}
           </select>
         </div>
