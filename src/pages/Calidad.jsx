@@ -6,6 +6,8 @@ import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
+import { AlertTriangle, BarChart3, CheckCircle2, Download, Pencil, X } from 'lucide-react'
+const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const BUCKET = 'documentos'
 const SEVERIDAD = { baja: 'Baja', media: 'Media', alta: 'Alta', critica: 'Crítica' }
@@ -171,15 +173,15 @@ export default function Calidad() {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">⚠️ No Conformidades & ACPM</h1>
+        <h1 className="page-title"><Ico as={AlertTriangle} size={14} />No Conformidades & ACPM</h1>
         <div className="page-actions"><button className="btn btn-primary btn-sm" onClick={abrirNuevo}>+ Nueva no conformidad</button></div>
       </div>
 
       <div className="kpi-grid">
         <div className="kpi-card rojo"><div className="kpi-icon">📂</div><div className="kpi-label">Abiertas</div><div className="kpi-value">{stats.abiertas}</div></div>
         <div className="kpi-card dorado"><div className="kpi-icon">🔥</div><div className="kpi-label">Críticas/Altas sin cerrar</div><div className="kpi-value">{stats.criticas}</div></div>
-        <div className="kpi-card verde"><div className="kpi-icon">✅</div><div className="kpi-label">Cerradas</div><div className="kpi-value">{stats.cerradas}</div></div>
-        <div className="kpi-card tierra"><div className="kpi-icon">📊</div><div className="kpi-label">Total</div><div className="kpi-value">{stats.total}</div></div>
+        <div className="kpi-card verde"><div className="kpi-icon"><CheckCircle2 size={13} aria-hidden="true" /></div><div className="kpi-label">Cerradas</div><div className="kpi-value">{stats.cerradas}</div></div>
+        <div className="kpi-card tierra"><div className="kpi-icon"><BarChart3 size={13} aria-hidden="true" /></div><div className="kpi-label">Total</div><div className="kpi-value">{stats.total}</div></div>
       </div>
 
       {/* Detecciones automáticas (producción y registros no conformes) */}
@@ -234,9 +236,9 @@ export default function Calidad() {
                     <td>{n.fecha_compromiso ? fFecha(n.fecha_compromiso) : '—'}</td>
                     <td><span className={`badge ${badgeEstado(n.estado)}`}>{ESTADOS[n.estado] || n.estado}</span></td>
                     <td style={{ whiteSpace: 'nowrap' }}>
-                      {n.storage_path && <button className="btn btn-xs btn-secondary" title="Evidencia" onClick={() => descargar(n)}>⬇</button>}{' '}
-                      <button className="btn btn-xs btn-secondary" onClick={() => abrirEditar(n)}>✏</button>{' '}
-                      {esAdmin && <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar ${n.codigo}?`).then(ok => ok && eliminar.mutate(n))}>✕</button>}
+                      {n.storage_path && <button className="btn btn-xs btn-secondary" title="Evidencia" onClick={() => descargar(n)}><Download size={13} aria-hidden="true" /></button>}{' '}
+                      <button className="btn btn-xs btn-secondary" onClick={() => abrirEditar(n)}><Pencil size={13} aria-hidden="true" /></button>{' '}
+                      {esAdmin && <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar ${n.codigo}?`).then(ok => ok && eliminar.mutate(n))}><X size={13} aria-hidden="true" /></button>}
                     </td>
                   </tr>
                 ))}

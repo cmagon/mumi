@@ -4,6 +4,8 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { useAuth } from '../context/AuthContext'
 import Modal from './ui/Modal'
+import { Bell, Check } from 'lucide-react'
+const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const tiempoRelativo = (ts) => {
   const d = (Date.now() - new Date(ts).getTime()) / 1000
@@ -46,12 +48,12 @@ export default function NotificationBell({ variant = 'sidebar' }) {
   const abrir = (n) => { marcarLeida(n); if (n.link) { navigate(n.link); setAbierto(false) } }
 
   const panel = (
-    <Modal open={abierto} onClose={() => setAbierto(false)} title="🔔 Notificaciones"
+    <Modal open={abierto} onClose={() => setAbierto(false)} title="Notificaciones"
       footer={<button className="btn btn-secondary" onClick={() => setAbierto(false)}>Cerrar</button>}
     >
       {noLeidas > 0 && (
         <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 10 }}>
-          <button className="btn btn-sm btn-secondary" onClick={marcarTodas}>✓ Marcar todas leídas</button>
+          <button className="btn btn-sm btn-secondary" onClick={marcarTodas}><Ico as={Check} size={14} />Marcar todas leídas</button>
         </div>
       )}
       {notifs.length === 0
@@ -66,7 +68,7 @@ export default function NotificationBell({ variant = 'sidebar' }) {
             </div>
             {!n.leido && (
               <button className="btn btn-xs btn-secondary" title="Marcar como leída"
-                onClick={(e) => { e.stopPropagation(); marcarLeida(n) }} style={{ flexShrink: 0 }}>✓</button>
+                onClick={(e) => { e.stopPropagation(); marcarLeida(n) }} style={{ flexShrink: 0 }}><Check size={13} aria-hidden="true" /></button>
             )}
           </div>
         ))}
@@ -83,7 +85,7 @@ export default function NotificationBell({ variant = 'sidebar' }) {
     return (
       <>
         <button className="nav-item" style={botonEstilo} onClick={() => setAbierto(true)} title="Notificaciones">
-          <span className="nav-icon">🔔</span>
+          <span className="nav-icon"><Bell size={13} aria-hidden="true" /></span>
           Notificaciones
           {noLeidas > 0 && (
             <span style={{ marginLeft: 'auto', background: 'var(--rojo, #d9534f)', color: '#fff', borderRadius: 10, fontSize: '0.62rem', fontWeight: 700, minWidth: 16, height: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: '0 5px' }}>

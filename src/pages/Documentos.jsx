@@ -10,6 +10,8 @@ import { puedeVer } from '../lib/permisos'
 import { useReorder } from '../hooks/useReorder'
 import JSZip from 'jszip'
 import Modal from '../components/ui/Modal'
+import { Bell, ClipboardList, Clock, Download, FileText, FolderOpen, Link2, Mail, Pencil, Trash2, Undo2, X } from 'lucide-react'
+const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const BUCKET = 'documentos'
 
@@ -628,16 +630,16 @@ export default function Documentos() {
       <td>{d.vigente !== false ? <span className="badge badge-verde">Vigente</span> : <span className="badge badge-dorado">Obsoleto</span>}</td>
       <td>
         {d.storage_path
-          ? <button className="btn btn-xs btn-secondary" onClick={() => descargar(d)}>⬇ Descargar</button>
+          ? <button className="btn btn-xs btn-secondary" onClick={() => descargar(d)}><Ico as={Download} size={14} />Descargar</button>
           : <span style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>Sin archivo</span>}
       </td>
       <td style={{ whiteSpace: 'nowrap' }}>
-        {d.storage_path && <button className="btn btn-xs btn-secondary" title="Compartir (enlace temporal de solo lectura)" onClick={() => abrirCompartir(d)}>🔗 Compartir</button>}{' '}
-        {d.modulo_link && <button className="btn btn-xs btn-dorado" title="Abrir módulo digital" onClick={() => navigate(d.modulo_link)}>🔗 Módulo</button>}{' '}
+        {d.storage_path && <button className="btn btn-xs btn-secondary" title="Compartir (enlace temporal de solo lectura)" onClick={() => abrirCompartir(d)}><Ico as={Link2} size={14} />Compartir</button>}{' '}
+        {d.modulo_link && <button className="btn btn-xs btn-dorado" title="Abrir módulo digital" onClick={() => navigate(d.modulo_link)}><Ico as={Link2} size={14} />Módulo</button>}{' '}
         {esAdmin && <>
-          <button className="btn btn-xs btn-secondary" onClick={() => abrirEditar(d)}>✏</button>{' '}
-          <button className="btn btn-xs btn-secondary" title="Ver versiones anteriores" onClick={() => setVerVers(d)}>🕑</button>{' '}
-          <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar "${d.nombre}"?`).then(ok => ok && eliminar.mutate(d))}>✕</button>
+          <button className="btn btn-xs btn-secondary" onClick={() => abrirEditar(d)}><Pencil size={13} aria-hidden="true" /></button>{' '}
+          <button className="btn btn-xs btn-secondary" title="Ver versiones anteriores" onClick={() => setVerVers(d)}><Clock size={13} aria-hidden="true" /></button>{' '}
+          <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar "${d.nombre}"?`).then(ok => ok && eliminar.mutate(d))}><X size={13} aria-hidden="true" /></button>
         </>}
       </td>
     </tr>
@@ -646,18 +648,18 @@ export default function Documentos() {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">📁 Gestión Documental</h1>
+        <h1 className="page-title"><Ico as={FolderOpen} size={14} />Gestión Documental</h1>
         <div className="page-actions" style={{ display: 'flex', gap: 8 }}>
           <div style={{ display: 'flex', gap: 2 }}>
-            <button className={`btn btn-sm ${vista === 'carpetas' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { cambiarVista('carpetas'); setCarpetaAbierta(null) }} title="Vista de carpetas">📁</button>
+            <button className={`btn btn-sm ${vista === 'carpetas' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { cambiarVista('carpetas'); setCarpetaAbierta(null) }} title="Vista de carpetas"><FolderOpen size={13} aria-hidden="true" /></button>
             <button className={`btn btn-sm ${vista === 'grupos' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => cambiarVista('grupos')} title="Vista por grupos">▦</button>
             <button className={`btn btn-sm ${vista === 'lista' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => cambiarVista('lista')} title="Vista de lista">☰</button>
           </div>
-          <button className="btn btn-secondary btn-sm" onClick={compartirTodo} title="Compartir todas las carpetas">🔗 Compartir</button>
-          {esAdmin && ordenProcesos.length === 0 && <button className="btn btn-secondary btn-sm" onClick={sembrarGrupos} disabled={saving}>📥 Cargar grupos base</button>}
-          {puedeEditarDocs && vista !== 'carpetas' && <button className="btn btn-secondary btn-sm" onClick={() => crearCarpeta('')}>📁 Nueva carpeta</button>}
-          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalPapelera(true)}>🗑 Papelera{papelera.length > 0 ? ` (${papelera.length})` : ''}</button>}
-          {esAdmin && solicitudesTiempo.length > 0 && <button className="btn btn-dorado btn-sm" onClick={() => setModalSolic(true)}>🔔 Solicitudes ({solicitudesTiempo.length})</button>}
+          <button className="btn btn-secondary btn-sm" onClick={compartirTodo} title="Compartir todas las carpetas"><Ico as={Link2} size={14} />Compartir</button>
+          {esAdmin && ordenProcesos.length === 0 && <button className="btn btn-secondary btn-sm" onClick={sembrarGrupos} disabled={saving}><Ico as={Download} size={14} />Cargar grupos base</button>}
+          {puedeEditarDocs && vista !== 'carpetas' && <button className="btn btn-secondary btn-sm" onClick={() => crearCarpeta('')}><Ico as={FolderOpen} size={14} />Nueva carpeta</button>}
+          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalPapelera(true)}><Ico as={Trash2} size={14} />Papelera{papelera.length > 0 ? ` (${papelera.length})` : ''}</button>}
+          {esAdmin && solicitudesTiempo.length > 0 && <button className="btn btn-dorado btn-sm" onClick={() => setModalSolic(true)}><Ico as={Bell} size={14} />Solicitudes ({solicitudesTiempo.length})</button>}
           {esAdmin && vista !== 'carpetas' && <button className="btn btn-primary btn-sm" onClick={() => abrirNuevo()}>+ Nuevo documento</button>}
         </div>
       </div>
@@ -694,7 +696,7 @@ export default function Documentos() {
                   <button className="btn btn-xs btn-secondary" onClick={() => setRuta(hasta)}>{seg}</button>
                 </span>
               })}
-              {puedeEditarDocs && <button className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => crearCarpeta(ruta)}>📁 Nueva {ruta ? 'subcarpeta' : 'carpeta'}</button>}
+              {puedeEditarDocs && <button className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => crearCarpeta(ruta)}><Ico as={FolderOpen} size={14} />Nueva {ruta ? 'subcarpeta' : 'carpeta'}</button>}
               {esAdmin && <button className="btn btn-xs btn-primary" style={{ marginLeft: puedeEditarDocs ? 0 : 'auto' }} onClick={() => abrirNuevo(ruta)}>+ Nuevo documento{ruta ? ' aquí' : ''}</button>}
             </div>
 
@@ -710,14 +712,14 @@ export default function Documentos() {
                     <div key={full} className={`card doc-folder ${puedeReordenar ? ordReorder.rowClassName(fi) : ''}`} style={{ cursor: 'pointer', textAlign: 'center', padding: 16, margin: 0, position: 'relative' }} onClick={() => setRuta(full)} {...(puedeReordenar ? ordReorder.rowProps(fi) : {})}>
                       {puedeReordenar && <span {...ordReorder.handleProps(fi)} onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: 6, left: 8, cursor: 'grab', color: 'var(--texto-suave)' }}>⠿</span>}
                       <span style={{ position: 'absolute', top: 6, right: 10, fontWeight: 700, color: 'var(--dorado)', fontSize: '0.85rem' }}>{fi + 1}</span>
-                      <div style={{ fontSize: '2.6rem', lineHeight: 1 }}>📁</div>
+                      <div style={{ fontSize: '2.6rem', lineHeight: 1 }}><FolderOpen size={13} aria-hidden="true" /></div>
                       <div style={{ fontWeight: 600, fontSize: '0.85rem', marginTop: 6 }}>{nombreSeg(full)}</div>
                       <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', marginTop: 2 }}>{sub.length} doc{sub.length === 1 ? '' : 's'}{nSub > 0 ? ` · ${nSub} subcarpeta(s)` : ''}</div>
                       <div style={{ display: 'flex', gap: 4, justifyContent: 'center', marginTop: 6, flexWrap: 'wrap' }} onClick={e => e.stopPropagation()}>
-                        {conArchivo.length > 0 && <button className="btn btn-xs btn-secondary" title="Compartir carpeta (incluye subcarpetas)" onClick={() => compartirUnaCarpeta(full, sub)}>🔗</button>}
-                        {conArchivo.length > 0 && <button className="btn btn-xs btn-secondary" title="Descargar ZIP" disabled={zipProc === full} onClick={() => descargarZip(full, sub)}>⬇</button>}
-                        {puedeEditarDocs && <button className="btn btn-xs btn-secondary" title="Renombrar" onClick={() => renombrarProceso(full)}>✏</button>}
-                        {puedeEditarDocs && vacia && <button className="btn btn-xs btn-danger" title="Eliminar carpeta vacía" onClick={() => eliminarCarpeta(full)}>🗑</button>}
+                        {conArchivo.length > 0 && <button className="btn btn-xs btn-secondary" title="Compartir carpeta (incluye subcarpetas)" onClick={() => compartirUnaCarpeta(full, sub)}><Link2 size={13} aria-hidden="true" /></button>}
+                        {conArchivo.length > 0 && <button className="btn btn-xs btn-secondary" title="Descargar ZIP" disabled={zipProc === full} onClick={() => descargarZip(full, sub)}><Download size={13} aria-hidden="true" /></button>}
+                        {puedeEditarDocs && <button className="btn btn-xs btn-secondary" title="Renombrar" onClick={() => renombrarProceso(full)}><Pencil size={13} aria-hidden="true" /></button>}
+                        {puedeEditarDocs && vacia && <button className="btn btn-xs btn-danger" title="Eliminar carpeta vacía" onClick={() => eliminarCarpeta(full)}><Trash2 size={13} aria-hidden="true" /></button>}
                       </div>
                     </div>
                   )
@@ -728,7 +730,7 @@ export default function Documentos() {
             {/* Documentos directamente en esta carpeta */}
             {(docsAqui.length > 0 || (ruta && subcarpetas.length === 0)) && (
               <div className="card">
-                <div className="card-title">📄 Documentos {ruta && <>en {nombreSeg(ruta)}</>} <span className="badge badge-verde" style={{ marginLeft: 6 }}>{docsAqui.length}</span></div>
+                <div className="card-title"><Ico as={FileText} size={14} />Documentos {ruta && <>en {nombreSeg(ruta)}</>} <span className="badge badge-verde" style={{ marginLeft: 6 }}>{docsAqui.length}</span></div>
                 <div className="table-wrap">
                   <table>
                     <thead><tr><th>Código</th><th>Documento</th><th>Tipo</th><th>Versión</th><th>Estado</th><th>Archivo</th><th>Acciones</th></tr></thead>
@@ -742,14 +744,14 @@ export default function Documentos() {
               </div>
             )}
             {subcarpetas.length === 0 && docsAqui.length === 0 && !ruta && (
-              <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--texto-suave)' }}>📁 Aún no hay carpetas. {esAdmin && 'Crea una con "📁 Nueva carpeta".'}</div>
+              <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--texto-suave)' }}><Ico as={FolderOpen} size={14} />Aún no hay carpetas. {esAdmin && 'Crea una con "📁 Nueva carpeta".'}</div>
             )}
           </div>
         )
         : vista === 'lista'
         ? (
           <div className="card">
-            <div className="card-title">📄 Todos los documentos <span className="badge badge-verde" style={{ marginLeft: 8 }}>{filtrados.length}</span></div>
+            <div className="card-title"><Ico as={FileText} size={14} />Todos los documentos <span className="badge badge-verde" style={{ marginLeft: 8 }}>{filtrados.length}</span></div>
             <div className="table-wrap">
               <table>
                 <thead><tr><th>Código</th><th>Documento</th><th>Proceso</th><th>Tipo</th><th>Versión</th><th>Estado</th><th>Archivo</th><th>Acciones</th></tr></thead>
@@ -770,10 +772,10 @@ export default function Documentos() {
                 {puedeReordenar && <span {...ordReorder.handleProps(gi)}>⠿</span>}
                 <span style={{ color: 'var(--dorado)', fontWeight: 700 }}>{gi + 1}.</span>
                 {tituloEditable(proceso)} <span className="badge badge-verde" style={{ marginLeft: 4 }}>{docs.length}</span>
-                {docs.some(d => d.storage_path) && <button className="btn btn-xs btn-secondary" title="Compartir esta carpeta" style={{ marginLeft: 'auto' }} onClick={() => compartirUnaCarpeta(proceso, docs)}>🔗 Compartir</button>}
+                {docs.some(d => d.storage_path) && <button className="btn btn-xs btn-secondary" title="Compartir esta carpeta" style={{ marginLeft: 'auto' }} onClick={() => compartirUnaCarpeta(proceso, docs)}><Ico as={Link2} size={14} />Compartir</button>}
                 {docs.some(d => d.storage_path) && <button className="btn btn-xs btn-secondary" title="Descargar todos en ZIP" disabled={zipProc === proceso} onClick={() => descargarZip(proceso, docs)}>{zipProc === proceso ? 'Generando…' : '⬇ ZIP'}</button>}
-                {puedeEditarDocs && proceso !== 'Sin proceso' && <button className="btn btn-xs btn-secondary" title="Renombrar proceso" onClick={() => renombrarProceso(proceso)}>✏ Renombrar</button>}
-                {puedeEditarDocs && docs.length === 0 && !documentos.some(d => (d.proceso || 'Sin proceso') === proceso) && <button className="btn btn-xs btn-danger" title="Eliminar proceso vacío" onClick={() => eliminarProcesoVacio(proceso)}>🗑</button>}
+                {puedeEditarDocs && proceso !== 'Sin proceso' && <button className="btn btn-xs btn-secondary" title="Renombrar proceso" onClick={() => renombrarProceso(proceso)}><Ico as={Pencil} size={14} />Renombrar</button>}
+                {puedeEditarDocs && docs.length === 0 && !documentos.some(d => (d.proceso || 'Sin proceso') === proceso) && <button className="btn btn-xs btn-danger" title="Eliminar proceso vacío" onClick={() => eliminarProcesoVacio(proceso)}><Trash2 size={13} aria-hidden="true" /></button>}
               </div>
               <div className="table-wrap">
                 <table>
@@ -870,8 +872,8 @@ export default function Documentos() {
                 <input className="form-control" value={enlace} readOnly onClick={e => e.target.select()} style={{ fontSize: '0.78rem' }} />
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button className="btn btn-secondary" onClick={copiarEnlace}>📋 Copiar</button>
-                <button className="btn btn-primary" onClick={enviarPorCorreo}>✉ Enviar por correo</button>
+                <button className="btn btn-secondary" onClick={copiarEnlace}><Ico as={ClipboardList} size={14} />Copiar</button>
+                <button className="btn btn-primary" onClick={enviarPorCorreo}><Ico as={Mail} size={14} />Enviar por correo</button>
                 <button className="btn btn-secondary" onClick={() => setEnlace('')}>↻ Regenerar</button>
               </div>
               <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 8 }}>"Enviar por correo" abre tu app de correo con el enlace listo. El enlace es de solo lectura y expira automáticamente.</small>
@@ -880,7 +882,7 @@ export default function Documentos() {
       </Modal>
 
       {/* Modal papelera */}
-      <Modal open={modalPapelera} onClose={() => setModalPapelera(false)} title="🗑 Papelera" size="modal-lg"
+      <Modal open={modalPapelera} onClose={() => setModalPapelera(false)} title="Papelera" size="modal-lg"
         footer={<button className="btn btn-secondary" onClick={() => setModalPapelera(false)}>Cerrar</button>}>
         <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>
           Los documentos eliminados se conservan aquí <strong>hasta 90 días</strong> y luego se borran definitivamente. Puedes <strong>restaurarlos</strong> antes de ese plazo.
@@ -899,8 +901,8 @@ export default function Documentos() {
                       <td style={{ fontSize: '0.8rem' }}>{fFecha(d.eliminado_at)}</td>
                       <td><span className={`badge ${rest <= 7 ? 'badge-rojo' : 'badge-dorado'}`}>{Math.max(0, rest)} día(s)</span></td>
                       <td style={{ whiteSpace: 'nowrap' }}>
-                        <button className="btn btn-xs btn-success" onClick={() => restaurar.mutate(d)}>↩ Restaurar</button>{' '}
-                        <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar definitivamente "${d.nombre}"? No se podrá recuperar.`, { title: 'Eliminar definitivo' }).then(ok => ok && eliminarDefinitivo.mutate(d))}>✕ Definitivo</button>
+                        <button className="btn btn-xs btn-success" onClick={() => restaurar.mutate(d)}><Ico as={Undo2} size={14} />Restaurar</button>{' '}
+                        <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar definitivamente "${d.nombre}"? No se podrá recuperar.`, { title: 'Eliminar definitivo' }).then(ok => ok && eliminarDefinitivo.mutate(d))}><Ico as={X} size={14} />Definitivo</button>
                       </td>
                     </tr>
                   )
@@ -910,7 +912,7 @@ export default function Documentos() {
       </Modal>
 
       {/* Modal solicitudes de más tiempo (invitados) */}
-      <Modal open={modalSolic} onClose={() => setModalSolic(false)} title="🔔 Solicitudes de acceso"
+      <Modal open={modalSolic} onClose={() => setModalSolic(false)} title="Solicitudes de acceso"
         footer={<button className="btn btn-secondary" onClick={() => setModalSolic(false)}>Cerrar</button>}>
         {solicitudesTiempo.length === 0
           ? <p className="empty-table">No hay solicitudes pendientes.</p>
@@ -954,8 +956,8 @@ export default function Documentos() {
                 <input className="form-control" value={enlaceGrupoLink} readOnly onClick={e => e.target.select()} style={{ fontSize: '0.78rem' }} />
               </div>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button className="btn btn-secondary" onClick={copiarGrupo}>📋 Copiar</button>
-                <button className="btn btn-primary" onClick={() => setMostrarCorreo(v => !v)}>✉ Enviar por correo</button>
+                <button className="btn btn-secondary" onClick={copiarGrupo}><Ico as={ClipboardList} size={14} />Copiar</button>
+                <button className="btn btn-primary" onClick={() => setMostrarCorreo(v => !v)}><Ico as={Mail} size={14} />Enviar por correo</button>
                 <button className="btn btn-secondary" onClick={() => { setEnlaceGrupoLink(''); setTokenGrupo(''); setMostrarCorreo(false) }}>↻ Regenerar</button>
               </div>
               {mostrarCorreo && (
@@ -968,7 +970,7 @@ export default function Documentos() {
                     <input type="checkbox" checked={permisoEdicion} onChange={e => setPermisoEdicion(e.target.checked)} />
                     ✏ Permitir edición (el invitado verifica su identidad con un código enviado a su correo)
                   </label>
-                  <button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} onClick={enviarGrupoCorreo}>✉ Enviar a este correo</button>
+                  <button className="btn btn-primary btn-sm" style={{ marginTop: 8 }} onClick={enviarGrupoCorreo}><Ico as={Mail} size={14} />Enviar a este correo</button>
                   <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 6 }}>
                     {permisoEdicion ? 'Solo ese correo podrá editar (tras ingresar el código). Otros correos solo verán.' : 'El invitado verá los documentos en solo lectura.'}
                   </small>
@@ -992,7 +994,7 @@ export default function Documentos() {
                     <td>{v.archivo_nombre || '—'}</td>
                     <td>{v.creado_por || '—'}</td>
                     <td>{fFecha(v.created_at)}</td>
-                    <td>{v.storage_path && <button className="btn btn-xs btn-secondary" onClick={() => descargarVersion(v)}>⬇</button>}</td>
+                    <td>{v.storage_path && <button className="btn btn-xs btn-secondary" onClick={() => descargarVersion(v)}><Download size={13} aria-hidden="true" /></button>}</td>
                   </tr>
                 ))}
               </tbody>

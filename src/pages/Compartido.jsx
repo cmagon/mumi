@@ -3,6 +3,8 @@ import { useParams } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { supabase, supabaseSignup, uploadFile } from '../lib/supabase'
 import { getConfig, loadConfig } from '../lib/appConfig'
+import { Check, Download, FileText, FolderOpen, Pencil, RefreshCw, Undo2 } from 'lucide-react'
+const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const BUCKET = 'documentos'
 
@@ -13,12 +15,12 @@ function ItemEditable({ it, onGuardar }) {
   const [guardando, setGuardando] = useState(false)
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', border: '1px solid #cde0b8', borderRadius: 8, background: 'rgba(124,179,66,0.05)', flexWrap: 'wrap' }}>
-      <span style={{ fontSize: '1.2rem' }}>📝</span>
+      <span style={{ fontSize: '1.2rem' }}><FileText size={13} aria-hidden="true" /></span>
       <div style={{ flex: 1, minWidth: 180, display: 'flex', flexDirection: 'column', gap: 4 }}>
         <input className="form-control" value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Nombre" style={{ fontSize: '0.85rem' }} />
         <input className="form-control" value={descripcion} onChange={e => setDescripcion(e.target.value)} placeholder="Descripción" style={{ fontSize: '0.8rem' }} />
       </div>
-      <a className="btn btn-sm btn-secondary" href={it.url} target="_blank" rel="noreferrer">⬇</a>
+      <a className="btn btn-sm btn-secondary" href={it.url} target="_blank" rel="noreferrer"><Download size={13} aria-hidden="true" /></a>
       <button className="btn btn-sm btn-primary" disabled={guardando} onClick={async () => { setGuardando(true); await onGuardar(it, { nombre, descripcion }); setGuardando(false) }}>{guardando ? '…' : '💾'}</button>
     </div>
   )
@@ -31,12 +33,12 @@ function LiveDocRow({ d, onGuardar, onReemplazar }) {
   const [g, setG] = useState(false)
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', border: '1px solid #cde0b8', borderRadius: 8, background: 'rgba(124,179,66,0.05)', flexWrap: 'wrap' }}>
-      <span style={{ fontSize: '1.2rem' }}>📝</span>
+      <span style={{ fontSize: '1.2rem' }}><FileText size={13} aria-hidden="true" /></span>
       <div style={{ flex: 1, minWidth: 180, display: 'flex', flexDirection: 'column', gap: 4 }}>
         <input className="form-control" value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Nombre" style={{ fontSize: '0.85rem' }} />
         <input className="form-control" value={descripcion} onChange={e => setDescripcion(e.target.value)} placeholder="Descripción" style={{ fontSize: '0.8rem' }} />
       </div>
-      {d.storage_url && <a className="btn btn-sm btn-secondary" href={d.storage_url} target="_blank" rel="noreferrer">⬇</a>}
+      {d.storage_url && <a className="btn btn-sm btn-secondary" href={d.storage_url} target="_blank" rel="noreferrer"><Download size={13} aria-hidden="true" /></a>}
       <label className="btn btn-sm btn-secondary" style={{ cursor: 'pointer' }}>📎<input type="file" style={{ display: 'none' }} onChange={e => { if (e.target.files[0]) onReemplazar(d, e.target.files[0]) }} /></label>
       <button className="btn btn-sm btn-primary" disabled={g} onClick={async () => { setG(true); await onGuardar(d, { nombre, descripcion }); setG(false) }}>{g ? '…' : '💾'}</button>
     </div>
@@ -250,8 +252,8 @@ export default function Compartido() {
               <p style={{ color: '#c0392b', fontWeight: 600 }}>La sesión ha expirado.</p>
               <p style={{ color: '#888', fontSize: '0.85rem' }}>El tiempo de acceso que asignó el administrador finalizó.</p>
               {solicitado
-                ? <p style={{ color: 'var(--selva,#2d5a3d)', fontSize: '0.85rem' }}>✓ Solicitud enviada. El administrador podrá ampliarte el acceso con este mismo enlace.</p>
-                : <button className="btn btn-primary" onClick={volverASolicitar}>🔄 Volver a solicitar acceso</button>}
+                ? <p style={{ color: 'var(--selva,#2d5a3d)', fontSize: '0.85rem' }}><Ico as={Check} size={14} />Solicitud enviada. El administrador podrá ampliarte el acceso con este mismo enlace.</p>
+                : <button className="btn btn-primary" onClick={volverASolicitar}><Ico as={RefreshCw} size={14} />Volver a solicitar acceso</button>}
             </div>
           : (
             <>
@@ -268,7 +270,7 @@ export default function Compartido() {
                       <button className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={salirEdicion}>Salir</button>
                     </div>
                   : <div style={{ background: '#fff8e8', border: '1px solid var(--dorado,#C8A94A)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
-                      <div style={{ fontWeight: 600, marginBottom: 6, fontSize: '0.9rem' }}>✏ Este enlace permite edición para <strong>{share.email_invitado}</strong></div>
+                      <div style={{ fontWeight: 600, marginBottom: 6, fontSize: '0.9rem' }}><Ico as={Pencil} size={14} />Este enlace permite edición para <strong>{share.email_invitado}</strong></div>
                       {paso === 'idle'
                         ? <div>
                             <p style={{ fontSize: '0.8rem', color: '#666', margin: '0 0 8px' }}>Para editar, solicita un código que llegará al correo invitado.</p>
@@ -277,7 +279,7 @@ export default function Compartido() {
                         : <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                             <input className="form-control" value={codigo} onChange={e => setCodigo(e.target.value)} placeholder="Código del correo" style={{ maxWidth: 180 }} />
                             <button className="btn btn-sm btn-primary" onClick={verificarCodigo}>Verificar</button>
-                            <button className="btn btn-sm btn-secondary" onClick={() => setPaso('idle')}>↩</button>
+                            <button className="btn btn-sm btn-secondary" onClick={() => setPaso('idle')}><Undo2 size={13} aria-hidden="true" /></button>
                           </div>}
                       {otpMsg && <div style={{ fontSize: '0.78rem', color: '#666', marginTop: 6 }}>{otpMsg}</div>}
                     </div>
@@ -301,7 +303,7 @@ export default function Compartido() {
                       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10, marginBottom: 12 }}>
                         {subEdit.map(full => (
                           <div key={full} onClick={() => setRutaEdit(full)} style={{ cursor: 'pointer', textAlign: 'center', padding: 12, border: '1px solid #cde0b8', borderRadius: 10, background: 'rgba(124,179,66,0.05)' }}>
-                            <div style={{ fontSize: '2rem' }}>📁</div>
+                            <div style={{ fontSize: '2rem' }}><FolderOpen size={13} aria-hidden="true" /></div>
                             <div style={{ fontWeight: 600, fontSize: '0.8rem' }}>{segName(full)}</div>
                           </div>
                         ))}
@@ -316,7 +318,7 @@ export default function Compartido() {
                       </div>
                     </div>
                     <div style={{ border: '1px dashed #cde0b8', borderRadius: 8, padding: 10, marginBottom: 12 }}>
-                      <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 6 }}>📁 Nueva subcarpeta (dentro de {carpetaScope || 'la raíz'})</div>
+                      <div style={{ fontWeight: 600, fontSize: '0.85rem', marginBottom: 6 }}><Ico as={FolderOpen} size={14} />Nueva subcarpeta (dentro de {carpetaScope || 'la raíz'})</div>
                       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
                         <input className="form-control" placeholder="Nombre de la subcarpeta" value={nuevaSub} onChange={e => setNuevaSub(e.target.value)} style={{ maxWidth: 240 }} />
                         <button className="btn btn-sm btn-secondary" onClick={crearSubcarpeta}>Crear subcarpeta</button>
@@ -344,9 +346,9 @@ export default function Compartido() {
                                   ? <ItemEditable key={i} it={it} onGuardar={guardarDoc} />
                                   : (
                                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid #eee', borderRadius: 8 }}>
-                                    <span style={{ fontSize: '1.3rem' }}>📄</span>
+                                    <span style={{ fontSize: '1.3rem' }}><FileText size={13} aria-hidden="true" /></span>
                                     <div style={{ flex: 1, minWidth: 0, fontSize: '0.9rem', fontWeight: 600 }}>{it.codigo ? it.codigo + ' — ' : ''}{it.nombre}</div>
-                                    <a className="btn btn-sm btn-primary" href={it.url} target="_blank" rel="noreferrer">⬇ Ver / Descargar</a>
+                                    <a className="btn btn-sm btn-primary" href={it.url} target="_blank" rel="noreferrer"><Ico as={Download} size={14} />Ver / Descargar</a>
                                   </div>
                                 ))}
                               </div>}
@@ -356,7 +358,7 @@ export default function Compartido() {
                   : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', gap: 12 }}>
                       {grupos.map((g, i) => (
                         <div key={i} onClick={() => setAbierta(g.proceso)} style={{ cursor: 'pointer', textAlign: 'center', padding: 16, border: '1px solid #eee', borderRadius: 10 }}>
-                          <div style={{ fontSize: '2.4rem', lineHeight: 1 }}>📁</div>
+                          <div style={{ fontSize: '2.4rem', lineHeight: 1 }}><FolderOpen size={13} aria-hidden="true" /></div>
                           <div style={{ fontWeight: 600, fontSize: '0.82rem', marginTop: 6 }}>{g.proceso}</div>
                           <div style={{ fontSize: '0.72rem', color: '#888' }}>{(g.items || []).length} doc(s)</div>
                         </div>
@@ -367,9 +369,9 @@ export default function Compartido() {
                 : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                     {items.map((it, i) => (
                       <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid #eee', borderRadius: 8 }}>
-                        <span style={{ fontSize: '1.3rem' }}>📄</span>
+                        <span style={{ fontSize: '1.3rem' }}><FileText size={13} aria-hidden="true" /></span>
                         <div style={{ flex: 1, minWidth: 0, fontSize: '0.9rem', fontWeight: 600 }}>{it.codigo ? it.codigo + ' — ' : ''}{it.nombre}</div>
-                        <a className="btn btn-sm btn-primary" href={it.url} target="_blank" rel="noreferrer">⬇ Ver / Descargar</a>
+                        <a className="btn btn-sm btn-primary" href={it.url} target="_blank" rel="noreferrer"><Ico as={Download} size={14} />Ver / Descargar</a>
                       </div>
                     ))}
                   </div>}

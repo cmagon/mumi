@@ -6,6 +6,8 @@ import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
+import { Clock, Download, GraduationCap, Pencil, Users, X } from 'lucide-react'
+const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const BUCKET = 'documentos'
 const TIPOS = ['BPM', 'HACCP', 'Seguridad', 'Calidad', 'Inducción', 'Otro']
@@ -108,14 +110,14 @@ export default function Capacitacion() {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">🎓 Capacitación</h1>
+        <h1 className="page-title"><Ico as={GraduationCap} size={14} />Capacitación</h1>
         <div className="page-actions"><button className="btn btn-primary btn-sm" onClick={abrirNuevo}>+ Nueva capacitación</button></div>
       </div>
 
       <div className="kpi-grid">
-        <div className="kpi-card verde"><div className="kpi-icon">🎓</div><div className="kpi-label">Capacitaciones ({new Date().getFullYear()})</div><div className="kpi-value">{stats.año}</div></div>
-        <div className="kpi-card dorado"><div className="kpi-icon">⏱</div><div className="kpi-label">Horas formación</div><div className="kpi-value">{stats.horas}</div></div>
-        <div className="kpi-card tierra"><div className="kpi-icon">👥</div><div className="kpi-label">Asistencias</div><div className="kpi-value">{stats.asistencias}</div></div>
+        <div className="kpi-card verde"><div className="kpi-icon"><GraduationCap size={13} aria-hidden="true" /></div><div className="kpi-label">Capacitaciones ({new Date().getFullYear()})</div><div className="kpi-value">{stats.año}</div></div>
+        <div className="kpi-card dorado"><div className="kpi-icon"><Clock size={13} aria-hidden="true" /></div><div className="kpi-label">Horas formación</div><div className="kpi-value">{stats.horas}</div></div>
+        <div className="kpi-card tierra"><div className="kpi-icon"><Users size={13} aria-hidden="true" /></div><div className="kpi-label">Asistencias</div><div className="kpi-value">{stats.asistencias}</div></div>
         <div className="kpi-card lima"><div className="kpi-icon">📚</div><div className="kpi-label">Histórico total</div><div className="kpi-value">{stats.total}</div></div>
       </div>
 
@@ -140,9 +142,9 @@ export default function Capacitacion() {
                     <td className="td-number"><button className="btn btn-xs btn-secondary" onClick={() => setVerAsist(c)}>{Array.isArray(c.asistentes) ? c.asistentes.length : 0} 👥</button></td>
                     <td>{c.proxima_fecha ? fFecha(c.proxima_fecha) : '—'}</td>
                     <td style={{ whiteSpace: 'nowrap' }}>
-                      {c.storage_path && <button className="btn btn-xs btn-secondary" title="Soporte" onClick={() => descargar(c)}>⬇</button>}{' '}
-                      <button className="btn btn-xs btn-secondary" onClick={() => abrirEditar(c)}>✏</button>{' '}
-                      {esAdmin && <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar "${c.tema}"?`).then(ok => ok && eliminar.mutate(c))}>✕</button>}
+                      {c.storage_path && <button className="btn btn-xs btn-secondary" title="Soporte" onClick={() => descargar(c)}><Download size={13} aria-hidden="true" /></button>}{' '}
+                      <button className="btn btn-xs btn-secondary" onClick={() => abrirEditar(c)}><Pencil size={13} aria-hidden="true" /></button>{' '}
+                      {esAdmin && <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar "${c.tema}"?`).then(ok => ok && eliminar.mutate(c))}><X size={13} aria-hidden="true" /></button>}
                     </td>
                   </tr>
                 ))}

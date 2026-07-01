@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 
 // Modal con guardia anti-cierre accidental:
 //  - Detecta automáticamente si el usuario ingresó información (cualquier input/select/textarea).
@@ -8,6 +8,9 @@ import { useEffect, useRef, useState } from 'react'
 export default function Modal({ open, onClose, title, children, footer, size = '', onSave, guard = true }) {
   const [confirming, setConfirming] = useState(false)
   const dirtyRef = useRef(false)
+  const dialogRef = useRef(null)
+  const prevFocusRef = useRef(null)
+  const titleId = useId()
 
   // Reinicia el estado cada vez que se abre
   useEffect(() => {
@@ -19,21 +22,63 @@ export default function Modal({ open, onClose, title, children, footer, size = '
     else onClose()
   }
 
+  // Escape + focus-trap (Tab/Shift+Tab circulan dentro del diálogo)
   useEffect(() => {
-    const handler = (e) => { if (e.key === 'Escape') requestClose() }
-    if (open) document.addEventListener('keydown', handler)
+    if (!open) return
+    const handler = (e) => {
+      if (e.key === 'Escape') { e.stopPropagation(); requestClose(); return }
+      if (e.key === 'Tab') {
+        const foco = dialogRef.current?.querySelectorAll(
+          'a[href], button:not([disabled]), textarea, input, select, [tabindex]:not([tabindex="-1"])'
+        )
+        if (!foco || !foco.length) return
+        const visibles = [...foco].filter(el => el.offsetParent !== null || el === document.activeElement)
+        if (!visibles.length) return
+        const primero = visibles[0], ultimo = visibles[visibles.length - 1]
+        if (e.shiftKey && document.activeElement === primero) { e.preventDefault(); ultimo.focus() }
+        else if (!e.shiftKey && document.activeElement === ultimo) { e.preventDefault(); primero.focus() }
+      }
+    }
+    document.addEventListener('keydown', handler)
     return () => document.removeEventListener('keydown', handler)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, guard])
+
+  // Bloquea el scroll del fondo, mueve el foco al abrir y lo restaura al cerrar
+  useEffect(() => {
+    if (!open) return
+    prevFocusRef.current = document.activeElement
+    const prevOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    // Enfoca el primer control del diálogo (o el propio contenedor)
+    const t = setTimeout(() => {
+      const el = dialogRef.current?.querySelector(
+        'input:not([type="hidden"]), textarea, select, button, [tabindex]:not([tabindex="-1"])'
+      )
+      ;(el || dialogRef.current)?.focus()
+    }, 0)
+    return () => {
+      clearTimeout(t)
+      document.body.style.overflow = prevOverflow
+      if (prevFocusRef.current && prevFocusRef.current.focus) prevFocusRef.current.focus()
+    }
+  }, [open])
 
   if (!open) return null
 
   return (
     <div className="modal-overlay active" onClick={(e) => { if (e.target === e.currentTarget) requestClose() }}>
-      <div className={`modal ${size}`}>
+      <div
+        className={`modal ${size}`}
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        tabIndex={-1}
+      >
         <div className="modal-header">
-          <span className="modal-title">{title}</span>
-          <button className="modal-close" onClick={requestClose}>×</button>
+          <span className="modal-title" id={titleId}>{title}</span>
+          <button className="modal-close" onClick={requestClose} aria-label="Cerrar" title="Cerrar">×</button>
         </div>
         <div className="modal-body"
           onInput={() => { dirtyRef.current = true }}

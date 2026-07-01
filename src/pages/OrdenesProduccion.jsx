@@ -14,6 +14,28 @@ import { useToast } from '../hooks/useToast'
 import { useConfirm, usePrompt } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
 import { notificar } from '../lib/notificaciones'
+import {
+  Recycle, ClipboardList, DollarSign, Link2, ReceiptText, Factory, Pencil, Printer,
+  Undo2, Trash2, Camera, Check, X, Play, Download, Send, Package, Shuffle, Plus, Save,
+  Eye, Calculator, FlaskConical, Hash, Clock, CheckCircle2, ScrollText, Image as ImageIcon,
+} from 'lucide-react'
+
+// Icono inline para usar dentro de títulos/botones manteniendo alineación con el texto
+const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
+
+// Selector SI / NO reutilizable. value puede ser true, false o null (sin marcar).
+function SiNo({ value, onChange }) {
+  return (
+    <span style={{ display: 'inline-flex', border: `1px solid ${value === null ? 'var(--rojo)' : 'var(--crema-oscuro)'}`, borderRadius: 8, overflow: 'hidden' }}>
+      {[['SI', true], ['NO', false]].map(([txt, val]) => (
+        <button key={txt} type="button" onClick={() => onChange(val)}
+          style={{ padding: '5px 16px', fontSize: '0.85rem', fontWeight: 700, cursor: 'pointer', border: 'none',
+            background: value === val ? (val ? 'var(--selva)' : 'var(--tierra)') : 'transparent',
+            color: value === val ? '#fff' : 'var(--texto-suave)' }}>{txt}</button>
+      ))}
+    </span>
+  )
+}
 import Modal from '../components/ui/Modal'
 
 const ESTADO_LABEL = {
@@ -25,7 +47,7 @@ const ESTADO_LABEL = {
 }
 
 const EMPTY_ORDEN = {
-  producto: '', origen: 'producto', origen_id: '', es_subproducto: false, mp_id: '',
+  producto: '', origen: 'producto', origen_id: '', es_subproducto: false, es_mp: false, mp_id: '',
   cantidad_plan: '', unidad: 'unidades', operario: '', notas_orden: '', unidadesPorBache: 0, lote: '', vence: '', baches_plan: '', inicio: '', es_prueba: false, forzar_sin_lote: false,
   lotes_elegidos: {},   // { [mpId]: loteId }  — lote de MP elegido por el usuario (vacío = PEPS automático)
 }
@@ -95,8 +117,8 @@ export default function OrdenesProduccion() {
   const [prepPesoDesp, setPrepPesoDesp] = useState('')
   const [prepObs, setPrepObs] = useState('')
   const [prepResp, setPrepResp] = useState('')
-  const [prepConforme, setPrepConforme] = useState(true)
-  const [prepSurtido, setPrepSurtido] = useState(false)
+  const [prepConforme, setPrepConforme] = useState(null)   // null = sin marcar (obligatorio antes de enviar)
+  const [prepSurtido, setPrepSurtido] = useState(null)   // null = sin marcar (obligatorio)
   const [prepLoteMezcla, setPrepLoteMezcla] = useState('')
   const [nuevoLoteMezcla, setNuevoLoteMezcla] = useState('')
   const [prepProductoSurtido, setPrepProductoSurtido] = useState('')
@@ -108,7 +130,7 @@ export default function OrdenesProduccion() {
   // Cada uno: { lote, vence, unidades, conforme, saldo_id, surtido, lote_mezcla }
   const [prepLotesExtra, setPrepLotesExtra] = useState([])
   // Sobrante de mezcla que NO se empacó y queda como saldo en proceso (en peso)
-  const [prepHaySobrante, setPrepHaySobrante] = useState(false)
+  const [prepHaySobrante, setPrepHaySobrante] = useState(null)   // null = sin marcar (obligatorio)
   const [prepSobrantePeso, setPrepSobrantePeso] = useState('')
   const [prepSobranteUnidad, setPrepSobranteUnidad] = useState('g')
   // Cantidad de unidades/cajas empacadas surtidas (stock del producto terminado surtido)
@@ -123,7 +145,11 @@ export default function OrdenesProduccion() {
   const [modalConfirmEnvio, setModalConfirmEnvio] = useState(false)
   const prepFotoRef = useRef()
   // Receta del producto seleccionado en Nueva Orden (para planear por ingrediente disponible)
-  const [prodReceta, setProdReceta] = useState(null)   // { ings, unidsBacheNet, bache }
+  const [prodReceta, setProdReceta] = useState(null)   // { ings, unidsBacheNet, bache, pesoUnidad, pesoSubp }
+  // Empaque de saldo pendiente al crear la orden: null = sin preguntar aún, true/false = decisión
+  const [empacarSaldo, setEmpacarSaldo] = useState(null)
+  const [saldoSelId, setSaldoSelId] = useState('')
+  const [saldoCant, setSaldoCant] = useState('')
   const [ingIdx, setIngIdx] = useState('')
   const [ingDisp, setIngDisp] = useState('')
   // Opciones rápidas de vencimiento (personalizables, en meses)
@@ -195,6 +221,8 @@ export default function OrdenesProduccion() {
     .filter(n => !isNaN(n))
     .reduce((mx, n) => Math.max(mx, n), 0)
   const siguienteLoteSugerido = String(maxSeqAnio + 1).padStart(2, '0') + anioYY
+  // Lote por FECHA (ddmmaaaa) para materias primas / subproductos internos
+  const loteFechaHoy = (() => { const d = new Date(), p2 = (n) => String(n).padStart(2, '0'); return p2(d.getDate()) + p2(d.getMonth() + 1) + d.getFullYear() })()
 
   // Numeración visible de órdenes: secuencial (1,2,3…) por orden de creación, con inicio configurable
   const ordenIdsSorted = useMemo(() => [...ordenes].map(o => o.id).sort((a, b) => a - b), [ordenes])
@@ -263,7 +291,7 @@ export default function OrdenesProduccion() {
   }, [location.state])
   const { data: productos = [] } = useQuery({
     queryKey: ['products_costing'],
-    queryFn: async () => { const { data } = await supabase.from('products_costing').select('id, nombre, tipo, bache, costo_final, costo_variable').order('nombre'); return data || [] },
+    queryFn: async () => { const { data } = await supabase.from('products_costing').select('id, nombre, tipo, bache, costo_final, costo_variable, activo, mp_id').order('nombre'); return data || [] },
   })
   const { data: recetas = [] } = useQuery({
     queryKey: ['recipes'],
@@ -329,7 +357,7 @@ export default function OrdenesProduccion() {
   // Carga datos de la orden (ingredientes calculados + lote/vence/fecha/procesos)
   const prepararDatos = async (o) => {
     setOrdenPrep(o); setPrepIngs([]); setPrepInfo(null); setPrepDatos(null); setPrepFicha(null)
-    setPrepLote(o.lote || siguienteLoteSugerido || ''); setPrepVence(o.vence || '')
+    setPrepLote(o.lote || (o.es_subproducto ? loteFechaHoy : siguienteLoteSugerido) || ''); setPrepVence(o.vence || '')
     setPrepFechaInicio(o.fecha_inicio || '')
     setPrepModoAvanzado(!!o.modo_avanzado); setPrepHoraInicio(o.inicio || ''); setPrepHoraFin(o.fin || '')
     setPrepDestajo(Array.isArray(o.destajo) ? o.destajo : [])
@@ -400,13 +428,19 @@ export default function OrdenesProduccion() {
   // Abre el modal de Iniciar proceso (fecha de inicio + tiempos por subproceso, con autoguardado)
   const openProceso = async (o) => {
     setAutoSavedAt('')
-    setPrepUnidades(o.cantidad_result || ''); setPrepPesoFinal(o.peso_final || ''); setPrepPesoDesp(o.peso_desperdicio || '')
-    setPrepObs(o.obs_result || ''); setPrepResp(o.operario || profile?.nombre || ''); setPrepConforme(true)
-    setPrepSurtido(!!o.surtido); setPrepLoteMezcla(o.lote_mezcla || ''); setPrepProductoSurtido(o.producto_surtido || '')
+    // Empaque de saldo: la salida real son las unidades empacadas del saldo (van como "lote empacado"),
+    // por eso la producción principal queda en 0 y el saldo se pre-carga listo para consumir.
+    const packInfo = (o.empaque_saldo && Array.isArray(o.saldo_pack) && o.saldo_pack[0]) ? o.saldo_pack[0] : null
+    setPrepUnidades(o.empaque_saldo ? '0' : (o.cantidad_result || '')); setPrepPesoFinal(o.peso_final || ''); setPrepPesoDesp(o.peso_desperdicio || '')
+    setPrepObs(o.obs_result || ''); setPrepResp(o.operario || profile?.nombre || ''); setPrepConforme(null)
+    setPrepSurtido(null); setPrepLoteMezcla(o.lote_mezcla || ''); setPrepProductoSurtido(o.producto_surtido || '')
     setPrepPorciona(false); setPrepCantSubp(o.cant_subporciones || '')
     setPrepFotoFile(null); setPrepFotoPrev(o.foto_url || '')
-    setPrepLotesExtra([])
-    setPrepHaySobrante(!!o.hay_sobrante); setPrepSobrantePeso(o.sobrante_peso || ''); setPrepSobranteUnidad(o.sobrante_unidad || 'g')
+    if (packInfo) {
+      const s = saldosMezcla.find(x => String(x.id) === String(packInfo.saldo_id))
+      setPrepLotesExtra([{ lote: s?.lote || o.lote || '', vence: s?.vencimiento || o.vence || '', unidades: String(o.cantidad_plan || ''), conforme: true, saldo_id: packInfo.saldo_id, peso_consumido: String(packInfo.cantidad || ''), surtido: false, lote_mezcla: '' }])
+    } else setPrepLotesExtra([])
+    setPrepHaySobrante(null); setPrepSobrantePeso(o.sobrante_peso || ''); setPrepSobranteUnidad(o.sobrante_unidad || 'g')
     setPrepSurtidoCantidad(o.surtido_cantidad != null ? String(o.surtido_cantidad) : '')
     setPrepSurtidoConsumos({})
     await prepararDatos(o); setModalProceso(true)
@@ -445,7 +479,7 @@ export default function OrdenesProduccion() {
         cant_subporciones: prepPorciona && prepCantSubp !== '' ? (parseFloat(prepCantSubp) || 0) : null,
         obs_result: prepObs || null, surtido: prepSurtido, lote_mezcla: prepSurtido ? (prepLoteMezcla || null) : null, producto_surtido: prepSurtido ? (prepProductoSurtido || null) : null,
         surtido_cantidad: prepSurtido && prepSurtidoCantidad !== '' ? (parseFloat(prepSurtidoCantidad) || 0) : null,
-        hay_sobrante: prepHaySobrante, sobrante_peso: prepHaySobrante && prepSobrantePeso !== '' ? (parseFloat(prepSobrantePeso) || 0) : null, sobrante_unidad: prepHaySobrante ? prepSobranteUnidad : null,
+        hay_sobrante: !!prepHaySobrante, sobrante_peso: prepHaySobrante && prepSobrantePeso !== '' ? (parseFloat(prepSobrantePeso) || 0) : null, sobrante_unidad: prepHaySobrante ? prepSobranteUnidad : null,
         destajo: prepDestajo.filter(d => d.nombre?.trim() || d.cantidad || d.tarifa),
       } })
       setAutoSavedAt(new Date().toLocaleTimeString('es-CO'))
@@ -607,6 +641,7 @@ export default function OrdenesProduccion() {
         <tr><td class="lbl">Unidades producidas</td><td style="height:22px"></td><td class="lbl">Cant. empaque utilizado</td><td></td></tr>
         ${prepPorciona ? `<tr><td class="lbl">Peso subporción</td><td>${prepPesoSubp ? g(prepPesoSubp) + ' g' : ''}</td><td class="lbl">Cant. subporciones</td><td>${prepCantSubp ? fNum(prepCantSubp) : ''}</td></tr>` : ''}
         <tr><td class="lbl">¿Empacó surtido?</td><td>SI <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle"></span> &nbsp; NO <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle"></span> &nbsp; CANT: <span style="display:inline-block;min-width:60px;border-bottom:1px solid #555">&nbsp;</span></td><td class="lbl">¿Quedó sin empacar?</td><td>SI <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle"></span> &nbsp; NO <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle"></span> &nbsp; CANT: <span style="display:inline-block;min-width:60px;border-bottom:1px solid #555">&nbsp;</span></td></tr>
+        <tr><td class="lbl">¿Producto conforme?</td><td colspan="3">SI <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle;text-align:center;line-height:12px;font-size:10px">${prepConforme === true ? 'X' : ''}</span> &nbsp; NO <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle;text-align:center;line-height:12px;font-size:10px">${prepConforme === false ? 'X' : ''}</span></td></tr>
       </table>
 
       <div class="seccion">LISTA DE INGREDIENTES</div>
@@ -674,6 +709,9 @@ export default function OrdenesProduccion() {
     if (prepSurtido && !(parseFloat(prepSurtidoCantidad) > 0)) { toast('Ingresa la CANTIDAD EMPACADA SURTIDA', 'warning'); return }
     if (prepHaySobrante && !(parseFloat(prepSobrantePeso) > 0)) { toast('Marcaste que quedó sin empacar: ingresa la CANTIDAD', 'warning'); return }
     if (prepHaySobrante && prepPorciona && (prepSobranteUnidad === 'subporciones') && parseFloat(prepSobrantePeso) > (parseFloat(prepCantSubp) || 0)) { toast('La cantidad sin empacar no puede superar las subporciones producidas', 'warning'); return }
+    if (prepConforme === null) { toast('Marca si la producción es CONFORME o NO CONFORME', 'warning'); return }
+    if (prepSurtido === null) { toast('Indica si EMPACÓ SURTIDO (SI/NO)', 'warning'); return }
+    if (prepHaySobrante === null) { toast('Indica si SOBRÓ PRODUCCIÓN / quedó sin empacar (SI/NO)', 'warning'); return }
     setModalConfirmEnvio(true)
   }
 
@@ -729,7 +767,7 @@ export default function OrdenesProduccion() {
         tipo_registro: o.es_subproducto ? 'subproducto' : 'final', subprocesos: procs,
         peso_subporcion: prepPorciona ? (parseFloat(prepPesoSubp) || 0) : null,
         cant_subporciones: prepPorciona ? (parseFloat(prepCantSubp) || 0) : null,
-        surtido: prepSurtido, lote_mezcla: prepSurtido ? (prepLoteMezcla || null) : null,
+        surtido: !!prepSurtido, lote_mezcla: prepSurtido ? (prepLoteMezcla || null) : null,
         producto_surtido: prepSurtido ? (prepProductoSurtido || null) : null,
         surtido_cantidad: prepSurtido && prepSurtidoCantidad !== '' ? (parseFloat(prepSurtidoCantidad) || 0) : null,
         lotes_origen: prepSurtido ? (prepLoteMezcla || '') : '',
@@ -761,10 +799,10 @@ export default function OrdenesProduccion() {
         peso_final: parseFloat(prepPesoFinal) || 0, peso_desperdicio: parseFloat(prepPesoDesp) || 0,
         peso_subporcion: prepPorciona ? (parseFloat(prepPesoSubp) || 0) : null,
         cant_subporciones: prepPorciona ? (parseFloat(prepCantSubp) || 0) : null,
-        surtido: prepSurtido, lote_mezcla: prepSurtido ? (prepLoteMezcla || null) : null,
+        surtido: !!prepSurtido, lote_mezcla: prepSurtido ? (prepLoteMezcla || null) : null,
         producto_surtido: prepSurtido ? (prepProductoSurtido || null) : null,
         surtido_cantidad: prepSurtido && prepSurtidoCantidad !== '' ? (parseFloat(prepSurtidoCantidad) || 0) : null,
-        hay_sobrante: prepHaySobrante, sobrante_peso: prepHaySobrante ? (parseFloat(prepSobrantePeso) || 0) : null, sobrante_unidad: prepHaySobrante ? prepSobranteUnidad : null,
+        hay_sobrante: !!prepHaySobrante, sobrante_peso: prepHaySobrante ? (parseFloat(prepSobrantePeso) || 0) : null, sobrante_unidad: prepHaySobrante ? prepSobranteUnidad : null,
         saldos_consumidos: saldosConsumidos.length ? saldosConsumidos : null,
         obs_result: prepObs || '', foto_url, fecha_envio: new Date().toISOString(),
         destajo: prepDestajo.filter(d => d.nombre?.trim() || d.cantidad || d.tarifa),
@@ -792,20 +830,30 @@ export default function OrdenesProduccion() {
             responsable: o.operario || profile?.nombre || '', obs: `Orden de producción #${opNum(o.id)} (subproducto)`, lote: prepLote || '', vencimiento: prepVence || null,
           })
           const { data: mpRow } = await supabase.from('raw_materials').select('stock').eq('id', o.mp_id).single()
-          const upd = { stock: (mpRow?.stock || 0) + unidades }
+          const nuevoStock = (mpRow?.stock || 0) + unidades
+          const upd = { stock: nuevoStock }
           if (prepLote) upd.lote = prepLote
           if (prepVence) upd.vencimiento = prepVence
           await supabase.from('raw_materials').update(upd).eq('id', o.mp_id)
+          // Si esa MP está publicada como producto vendible, refleja el stock y lo empuja a Alegra
+          try {
+            const { data: fp } = await supabase.from('finished_products').select('id, alegra_item_id').eq('mp_id', o.mp_id).maybeSingle()
+            if (fp) {
+              await supabase.from('finished_products').update({ stock: nuevoStock }).eq('id', fp.id)
+              if (fp.alegra_item_id) { try { await supabase.functions.invoke('alegra-push-stock', { body: { finished_id: fp.id } }) } catch { /* no bloquea */ } }
+            }
+          } catch { /* sin producto vendible enlazado */ }
         } catch (e) { console.warn('No se pudo sumar el subproducto a inventario:', e) }
       }
       // Si el admin auto-aprueba un producto terminado, súmalo al inventario de terminados.
       // En surtido: el stock es la cantidad empacada surtida y el lote de la caja = último lote combinado.
       if (!r.queued && autoAprob) {
         const esSurt = prepSurtido && prepProductoSurtido
-        const unpackedSub = (prepHaySobrante && prepPorciona && prepSobranteUnidad === 'subporciones') ? (parseFloat(prepSobrantePeso) || 0) : 0
         let cantStock, nombreStock, loteStock
         if (esSurt) { cantStock = parseFloat(prepSurtidoCantidad) || 0; nombreStock = prepProductoSurtido; loteStock = loteCaja(prepLoteMezcla, prepLote) || prepLote }
-        else if (prepPorciona) { cantStock = Math.max(0, (parseFloat(prepCantSubp) || 0) - unpackedSub); nombreStock = o.producto; loteStock = prepLote }
+        // Producto base/porcionado: se suma la CANTIDAD FINAL (unidades/cajas), igual que el
+        // registro diario (cantidad_result). Para porcionados, prepUnidades ya viene convertido a
+        // cajas/unidades de venta; el sobrante de mezcla va a saldo aparte (no descuenta cajas).
         else { cantStock = unidadesTotal; nombreStock = o.producto; loteStock = prepLote }
         await sumarProductoTerminado(o, cantStock, nombreStock, loteStock)
       }
@@ -894,7 +942,10 @@ export default function OrdenesProduccion() {
       if (!form.producto.trim()) throw new Error('Indica el producto/receta')
       if (!(parseFloat(form.cantidad_plan) > 0)) throw new Error('Ingresa la cantidad planificada')
       if (!form.operario) throw new Error('Asigna un operario')
-      if (form.es_subproducto && !form.mp_id) throw new Error('Indica qué materia prima alimenta el subproducto')
+      if (form.es_subproducto && !form.mp_id) throw new Error(form.es_mp ? 'Esta MP vendible no está vinculada a una materia prima (revísala en la ficha)' : 'Indica qué materia prima alimenta el subproducto')
+      const esEmp = empacarSaldo === true
+      if (esEmp && !(saldoSelId && parseFloat(saldoCant) > 0)) throw new Error('Elige el saldo y la cantidad a empacar')
+      const saldoUnidad = saldosMezcla.find(s => String(s.id) === String(saldoSelId))?.unidad || 'g'
       const campos = {
         producto: form.producto, origen: form.origen, origen_id: form.origen_id ? parseInt(form.origen_id) : null,
         es_subproducto: form.es_subproducto, mp_id: form.es_subproducto && form.mp_id ? parseInt(form.mp_id) : null,
@@ -903,6 +954,8 @@ export default function OrdenesProduccion() {
         lote: form.lote || '', vence: form.vence || null, baches_plan: parseFloat(form.baches_plan) || null, inicio: form.inicio || null,
         es_prueba: form.origen === 'receta', forzar_sin_lote: !!form.forzar_sin_lote,
         lotes_preferidos: form.lotes_elegidos && Object.keys(form.lotes_elegidos).length ? form.lotes_elegidos : null,
+        empaque_saldo: esEmp,
+        saldo_pack: esEmp ? [{ saldo_id: parseInt(saldoSelId), cantidad: parseFloat(saldoCant) || 0, unidad: saldoUnidad }] : null,
       }
       if (editOrdenId) {
         // Editar una orden aún PENDIENTE (no tomada)
@@ -922,7 +975,7 @@ export default function OrdenesProduccion() {
       // Notificar al operario asignado
       await notificar({ destinatario: form.operario, tipo: 'orden_asignada', mensaje: `Nueva orden de producción asignada: ${form.producto}`, link: '/ordenes', ref_id: data?.id })
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['production_orders'] }); setModalNueva(false); setForm(EMPTY_ORDEN); toast(editOrdenId ? 'Orden actualizada ✓' : 'Orden creada y asignada ✓'); setEditOrdenId(null) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['mezcla_saldos'] }); setModalNueva(false); setForm(EMPTY_ORDEN); setEmpacarSaldo(null); setSaldoSelId(''); setSaldoCant(''); toast(editOrdenId ? 'Orden actualizada ✓' : 'Orden creada y asignada ✓'); setEditOrdenId(null) },
     onError: (e) => toast(e.message, 'error'),
   })
 
@@ -1084,6 +1137,7 @@ export default function OrdenesProduccion() {
 
   // 1) RESERVAR la MP cuando la orden INICIA producción (sale de "disponible" → "reservado")
   const reservarMP = async (o) => {
+    if (o.empaque_saldo) return   // empaque de saldo: no consume MP (ya está producido)
     if (o.origen !== 'producto' || !o.origen_id) return
     if (Array.isArray(o.lotes_reservados) && o.lotes_reservados.length) return  // ya reservado (idempotente)
     const items = await calcularConsumoOrden(o)
@@ -1179,6 +1233,14 @@ export default function OrdenesProduccion() {
         if (o.lote) upd.lote = o.lote
         if (o.vence) upd.vencimiento = o.vence
         await supabase.from('raw_materials').update(upd).eq('id', o.mp_id)
+        // Refleja el stock en el producto vendible enlazado y lo empuja a Alegra
+        try {
+          const { data: fp } = await supabase.from('finished_products').select('id, alegra_item_id').eq('mp_id', o.mp_id).maybeSingle()
+          if (fp) {
+            await supabase.from('finished_products').update({ stock: nuevo }).eq('id', fp.id)
+            if (fp.alegra_item_id) { try { await supabase.functions.invoke('alegra-push-stock', { body: { finished_id: fp.id } }) } catch { /* no bloquea */ } }
+          }
+        } catch { /* sin producto vendible enlazado */ }
       } else {
         // 2b. Producto terminado → registro de producción
         // Si el operario ya registró el lote desde el módulo de Producción (vinculado a la orden),
@@ -1271,6 +1333,7 @@ export default function OrdenesProduccion() {
   const selectProducto = async (val, prefill) => {
     // val = 'prod-{id}' | 'recipe-{id}'; prefill = { ancla, cantidad } para precargar el ingrediente disponible
     setProdReceta(null); setIngIdx(''); setIngDisp('')
+    setEmpacarSaldo(null); setSaldoSelId(''); setSaldoCant('')
     setForm(f => ({ ...f, baches_plan: '' }))
     const aplicarPrefill = (ings, unidsBacheNet) => {
       if (!prefill?.ancla) return
@@ -1288,16 +1351,18 @@ export default function OrdenesProduccion() {
     const [tipo, id] = val.split('-')
     if (tipo === 'prod') {
       const p = productos.find(x => String(x.id) === id)
-      setForm(f => ({ ...f, producto: p?.nombre || '', origen: 'producto', origen_id: id, es_subproducto: p?.tipo === 'subproducto', unidadesPorBache: parseFloat(p?.bache) || 0 }))
+      // MP vendible: se comporta como subproducto (suma a stock de MP), con su mp_id ya vinculado
+      const esMpFicha = p?.tipo === 'mp'
+      setForm(f => ({ ...f, producto: p?.nombre || '', origen: 'producto', origen_id: id, es_subproducto: p?.tipo === 'subproducto' || esMpFicha, es_mp: esMpFicha, mp_id: esMpFicha ? String(p?.mp_id || '') : f.mp_id, unidadesPorBache: parseFloat(p?.bache) || 0 }))
       // Cargar la receta para permitir planear por ingrediente disponible
-      const { data: full } = await supabase.from('products_costing').select('ingredientes, bache, rendimiento, desperdicio, peso_unidad').eq('id', id).single()
+      const { data: full } = await supabase.from('products_costing').select('ingredientes, bache, rendimiento, desperdicio, peso_unidad, peso_subporcion').eq('id', id).single()
       if (full) {
         const parse = (v) => { try { return Array.isArray(v) ? v : JSON.parse(v || '[]') } catch { return [] } }
         const ings = parse(full.ingredientes).filter(i => (parseFloat(i.cantidad) || 0) > 0)
         const totalMezcla = ings.reduce((s, i) => s + (parseFloat(i.cantidad) || 0), 0)
         const rend = parseFloat(full.rendimiento) || 62, desp = parseFloat(full.desperdicio) || 2, pu = parseFloat(full.peso_unidad) || 1000
         const unidsBacheNet = pu > 0 ? (totalMezcla * (rend / 100) * (1 - desp / 100)) / pu : (parseFloat(full.bache) || 0)
-        setProdReceta({ ings, unidsBacheNet, bache: parseFloat(full.bache) || 0 })
+        setProdReceta({ ings, unidsBacheNet, bache: parseFloat(full.bache) || 0, pesoUnidad: pu, pesoSubp: parseFloat(full.peso_subporcion) || 0 })
         if (unidsBacheNet > 0) setForm(f => ({ ...f, unidadesPorBache: Math.round(unidsBacheNet) }))
         aplicarPrefill(ings, unidsBacheNet)
       }
@@ -1334,15 +1399,15 @@ export default function OrdenesProduccion() {
         <h1 className="page-title">Órdenes de Producción</h1>
         <div className="page-actions">
           {esAdmin && pendientesAprob > 0 && <span className="badge badge-dorado" style={{ alignSelf: 'center' }}>{pendientesAprob} por aprobar</span>}
-          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalAudit(true)}>📜 Registro de creación</button>}
-          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={reiniciarNumeracion}>🔢 Numeración</button>}
-          {(esAdmin || esOperario) && <button className="btn btn-primary btn-sm" onClick={() => { setEditOrdenId(null); setForm(EMPTY_ORDEN); setProdReceta(null); setIngIdx(''); setIngDisp(''); setModalNueva(true) }}>+ Nueva Orden</button>}
+          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalAudit(true)}><Ico as={ScrollText} size={14} />Registro de creación</button>}
+          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={reiniciarNumeracion}><Ico as={Hash} size={14} />Numeración</button>}
+          {(esAdmin || esOperario) && <button className="btn btn-primary btn-sm" onClick={() => { setEditOrdenId(null); setForm(EMPTY_ORDEN); setProdReceta(null); setIngIdx(''); setIngDisp(''); setEmpacarSaldo(null); setSaldoSelId(''); setSaldoCant(''); setModalNueva(true) }}><Ico as={Plus} size={14} />Nueva Orden</button>}
         </div>
       </div>
 
       {saldosMezcla.length > 0 && (
         <div className="card" style={{ borderLeft: '4px solid var(--lima)' }}>
-          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>♻ Saldos de mezcla en proceso ({saldosMezcla.length})
+          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Recycle size={16} aria-hidden="true" /> Saldos de mezcla en proceso ({saldosMezcla.length})
             <button className="btn btn-sm btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => navigate('/porempacar')}>Gestionar productos por empacar</button>
           </div>
           <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', marginTop: -4 }}>Sobrantes de producción sin empacar. Se pueden empacar al diligenciar una orden del mismo producto.</p>
@@ -1369,7 +1434,7 @@ export default function OrdenesProduccion() {
       )}
 
       <div className="card">
-        <div className="card-title">📋 {esAdmin ? 'Todas las órdenes' : 'Mis órdenes asignadas'}</div>
+        <div className="card-title"><Ico as={ClipboardList} size={16} />{esAdmin ? 'Todas las órdenes' : 'Mis órdenes asignadas'}</div>
         {cargandoOrdenes ? <Cargando texto="Cargando órdenes…" /> : (
         <div className="table-wrap">
           <table>
@@ -1385,46 +1450,46 @@ export default function OrdenesProduccion() {
                       <td>#{opNum(o.id)}</td>
                       <td className="col-opcional">{o.created_at ? fFecha(o.created_at.split('T')[0]) : '—'}</td>
                       <td><strong>{o.producto}</strong>{o.notas_orden && <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>{o.notas_orden}</div>}</td>
-                      <td>{o.lote || '—'}{o.surtido && o.lote_mezcla && <div style={{ fontSize: '0.7rem', color: 'var(--tierra)' }}>🔀 {o.lote_mezcla}</div>}</td>
-                      <td className="col-opcional">{o.es_prueba ? <span className="badge badge-dorado">🧪 Prueba</span> : o.es_subproducto ? <span className="badge badge-dorado">Subproducto</span> : <span className="badge badge-azul">Terminado</span>}</td>
+                      <td>{o.lote || '—'}{o.surtido && o.lote_mezcla && <div style={{ fontSize: '0.7rem', color: 'var(--tierra)', display: 'flex', alignItems: 'center', gap: 3 }}><Shuffle size={11} aria-hidden="true" /> {o.lote_mezcla}</div>}</td>
+                      <td className="col-opcional">{o.es_prueba ? <span className="badge badge-dorado" style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><FlaskConical size={11} aria-hidden="true" /> Prueba</span> : o.es_subproducto ? <span className="badge badge-dorado">Subproducto</span> : <span className="badge badge-azul">Terminado</span>}</td>
                       <td className="td-number">{fNum(o.cantidad_plan)} {o.unidad}</td>
                       <td className="col-opcional-2">{o.operario}</td>
                       <td><span className={`badge ${est.badge}`}>{est.txt}</span>{o.estado === 'rechazada' && o.motivo_rechazo && <div style={{ fontSize: '0.72rem', color: 'var(--rojo)' }}>{o.motivo_rechazo}</div>}</td>
                       <td className="td-number col-opcional-2">{o.cantidad_result != null ? `${fNum(o.cantidad_result)}` : '—'}</td>
                       <td onClick={e => e.stopPropagation()}>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          <button className="btn btn-xs btn-secondary" onClick={() => setOrdenDetalle(o)}>👁 Detalles</button>
+                          <button className="btn btn-xs btn-secondary" title="Ver detalles" onClick={() => setOrdenDetalle(o)}><Eye size={13} aria-hidden="true" /></button>
                           {/* Quien ejecuta la orden: el operario dueño */}
-                          {esMia && o.estado === 'pendiente' && <button className="btn btn-xs btn-primary" onClick={() => tomarOrden.mutate(o)}>▶ Tomar</button>}
+                          {esMia && o.estado === 'pendiente' && <button className="btn btn-xs btn-primary" onClick={() => tomarOrden.mutate(o)}><Ico as={Play} size={13} />Tomar</button>}
                           {esMia && (o.estado === 'en_proceso' || o.estado === 'rechazada') && <>
-                            <button className="btn btn-xs btn-secondary" onClick={() => openPreparar(o)}>🧮 Ingredientes</button>
-                            <button className="btn btn-xs btn-primary" onClick={() => openProceso(o)}>▶ Iniciar proceso</button>
+                            <button className="btn btn-xs btn-secondary" onClick={() => openPreparar(o)}><Ico as={Calculator} size={13} />Ingredientes</button>
+                            <button className="btn btn-xs btn-primary" onClick={() => openProceso(o)}><Ico as={Play} size={13} />Iniciar proceso</button>
                           </>}
                           {/* El admin puede imprimir cualquier orden sin tomarla */}
-                          {esAdmin && !esMia && <button className="btn btn-xs btn-dorado" title="Imprimir orden" onClick={() => openPreparar(o)}>🖨 Imprimir</button>}
+                          {esAdmin && !esMia && <button className="btn btn-xs btn-dorado" title="Imprimir orden" onClick={() => openPreparar(o)}><Printer size={13} aria-hidden="true" /></button>}
                           {/* El admin puede diligenciar el proceso de órdenes de OTROS (en las suyas ya tiene "Iniciar proceso") */}
                           {esAdmin && !esMia && (o.estado === 'pendiente' || o.estado === 'en_proceso' || o.estado === 'rechazada') && (
-                            <button className="btn btn-xs btn-primary" title="Diligenciar proceso, cerrar y enviar (se aprueba automáticamente)" onClick={() => adminDiligenciar(o)}>▶ Diligenciar proceso</button>
+                            <button className="btn btn-xs btn-primary" title="Diligenciar proceso, cerrar y enviar (se aprueba automáticamente)" onClick={() => adminDiligenciar(o)}><Ico as={Play} size={13} />Diligenciar proceso</button>
                           )}
                           {/* Editar la orden mientras esté pendiente (no tomada) */}
-                          {(esAdmin || esOperario) && o.estado === 'pendiente' && <button className="btn btn-xs btn-secondary" title="Modificar orden" onClick={() => openEditarOrden(o)}>✏ Editar</button>}
+                          {(esAdmin || esOperario) && o.estado === 'pendiente' && <button className="btn btn-xs btn-secondary" title="Modificar orden" onClick={() => openEditarOrden(o)}><Pencil size={13} aria-hidden="true" /></button>}
                           {/* Ventana de 1 día hábil para corregir el envío (no-admin) */}
                           {!esAdmin && esMia && o.estado === 'ejecutada' && dentroVentanaEdicion(o) && (
-                            <button className="btn btn-xs btn-secondary" title="Anular el envío para corregirlo (1 día hábil)" onClick={() => confirmar('¿Anular el envío para corregir el registro?').then(ok => ok && anularEnvio.mutate(o))}>↩ Anular envío</button>
+                            <button className="btn btn-xs btn-secondary" title="Anular el envío para corregirlo (1 día hábil)" onClick={() => confirmar('¿Anular el envío para corregir el registro?').then(ok => ok && anularEnvio.mutate(o))}><Ico as={Undo2} size={13} />Anular envío</button>
                           )}
                           {!esAdmin && esMia && o.estado === 'ejecutada' && !dentroVentanaEdicion(o) && (
                             <span style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>En revisión (plazo de edición vencido)</span>
                           )}
                           {/* Admin */}
                           {esAdmin && o.estado === 'ejecutada' && <>
-                            <button className="btn btn-xs btn-success" onClick={() => aprobar.mutate(o)} disabled={aprobar.isPending}>✓ Aprobar</button>
-                            <button className="btn btn-xs btn-danger" onClick={() => pedir('Motivo del rechazo:', { title: 'Rechazar orden' }).then(motivo => { if (motivo !== null) rechazar.mutate({ o, motivo: motivo || '' }) })}>✕ Rechazar</button>
+                            <button className="btn btn-xs btn-success" onClick={() => aprobar.mutate(o)} disabled={aprobar.isPending}><Ico as={Check} size={13} />Aprobar</button>
+                            <button className="btn btn-xs btn-danger" onClick={() => pedir('Motivo del rechazo:', { title: 'Rechazar orden' }).then(motivo => { if (motivo !== null) rechazar.mutate({ o, motivo: motivo || '' }) })}><Ico as={X} size={13} />Rechazar</button>
                           </>}
                           {esAdmin && (o.estado === 'ejecutada' || o.estado === 'aprobada') && (
-                            <button className="btn btn-xs btn-secondary" title="Devolver orden: elimina el registro, devuelve el stock terminado y vuelve a 'en proceso' para reeditarla" disabled={devolverOrden.isPending} onClick={() => confirmar(`¿Devolver la orden #${opNum(o.id)}?\n\nSe ELIMINA su registro de producción, se DEVUELVE el stock que sumó al producto terminado y vuelve a "en proceso" para reeditarla.`).then(ok => ok && devolverOrden.mutate(o))}>↩ Devolver</button>
+                            <button className="btn btn-xs btn-secondary" title="Devolver orden: elimina el registro, devuelve el stock terminado y vuelve a 'en proceso' para reeditarla" disabled={devolverOrden.isPending} onClick={() => confirmar(`¿Devolver la orden #${opNum(o.id)}?\n\nSe ELIMINA su registro de producción, se DEVUELVE el stock que sumó al producto terminado y vuelve a "en proceso" para reeditarla.`).then(ok => ok && devolverOrden.mutate(o))}><Ico as={Undo2} size={13} />Devolver</button>
                           )}
-                          {esAdmin && o.estado !== 'ejecutada' && o.estado !== 'aprobada' && <button className="btn btn-xs btn-danger" title="Eliminar orden (solo admin)" onClick={() => confirmarEliminarOrden(o)}>🗑</button>}
-                          {(o.estado === 'aprobada' || (esAdmin && o.estado !== 'ejecutada')) && o.foto_url && <button className="btn btn-xs btn-secondary" onClick={() => openEjecutar(o)}>📷</button>}
+                          {esAdmin && o.estado !== 'ejecutada' && o.estado !== 'aprobada' && <button className="btn btn-xs btn-danger" title="Eliminar orden (solo admin)" onClick={() => confirmarEliminarOrden(o)}><Trash2 size={13} aria-hidden="true" /></button>}
+                          {(o.estado === 'aprobada' || (esAdmin && o.estado !== 'ejecutada')) && o.foto_url && <button className="btn btn-xs btn-secondary" title="Ver/registrar foto" onClick={() => openEjecutar(o)}><Camera size={13} aria-hidden="true" /></button>}
                         </div>
                       </td>
                     </tr>
@@ -1437,7 +1502,7 @@ export default function OrdenesProduccion() {
       </div>
 
       {/* Modal Nueva / Editar Orden (admin) */}
-      <Modal open={modalNueva} onClose={() => { setModalNueva(false); setEditOrdenId(null) }} title={editOrdenId ? '✏ Editar Orden de Producción' : '🏭 Nueva Orden de Producción'} size="modal-lg"
+      <Modal open={modalNueva} onClose={() => { setModalNueva(false); setEditOrdenId(null) }} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>{editOrdenId ? <Pencil size={18} aria-hidden="true" /> : <Factory size={18} aria-hidden="true" />}{editOrdenId ? 'Editar Orden de Producción' : 'Nueva Orden de Producción'}</span>} size="modal-lg"
         footer={<>
           <button className="btn btn-secondary" onClick={() => { setModalNueva(false); setEditOrdenId(null) }}>Cancelar</button>
           <button className="btn btn-primary" onClick={() => crearOrden.mutate()} disabled={crearOrden.isPending}>{editOrdenId ? 'Guardar cambios' : 'Crear y asignar'}</button>
@@ -1447,10 +1512,54 @@ export default function OrdenesProduccion() {
           <label className="form-label">Receta / Producto</label>
           <select className="form-control" value={form.origen_id ? `${form.origen === 'receta' ? 'recipe' : 'prod'}-${form.origen_id}` : ''} onChange={e => selectProducto(e.target.value)}>
             <option value="">Seleccionar...</option>
-            {productos.length > 0 && <optgroup label="⭐ Productos">{productos.map(p => <option key={p.id} value={`prod-${p.id}`}>{p.nombre}{p.tipo === 'subproducto' ? ' (subproducto)' : ''}</option>)}</optgroup>}
+            {productos.filter(p => p.tipo !== 'mp' && p.activo !== false).length > 0 && <optgroup label="⭐ Productos">{productos.filter(p => p.tipo !== 'mp' && p.activo !== false).map(p => <option key={p.id} value={`prod-${p.id}`}>{p.nombre}{p.tipo === 'subproducto' ? ' (subproducto)' : ''}</option>)}</optgroup>}
+            {productos.filter(p => p.tipo === 'mp' && p.activo !== false).length > 0 && <optgroup label="🧪 Materias primas vendibles">{productos.filter(p => p.tipo === 'mp' && p.activo !== false).map(p => <option key={p.id} value={`prod-${p.id}`}>{p.nombre}</option>)}</optgroup>}
             {recetas.length > 0 && <optgroup label="💾 Recetas rápidas">{recetas.map(r => <option key={r.id} value={`recipe-${r.id}`}>{r.nombre}</option>)}</optgroup>}
           </select>
         </div>
+        {/* Empaque de saldo pendiente: si el producto elegido tiene saldos, se ofrece empacarlos */}
+        {(() => {
+          const saldosProd = form.origen === 'producto' && form.origen_id ? saldosDeProducto(form.producto, form.origen_id).filter(s => (s.peso || 0) > 0) : []
+          if (!saldosProd.length) return null
+          const ordenados = [...saldosProd].sort((a, b) => String(a.vencimiento || '9').localeCompare(String(b.vencimiento || '9')))
+          const sel = ordenados.find(s => String(s.id) === String(saldoSelId)) || null
+          const esSubp = (sel?.unidad || '').toLowerCase().includes('subp')
+          const cant = parseFloat(saldoCant) || 0
+          const pesoEquiv = esSubp && (prodReceta?.pesoSubp > 0) ? cant * prodReceta.pesoSubp : cant
+          const unids = (prodReceta?.pesoUnidad > 0) ? Math.round(pesoEquiv / prodReceta.pesoUnidad) : 0
+          return (
+            <div className="form-group" style={{ background: 'rgba(200,169,74,0.12)', border: '1px solid rgba(200,169,74,0.45)', borderRadius: 'var(--radio)', padding: 12 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <strong style={{ color: 'var(--tierra)', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Recycle size={16} aria-hidden="true" /> Hay {ordenados.length} saldo(s) de mezcla anteriores por empacar</strong>
+                <span>¿Deseas empacarlo?</span>
+                <SiNo value={empacarSaldo} onChange={setEmpacarSaldo} />
+              </div>
+              {empacarSaldo === true && (
+                <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
+                  <div>
+                    <label style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>Saldo a empacar (ordenado por vencimiento)</label>
+                    <select className="form-control" value={saldoSelId} onChange={e => { setSaldoSelId(e.target.value); setSaldoCant('') }}>
+                      <option value="">Seleccionar saldo...</option>
+                      {ordenados.map(s => <option key={s.id} value={s.id}>Lote {s.lote || '(s/n)'} · disp. {fCant(s.peso)} {s.unidad}{s.vencimiento ? ` · vence ${s.vencimiento}` : ''}</option>)}
+                    </select>
+                  </div>
+                  {sel && (
+                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
+                      <div>
+                        <label style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>Cantidad a empacar ({sel.unidad})</label>
+                        <input type="number" className="form-control" style={{ maxWidth: 150 }} value={saldoCant} onChange={e => setSaldoCant(e.target.value)} min={0} max={sel.peso} />
+                      </div>
+                      <button type="button" className="btn btn-sm btn-secondary" onClick={() => setSaldoCant(String(sel.peso))}>Todo ({fCant(sel.peso)})</button>
+                      <span style={{ paddingBottom: 8, fontSize: '0.9rem' }}>= <strong>{fNum(unids)}</strong> unidades a salir</span>
+                      <button type="button" className="btn btn-sm btn-primary" disabled={!(cant > 0) || !(unids > 0)} onClick={() => setForm(f => ({ ...f, cantidad_plan: String(unids), baches_plan: '' }))}>Usar cantidad</button>
+                    </div>
+                  )}
+                  <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>No consume MP (ya está producido). En el diligenciamiento se cargan los ingredientes de referencia y asignas el nuevo lote.</small>
+                </div>
+              )}
+            </div>
+          )
+        })()}
         <div className="form-grid-2">
           <div className="form-group"><label className="form-label">Cantidad planificada (unidades) *</label><input type="number" className="form-control" value={form.cantidad_plan} onChange={e => setForm(f => ({ ...f, cantidad_plan: e.target.value, baches_plan: '' }))} min={0} /></div>
           <div className="form-group"><label className="form-label">Unidad</label>
@@ -1467,7 +1576,7 @@ export default function OrdenesProduccion() {
           </div>
         )}
         {/* Planear según la cantidad disponible de un ingrediente */}
-        {prodReceta && prodReceta.ings.length > 0 && (
+        {!empacarSaldo && prodReceta && prodReceta.ings.length > 0 && (
           <div className="form-group" style={{ background: 'rgba(124,179,66,0.06)', padding: 10, borderRadius: 'var(--radio)' }}>
             <label className="form-label">🧮 Planear por ingrediente disponible</label>
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
@@ -1498,9 +1607,9 @@ export default function OrdenesProduccion() {
         )}
         <div className="alert alert-info" style={{ fontSize: '0.8rem' }}>El <strong>lote</strong> y la <strong>fecha de vencimiento</strong> se definen al <strong>diligenciar el proceso</strong> (con el lote sugerido automáticamente).</div>
         {/* Lotes de MP en stock: sugerencia PEPS (cuál gastar primero) + alertas de vencimiento */}
-        {form.origen === 'producto' && prodReceta && prodReceta.ings.some(i => i.mpId) && (
+        {!empacarSaldo && form.origen === 'producto' && prodReceta && prodReceta.ings.some(i => i.mpId) && (
           <div className="form-group" style={{ background: 'rgba(124,179,66,0.06)', padding: 10, borderRadius: 'var(--radio)' }}>
-            <label className="form-label">📦 Lotes de MP en stock (orden PEPS sugerido)</label>
+            <label className="form-label"><Ico as={Package} size={14} />Lotes de MP en stock (orden PEPS sugerido)</label>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.82rem', cursor: 'pointer', marginBottom: 8, color: 'var(--tierra)' }}>
               <input type="checkbox" checked={!!form.forzar_sin_lote} onChange={e => setForm(f => ({ ...f, forzar_sin_lote: e.target.checked }))} />
               ⚠ Forzar salida sin lote (no descontar de lotes específicos; solo del stock total)
@@ -1549,24 +1658,26 @@ export default function OrdenesProduccion() {
         </div>
         {form.origen === 'receta' && (
           <div className="alert" style={{ fontWeight: 600, color: 'var(--selva)', background: 'rgba(124,179,66,0.10)', border: '1px solid var(--lima)', padding: 10, borderRadius: 'var(--radio)', marginBottom: 10, fontSize: '0.85rem' }}>
-            🧪 Esta orden es de <strong>PRUEBA</strong> por provenir de una receta rápida.
+            <FlaskConical size={14} aria-hidden="true" style={{ display: 'inline', verticalAlign: '-2px', marginRight: 4 }} /> Esta orden es de <strong>PRUEBA</strong> por provenir de una receta rápida.
           </div>
         )}
-        <div className="form-group" style={{ background: 'rgba(200,169,74,0.08)', padding: 12, borderRadius: 'var(--radio)' }}>
-          <label style={{ cursor: 'pointer', fontWeight: 600, color: 'var(--tierra)' }}>
-            <input type="checkbox" checked={form.es_subproducto} onChange={e => setForm(f => ({ ...f, es_subproducto: e.target.checked }))} style={{ marginRight: 6 }} />
-            Es un subproducto interno (alimenta Inventario MP, no el registro de producción)
-          </label>
-          {form.es_subproducto && (
-            <div style={{ marginTop: 10 }}>
-              <label className="form-label">Materia prima que alimenta</label>
-              <select className="form-control" value={form.mp_id} onChange={e => setForm(f => ({ ...f, mp_id: e.target.value }))}>
-                <option value="">Seleccionar MP...</option>
-                {mps.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
-              </select>
-            </div>
-          )}
-        </div>
+        {/* El tipo (MP interna vs producto base) se determina automáticamente por el producto elegido; ya no hay check manual */}
+        {form.es_mp && (
+          <div className="form-group" style={{ background: 'rgba(124,179,66,0.10)', padding: 12, borderRadius: 'var(--radio)', fontSize: '0.85rem', color: 'var(--selva)' }}>
+            <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><FlaskConical size={14} aria-hidden="true" /> Materia prima vendible</strong> — al producirla suma al <strong>stock de Inventario MP</strong> ({mps.find(m => String(m.id) === String(form.mp_id))?.nombre || 'MP vinculada'}); el lote se asigna por <strong>fecha (ddmmaaaa)</strong> al diligenciar.
+            {!form.mp_id && <div style={{ color: 'var(--rojo)', marginTop: 4 }}>⚠ Esta ficha MP no está vinculada a una materia prima; vincúlala en la ficha.</div>}
+          </div>
+        )}
+        {/* Subproducto interno (ficha tipo subproducto): solo pide a qué MP alimenta, sin check manual */}
+        {!form.es_mp && form.es_subproducto && (
+          <div className="form-group" style={{ background: 'rgba(200,169,74,0.08)', padding: 12, borderRadius: 'var(--radio)' }}>
+            <label className="form-label">Subproducto interno — materia prima que alimenta</label>
+            <select className="form-control" value={form.mp_id} onChange={e => setForm(f => ({ ...f, mp_id: e.target.value }))}>
+              <option value="">Seleccionar MP...</option>
+              {mps.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+            </select>
+          </div>
+        )}
         <div className="form-group"><label className="form-label">Notas para el operario</label><textarea className="form-control" rows={2} value={form.notas_orden} onChange={e => setForm(f => ({ ...f, notas_orden: e.target.value }))} /></div>
       </Modal>
 
@@ -1644,11 +1755,11 @@ export default function OrdenesProduccion() {
         </div>
       </Modal>
 
-      <Modal open={modalPrep} onClose={() => setModalPrep(false)} title={`🧮 Ingredientes — ${ordenPrep?.producto || ''}`} size="modal-lg"
+      <Modal open={modalPrep} onClose={() => setModalPrep(false)} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Calculator size={18} aria-hidden="true" /> Ingredientes — {ordenPrep?.producto || ''}</span>} size="modal-lg"
         footer={<>
           <button className="btn btn-secondary" onClick={() => setModalPrep(false)}>Cerrar</button>
-          {prepFicha && <button className="btn btn-secondary" onClick={() => descargarFicha(prepFicha.url, prepFicha.nombre)}>⬇ Ficha técnica</button>}
-          {ordenPrep?.operario === profile?.nombre && <button className="btn btn-primary" onClick={() => { setModalPrep(false); openProceso(ordenPrep) }}>▶ Iniciar proceso</button>}
+          {prepFicha && <button className="btn btn-secondary" onClick={() => descargarFicha(prepFicha.url, prepFicha.nombre)}><Ico as={Download} size={14} />Ficha técnica</button>}
+          {ordenPrep?.operario === profile?.nombre && <button className="btn btn-primary" onClick={() => { setModalPrep(false); openProceso(ordenPrep) }}><Ico as={Play} size={14} />Iniciar proceso</button>}
         </>}
       >
         {ordenPrep && (
@@ -1664,7 +1775,7 @@ export default function OrdenesProduccion() {
             {/* Datos previstos */}
             {prepDatos && (
               <div style={{ background: 'var(--selva)', color: 'var(--crema)', borderRadius: 'var(--radio)', padding: 14, marginBottom: 14 }}>
-                <div style={{ fontFamily: "'Playfair Display', serif", color: 'var(--dorado)', marginBottom: 10 }}>📦 Datos Previstos</div>
+                <div style={{ fontFamily: "'Playfair Display', serif", color: 'var(--dorado)', marginBottom: 10 }}><Ico as={Package} size={15} />Datos Previstos</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, fontSize: '0.85rem' }}>
                   <div><div style={{ opacity: 0.6, fontSize: '0.72rem' }}>Mezcla total</div><strong>{fNum(prepDatos.totalMezcla)} g</strong></div>
                   <div><div style={{ opacity: 0.6, fontSize: '0.72rem' }}>Peso esperado</div><strong>{fNum(prepDatos.pesoEsperado)} g</strong></div>
@@ -1695,13 +1806,13 @@ export default function OrdenesProduccion() {
 
       {/* Modal Iniciar proceso — fecha de inicio + tiempos por subproceso (autoguardado) */}
       <Modal open={modalProceso} onClose={() => setModalProceso(false)} guard={false}
-        title={<span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>▶ Proceso — {ordenPrep?.producto || ''}
-          <button type="button" className="btn btn-xs btn-dorado" title="Imprimir orden" onClick={imprimirOrden}>🖨</button></span>}
+        title={<span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', width: '100%' }}><Play size={18} aria-hidden="true" /> Proceso — {ordenPrep?.producto || ''}
+          <button type="button" className="btn btn-dorado btn-sm" style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }} title="Imprimir orden" onClick={imprimirOrden}><Printer size={16} aria-hidden="true" /> Imprimir</button></span>}
         size="modal-lg"
         footer={<>
-          <button className="btn btn-secondary" onClick={async () => { await guardarProcesoData(false); setModalProceso(false) }}>💾 Guardar</button>
-          <button className="btn btn-secondary" onClick={imprimirOrden}>⬇ Descargar PDF</button>
-          <button className="btn btn-success" onClick={abrirConfirmEnvio}>📤 Enviar</button>
+          <button className="btn btn-secondary" onClick={async () => { await guardarProcesoData(false); setModalProceso(false) }}><Ico as={Save} size={14} />Guardar</button>
+          <button className="btn btn-secondary" onClick={imprimirOrden}><Ico as={Download} size={14} />Descargar PDF</button>
+          <button className="btn btn-success" onClick={abrirConfirmEnvio}><Ico as={Send} size={14} />Enviar</button>
         </>}>
         {ordenPrep && (
           <>
@@ -1722,7 +1833,7 @@ export default function OrdenesProduccion() {
 
             <div style={{ background: 'rgba(0,0,0,0.02)', padding: 10, borderRadius: 'var(--radio)', marginBottom: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-                <strong style={{ fontSize: '0.9rem' }}>⏱ Tiempos</strong>
+                <strong style={{ fontSize: '0.9rem' }}><Ico as={Clock} size={15} />Tiempos</strong>
                 {/* Toggle modo básico / avanzado */}
                 <div style={{ display: 'flex', border: '1px solid var(--crema-oscuro)', borderRadius: 6, overflow: 'hidden', marginLeft: 4 }}>
                   {[['basico', 'Básico'], ['avanzado', 'Avanzado']].map(([k, l]) => (
@@ -1738,8 +1849,8 @@ export default function OrdenesProduccion() {
               {/* MODO BÁSICO: solo hora inicio y hora fin */}
               {!prepModoAvanzado && (
                 <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                  <div><label style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Hora inicio</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><TimeField value={prepHoraInicio} onChange={setPrepHoraInicio} /><button type="button" className="btn btn-xs btn-secondary" title="Ahora" onClick={() => setPrepHoraInicio(horaAhora())}>⏱</button></div></div>
-                  <div><label style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Hora fin</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><TimeField value={prepHoraFin} onChange={setPrepHoraFin} /><button type="button" className="btn btn-xs btn-secondary" title="Ahora" onClick={() => setPrepHoraFin(horaAhora())}>⏱</button></div></div>
+                  <div><label style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Hora inicio</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><TimeField value={prepHoraInicio} onChange={setPrepHoraInicio} /><button type="button" className="btn btn-xs btn-secondary" title="Ahora" onClick={() => setPrepHoraInicio(horaAhora())}><Clock size={13} aria-hidden="true" /></button></div></div>
+                  <div><label style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Hora fin</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><TimeField value={prepHoraFin} onChange={setPrepHoraFin} /><button type="button" className="btn btn-xs btn-secondary" title="Ahora" onClick={() => setPrepHoraFin(horaAhora())}><Clock size={13} aria-hidden="true" /></button></div></div>
                 </div>
               )}
               {/* MODO AVANZADO: todos los procesos con fecha, hora inicio y fin */}
@@ -1751,8 +1862,8 @@ export default function OrdenesProduccion() {
                     <span {...ordProc.handleProps(i)} style={{ ...ordProc.handleProps(i).style, alignSelf: 'center', paddingBottom: 0 }}>⠿</span>
                     <div><label style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>Proceso/subproceso</label><input className="form-control" value={p.nombre} onChange={e => upd('nombre', e.target.value)} placeholder="Ej: Mezclado, Horneo..." /></div>
                     <div><label style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>Fecha</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><input type="date" className="form-control" value={p.fecha || ''} onChange={e => upd('fecha', e.target.value)} /><button type="button" className="btn btn-xs btn-secondary" title="Hoy" onClick={() => upd('fecha', hoyISO())}>Hoy</button></div></div>
-                    <div><label style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>Inicio</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><TimeField value={p.inicio} onChange={v => upd('inicio', v)} /><button type="button" className="btn btn-xs btn-secondary" title="Ahora" onClick={() => upd('inicio', horaAhora())}>⏱</button></div></div>
-                    <div><label style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>Fin</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><TimeField value={p.fin} onChange={v => upd('fin', v)} /><button type="button" className="btn btn-xs btn-secondary" title="Ahora" onClick={() => upd('fin', horaAhora())}>⏱</button></div></div>
+                    <div><label style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>Inicio</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><TimeField value={p.inicio} onChange={v => upd('inicio', v)} /><button type="button" className="btn btn-xs btn-secondary" title="Ahora" onClick={() => upd('inicio', horaAhora())}><Clock size={13} aria-hidden="true" /></button></div></div>
+                    <div><label style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>Fin</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><TimeField value={p.fin} onChange={v => upd('fin', v)} /><button type="button" className="btn btn-xs btn-secondary" title="Ahora" onClick={() => upd('fin', horaAhora())}><Clock size={13} aria-hidden="true" /></button></div></div>
                     <button type="button" className="btn btn-xs btn-danger" onClick={() => setPrepProcesos(arr => arr.filter((_, idx) => idx !== i))}>✕</button>
                   </div>
                 )
@@ -1762,7 +1873,7 @@ export default function OrdenesProduccion() {
 
             {/* Resultado de producción */}
             <div style={{ background: 'rgba(200,169,74,0.08)', padding: 10, borderRadius: 'var(--radio)' }}>
-              <strong style={{ fontSize: '0.9rem' }}>📦 Resultado de producción</strong>
+              <strong style={{ fontSize: '0.9rem' }}><Ico as={Package} size={15} />Resultado de producción</strong>
               <div className="form-grid-2" style={{ marginTop: 8 }}>
                 <div className="form-group" style={{ margin: 0 }}><label className="form-label">Unidades obtenidas *</label><input type="number" className="form-control" value={prepUnidades} onChange={e => setPrepUnidades(e.target.value)} min={0} step="0.01" placeholder={`Planificado: ${fNum(ordenPrep.cantidad_plan)}`} /></div>
                 <div className="form-group" style={{ margin: 0 }}><label className="form-label">Responsable</label><input className="form-control" value={prepResp} onChange={e => setPrepResp(e.target.value)} /></div>
@@ -1778,13 +1889,19 @@ export default function OrdenesProduccion() {
                 </>}
               </div>
               <div className="form-group" style={{ marginTop: 8 }}><label className="form-label">Observaciones</label><textarea className="form-control" rows={2} value={prepObs} onChange={e => setPrepObs(e.target.value)} /></div>
-              <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap', marginBottom: 8 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}>
-                  <input type="checkbox" checked={prepConforme} onChange={e => setPrepConforme(e.target.checked)} /> Lote principal conforme
-                </label>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem' }}>
-                  <input type="checkbox" checked={prepSurtido} onChange={e => setPrepSurtido(e.target.checked)} /> 📦 Empacado surtido / mezclado con otro lote
-                </label>
+              <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 8, alignItems: 'center' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                  <strong style={{ fontSize: '1.05rem', color: 'var(--selva)' }}>¿Producción conforme? *</strong>
+                  <SiNo value={prepConforme} onChange={val => {
+                    setPrepConforme(val)
+                    // Si NO es conforme, se asume que no hay producto bueno: unidades y subporciones a 0
+                    if (val === false) { setPrepUnidades('0'); setPrepCantSubp('0') }
+                  }} />
+                </div>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem' }}>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Shuffle size={14} aria-hidden="true" /> ¿Empacó surtido? *</span>
+                  <SiNo value={prepSurtido} onChange={setPrepSurtido} />
+                </div>
               </div>
               {prepSurtido && (
                 <div className="form-group" style={{ background: 'rgba(200,169,74,0.10)', borderRadius: 'var(--radio)', padding: 10 }}>
@@ -1869,7 +1986,7 @@ export default function OrdenesProduccion() {
                 const updExtra = (i, k, v) => setPrepLotesExtra(arr => arr.map((x, idx) => idx === i ? { ...x, [k]: v } : x))
                 return (
                   <div className="form-group" style={{ background: 'rgba(124,179,66,0.07)', borderRadius: 'var(--radio)', padding: 10 }}>
-                    <label className="form-label">♻ Empacar saldo de mezcla en proceso (lotes anteriores)</label>
+                    <label className="form-label"><Ico as={Recycle} size={14} />Empacar saldo de mezcla en proceso (lotes anteriores)</label>
                     {saldos.length > 0 && (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
                         {saldos.map(s => (
@@ -1915,9 +2032,10 @@ export default function OrdenesProduccion() {
 
               {/* 📦 ¿Quedó producción sin empacar? → acordeón para registrar lo que va a saldo */}
               <div className="form-group" style={{ background: 'rgba(200,169,74,0.06)', borderRadius: 'var(--radio)', padding: 10 }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600 }}>
-                  <input type="checkbox" checked={prepHaySobrante} onChange={e => setPrepHaySobrante(e.target.checked)} /> ¿Quedó producción sin empacar?
-                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600, flexWrap: 'wrap' }}>
+                  <span>¿Sobró producción / quedó sin empacar? *</span>
+                  <SiNo value={prepHaySobrante} onChange={setPrepHaySobrante} />
+                </div>
                 {prepHaySobrante && (
                   <div style={{ marginTop: 10 }}>
                     <label className="form-label">Cantidad sin empacar *</label>
@@ -1996,7 +2114,7 @@ export default function OrdenesProduccion() {
                 )
               })()}
               <div className="form-group">
-                <label className="form-label">📷 Registro fotográfico</label>
+                <label className="form-label"><Ico as={Camera} size={14} />Registro fotográfico</label>
                 <div className="foto-upload" onClick={() => prepFotoRef.current?.click()} style={{ minHeight: 100 }}>
                   <input type="file" accept="image/*" ref={prepFotoRef} onChange={e => { const f = e.target.files[0]; if (f) { setPrepFotoFile(f); setPrepFotoPrev(URL.createObjectURL(f)) } }} style={{ display: 'none' }} />
                   {prepFotoPrev ? <img src={prepFotoPrev} className="foto-preview" alt="preview" /> : <><div style={{ fontSize: '1.6rem' }}>📸</div><div style={{ color: 'var(--texto-suave)', fontSize: '0.85rem' }}>Toca para agregar foto</div></>}
@@ -2008,7 +2126,7 @@ export default function OrdenesProduccion() {
       </Modal>
 
       {/* Modal Confirmar envío (resumen + confirmar/editar) */}
-      <Modal open={modalConfirmEnvio} onClose={() => setModalConfirmEnvio(false)} title="✅ Confirmar y enviar producción"
+      <Modal open={modalConfirmEnvio} onClose={() => setModalConfirmEnvio(false)} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><CheckCircle2 size={18} aria-hidden="true" /> Confirmar y enviar producción</span>}
         footer={<>
           <button className="btn btn-secondary" onClick={() => setModalConfirmEnvio(false)}>✏ Editar</button>
           <button className="btn btn-success" onClick={confirmarEnviar} disabled={savingEvid}>{savingEvid ? 'Enviando...' : 'Confirmar y enviar'}</button>
@@ -2106,7 +2224,7 @@ export default function OrdenesProduccion() {
                   : { txt: `Más barato de lo esperado (${desv.toFixed(1)}%)`, badge: 'badge-dorado' }
                 return (
                   <>
-                    <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 12 }}>💰 Costos del lote (solo admin)</div>
+                    <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 12 }}><Ico as={DollarSign} size={15} />Costos del lote (solo admin)</div>
                     {(() => { const q = obtenidas > 0 ? obtenidas : planificadas; return (
                     <div className="table-wrap">
                       <table>
@@ -2130,7 +2248,7 @@ export default function OrdenesProduccion() {
               {/* Trazabilidad lote-a-lote: lotes de MP consumidos */}
               {Array.isArray(o.lotes_mp) && o.lotes_mp.length > 0 && (
                 <>
-                  <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 12 }}>🔗 Trazabilidad — Lotes de MP consumidos</div>
+                  <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 12 }}><Ico as={Link2} size={15} />Trazabilidad — Lotes de MP consumidos</div>
                   <div className="table-wrap">
                     <table>
                       <thead><tr><th>Materia prima</th><th className="td-number">Consumo</th><th>Lotes usados (PEPS)</th></tr></thead>
@@ -2152,7 +2270,7 @@ export default function OrdenesProduccion() {
                 </>
               )}
 
-              <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 12 }}>🧾 Lotes de producción vinculados ({recs.length})</div>
+              <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 12 }}><Ico as={ReceiptText} size={15} />Lotes de producción vinculados ({recs.length})</div>
               {recs.length === 0
                 ? <p className="empty-table">Aún no hay registros de producción para esta orden.</p>
                 : (

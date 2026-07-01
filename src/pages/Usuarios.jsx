@@ -7,6 +7,8 @@ import { useConfirm } from '../context/ConfirmContext'
 import { useToast } from '../hooks/useToast'
 import { CATALOGO_MODULOS, MODULOS_POR_ROL } from '../lib/permisos'
 import Modal from '../components/ui/Modal'
+import { Bell, Check, FolderOpen, Pencil, Save, Tag, Trash2, Undo2, Users, X } from 'lucide-react'
+const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 // Roles base del sistema (el admin puede crear más)
 const ROLES_BASE = ['admin', 'operario', 'auxiliar']
@@ -146,22 +148,22 @@ export default function Usuarios() {
       </div>
 
       <div className="tabs">
-        <button className={`tab-btn${tab === 'usuarios' ? ' active' : ''}`} onClick={() => setTab('usuarios')}>👥 Usuarios</button>
-        <button className={`tab-btn${tab === 'roles' ? ' active' : ''}`} onClick={() => setTab('roles')}>🏷 Roles</button>
+        <button className={`tab-btn${tab === 'usuarios' ? ' active' : ''}`} onClick={() => setTab('usuarios')}><Ico as={Users} size={14} />Usuarios</button>
+        <button className={`tab-btn${tab === 'roles' ? ' active' : ''}`} onClick={() => setTab('roles')}><Ico as={Tag} size={14} />Roles</button>
         <button className={`tab-btn${tab === 'permisos' ? ' active' : ''}`} onClick={() => setTab('permisos')}>🔐 Gestión de Permisos</button>
       </div>
 
       {tab === 'usuarios' && (
         <>
           <div className="card">
-            <div className="card-title">👥 Usuarios Activos</div>
+            <div className="card-title"><Ico as={Users} size={14} />Usuarios Activos</div>
             {solicitudes.length > 0 && (
               <div className="alert" style={{ fontSize: '0.85rem', background: 'rgba(200,169,74,0.12)', border: '1px solid var(--dorado)', borderRadius: 'var(--radio)', padding: 10, marginBottom: 10 }}>
-                <strong>🔔 Solicitudes de recuperación de contraseña</strong>
+                <strong><Ico as={Bell} size={14} />Solicitudes de recuperación de contraseña</strong>
                 {solicitudes.map(s => (
                   <div key={s.id} style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 6, fontSize: '0.82rem' }}>
                     <span>Usuario <strong>{s.usuario}</strong> — {new Date(s.created_at).toLocaleString('es-CO')}</span>
-                    <button className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => marcarAtendida(s.id)}>✓ Atendida</button>
+                    <button className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => marcarAtendida(s.id)}><Ico as={Check} size={14} />Atendida</button>
                   </div>
                 ))}
               </div>
@@ -189,7 +191,7 @@ export default function Usuarios() {
                         <td>{u.ultimo_acceso ? fFecha(u.ultimo_acceso.split('T')[0]) : 'Nunca'}</td>
                         <td>
                           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                            <button className="btn btn-xs btn-secondary" title="Editar" onClick={() => openEdit(u)}>✏</button>
+                            <button className="btn btn-xs btn-secondary" title="Editar" onClick={() => openEdit(u)}><Pencil size={13} aria-hidden="true" /></button>
                             <button className="btn btn-xs btn-secondary" title="Restablecer contraseña" onClick={() => abrirReset(u)}>🔑</button>
                             {u.id !== currentProfile?.id && u.rol !== 'admin' && (
                               <>
@@ -197,7 +199,7 @@ export default function Usuarios() {
                                   {u.estado === 'activo' ? 'Desactivar' : 'Activar'}
                                 </button>
                                 {u.estado === 'inactivo' && (
-                                  <button className="btn btn-xs btn-secondary" onClick={() => toggleArchivar(u, true)}>📁 Archivar</button>
+                                  <button className="btn btn-xs btn-secondary" onClick={() => toggleArchivar(u, true)}><Ico as={FolderOpen} size={14} />Archivar</button>
                                 )}
                               </>
                             )}
@@ -213,7 +215,7 @@ export default function Usuarios() {
 
           {antiguos.length > 0 && (
             <div className="card">
-              <div className="card-title">📁 Usuarios Antiguos (archivados)</div>
+              <div className="card-title"><Ico as={FolderOpen} size={14} />Usuarios Antiguos (archivados)</div>
               <div className="table-wrap">
                 <table>
                   <thead><tr><th>Nombre</th><th>Cédula</th><th>Rol</th><th>Último Acceso</th><th>Acciones</th></tr></thead>
@@ -224,7 +226,7 @@ export default function Usuarios() {
                         <td>{u.login}</td>
                         <td>{getRolLabel(u.rol)}</td>
                         <td>{u.ultimo_acceso ? fFecha(u.ultimo_acceso.split('T')[0]) : 'Nunca'}</td>
-                        <td><button className="btn btn-xs btn-secondary" onClick={() => toggleArchivar(u, false)}>↩ Restaurar</button></td>
+                        <td><button className="btn btn-xs btn-secondary" onClick={() => toggleArchivar(u, false)}><Ico as={Undo2} size={14} />Restaurar</button></td>
                       </tr>
                     ))}
                   </tbody>
@@ -273,7 +275,7 @@ export default function Usuarios() {
                     <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                       <input className="form-control" placeholder="Nombre del nuevo rol" value={nuevoRol} onChange={e => setNuevoRol(e.target.value)} />
                       <button type="button" className="btn btn-sm btn-primary" onClick={crearRol}>Crear</button>
-                      <button type="button" className="btn btn-sm btn-secondary" onClick={() => { setCreandoRol(false); setNuevoRol('') }}>✕</button>
+                      <button type="button" className="btn btn-sm btn-secondary" onClick={() => { setCreandoRol(false); setNuevoRol('') }}><X size={13} aria-hidden="true" /></button>
                     </div>
                   )}
             </div>
@@ -373,7 +375,7 @@ function RolesTab({ usuarios = [], onSaved, onIrPermisos }) {
 
   return (
     <div className="card">
-      <div className="card-title">🏷 Roles del sistema</div>
+      <div className="card-title"><Ico as={Tag} size={14} />Roles del sistema</div>
       <div className="alert alert-info" style={{ fontSize: '0.85rem' }}>
         Aquí administras los roles que podrás <strong>asignar a los usuarios</strong>. Los roles
         <strong> base</strong> (Administrador, Operario, Auxiliar) no se pueden eliminar. Para definir
@@ -402,14 +404,14 @@ function RolesTab({ usuarios = [], onSaved, onIrPermisos }) {
                   <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                     {editando === r ? (
                       <>
-                        <button className="btn btn-xs btn-primary" onClick={() => guardarNombre(r)} disabled={busy}>💾 Guardar</button>
-                        <button className="btn btn-xs btn-secondary" onClick={() => setEditando(null)}>✕</button>
+                        <button className="btn btn-xs btn-primary" onClick={() => guardarNombre(r)} disabled={busy}><Ico as={Save} size={14} />Guardar</button>
+                        <button className="btn btn-xs btn-secondary" onClick={() => setEditando(null)}><X size={13} aria-hidden="true" /></button>
                       </>
                     ) : (
                       <>
                         {r !== 'admin' && <button className="btn btn-xs btn-secondary" title="Configurar permisos" onClick={onIrPermisos}>🔐 Permisos</button>}
-                        <button className="btn btn-xs btn-secondary" title="Renombrar" onClick={() => { setEditando(r); setLabelEdit(getRolLabel(r)) }}>✏</button>
-                        {!esBase(r) && <button className="btn btn-xs btn-dorado" title="Eliminar" onClick={() => eliminar(r)} disabled={busy}>🗑</button>}
+                        <button className="btn btn-xs btn-secondary" title="Renombrar" onClick={() => { setEditando(r); setLabelEdit(getRolLabel(r)) }}><Pencil size={13} aria-hidden="true" /></button>
+                        {!esBase(r) && <button className="btn btn-xs btn-dorado" title="Eliminar" onClick={() => eliminar(r)} disabled={busy}><Trash2 size={13} aria-hidden="true" /></button>}
                       </>
                     )}
                   </div>

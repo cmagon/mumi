@@ -82,7 +82,7 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
       open
       guard={false}
       onClose={esLogout ? undefined : onClose}
-      title="🕒 Registro de Asistencia"
+      title="Registro de Asistencia"
       footer={
         <>
           {!esLogout && (abiertaDia

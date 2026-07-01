@@ -17,11 +17,15 @@ import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import * as XLSX from 'xlsx'
 import Receta from './Receta'
 import { CATALOGO_PARAMS, PARAM_UNIDAD, PRESENTACIONES } from '../lib/calidad'
+import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Printer, Settings, ShoppingCart, Tag, Trash2, Undo2, X } from 'lucide-react'
+import { descargarFichaExcel } from '../lib/fichaExcel'
+import { getConfig } from '../lib/appConfig'
+const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const EMPTY_PROD = {
   nombre: '', tipo: 'galleta', bache: 70, baches_mes: 3,
   merma: 0, comision: 3, precio_mayor: 10000, precio_detal: 15000,
-  presentacion: 'Unidad', activo: true, sku: '', alegra_item_id: '',
+  presentacion: 'Unidad', activo: true, sku: '', alegra_item_id: '', mp_id: '',
 }
 const EMPTY_ING = { mpId: '', nombre: '', modo: 'lista', precio: '', presentacion: 1000, pct: '', cantidad: '', tipo: 'normal', base: '' }
 
@@ -39,6 +43,7 @@ export default function Costos() {
   const [tab, setTab] = useState(profile?.rol && profile.rol !== 'admin' ? 'receta' : 'lista')
   const [editingId, setEditingId] = useState(null)   // null = nuevo, number = editando producto existente
   const [selFuente, setSelFuente] = useState('')     // valor del selector: '' | prod-{id} | recipe-{id}
+  const [modoMpVend, setModoMpVend] = useState(false)   // "calcular costos de una MP vendible"
 
   // ---- Formulario de ficha ----
   const [formProd, setFormProd]     = useState(EMPTY_PROD)
@@ -166,8 +171,8 @@ export default function Costos() {
     queryFn: async () => { const { data } = await supabase.from('product_types').select('*').order('nombre'); return data || [] },
   })
   // Opciones del select de Tipo: gestionables + especiales fijos
-  const tipoLabel = (t) => ({ subproducto: 'Subproducto interno', otro: 'Otro' }[t] || (t.charAt(0).toUpperCase() + t.slice(1)))
-  const opcionesTipo = [...new Set([...tiposProducto.map(t => t.nombre), 'subproducto', 'otro'])]
+  const tipoLabel = (t) => ({ subproducto: 'Subproducto interno', mp: 'Materia prima vendible', otro: 'Otro' }[t] || (t.charAt(0).toUpperCase() + t.slice(1)))
+  const opcionesTipo = [...new Set([...tiposProducto.map(t => t.nombre), 'subproducto', 'mp', 'otro'])]
   const [tiposModal, setTiposModal] = useState(false)
   const [nuevoTipo, setNuevoTipo] = useState('')
   const [confirmDel, setConfirmDel] = useState(null)   // ficha a eliminar (confirmación reforzada)
@@ -299,7 +304,9 @@ export default function Costos() {
     if (st?.nuevaFichaNombre) {
       setEditingId(null); setSelFuente('')
       setIngredientes([]); setProcesos([]); setEmpaque([])
-      setFormProd({ ...EMPTY_PROD, nombre: st.nuevaFichaNombre, precio_mayor: st.nuevaFichaPrecio || EMPTY_PROD.precio_mayor })
+      // Si viene de una MP vendible, la ficha se marca AUTOMÁTICAMENTE como tipo 'mp' y se vincula a la MP
+      setFormProd({ ...EMPTY_PROD, nombre: st.nuevaFichaNombre, precio_mayor: st.nuevaFichaPrecio || EMPTY_PROD.precio_mayor,
+        ...(st.nuevaFichaMpId ? { tipo: 'mp', mp_id: st.nuevaFichaMpId, presentacion: st.nuevaFichaUnidad || 'Unidad' } : {}) })
       setTab('nuevo')
       navigate(location.pathname, { replace: true, state: {} })
     }
@@ -377,7 +384,7 @@ export default function Costos() {
     if (!p) return
     setEditingId(p.id)
     setSelFuente(`prod-${p.id}`)
-    setFormProd({ nombre: p.nombre, tipo: p.tipo, bache: p.bache, baches_mes: p.baches_mes, merma: p.merma, comision: p.comision, precio_mayor: p.precio_mayor, precio_detal: p.precio_detal, presentacion: p.presentacion || 'Unidad', activo: p.activo !== false, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '' })
+    setFormProd({ nombre: p.nombre, tipo: p.tipo, bache: p.bache, baches_mes: p.baches_mes, merma: p.merma, comision: p.comision, precio_mayor: p.precio_mayor, precio_detal: p.precio_detal, presentacion: p.presentacion || 'Unidad', activo: p.activo !== false, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '', mp_id: p.mp_id || '' })
     setCamposExtra(parseJSON(p.campos_personalizados, []))
     setIngredientes(parseJSON(p.ingredientes, []).map(i => ({ ...EMPTY_ING, _id: Date.now() + Math.random(), mpId: i.mpId||'', nombre: i.nombre||'', modo: i.mpId ? 'lista' : 'manual', precio: i.precio||'', precioOverride: !!i.precioOverride, presentacion: i.presentacion||1000, pct: i.pct||'', cantidad: i.cantidad||'', tipo: i.tipo||'normal', base: i.base||'' })))
     setProcesos(parseJSON(p.procesos, []).map(pr => ({ ...pr, _id: Date.now() + Math.random() })))
@@ -441,6 +448,7 @@ export default function Costos() {
 
       const datos = {
         ...formProd,
+        mp_id: formProd.mp_id ? parseInt(formProd.mp_id) : null,
         bache: parseFloat(formProd.bache) || 70,
         baches_mes: parseFloat(formProd.baches_mes) || 1,
         merma: parseFloat(formProd.merma) || 0,
@@ -799,15 +807,55 @@ export default function Costos() {
     setAnclaModal(false); toast('Cantidades aplicadas ✓')
   }
 
-  const exportarFichaExcel = (p) => {
-    const ws = XLSX.utils.aoa_to_sheet([
-      ['MUMI AMAZONIA - FICHA DE COSTOS'],[''],
-      ['Producto',p.nombre],['Tipo',p.tipo],['Fecha',p.fecha_creado],[''],
-      ['Costo total por unidad',p.costo_final],['Precio mayor',p.precio_mayor],['Utilidad mayor',p.util_mayor],
-      ['Precio detal',p.precio_detal],['Utilidad detal',p.util_detal],['Punto equilibrio',p.pe||'—']
-    ])
-    const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb,ws,'Costos')
-    XLSX.writeFile(wb,`FichaCostos_${p.nombre.replace(/\s/g,'_')}.xlsx`); toast('Excel exportado ✓')
+  // Exporta la ficha de costos como Excel CON ESTILO (logo, colores, bordes) y FÓRMULAS VIVAS.
+  // Pre-carga el costo/minuto y el CIF por unidad para que el total cuadre con la app.
+  const exportarFichaExcel = async (p) => {
+    try {
+      const cfg = getConfig()
+      await descargarFichaExcel(
+        { ...p, _costoMinuto: costoMin, _cifUnidad: parseFloat(p.cif_unit) || 0 },
+        { empresa: cfg.empresa || 'Mumi Amazonia', logoUrl: cfg.logo_url || '', cifItems }
+      )
+      toast('Excel exportado ✓')
+    } catch (e) { toast('No se pudo generar el Excel: ' + e.message, 'error') }
+  }
+
+  // Importa una ficha desde un Excel exportado (hoja "Datos"). Restaura lo importante (sin CIF, que es global).
+  const importarFichaExcel = async (file) => {
+    if (!file) return
+    try {
+      const buf = await file.arrayBuffer()
+      const wb = XLSX.read(buf, { type: 'array' })
+      const shName = wb.SheetNames.find(n => /^datos/i.test(n))
+      const sh = shName ? wb.Sheets[shName] : null
+      if (!sh) { toast('El archivo no tiene la hoja "Datos" para importar.', 'error'); return }
+      const rows = XLSX.utils.sheet_to_json(sh, { header: 1 })
+      const o = {}
+      for (const row of rows) { const k = row?.[0]; if (k && String(k).trim() !== 'campo') o[String(k).trim()] = row[1] }
+      if (!o.nombre) { toast('No se encontró el nombre del producto en el archivo.', 'error'); return }
+      const jstr = (v) => (typeof v === 'string' ? v : JSON.stringify(v || []))
+      const jarr = (v) => { try { return typeof v === 'string' ? JSON.parse(v) : (Array.isArray(v) ? v : []) } catch { return [] } }
+      const payload = {
+        nombre: String(o.nombre).trim(), tipo: o.tipo || 'galleta', sku: o.sku ? String(o.sku) : null,
+        rendimiento: parseFloat(o.rendimiento) || 62, desperdicio: parseFloat(o.desperdicio) || 2, peso_unidad: parseFloat(o.peso_unidad) || 1000,
+        precio_mayor: parseFloat(o.precio_mayor) || 0, precio_detal: parseFloat(o.precio_detal) || 0,
+        merma: parseFloat(o.merma) || 0, comision: parseFloat(o.comision) || 0, presentacion: o.presentacion || 'Unidad',
+        bache: parseFloat(o.bache) || 0, baches_mes: parseFloat(o.baches_mes) || 0,
+        ingredientes: jstr(o.ingredientes), procesos: jstr(o.procesos), empaque: jstr(o.empaque),
+        parametros_calidad: jarr(o.parametros_calidad), campos_personalizados: jarr(o.campos_personalizados),
+        activo: true,
+      }
+      const existe = productos.find(p => (p.nombre || '').toLowerCase() === payload.nombre.toLowerCase())
+      if (existe) {
+        const ok = await confirmar(`Ya existe una ficha "${payload.nombre}". ¿Sobrescribir sus datos (sin tocar el CIF global)?`)
+        if (!ok) return
+        const { error } = await supabase.from('products_costing').update(payload).eq('id', existe.id); if (error) throw error
+      } else {
+        const { error } = await supabase.from('products_costing').insert(payload); if (error) throw error
+      }
+      qc.invalidateQueries({ queryKey: ['products_costing'] })
+      toast(`Ficha "${payload.nombre}" importada ✓ (recuerda revisarla y guardar para recalcular costos)`)
+    } catch (e) { toast('No se pudo importar: ' + e.message, 'error') }
   }
 
   // ---- RENDER ----
@@ -817,8 +865,12 @@ export default function Costos() {
         <h1 className="page-title">{soloReceta ? 'Calcular Recetas Rápidas o de Prueba' : 'Calculadora de Costos'}</h1>
         {!soloReceta && (
           <div className="page-actions">
-            <button className="btn btn-secondary btn-sm" onClick={() => setTab('lista')}>📋 Productos</button>
-            {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalPapelera(true)}>🗑 Papelera{papelera.length > 0 ? ` (${papelera.length})` : ''}</button>}
+            <button className="btn btn-secondary btn-sm" onClick={() => setTab('lista')}><Ico as={ClipboardList} size={14} />Productos</button>
+            {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalPapelera(true)}><Ico as={Trash2} size={14} />Papelera{papelera.length > 0 ? ` (${papelera.length})` : ''}</button>}
+            {esAdmin && <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', margin: 0 }} title="Importar una ficha desde un Excel exportado (restaura lo importante, sin el CIF)">
+              <Ico as={FileSpreadsheet} size={14} />Importar ficha
+              <input type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; importarFichaExcel(f) }} />
+            </label>}
             <button className="btn btn-dorado btn-sm" onClick={() => { limpiarForm(); setTab('nuevo') }}>+ Nueva Ficha</button>
           </div>
         )}
@@ -836,7 +888,7 @@ export default function Costos() {
       {/* ===== LISTA PRODUCTOS ===== */}
       {tab === 'lista' && (
         <div className="card">
-          <div className="card-title">📦 Fichas de Productos</div>
+          <div className="card-title"><Ico as={Package} size={14} />Fichas de Productos</div>
           <div className="alert alert-info" style={{ fontSize:'0.82rem' }}>
             ℹ El <strong>CIF/unidad</strong> y el <strong>% CIF</strong> se recalculan en vivo según el portafolio actual.
             Al agregar un producto, la participación de cada uno se ajusta automáticamente. Los valores guardados se
@@ -865,10 +917,10 @@ export default function Costos() {
                       <Fila et="% Utilidad">{margen != null ? margen.toFixed(1)+'%' : '—'}</Fila>
                       <div className="acordeon-acciones">
                         <button className="btn btn-xs btn-secondary" onClick={() => { setVerProd(p); setVerModal(true) }}>Ver</button>
-                        <button className="btn btn-xs btn-primary" onClick={() => cargarProducto(p.id)}>✏ Editar</button>
+                        <button className="btn btn-xs btn-primary" onClick={() => cargarProducto(p.id)}><Ico as={Pencil} size={14} />Editar</button>
                         <button className="btn btn-xs btn-secondary" onClick={() => duplicarProducto.mutate(p)} disabled={duplicarProducto.isPending}>⧉ Duplicar</button>
-                        <button className="btn btn-xs btn-dorado" onClick={() => exportarFichaExcel(p)}>Excel</button>
-                        <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar la ficha del producto "${p.nombre}"?\nEsta acción no se puede deshacer.`).then(ok => ok && deleteProducto.mutate(p.id))}>✕</button>
+                        <button className="btn btn-xs btn-dorado" title="Descargar ficha de costos en Excel (con fórmulas)" onClick={() => exportarFichaExcel(p)}><Ico as={FileSpreadsheet} size={13} />Excel</button>
+                        <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar la ficha del producto "${p.nombre}"?\nEsta acción no se puede deshacer.`).then(ok => ok && deleteProducto.mutate(p.id))}><X size={13} aria-hidden="true" /></button>
                       </div>
                     </AccordionItem>
                   )
@@ -890,7 +942,7 @@ export default function Costos() {
                       const inactivo = p.activo === false
                       return (
                         <tr key={p.id} style={inactivo ? { opacity: 0.6 } : undefined}>
-                          <td><strong>{p.nombre}</strong> {inactivo && <span className="badge badge-gris" style={{ fontSize:'0.65rem' }}>⏸ Inactivo</span>}</td>
+                          <td><strong>{p.nombre}</strong> {inactivo && <span className="badge badge-gris" style={{ fontSize:'0.65rem' }}><Ico as={Pause} size={14} />Inactivo</span>}</td>
                           <td className="col-opcional-2">
                             {p.imagen_url
                               ? <img src={p.imagen_url} alt={p.nombre} style={{ width:32, height:32, borderRadius:3, objectFit:'cover' }} />
@@ -907,11 +959,11 @@ export default function Costos() {
                           <td>
                             <div style={{ display:'flex', gap:4 }}>
                               <button className="btn btn-xs btn-secondary" onClick={() => { setVerProd(p); setVerModal(true) }}>Ver</button>
-                              <button className="btn btn-xs btn-primary" onClick={() => cargarProducto(p.id)}>✏ Editar</button>
+                              <button className="btn btn-xs btn-primary" onClick={() => cargarProducto(p.id)}><Ico as={Pencil} size={14} />Editar</button>
                               <button className="btn btn-xs btn-secondary" onClick={() => duplicarProducto.mutate(p)} disabled={duplicarProducto.isPending} title="Duplicar producto">⧉ Duplicar</button>
                               <button className={`btn btn-xs ${inactivo ? 'btn-success' : 'btn-secondary'}`} onClick={() => toggleActivoProducto.mutate(p)} disabled={toggleActivoProducto.isPending} title={inactivo ? 'Activar (vuelve a repartir CIF)' : 'Inactivar (no reparte CIF)'}>{inactivo ? '▶ Activar' : '⏸ Inactivar'}</button>
-                              <button className="btn btn-xs btn-dorado" onClick={() => exportarFichaExcel(p)}>Excel</button>
-                              <button className="btn btn-xs btn-danger" onClick={() => { setConfirmDel(p); setDelText('') }}>✕</button>
+                              <button className="btn btn-xs btn-dorado" title="Descargar ficha de costos en Excel (con fórmulas)" onClick={() => exportarFichaExcel(p)}><Ico as={FileSpreadsheet} size={13} />Excel</button>
+                              <button className="btn btn-xs btn-danger" onClick={() => { setConfirmDel(p); setDelText('') }}><X size={13} aria-hidden="true" /></button>
                             </div>
                           </td>
                         </tr>
@@ -954,9 +1006,37 @@ export default function Costos() {
             </div>
           </div>
 
+          {/* Calcular costos de una MP vendible (marcada en Inventario) */}
+          {!editingId && (
+            <div className="card" style={{ padding:'14px 20px', marginBottom:16, background:'rgba(124,179,66,0.06)', border:'1px solid rgba(124,179,66,0.3)' }}>
+              <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', fontWeight:600, color:'var(--selva)' }}>
+                <input type="checkbox" checked={modoMpVend} onChange={e => setModoMpVend(e.target.checked)} />
+                <FlaskConical size={15} aria-hidden="true" /> Calcular costos de una materia prima vendible
+              </label>
+              {modoMpVend && (() => {
+                const mpVendibles = mps.filter(m => m.vendible && !productos.some(p => p.tipo === 'mp' && String(p.mp_id) === String(m.id)))
+                return (
+                  <div style={{ marginTop: 10 }}>
+                    <label style={{ fontSize:'0.72rem', color:'var(--texto-suave)' }}>MP vendible (marcada en Inventario MP)</label>
+                    <select className="form-control" style={{ maxWidth: 340 }} value="" onChange={e => {
+                      const m = mps.find(x => String(x.id) === e.target.value); if (!m) return
+                      setIngredientes([]); setProcesos([]); setEmpaque([]); setEditingId(null); setSelFuente('')
+                      setFormProd({ ...EMPTY_PROD, nombre: m.nombre, tipo: 'mp', mp_id: String(m.id), presentacion: m.unidad || 'Unidad' })
+                    }}>
+                      <option value="">Seleccionar MP...</option>
+                      {mpVendibles.map(m => <option key={m.id} value={m.id}>{m.nombre} · {m.unidad}</option>)}
+                    </select>
+                    {mpVendibles.length === 0 && <small style={{ display:'block', marginTop:6, color:'var(--texto-suave)' }}>No hay MP vendibles pendientes. Márcalas en <strong>Inventario MP</strong> (check "Se puede vender").</small>}
+                    {formProd.tipo === 'mp' && formProd.mp_id && <small style={{ display:'block', marginTop:6, color:'var(--selva)' }}>✓ Ficha de MP vendible: <strong>{formProd.nombre}</strong>. Agrega sus ingredientes/procesos y guarda para calcular su costo.</small>}
+                  </div>
+                )
+              })()}
+            </div>
+          )}
+
           {/* ── Imagen + Info básica del producto ── */}
           <div className="card">
-            <div className="card-title">📝 Información del Producto</div>
+            <div className="card-title"><Ico as={FileText} size={14} />Información del Producto</div>
             <div className="grid-resp" style={{ gridTemplateColumns:'80px 1fr', gap:20, alignItems:'start' }}>
               {/* Imagen */}
               <div>
@@ -968,7 +1048,7 @@ export default function Costos() {
                   {imgData ? <img src={imgData} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="producto" /> : '📷'}
                   <input type="file" accept="image/*" ref={imgInputRef} onChange={handleImg} style={{ display:'none' }} />
                 </div>
-                {imgData && <button className="btn btn-xs btn-danger" style={{ marginTop:4 }} onClick={() => setImgData('')}>✕</button>}
+                {imgData && <button className="btn btn-xs btn-danger" style={{ marginTop:4 }} onClick={() => setImgData('')}><X size={13} aria-hidden="true" /></button>}
               </div>
 
               {/* Campos */}
@@ -985,7 +1065,7 @@ export default function Costos() {
                 <div className="form-group">
                   <label className="form-label" style={{ display:'flex', alignItems:'center' }}>
                     Tipo
-                    {esAdmin && <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft:'auto' }} onClick={() => setTiposModal(true)}>⚙ Gestionar</button>}
+                    {esAdmin && <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft:'auto' }} onClick={() => setTiposModal(true)}><Ico as={Settings} size={14} />Gestionar</button>}
                   </label>
                   <select className="form-control" value={formProd.tipo} onChange={e => setFormProd(f=>({...f,tipo:e.target.value}))}>
                     {opcionesTipo.map(t => <option key={t} value={t}>{tipoLabel(t)}</option>)}
@@ -1015,7 +1095,7 @@ export default function Costos() {
             {/* Campos personalizados */}
             <div style={{ marginTop:14, paddingTop:12, borderTop:'1px solid var(--crema-oscuro)' }}>
               <div style={{ display:'flex', alignItems:'center', marginBottom:8 }}>
-                <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem' }}>🏷️ Campos personalizados <small style={{ fontWeight:400, color:'var(--texto-suave)' }}>— datos adicionales del producto</small></div>
+                <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem' }}><Ico as={Tag} size={14} />Campos personalizados <small style={{ fontWeight:400, color:'var(--texto-suave)' }}>— datos adicionales del producto</small></div>
                 <button type="button" className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={addCampoExtra}>+ Agregar campo</button>
               </div>
               {camposExtra.length === 0
@@ -1024,7 +1104,7 @@ export default function Costos() {
                   <div key={i} style={{ display:'grid', gridTemplateColumns:'1fr 1.4fr auto', gap:8, marginBottom:8, alignItems:'center' }}>
                     <input className="form-control" placeholder="Nombre del campo" value={c.nombre} onChange={e => updCampoExtra(i,'nombre',e.target.value)} />
                     <input className="form-control" placeholder="Valor" value={c.valor} onChange={e => updCampoExtra(i,'valor',e.target.value)} />
-                    <button type="button" className="btn btn-danger btn-xs" onClick={() => delCampoExtra(i)}>✕</button>
+                    <button type="button" className="btn btn-danger btn-xs" onClick={() => delCampoExtra(i)}><X size={13} aria-hidden="true" /></button>
                   </div>
                 ))}
             </div>
@@ -1167,7 +1247,7 @@ export default function Costos() {
                       {/* Subtotal */}
                       <span className="ed-sub" style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', paddingTop:8, textAlign:'right' }}>{fCOP(sub)}</span>
                       <div className="ed-controls" style={{ display:'flex', alignItems:'center', gap:2, marginTop:6 }}>
-                        <button className="btn btn-danger btn-xs" onClick={() => setIngredientes(p => p.filter(x => x._id !== r._id))}>✕</button>
+                        <button className="btn btn-danger btn-xs" onClick={() => setIngredientes(p => p.filter(x => x._id !== r._id))}><X size={13} aria-hidden="true" /></button>
                       </div>
                     </div>
                   )
@@ -1185,7 +1265,7 @@ export default function Costos() {
 
           {/* ── Parámetros de producción ── */}
           <div className="card">
-            <div className="card-title">⚙️ Parámetros de Producción <small style={{ fontWeight:400, fontSize:'0.78rem', color:'var(--texto-suave)' }}>— rendimiento, desperdicio y peso por unidad determinan cuántas unidades salen del bache</small></div>
+            <div className="card-title"><Ico as={Settings} size={14} />Parámetros de Producción <small style={{ fontWeight:400, fontSize:'0.78rem', color:'var(--texto-suave)' }}>— rendimiento, desperdicio y peso por unidad determinan cuántas unidades salen del bache</small></div>
             <div className="form-grid">
               <div className="form-group"><label className="form-label">Rendimiento esperado (%)</label><input type="number" className="form-control" value={rendimiento} onChange={e => setRendimiento(e.target.value)} min={1} max={100} step={0.1} /></div>
               <div className="form-group"><label className="form-label">% Desperdicio</label><input type="number" className="form-control" value={desperdicio} onChange={e => setDesperdicio(e.target.value)} min={0} max={50} step={0.1} /></div>
@@ -1209,7 +1289,7 @@ export default function Costos() {
             {/* Parámetros de calidad (fisicoquímicos, reológicos, nutricionales...) */}
             <div style={{ marginTop:14, paddingTop:12, borderTop:'1px solid var(--crema-oscuro)' }}>
               <div style={{ display:'flex', alignItems:'center', marginBottom:8 }}>
-                <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem' }}>🧪 Parámetros de Calidad <small style={{ fontWeight:400, color:'var(--texto-suave)' }}>— fisicoquímicos, reológicos, nutricionales y de pureza</small></div>
+                <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem' }}><Ico as={FlaskConical} size={14} />Parámetros de Calidad <small style={{ fontWeight:400, color:'var(--texto-suave)' }}>— fisicoquímicos, reológicos, nutricionales y de pureza</small></div>
                 <button type="button" className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={addParamCalidad}>+ Agregar parámetro</button>
               </div>
               <datalist id="dl-params-calidad">
@@ -1222,7 +1302,7 @@ export default function Costos() {
                     <input className="form-control" list="dl-params-calidad" placeholder="Parámetro (ej. pH, Brix...)" value={pc.nombre} onChange={e => updParamCalidad(i,'nombre',e.target.value)} />
                     <input className="form-control" placeholder="Valor" value={pc.valor} onChange={e => updParamCalidad(i,'valor',e.target.value)} />
                     <input className="form-control" placeholder="Unidad" value={pc.unidad} onChange={e => updParamCalidad(i,'unidad',e.target.value)} />
-                    <button type="button" className="btn btn-danger btn-xs" onClick={() => delParamCalidad(i)}>✕</button>
+                    <button type="button" className="btn btn-danger btn-xs" onClick={() => delParamCalidad(i)}><X size={13} aria-hidden="true" /></button>
                   </div>
                 ))}
             </div>
@@ -1247,7 +1327,7 @@ export default function Costos() {
 
           {/* ── Mano de obra ── */}
           <div className="card">
-            <div className="card-title">⏱️ Mano de Obra (por proceso)<button className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={addProceso}>+ Agregar proceso</button></div>
+            <div className="card-title"><Ico as={Clock} size={14} />Mano de Obra (por proceso)<button className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={addProceso}>+ Agregar proceso</button></div>
             <div style={{ overflowX:'auto' }}>
               <div className="ed-wrap" style={{ minWidth:500 }}>
                 <div className="ed-head" style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr 44px', gap:8, paddingBottom:8, fontSize:'0.72rem', fontWeight:700, color:'var(--texto-suave)', textTransform:'uppercase' }}>
@@ -1262,7 +1342,7 @@ export default function Costos() {
                     <input type="number" className="form-control" placeholder="Minutos" value={r.minutos} onChange={e => updProc(r._id,'minutos',e.target.value)} />
                     <span className="ed-sub" style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.9rem' }}>{fCOP((parseFloat(r.minutos)||0)*costoMin)}</span>
                     <div className="ed-controls" style={{ display:'flex', alignItems:'center', gap:2 }}>
-                      <button className="btn btn-danger btn-xs" onClick={() => setProcesos(p => p.filter(x => x._id !== r._id))}>✕</button>
+                      <button className="btn btn-danger btn-xs" onClick={() => setProcesos(p => p.filter(x => x._id !== r._id))}><X size={13} aria-hidden="true" /></button>
                     </div>
                   </div>
                 ))}
@@ -1276,7 +1356,7 @@ export default function Costos() {
 
           {/* ── Empaque ── */}
           <div className="card">
-            <div className="card-title">📦 Empaque & Envase<button className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={addEmpaque}>+ Agregar</button></div>
+            <div className="card-title"><Ico as={Package} size={14} />Empaque & Envase<button className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={addEmpaque}>+ Agregar</button></div>
             <div style={{ overflowX:'auto' }}>
               <div className="ed-wrap" style={{ minWidth:720 }}>
                 <div className="ed-head" style={{ display:'grid', gridTemplateColumns:'2.2fr 1fr 1fr 1fr 1fr 44px', gap:8, paddingBottom:6, fontSize:'0.72rem', fontWeight:700, color:'var(--texto-suave)', textTransform:'uppercase' }}>
@@ -1328,7 +1408,7 @@ export default function Costos() {
                       </div>
                       <span className="ed-sub" style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', paddingTop:8, textAlign:'right' }}>{fCOP(sub)}</span>
                       <div className="ed-controls" style={{ display:'flex', alignItems:'center', gap:2, marginTop:6 }}>
-                        <button className="btn btn-danger btn-xs" onClick={() => setEmpaque(p => p.filter(x => x._id !== r._id))}>✕</button>
+                        <button className="btn btn-danger btn-xs" onClick={() => setEmpaque(p => p.filter(x => x._id !== r._id))}><X size={13} aria-hidden="true" /></button>
                       </div>
                     </div>
                   )
@@ -1341,13 +1421,13 @@ export default function Costos() {
 
           {/* ── Ficha técnica (instrucciones paso a paso) ── */}
           <div className="card">
-            <div className="card-title">📄 Ficha Técnica — Instrucciones de Elaboración</div>
+            <div className="card-title"><Ico as={FileText} size={14} />Ficha Técnica — Instrucciones de Elaboración</div>
             {fichaNombre && (
               <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12, padding:'8px 12px', background:'rgba(124,179,66,0.08)', borderRadius:'var(--radio)', border:'1px solid rgba(124,179,66,0.2)' }}>
-                <span style={{ flex:1, fontSize:'0.88rem', color:'var(--selva-claro)' }}>📄 <strong>{fichaNombre}</strong></span>
-                {fichaPath && !fichaFile && <button className="btn btn-xs btn-dorado" onClick={descargarFicha}>⬇ Descargar</button>}
+                <span style={{ flex:1, fontSize:'0.88rem', color:'var(--selva-claro)' }}><Ico as={FileText} size={14} /><strong>{fichaNombre}</strong></span>
+                {fichaPath && !fichaFile && <button className="btn btn-xs btn-dorado" onClick={descargarFicha}><Ico as={Download} size={14} />Descargar</button>}
                 {fichaFile && <span style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>pendiente de guardar</span>}
-                <button className="btn btn-xs btn-danger" onClick={() => { setFichaFile(null); setFichaNombre(''); setFichaPath('') }}>✕</button>
+                <button className="btn btn-xs btn-danger" onClick={() => { setFichaFile(null); setFichaNombre(''); setFichaPath('') }}><X size={13} aria-hidden="true" /></button>
               </div>
             )}
             <label className="btn btn-secondary btn-sm" style={{ cursor:'pointer', display:'inline-flex' }}>
@@ -1359,7 +1439,7 @@ export default function Costos() {
           {/* ── Precios y Resumen ── */}
           <div className="grid-resp" style={{ gridTemplateColumns:'1fr 1fr', gap:20 }}>
             <div className="card">
-              <div className="card-title">💲 Precios de Venta</div>
+              <div className="card-title"><Ico as={DollarSign} size={14} />Precios de Venta</div>
               <div className="form-group"><label className="form-label">Precio a distribuidor (mayor)</label><MoneyInput value={formProd.precio_mayor} onChange={v => setFormProd(f=>({...f,precio_mayor:v}))} /></div>
               <div className="form-group"><label className="form-label">Precio al público (detal)</label><MoneyInput value={formProd.precio_detal} onChange={v => setFormProd(f=>({...f,precio_detal:v}))} /></div>
               {calcResult && (
@@ -1374,8 +1454,8 @@ export default function Costos() {
               {calcResult && (parseFloat(formProd.precio_mayor) || 0) > 0 && (
                 <div style={{ marginTop:12 }}>
                   <div style={{ display:'flex', alignItems:'center', marginBottom:6 }}>
-                    <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.85rem' }}>🛒 Precio sugerido al público <small style={{ fontWeight:400, color:'var(--texto-suave)' }}>(margen del distribuidor sobre el precio mayor = {fCOP(parseFloat(formProd.precio_mayor)||0)})</small></div>
-                    {esAdmin && !editMargenes && <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft:'auto' }} onClick={abrirEditMargenes}>✏ Editar márgenes</button>}
+                    <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.85rem' }}><Ico as={ShoppingCart} size={14} />Precio sugerido al público <small style={{ fontWeight:400, color:'var(--texto-suave)' }}>(margen del distribuidor sobre el precio mayor = {fCOP(parseFloat(formProd.precio_mayor)||0)})</small></div>
+                    {esAdmin && !editMargenes && <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft:'auto' }} onClick={abrirEditMargenes}><Ico as={Pencil} size={14} />Editar márgenes</button>}
                   </div>
                   {editMargenes ? (
                     <div style={{ background:'var(--crema)', borderRadius:'var(--radio)', padding:10, marginBottom:8 }}>
@@ -1384,7 +1464,7 @@ export default function Costos() {
                           <div key={i} style={{ display:'flex', alignItems:'center', gap:2 }}>
                             <input type="number" className="form-control" style={{ width:64, textAlign:'right' }} value={m} onChange={e => setMargenesTmp(t => t.map((x, idx) => idx === i ? e.target.value : x))} />
                             <span style={{ fontSize:'0.8rem' }}>%</span>
-                            <button type="button" className="btn btn-xs btn-danger" onClick={() => setMargenesTmp(t => t.filter((_, idx) => idx !== i))}>✕</button>
+                            <button type="button" className="btn btn-xs btn-danger" onClick={() => setMargenesTmp(t => t.filter((_, idx) => idx !== i))}><X size={13} aria-hidden="true" /></button>
                           </div>
                         ))}
                         <button type="button" className="btn btn-xs btn-secondary" onClick={() => setMargenesTmp(t => [...t, ''])}>+ margen</button>
@@ -1436,7 +1516,7 @@ export default function Costos() {
           {/* ── Botones ── */}
           <div style={{ display:'flex', gap:10, justifyContent:'flex-end', marginTop:8 }}>
             <button className="btn btn-secondary" onClick={limpiarForm}>Limpiar</button>
-            <button className="btn btn-dorado" onClick={() => window.print()}>⬇ PDF</button>
+            <button className="btn btn-dorado" onClick={() => window.print()}><Ico as={Download} size={14} />PDF</button>
             <button className="btn btn-primary" onClick={guardarFicha} disabled={saveProducto.isPending}>
               {saveProducto.isPending ? 'Guardando...' : editingId ? '✏ Actualizar Ficha' : '💾 Guardar Ficha'}
             </button>
@@ -1445,7 +1525,7 @@ export default function Costos() {
           {/* ── Histórico de cambios de costos/cantidades ── */}
           {editingId && (
             <div className="card" style={{ marginTop: 16 }}>
-              <div className="card-title">🕑 Histórico de cambios (cantidades/costos de ingredientes)</div>
+              <div className="card-title"><Ico as={Clock} size={14} />Histórico de cambios (cantidades/costos de ingredientes)</div>
               {costHistory.length === 0
                 ? <p style={{ color:'var(--texto-suave)', fontSize:'0.85rem' }}>Aún no hay cambios registrados. Cada vez que modifiques cantidades o costos y guardes, se registra aquí con su fecha.</p>
                 : <div className="table-wrap">
@@ -1469,7 +1549,7 @@ export default function Costos() {
                               {(!Array.isArray(h.snapshot) || h.snapshot.length === 0) && '—'}
                             </td>
                             <td><button className="btn btn-xs btn-danger" title="Eliminar este registro del histórico"
-                              onClick={() => confirmar('¿Eliminar este registro del histórico?').then(ok => ok && borrarHistorial(h.id))}>✕</button></td>
+                              onClick={() => confirmar('¿Eliminar este registro del histórico?').then(ok => ok && borrarHistorial(h.id))}><X size={13} aria-hidden="true" /></button></td>
                           </tr>
                         ))}
                       </tbody>
@@ -1479,7 +1559,7 @@ export default function Costos() {
           )}
 
           {/* ── Modal: Gestionar tipos de producto (admin) ── */}
-          <Modal open={tiposModal} onClose={() => setTiposModal(false)} title="⚙ Tipos de Producto"
+          <Modal open={tiposModal} onClose={() => setTiposModal(false)} title="Tipos de Producto"
             footer={<button className="btn btn-secondary" onClick={() => setTiposModal(false)}>Cerrar</button>}
           >
             <div className="alert alert-info" style={{ fontSize:'0.83rem' }}>
@@ -1494,7 +1574,7 @@ export default function Costos() {
               : tiposProducto.map(t => (
                 <div key={t.id} style={{ display:'flex', alignItems:'center', gap:8, padding:'6px 0', borderBottom:'1px solid var(--crema-oscuro)' }}>
                   <span style={{ flex:1 }}>{tipoLabel(t.nombre)}</span>
-                  <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar el tipo "${t.nombre}"?`).then(ok => ok && delTipo(t))}>✕ Eliminar</button>
+                  <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar el tipo "${t.nombre}"?`).then(ok => ok && delTipo(t))}><Ico as={X} size={14} />Eliminar</button>
                 </div>
               ))}
           </Modal>
@@ -1530,7 +1610,7 @@ export default function Costos() {
                         <input type="number" className="form-control" defaultValue={c.valor} onBlur={e => updateCIF(c.id,'valor',parseFloat(e.target.value)||0)} style={{ textAlign:'right', width:140 }} />
                         {esProrrateo && <div style={{ fontSize:'0.75rem', color:'var(--tierra)', marginTop:3 }}>÷ {c.frecuencia==='anual'?12:c.frecuencia==='semestral'?6:3} = {fCOP(mensual)}/mes</div>}
                       </td>
-                      <td><button className="btn btn-xs btn-danger" onClick={() => deleteCIF(c.id)}>✕</button></td>
+                      <td><button className="btn btn-xs btn-danger" onClick={() => deleteCIF(c.id)}><X size={13} aria-hidden="true" /></button></td>
                     </tr>
                   )
                 })}
@@ -1558,7 +1638,7 @@ export default function Costos() {
           </div>
           {/* Desglose y simulador del costo por minuto de mano de obra */}
           <div style={{ marginTop:16, padding:16, background:'#fff8e8', border:'1px solid var(--dorado)', borderRadius:'var(--radio)' }}>
-            <strong style={{ color:'var(--selva)' }}>⏱ Costo por minuto de mano de obra</strong>
+            <strong style={{ color:'var(--selva)' }}><Ico as={Clock} size={14} />Costo por minuto de mano de obra</strong>
             <div style={{ fontSize:'0.85rem', marginTop:8, display:'grid', gap:4 }}>
               <div>CIF total mensual: <strong>{fCOP(cifTotal)}</strong> <small style={{ color:'var(--texto-suave)' }}>(manuales {fCOP(cifManual)} + nómina {fCOP(costoNomina.total)})</small></div>
               <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
@@ -1585,7 +1665,7 @@ export default function Costos() {
 
           <div style={{ marginTop:16, padding:16, background:'var(--crema)', borderRadius:'var(--radio)' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, flexWrap:'wrap', gap:8 }}>
-              <strong style={{ color:'var(--selva)' }}>📊 Distribución CIF por línea de producto</strong>
+              <strong style={{ color:'var(--selva)' }}><Ico as={BarChart3} size={14} />Distribución CIF por línea de producto</strong>
               <div style={{ fontSize:'1.05rem', fontWeight:600, color:'var(--selva)' }}>Total: <span style={{ color:'var(--dorado)' }}>{fCOP(cifTotal)}</span></div>
             </div>
             <div className="alert alert-info" style={{ fontSize:'0.85rem', marginBottom:12 }}>
@@ -1626,7 +1706,7 @@ export default function Costos() {
             }
             {productos.length === 0 && (
               <div style={{ marginTop:12, padding:10, background:'white', borderRadius:'var(--radio)', border:'1px solid var(--crema-oscuro)' }}>
-                <span style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}>⚙️ Estimación inicial (aún sin fichas) — unidades/mes:</span>
+                <span style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}><Ico as={Settings} size={14} />Estimación inicial (aún sin fichas) — unidades/mes:</span>
                 <input type="number" className="form-control" value={cifUnidadesFallback} onChange={e => setCifUnidadesFallback(Number(e.target.value))} style={{ width:110, display:'inline-block', marginLeft:8 }} />
                 <span style={{ fontSize:'0.82rem', color:'var(--texto-suave)', marginLeft:8 }}>CIF/unidad: <strong style={{ color:'var(--dorado)' }}>{fCOP(cifTotal/(cifUnidadesFallback||1))}</strong></span>
                 <div style={{ fontSize:'0.72rem', color:'var(--texto-suave)', marginTop:4 }}>Solo se usa mientras no haya fichas de producto. Al crear productos, el CIF se reparte automáticamente y este valor se ignora.</div>
@@ -1670,7 +1750,7 @@ export default function Costos() {
 
       {/* Modal ver ficha de costo */}
       {/* Confirmación reforzada de borrado de ficha */}
-      <Modal open={!!confirmDel} onClose={() => setConfirmDel(null)} title="🗑 Eliminar ficha de producto"
+      <Modal open={!!confirmDel} onClose={() => setConfirmDel(null)} title="Eliminar ficha de producto"
         footer={<>
           <button className="btn btn-secondary" onClick={() => setConfirmDel(null)}>Cancelar</button>
           <button className="btn btn-danger" disabled={delText.trim() !== (confirmDel?.nombre || '').trim()} onClick={() => { deleteProducto.mutate(confirmDel.id); setConfirmDel(null) }}>Eliminar</button>
@@ -1700,8 +1780,8 @@ export default function Costos() {
                       <td>{p.eliminado_por || '—'}</td>
                       <td>
                         <div style={{ display: 'flex', gap: 4 }}>
-                          <button className="btn btn-xs btn-success" onClick={() => restaurarFicha.mutate(p)} disabled={restaurarFicha.isPending}>↩ Restaurar</button>
-                          <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar definitivamente "${p.nombre}" de la papelera? Esto ya no se puede recuperar.`).then(ok => ok && purgarFicha.mutate(p.id))}>✕</button>
+                          <button className="btn btn-xs btn-success" onClick={() => restaurarFicha.mutate(p)} disabled={restaurarFicha.isPending}><Ico as={Undo2} size={14} />Restaurar</button>
+                          <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar definitivamente "${p.nombre}" de la papelera? Esto ya no se puede recuperar.`).then(ok => ok && purgarFicha.mutate(p.id))}><X size={13} aria-hidden="true" /></button>
                         </div>
                       </td>
                     </tr>
@@ -1715,8 +1795,8 @@ export default function Costos() {
         footer={
           <>
             <button className="btn btn-secondary" onClick={() => setVerModal(false)}>Cerrar</button>
-            <button className="btn btn-primary" onClick={() => { cargarProducto(verProd?.id); setVerModal(false) }}>✏ Editar esta ficha</button>
-            <button className="btn btn-dorado" onClick={() => window.print()}>🖨 Imprimir</button>
+            <button className="btn btn-primary" onClick={() => { cargarProducto(verProd?.id); setVerModal(false) }}><Ico as={Pencil} size={14} />Editar esta ficha</button>
+            <button className="btn btn-dorado" onClick={() => window.print()}><Ico as={Printer} size={14} />Imprimir</button>
           </>
         }
       >

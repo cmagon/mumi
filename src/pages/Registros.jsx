@@ -7,6 +7,8 @@ import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
+import { Bell, Download, Link2, NotebookText, Pencil, X } from 'lucide-react'
+const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const BUCKET = 'documentos'
 const TIPOS_CAMPO = { text: 'Texto', number: 'Número', date: 'Fecha', hora: 'Hora', select: 'Lista', textarea: 'Texto largo', checkbox: 'Sí/No' }
@@ -257,11 +259,11 @@ export default function Registros() {
     return (
       <div>
         <div className="page-header">
-          <h1 className="page-title">📒 {sel.nombre} {sel.codigo && <small style={{ color: 'var(--texto-suave)' }}>({sel.codigo})</small>}</h1>
+          <h1 className="page-title"><Ico as={NotebookText} size={14} />{sel.nombre} {sel.codigo && <small style={{ color: 'var(--texto-suave)' }}>({sel.codigo})</small>}</h1>
           <div className="page-actions" style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-secondary btn-sm" onClick={() => setSel(null)}>← Volver</button>
-            {esLibroOrdenes && <button className="btn btn-secondary btn-sm" onClick={() => navigate('/ordenes')}>🔗 Abrir módulo</button>}
-            {esLibroProduccion && <button className="btn btn-secondary btn-sm" onClick={() => navigate('/produccion')}>🔗 Abrir módulo</button>}
+            {esLibroOrdenes && <button className="btn btn-secondary btn-sm" onClick={() => navigate('/ordenes')}><Ico as={Link2} size={14} />Abrir módulo</button>}
+            {esLibroProduccion && <button className="btn btn-secondary btn-sm" onClick={() => navigate('/produccion')}><Ico as={Link2} size={14} />Abrir módulo</button>}
             {!esLibroAuto && <button className="btn btn-primary btn-sm" onClick={abrirEntrada}>+ Nuevo registro</button>}
           </div>
         </div>
@@ -296,8 +298,8 @@ export default function Registros() {
                       {campos.map(c => <td key={c.key}>{c.tipo === 'checkbox' ? (e.datos?.[c.key] ? '✓' : '—') : (e.datos?.[c.key] ?? '—')}</td>)}
                       <td>{e.responsable || e.creado_por || '—'}{(e._orden || e._registro) && e.estado ? <span className="badge badge-azul" style={{ marginLeft: 6, fontSize: '0.62rem' }}>{e.estado}</span> : null}</td>
                       {sel.periodica && <td>{e.proxima_fecha ? fFecha(e.proxima_fecha) : '—'}</td>}
-                      <td>{(e._orden || e._registro) ? '—' : (e.storage_path ? <button className="btn btn-xs btn-secondary" onClick={() => descargarEvidencia(e)}>⬇</button> : '—')}</td>
-                      {esAdmin && <td>{(e._orden || e._registro) ? '' : <button className="btn btn-xs btn-danger" onClick={() => confirmar('¿Eliminar este registro?').then(ok => ok && eliminarEntrada.mutate(e))}>✕</button>}</td>}
+                      <td>{(e._orden || e._registro) ? '—' : (e.storage_path ? <button className="btn btn-xs btn-secondary" onClick={() => descargarEvidencia(e)}><Download size={13} aria-hidden="true" /></button> : '—')}</td>
+                      {esAdmin && <td>{(e._orden || e._registro) ? '' : <button className="btn btn-xs btn-danger" onClick={() => confirmar('¿Eliminar este registro?').then(ok => ok && eliminarEntrada.mutate(e))}><X size={13} aria-hidden="true" /></button>}</td>}
                     </tr>
                   ))}
               </tbody>
@@ -330,9 +332,9 @@ export default function Registros() {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">📒 Libros de Registro (BPM)</h1>
+        <h1 className="page-title"><Ico as={NotebookText} size={14} />Libros de Registro (BPM)</h1>
         <div className="page-actions" style={{ display: 'flex', gap: 8 }}>
-          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={sembrarPlantillas} disabled={saving}>📥 Cargar plantillas base</button>}
+          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={sembrarPlantillas} disabled={saving}><Ico as={Download} size={14} />Cargar plantillas base</button>}
           {esAdmin && <button className="btn btn-primary btn-sm" onClick={abrirNuevaPlantilla}>+ Nuevo libro</button>}
         </div>
       </div>
@@ -340,7 +342,7 @@ export default function Registros() {
       {/* Alertas de vencimientos */}
       {alertas.length > 0 && (
         <div className="card" style={{ marginBottom: 16, borderLeft: '4px solid var(--dorado)' }}>
-          <div className="card-title" style={{ fontSize: '0.95rem' }}>🔔 Próximos vencimientos / pendientes</div>
+          <div className="card-title" style={{ fontSize: '0.95rem' }}><Ico as={Bell} size={14} />Próximos vencimientos / pendientes</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {alertas.map(a => (
               <div key={a.p.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem' }}>
@@ -376,8 +378,8 @@ export default function Registros() {
                         <td style={{ whiteSpace: 'nowrap' }}>
                           <button className="btn btn-xs btn-primary" onClick={() => setSel(p)}>📖 Abrir</button>{' '}
                           {esAdmin && <>
-                            <button className="btn btn-xs btn-secondary" onClick={() => abrirEditarPlantilla(p)}>✏</button>{' '}
-                            <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar el libro "${p.nombre}" y todos sus registros?`).then(ok => ok && eliminarPlantilla.mutate(p))}>✕</button>
+                            <button className="btn btn-xs btn-secondary" onClick={() => abrirEditarPlantilla(p)}><Pencil size={13} aria-hidden="true" /></button>{' '}
+                            <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar el libro "${p.nombre}" y todos sus registros?`).then(ok => ok && eliminarPlantilla.mutate(p))}><X size={13} aria-hidden="true" /></button>
                           </>}
                         </td>
                       </tr>
@@ -408,7 +410,7 @@ export default function Registros() {
               ? <input className="form-control" placeholder="opciones, separadas por coma" value={Array.isArray(c.opciones) ? c.opciones.join(', ') : (c.opciones || '')} onChange={e => setCampo(i, 'opciones', e.target.value)} />
               : <span />}
             <label style={{ fontSize: '0.75rem', whiteSpace: 'nowrap' }}><input type="checkbox" checked={!!c.requerido} onChange={e => setCampo(i, 'requerido', e.target.checked)} /> Oblig.</label>
-            <button className="btn btn-xs btn-danger" onClick={() => delCampo(i)}>✕</button>
+            <button className="btn btn-xs btn-danger" onClick={() => delCampo(i)}><X size={13} aria-hidden="true" /></button>
           </div>
         ))}
         <button className="btn btn-sm btn-secondary" onClick={addCampo}>+ Agregar campo</button>

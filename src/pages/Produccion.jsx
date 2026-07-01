@@ -13,6 +13,14 @@ import TimeField from '../components/ui/TimeField'
 import { useReorder } from '../hooks/useReorder'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import * as XLSX from 'xlsx'
+import {
+  Download, Upload, Plus, Check, Pencil, Trash2, X, BarChart3, DollarSign, Link2,
+  ReceiptText, Factory, ClipboardList, Shuffle, Camera, Save, Printer, Undo2, Package,
+  CheckCircle2, AlertTriangle,
+} from 'lucide-react'
+
+// Icono inline alineado con el texto
+const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 // Fecha/hora locales
 const fechaLocalISO = (d = new Date()) => { const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` }
@@ -429,15 +437,15 @@ export default function Produccion() {
       <div className="page-header">
         <h1 className="page-title">Registro de Producción</h1>
         <div className="page-actions">
-          <button className="btn btn-secondary btn-sm" onClick={exportarExcel}>⬇ Excel</button>
+          <button className="btn btn-secondary btn-sm" onClick={exportarExcel}><Ico as={Download} size={14} />Excel</button>
           {!esOperario && (
-            <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', margin: 0 }}>
-              {importando ? 'Importando...' : '⬆ Importar Excel'}
+            <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', margin: 0, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              {importando ? 'Importando...' : <><Upload size={14} aria-hidden="true" /> Importar Excel</>}
               <input type="file" accept=".xlsx,.xls,.csv" ref={importRef} onChange={handleImport} style={{ display: 'none' }} disabled={importando} />
             </label>
           )}
-          <button className="btn btn-secondary btn-sm" onClick={() => window.print()}>⬇ PDF</button>
-          <button className="btn btn-primary btn-sm" onClick={() => { setForm(EMPTY); setEditId(null); setDetalleRec(null); setFotos([]); setOrdenLink(null); setSubprocs([]); setModal(true) }}>+ Nuevo Registro</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => window.print()}><Ico as={Download} size={14} />PDF</button>
+          <button className="btn btn-primary btn-sm" onClick={() => { setForm(EMPTY); setEditId(null); setDetalleRec(null); setFotos([]); setOrdenLink(null); setSubprocs([]); setModal(true) }}><Ico as={Plus} size={14} />Nuevo Registro</button>
         </div>
       </div>
 
@@ -485,12 +493,12 @@ export default function Produccion() {
                   <Fila et="Cant. final">{fNum(p.cantidad)}</Fila>
                   <Fila et="Estado">{p.estado || 'conforme'}{p.aprobado === false ? ' · Pendiente aprob.' : ''}</Fila>
                   <div className="acordeon-acciones">
-                    {!esOperario && p.aprobado === false && <button className="btn btn-xs btn-success" onClick={() => aprobarRegistro.mutate(p.id)}>✓ Aprobar</button>}
-                    <button className="btn btn-xs btn-secondary" onClick={() => setDetalleRec(p)}>🧾 Detalles</button>
+                    {!esOperario && p.aprobado === false && <button className="btn btn-xs btn-success" onClick={() => aprobarRegistro.mutate(p.id)}><Ico as={Check} size={13} />Aprobar</button>}
+                    <button className="btn btn-xs btn-secondary" onClick={() => setDetalleRec(p)}><Ico as={ReceiptText} size={13} />Detalles</button>
                     {p.orden_id
-                      ? <button className="btn btn-xs btn-secondary" onClick={() => revertirAOrden(p)}>↩ Revertir a la orden</button>
-                      : <button className="btn btn-xs btn-secondary" onClick={() => openEdit(p)}>✏ Editar</button>}
-                    {!esOperario && <button className="btn btn-xs btn-danger" onClick={() => confirmar('¿Eliminar este registro?').then(ok => ok && remove.mutate(p.id))}>✕ Eliminar</button>}
+                      ? <button className="btn btn-xs btn-secondary" onClick={() => revertirAOrden(p)}><Ico as={Undo2} size={13} />Revertir a la orden</button>
+                      : <button className="btn btn-xs btn-secondary" onClick={() => openEdit(p)}><Ico as={Pencil} size={13} />Editar</button>}
+                    {!esOperario && <button className="btn btn-xs btn-danger" onClick={() => confirmar('¿Eliminar este registro?').then(ok => ok && remove.mutate(p.id))}><Ico as={X} size={13} />Eliminar</button>}
                   </div>
                 </AccordionItem>
               ))}
@@ -508,7 +516,7 @@ export default function Produccion() {
                       <td><strong>{p.producto}</strong>{p.surtido && (() => {
                         const rankLote = (l) => { const m = String(l || '').match(/^(\d+)(\d{2})$/); return m ? (parseInt(m[2]) * 100000 + parseInt(m[1])) : (parseInt(l) || 0) }
                         const lotes = [...new Set([p.lote, ...String(p.lote_mezcla || '').split(/[,;+]/)].map(l => String(l || '').trim()).filter(Boolean))].sort((a, b) => rankLote(a) - rankLote(b))
-                        return lotes.length > 0 ? <div style={{ fontSize: '0.72rem', color: 'var(--tierra)' }}>🔀 {lotes.join(' + ')}</div> : null
+                        return lotes.length > 0 ? <div style={{ fontSize: '0.72rem', color: 'var(--tierra)', display: 'flex', alignItems: 'center', gap: 3 }}><Shuffle size={11} aria-hidden="true" /> {lotes.join(' + ')}</div> : null
                       })()}</td>
                       <td className="col-opcional"><span className={`badge ${p.tipo_registro === 'subproducto' ? 'badge-dorado' : 'badge-azul'}`}>{p.tipo_registro === 'subproducto' ? 'Subprod.' : 'Final'}</span></td>
                       <td><strong>{p.lote || '—'}</strong></td>
@@ -523,12 +531,12 @@ export default function Produccion() {
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: 4 }}>
-                          {!esOperario && p.aprobado === false && <button className="btn btn-xs btn-success" onClick={() => aprobarRegistro.mutate(p.id)} title="Aprobar">✓</button>}
-                          <button className="btn btn-xs btn-secondary" onClick={() => setDetalleRec(p)} title="Ver detalles">🧾</button>
+                          {!esOperario && p.aprobado === false && <button className="btn btn-xs btn-success" onClick={() => aprobarRegistro.mutate(p.id)} title="Aprobar"><Check size={13} aria-hidden="true" /></button>}
+                          <button className="btn btn-xs btn-secondary" onClick={() => setDetalleRec(p)} title="Ver detalles"><ReceiptText size={13} aria-hidden="true" /></button>
                           {p.orden_id
-                            ? <button className="btn btn-xs btn-secondary" title="Revertir a la orden para corregir" onClick={() => revertirAOrden(p)}>↩</button>
-                            : <button className="btn btn-xs btn-secondary" onClick={() => openEdit(p)}>✏</button>}
-                          {!esOperario && <button className="btn btn-xs btn-danger" onClick={() => confirmar('¿Eliminar?').then(ok => ok && remove.mutate(p.id))}>✕</button>}
+                            ? <button className="btn btn-xs btn-secondary" title="Revertir a la orden para corregir" onClick={() => revertirAOrden(p)}><Undo2 size={13} aria-hidden="true" /></button>
+                            : <button className="btn btn-xs btn-secondary" onClick={() => openEdit(p)} title="Editar"><Pencil size={13} aria-hidden="true" /></button>}
+                          {!esOperario && <button className="btn btn-xs btn-danger" onClick={() => confirmar('¿Eliminar?').then(ok => ok && remove.mutate(p.id))} title="Eliminar"><X size={13} aria-hidden="true" /></button>}
                         </div>
                       </td>
                     </tr>
@@ -542,7 +550,7 @@ export default function Produccion() {
 
       {tab === 'analisis' && (
         <div className="card">
-          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>📊 Resumen de Producción por Mes
+          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}><BarChart3 size={16} aria-hidden="true" /> Resumen de Producción por Mes
             <select className="form-control" style={{ width: 120, marginLeft: 'auto' }} value={anioAnalisis} onChange={e => setAnioAnalisis(e.target.value)}>
               {(aniosDisponibles.length ? aniosDisponibles : [anioAnalisis]).map(a => <option key={a} value={a}>{a}</option>)}
             </select>
@@ -630,7 +638,7 @@ export default function Produccion() {
             {form.tipo_registro === 'final' && <> Formato sugerido para producto final: <strong>012026, 022026…</strong></>}
           </div>
         )}
-        <div style={{ background: 'rgba(45,90,61,0.10)', borderLeft: '3px solid var(--selva)', padding: '6px 10px', borderRadius: 4, fontWeight: 700, fontSize: '0.88rem', color: 'var(--selva)', margin: '14px 0 8px' }}>🏷️ Identificación del lote</div>
+        <div style={{ background: 'rgba(45,90,61,0.10)', borderLeft: '3px solid var(--selva)', padding: '6px 10px', borderRadius: 4, fontWeight: 700, fontSize: '0.88rem', color: 'var(--selva)', margin: '14px 0 8px' }}><Ico as={ClipboardList} size={14} />Identificación del lote</div>
         <div className="form-grid-2">
           <div className="form-group"><label className="form-label">Lote</label><input className="form-control" value={form.lote} onChange={e => setForm(f => ({ ...f, lote: e.target.value }))} placeholder={form.tipo_registro === 'final' ? 'Ej: 012026' : 'Lote de subproducto'} /></div>
           <div className="form-group"><label className="form-label">Fecha</label><input type="date" className="form-control" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} /></div>
@@ -647,12 +655,12 @@ export default function Produccion() {
           </div>
           <div className="form-group"><label className="form-label">Cantidad {esRotulado(form.labor) ? '(producto terminado)' : '(esta etapa)'}</label><input type="number" className="form-control" value={form.cantidad} onChange={e => setForm(f => ({ ...f, cantidad: e.target.value }))} min={0} /></div>
         </div>
-        <div style={{ background: 'rgba(45,90,61,0.10)', borderLeft: '3px solid var(--selva)', padding: '6px 10px', borderRadius: 4, fontWeight: 700, fontSize: '0.88rem', color: 'var(--selva)', margin: '14px 0 8px' }}>📦 Resultado de producción</div>
+        <div style={{ background: 'rgba(45,90,61,0.10)', borderLeft: '3px solid var(--selva)', padding: '6px 10px', borderRadius: 4, fontWeight: 700, fontSize: '0.88rem', color: 'var(--selva)', margin: '14px 0 8px' }}><Ico as={Package} size={14} />Resultado de producción</div>
         {/* Conformidad y pesos */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '8px 12px', background: form.conforme ? 'rgba(124,179,66,0.08)' : 'rgba(192,57,43,0.08)', borderRadius: 'var(--radio)', border: `1px solid ${form.conforme ? 'rgba(124,179,66,0.2)' : 'rgba(192,57,43,0.25)'}`, marginBottom: 12 }}>
           <input type="checkbox" id="cb-conforme" checked={form.conforme} onChange={e => setForm(f => ({ ...f, conforme: e.target.checked }))} style={{ width: 16, height: 16, cursor: 'pointer' }} />
-          <label htmlFor="cb-conforme" style={{ cursor: 'pointer', fontSize: '0.9rem', fontWeight: 600, color: form.conforme ? 'var(--selva)' : 'var(--rojo)' }}>
-            {form.conforme ? '✅ Producción conforme' : '⚠ No conforme (registra los pesos obtenidos)'}
+          <label htmlFor="cb-conforme" style={{ cursor: 'pointer', fontSize: '0.9rem', fontWeight: 600, color: form.conforme ? 'var(--selva)' : 'var(--rojo)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            {form.conforme ? <><CheckCircle2 size={15} aria-hidden="true" /> Producción conforme</> : <><AlertTriangle size={15} aria-hidden="true" /> No conforme (registra los pesos obtenidos)</>}
           </label>
         </div>
         <div className="form-grid-3">
@@ -682,7 +690,7 @@ export default function Produccion() {
         })()}
         {/* Empaque surtido / mezclado con otro lote */}
         <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', margin: '4px 0 8px' }}>
-          <input type="checkbox" checked={form.surtido} onChange={e => setForm(f => ({ ...f, surtido: e.target.checked }))} /> 📦 Empacado surtido / mezclado con otro lote
+          <input type="checkbox" checked={form.surtido} onChange={e => setForm(f => ({ ...f, surtido: e.target.checked }))} /> <Shuffle size={14} aria-hidden="true" style={{ display: 'inline', verticalAlign: '-2px' }} /> Empacado surtido / mezclado con otro lote
         </label>
         {form.surtido && (
           <>
@@ -784,7 +792,7 @@ export default function Produccion() {
       </Modal>
 
       {/* Modal ver foto */}
-      <Modal open={verFotoModal} onClose={() => setVerFotoModal(false)} title="📷 Foto registro" size="modal-lg">
+      <Modal open={verFotoModal} onClose={() => setVerFotoModal(false)} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Camera size={18} aria-hidden="true" /> Foto registro</span>} size="modal-lg">
         <div style={{ textAlign: 'center' }}>
           <img src={fotoVerUrl} alt="registro" style={{ maxWidth: '100%', maxHeight: '70vh', borderRadius: 4, objectFit: 'contain' }} />
         </div>
@@ -827,7 +835,7 @@ export default function Produccion() {
                   : { txt: `Más barato de lo esperado (${desv.toFixed(1)}%)`, badge: 'badge-dorado' }
               return (
                 <>
-                  <div className="card-title" style={{ fontSize: '0.95rem' }}>💰 Costos del lote (solo admin)</div>
+                  <div className="card-title" style={{ fontSize: '0.95rem' }}><Ico as={DollarSign} size={15} />Costos del lote (solo admin)</div>
                   <div className="table-wrap" style={{ marginBottom: 8 }}>
                     <table>
                       <thead><tr><th>Concepto</th><th className="td-number">Por unidad</th><th className="td-number">Total lote ({fNum(cant)} u)</th></tr></thead>
@@ -843,7 +851,7 @@ export default function Produccion() {
                   <div style={{ marginBottom: 12 }}><span className={`badge ${alerta.badge}`}>{alerta.txt}</span>{' '}<small style={{ color: 'var(--texto-suave)' }}>vs costo de la ficha {fCOP(total)}/u</small></div>
                   {ord && Array.isArray(ord.lotes_mp) && ord.lotes_mp.length > 0 && (
                     <>
-                      <div className="card-title" style={{ fontSize: '0.95rem' }}>🔗 Materias primas consumidas (lotes)</div>
+                      <div className="card-title" style={{ fontSize: '0.95rem' }}><Ico as={Link2} size={15} />Materias primas consumidas (lotes)</div>
                       <div className="table-wrap" style={{ marginBottom: 12 }}>
                         <table>
                           <thead><tr><th>Materia prima</th><th className="td-number">Consumo</th><th>Lotes (PEPS)</th></tr></thead>
@@ -871,7 +879,7 @@ export default function Produccion() {
               const fechas = Object.keys(grupos).sort()
               return (
                 <>
-                  <div className="card-title" style={{ fontSize: '0.95rem' }}>🧾 Etapas (resumen por fecha)</div>
+                  <div className="card-title" style={{ fontSize: '0.95rem' }}><Ico as={ReceiptText} size={15} />Etapas (resumen por fecha)</div>
                   <div className="table-wrap" style={{ marginBottom: 16 }}>
                     <table>
                       <thead><tr><th>Fecha</th><th>Procesos / etapas</th></tr></thead>
@@ -922,7 +930,7 @@ export default function Produccion() {
                     {et.responsable && <span style={{ marginLeft: 10, color: 'var(--texto-suave)' }}>· {et.responsable}</span>}
                   </div>
                   {(et.peso_final || et.peso_desperdicio) ? <div style={{ fontSize: '0.82rem', marginTop: 4 }}>Peso final: <strong>{fNum(et.peso_final || 0)}</strong> · Desperdicio: <strong>{fNum(et.peso_desperdicio || 0)}</strong></div> : null}
-                  {et.lotes_origen && <div style={{ fontSize: '0.82rem', color: 'var(--tierra)', marginTop: 4 }}>🔀 Combina lotes: {et.lotes_origen}</div>}
+                  {et.lotes_origen && <div style={{ fontSize: '0.82rem', color: 'var(--tierra)', marginTop: 4, display: 'flex', alignItems: 'center', gap: 3 }}><Shuffle size={12} aria-hidden="true" /> Combina lotes: {et.lotes_origen}</div>}
                   {et.obs && <div style={{ fontSize: '0.82rem', color: 'var(--texto-suave)', marginTop: 4 }}>{et.obs}</div>}
                   {Array.isArray(et.fotos) && et.fotos.length > 0 && (
                     <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>

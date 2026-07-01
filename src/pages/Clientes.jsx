@@ -6,6 +6,8 @@ import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
 import Modal from '../components/ui/Modal'
 import * as XLSX from 'xlsx'
+import { Download, Pencil, X } from 'lucide-react'
+const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const CANALES = { mayor: 'Por mayor', detal: 'Detal', feria: 'Feria/Evento', ecommerce: 'E-commerce', whatsapp: 'WhatsApp/Redes' }
 
@@ -84,7 +86,7 @@ export default function Clientes() {
       <div className="page-header">
         <h1 className="page-title">Clientes</h1>
         <div className="page-actions">
-          <button className="btn btn-secondary btn-sm" onClick={exportarExcel}>⬇ Excel</button>
+          <button className="btn btn-secondary btn-sm" onClick={exportarExcel}><Ico as={Download} size={14} />Excel</button>
           <button className="btn btn-primary btn-sm" onClick={openNew}>+ Nuevo Cliente</button>
         </div>
       </div>
@@ -113,8 +115,8 @@ export default function Clientes() {
                     <td className="col-opcional-2">{fFecha(c.fecha_reg)}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>
-                        <button className="btn btn-xs btn-secondary" onClick={() => openEdit(c)}>✏</button>
-                        <button className="btn btn-xs btn-danger" onClick={() => confirmar('¿Eliminar cliente?').then(ok => ok && remove.mutate(c.id))}>✕</button>
+                        <button className="btn btn-xs btn-secondary" onClick={() => openEdit(c)}><Pencil size={13} aria-hidden="true" /></button>
+                        <button className="btn btn-xs btn-danger" onClick={() => confirmar('¿Eliminar cliente?').then(ok => ok && remove.mutate(c.id))}><X size={13} aria-hidden="true" /></button>
                       </div>
                     </td>
                   </tr>

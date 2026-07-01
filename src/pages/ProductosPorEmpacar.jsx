@@ -6,6 +6,8 @@ import { estadoLote } from '../lib/lotes'
 import { useToast } from '../hooks/useToast'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
+import { Recycle, Trash2 } from 'lucide-react'
+const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const fCant = (n) => Number(n || 0).toLocaleString('es-CO', { maximumFractionDigits: 3 })
 const fmtV = (v) => v ? fFecha(v) : '—'
@@ -75,7 +77,7 @@ export default function ProductosPorEmpacar() {
 
       {tab === 'saldos' && (
         <div className="card">
-          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>♻ Pendientes de empacar ({filtrados.length})
+          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Ico as={Recycle} size={14} />Pendientes de empacar ({filtrados.length})
             <input className="form-control" style={{ marginLeft: 'auto', maxWidth: 240 }} placeholder="Buscar producto o lote..." value={buscar} onChange={e => setBuscar(e.target.value)} />
           </div>
           <div className="table-wrap">
@@ -93,7 +95,7 @@ export default function ProductosPorEmpacar() {
                           <td className="td-number">{fCant(s.peso)} {s.unidad}</td>
                           <td className="col-opcional" style={{ color: est === 'vencido' ? 'var(--rojo)' : est === 'por_vencer' ? 'var(--tierra)' : undefined }}>{fmtV(s.vencimiento)} {est === 'vencido' ? '⛔' : est === 'por_vencer' ? '⚠' : ''}</td>
                           <td className="col-opcional-2" style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>{s.created_at ? fFecha(s.created_at.slice(0, 10)) : '—'}</td>
-                          <td><button className="btn btn-xs btn-danger" onClick={() => abrirBaja(s)}>🗑 Dar de baja</button></td>
+                          <td><button className="btn btn-xs btn-danger" onClick={() => abrirBaja(s)}><Ico as={Trash2} size={14} />Dar de baja</button></td>
                         </tr>
                       )
                     })}
@@ -105,7 +107,7 @@ export default function ProductosPorEmpacar() {
 
       {tab === 'bajas' && (
         <div className="card">
-          <div className="card-title">🗑 Historial de bajas ({bajas.length})</div>
+          <div className="card-title"><Ico as={Trash2} size={14} />Historial de bajas ({bajas.length})</div>
           <div className="table-wrap">
             <table>
               <thead><tr><th>Fecha</th><th>Producto</th><th>Lote</th><th className="td-number">Cantidad</th><th>Motivo</th><th>Por</th></tr></thead>

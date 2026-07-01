@@ -5,6 +5,8 @@ import { fFecha } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
 import Modal from '../components/ui/Modal'
+import { Camera, Download, Trash2 } from 'lucide-react'
+const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const CATEGORIAS = { produccion: 'Producción', producto: 'Producto terminado', inventario: 'Inventario', evento: 'Evento / Feria', empleados: 'Empleados', otro: 'Otro' }
 
@@ -94,7 +96,7 @@ export default function Galeria() {
       <div className="page-header">
         <h1 className="page-title">Galería Fotográfica</h1>
         <div className="page-actions">
-          <button className="btn btn-primary btn-sm" onClick={() => setModal(true)}>📷 Agregar Foto</button>
+          <button className="btn btn-primary btn-sm" onClick={() => setModal(true)}><Ico as={Camera} size={14} />Agregar Foto</button>
         </div>
       </div>
 
@@ -115,7 +117,7 @@ export default function Galeria() {
               const url = getFotoUrl(f)
               return (
                 <div key={f.id} className="foto-thumb" onClick={() => { setFotoActual(f); setVerModal(true) }}>
-                  {url ? <img src={url} alt={f.descripcion} /> : <div className="foto-placeholder" style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%', fontSize:'2rem', opacity:0.4 }}>📷</div>}
+                  {url ? <img src={url} alt={f.descripcion} /> : <div className="foto-placeholder" style={{ display:'flex', alignItems:'center', justifyContent:'center', height:'100%', fontSize:'2rem', opacity:0.4 }}><Camera size={13} aria-hidden="true" /></div>}
                   <div className="foto-thumb-info">
                     <div style={{ fontWeight: 600 }}>{f.descripcion || 'Sin descripción'}</div>
                     <div style={{ opacity: 0.8 }}>{fFecha(f.fecha)}</div>
@@ -127,7 +129,7 @@ export default function Galeria() {
       }
 
       {/* Modal agregar foto */}
-      <Modal open={modal} onClose={() => { setModal(false); setFotoFile(null); setPreviewUrl('') }} title="📷 Agregar Foto"
+      <Modal open={modal} onClose={() => { setModal(false); setFotoFile(null); setPreviewUrl('') }} title="Agregar Foto"
         footer={
           <>
             <button className="btn btn-secondary" onClick={() => setModal(false)}>Cancelar</button>
@@ -143,7 +145,7 @@ export default function Galeria() {
             <input type="file" accept="image/*" ref={fileRef} onChange={handleFile} style={{ display: 'none' }} />
             {previewUrl
               ? <img src={previewUrl} className="foto-preview" alt="preview" />
-              : <><div style={{ fontSize: '2rem', marginBottom: 8 }}>📸</div><div style={{ color: 'var(--texto-suave)', fontSize: '0.9rem' }}>Toca para agregar foto o tomar con cámara</div></>
+              : <><div style={{ fontSize: '2rem', marginBottom: 8 }}><Camera size={13} aria-hidden="true" /></div><div style={{ color: 'var(--texto-suave)', fontSize: '0.9rem' }}>Toca para agregar foto o tomar con cámara</div></>
             }
           </div>
         </div>
@@ -172,8 +174,8 @@ export default function Galeria() {
               {fFecha(fotoActual.fecha)}{fotoActual.etiquetas ? ' — ' + fotoActual.etiquetas : ''}
             </p>
             <div style={{ marginTop: 12, display: 'flex', gap: 8, justifyContent: 'center' }}>
-              <button className="btn btn-secondary btn-sm" onClick={() => handleDescargar(fotoActual)}>⬇ Descargar</button>
-              <button className="btn btn-danger btn-sm" onClick={() => confirmar('¿Eliminar foto?').then(ok => ok && remove.mutate(fotoActual))}>🗑 Eliminar</button>
+              <button className="btn btn-secondary btn-sm" onClick={() => handleDescargar(fotoActual)}><Ico as={Download} size={14} />Descargar</button>
+              <button className="btn btn-danger btn-sm" onClick={() => confirmar('¿Eliminar foto?').then(ok => ok && remove.mutate(fotoActual))}><Ico as={Trash2} size={14} />Eliminar</button>
             </div>
           </div>
         )}

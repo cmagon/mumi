@@ -11,6 +11,9 @@ import { useConfirm, usePrompt } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import { crearLoteEntrada, consumirPEPS, consumirLote, estadoLote } from '../lib/lotes'
 import * as XLSX from 'xlsx'
+import { Download, Tags, Tag, Plus, Pencil, X, Package, ClipboardList, FileText, AlertTriangle } from 'lucide-react'
+
+const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const EMPTY_MP = { nombre: '', categoria: 'pulpa', tipo: 'comprado', unidad: 'Kg', precio: '', stock_min: 0, stock: 0, lote: '', vencimiento: '', obs: '', extra: {}, vendible: false, precio_venta: '' }
 const EMPTY_MOV = { mp_id: '', tipo: 'entrada', cantidad: '', fecha: new Date().toISOString().split('T')[0], responsable: '', obs: '', lote: '', vencimiento: '', extra: {}, costo: '', motivo: 'consumo', lote_id: '' }
@@ -52,7 +55,7 @@ function CamposExtra({ value = {}, onChange }) {
         <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 6, marginBottom: 6 }}>
           <input className="form-control" placeholder="Nombre del campo" value={k} onChange={e => setEntry(i, e.target.value, v)} />
           <input className="form-control" placeholder="Valor" value={v} onChange={e => setEntry(i, k, e.target.value)} />
-          <button className="btn btn-xs btn-danger" onClick={() => delEntry(i)}>✕</button>
+          <button className="btn btn-xs btn-danger" onClick={() => delEntry(i)} title="Quitar"><X size={13} aria-hidden="true" /></button>
         </div>
       ))}
       <button className="btn btn-xs btn-secondary" onClick={addEntry}>+ Agregar campo</button>
@@ -283,21 +286,21 @@ export default function Inventario() {
       <div className="page-header">
         <h1 className="page-title">Inventario MP</h1>
         <div className="page-actions">
-          <button className="btn btn-secondary btn-sm" onClick={exportarExcel}>⬇ Excel</button>
-          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalCats(true)}>🏷 Categorías</button>}
-          {puedeEditarInv && <button className="btn btn-secondary btn-sm" onClick={() => { setFormMP(EMPTY_MP); setEditMPId(null); setModalMP(true) }}>+ Nueva MP</button>}
-          {puedeEditarInv && <button className="btn btn-primary btn-sm" onClick={() => openMovimiento()}>+ Movimiento</button>}
+          <button className="btn btn-secondary btn-sm" onClick={exportarExcel}><Ico as={Download} size={14} />Excel</button>
+          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalCats(true)}><Ico as={Tag} size={14} />Categorías</button>}
+          {puedeEditarInv && <button className="btn btn-secondary btn-sm" onClick={() => { setFormMP(EMPTY_MP); setEditMPId(null); setModalMP(true) }}><Ico as={Plus} size={14} />Nueva MP</button>}
+          {puedeEditarInv && <button className="btn btn-primary btn-sm" onClick={() => openMovimiento()}><Ico as={Plus} size={14} />Movimiento</button>}
         </div>
       </div>
 
       <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)' }}>
         <div className="kpi-card verde"><div className="kpi-label">Total Ítems</div><div className="kpi-value">{mps.length}</div></div>
-        <div className="kpi-card dorado"><div className="kpi-label">Stock Bajo ⚠</div><div className="kpi-value">{bajo}</div></div>
+        <div className="kpi-card dorado"><div className="kpi-label" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>Stock Bajo <AlertTriangle size={13} aria-hidden="true" /></div><div className="kpi-value">{bajo}</div></div>
         <div className="kpi-card tierra"><div className="kpi-label">Sin Stock</div><div className="kpi-value">{cero}</div></div>
       </div>
 
       <div className="card">
-        <div className="card-title">📦 Estado del Inventario</div>
+        <div className="card-title"><Ico as={Package} size={16} />Estado del Inventario</div>
         <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
           <label className="form-label" style={{ margin: 0 }}>Categoría:</label>
           <select className="form-control" value={filtroCat} onChange={e => setFiltroCat(e.target.value)} style={{ width: 'auto' }}>
@@ -330,9 +333,9 @@ export default function Inventario() {
                     {puedeEditarInv && <button className="btn btn-xs btn-primary" onClick={() => openMovimiento(m.id, 'entrada')}>+ Entrada</button>}
                     {puedeEditarInv && <button className="btn btn-xs btn-secondary" onClick={() => openMovimiento(m.id, 'salida')}>- Salida</button>}
                     <button className="btn btn-xs btn-secondary" onClick={() => openHistorial(m)}>🕑 Historial</button>
-                    {puedeEditarInv && <button className="btn btn-xs btn-secondary" onClick={() => openEditMP(m)}>✏ Editar</button>}
+                    {puedeEditarInv && <button className="btn btn-xs btn-secondary" onClick={() => openEditMP(m)}><Ico as={Pencil} size={13} />Editar</button>}
                     {esAdmin && <button className="btn btn-xs btn-danger" disabled={(m.stock || 0) !== 0}
-                      onClick={() => confirmar(`¿Eliminar la materia prima "${m.nombre}"?\nEsta acción no se puede deshacer.`).then(ok => ok && deleteMP.mutate(m))}>✕</button>}
+                      onClick={() => confirmar(`¿Eliminar la materia prima "${m.nombre}"?\nEsta acción no se puede deshacer.`).then(ok => ok && deleteMP.mutate(m))} title="Eliminar"><X size={13} aria-hidden="true" /></button>}
                   </div>
                 </AccordionItem>
               )
@@ -369,11 +372,11 @@ export default function Inventario() {
                           {puedeEditarInv && <button className="btn btn-xs btn-secondary" onClick={() => openMovimiento(m.id, 'salida')}>- Sal.</button>}
                           <button className="btn btn-xs btn-secondary" onClick={() => openHistorial(m)}>🕑</button>
                           {!esEmpaque(m.categoria) && <button className="btn btn-xs btn-secondary" title="Lotes (PEPS)" onClick={() => { setLotesMP(m); setModalLotes(true) }}>🧊</button>}
-                          {puedeEditarInv && <button className="btn btn-xs btn-secondary" onClick={() => openEditMP(m)}>✏</button>}
+                          {puedeEditarInv && <button className="btn btn-xs btn-secondary" onClick={() => openEditMP(m)} title="Editar"><Pencil size={13} aria-hidden="true" /></button>}
                           {esAdmin && <button className="btn btn-xs btn-danger"
                             disabled={(m.stock || 0) !== 0}
                             title={(m.stock || 0) !== 0 ? 'Tiene stock — no se puede eliminar' : 'Eliminar'}
-                            onClick={() => confirmar(`¿Eliminar la materia prima "${m.nombre}"?\nEsta acción no se puede deshacer.`).then(ok => ok && deleteMP.mutate(m))}>✕</button>}
+                            onClick={() => confirmar(`¿Eliminar la materia prima "${m.nombre}"?\nEsta acción no se puede deshacer.`).then(ok => ok && deleteMP.mutate(m))} title="Eliminar"><X size={13} aria-hidden="true" /></button>}
                         </div>
                       </td>
                     </tr>
@@ -385,7 +388,7 @@ export default function Inventario() {
       </div>
 
       <div className="card">
-        <div className="card-title">📋 Últimos Movimientos</div>
+        <div className="card-title"><Ico as={ClipboardList} size={16} />Últimos Movimientos</div>
         <div className="table-wrap">
           <table>
             <thead><tr><th>Fecha</th><th>MP</th><th>Tipo</th><th>Cantidad</th><th>Lote</th><th>Responsable</th><th>Observación</th></tr></thead>
@@ -455,17 +458,10 @@ export default function Inventario() {
         </div>
         <div className="form-group" style={{ background: 'rgba(124,179,66,0.07)', borderRadius: 'var(--radio)', padding: 10 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600 }}>
-            <input type="checkbox" checked={!!formMP.vendible} onChange={e => setFormMP(f => ({ ...f, vendible: e.target.checked }))} /> 🏷️ Se puede vender (producto terminado)
+            <input type="checkbox" checked={!!formMP.vendible} onChange={e => setFormMP(f => ({ ...f, vendible: e.target.checked }))} /> <Tag size={14} aria-hidden="true" style={{ display: 'inline', verticalAlign: '-2px' }} /> Se puede vender (producto terminado)
           </label>
           {formMP.vendible && (
-            <div style={{ marginTop: 8 }}>
-              <label className="form-label">Precio de venta</label>
-              <MoneyInput value={formMP.precio_venta} onChange={v => setFormMP(f => ({ ...f, precio_venta: v }))} />
-              <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Como la fabricas tú, lo ideal es crearla como <strong>ficha de producto</strong> para configurar sus costos. Desde ahí se vuelve producto terminado y se sincroniza con Alegra.</small>
-              <div style={{ marginTop: 8 }}>
-                <button type="button" className="btn btn-sm btn-dorado" disabled={!formMP.nombre.trim()} onClick={() => navigate('/costos', { state: { nuevaFichaNombre: formMP.nombre.trim(), nuevaFichaPrecio: parseFloat(formMP.precio_venta) || 0 } })}>📋 Crear ficha de producto</button>
-              </div>
-            </div>
+            <small style={{ display: 'block', marginTop: 6, color: 'var(--texto-suave)', fontSize: '0.75rem' }}>Los <strong>costos y el precio de venta</strong> se definen en <strong>Fichas de Productos</strong> → marca "Calcular costos de una MP vendible" y elige esta MP. Desde ahí pasa a producto terminado y se sincroniza con Alegra.</small>
           )}
         </div>
         <div className="form-grid-2">
@@ -479,7 +475,7 @@ export default function Inventario() {
       </Modal>
 
       {/* Modal Movimiento */}
-      <Modal open={modalMov} onClose={() => setModalMov(false)} title={`📦 ${formMov.tipo === 'entrada' ? 'Entrada' : formMov.tipo === 'salida' ? 'Salida' : 'Movimiento'} de Inventario`}
+      <Modal open={modalMov} onClose={() => setModalMov(false)} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Package size={18} aria-hidden="true" /> {formMov.tipo === 'entrada' ? 'Entrada' : formMov.tipo === 'salida' ? 'Salida' : 'Movimiento'} de Inventario</span>}
         footer={
           <>
             <button className="btn btn-secondary" onClick={() => setModalMov(false)}>Cancelar</button>
@@ -555,7 +551,7 @@ export default function Inventario() {
       </Modal>
 
       {/* Modal Categorías */}
-      <Modal open={modalCats} onClose={() => setModalCats(false)} title="🏷 Gestionar Categorías"
+      <Modal open={modalCats} onClose={() => setModalCats(false)} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Tags size={18} aria-hidden="true" /> Gestionar Categorías</span>}
         footer={<button className="btn btn-secondary" onClick={() => setModalCats(false)}>Cerrar</button>}
       >
         <div style={{ display: 'flex', gap: 6, marginBottom: 16 }}>
@@ -580,9 +576,9 @@ export default function Inventario() {
                           <button className="btn btn-xs btn-secondary" onClick={() => {
                             pedir(`Renombrar "${nombre}" a:`, { title: 'Renombrar categoría', defaultValue: nombre })
                               .then(nuevo => { if (nuevo && nuevo.trim() && nuevo.trim() !== nombre) renameCategoria.mutate({ viejo: nombre, nuevo }) })
-                          }}>✏ Renombrar</button>
+                          }}><Ico as={Pencil} size={13} />Renombrar</button>
                           <button className="btn btn-xs btn-danger" disabled={uso > 0} title={uso > 0 ? 'En uso, no se puede eliminar' : 'Eliminar'}
-                            onClick={() => confirmar(`¿Eliminar categoría "${nombre}"?`).then(ok => ok && deleteCategoria.mutate({ nombre }))}>✕</button>
+                            onClick={() => confirmar(`¿Eliminar categoría "${nombre}"?`).then(ok => ok && deleteCategoria.mutate({ nombre }))}><X size={13} aria-hidden="true" /></button>
                         </div>
                       </td>
                     </tr>
@@ -606,7 +602,7 @@ export default function Inventario() {
               <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>
                 Las salidas consumen primero el lote <strong>más próximo a vencer / más antiguo</strong> (PEPS).
                 Saldo en lotes: <strong>{fNum(totalLotes)} {lotesMP.unidad}</strong>.
-                {desfase !== 0 && <span style={{ color: 'var(--rojo)' }}> ⚠ Difiere del stock general ({fNum(lotesMP.stock || 0)}) en {fNum(desfase)}. Ajusta con una entrada/salida.</span>}
+                {desfase !== 0 && <span style={{ color: 'var(--rojo)', display: 'inline-flex', alignItems: 'center', gap: 3 }}> <AlertTriangle size={12} aria-hidden="true" /> Difiere del stock general ({fNum(lotesMP.stock || 0)}) en {fNum(desfase)}. Ajusta con una entrada/salida.</span>}
               </div>
               <div className="table-wrap">
                 <table>
@@ -660,7 +656,7 @@ export default function Inventario() {
                 {Object.entries(histMP.extra).map(([k, v]) => <span key={k} className="badge badge-gris" style={{ marginRight: 6 }}>{k}: {v}</span>)}
               </div>
             )}
-            <div className="card-title" style={{ fontSize: '0.95rem' }}>📋 Movimientos ({histMovs.length})</div>
+            <div className="card-title" style={{ fontSize: '0.95rem' }}><Ico as={ClipboardList} size={15} />Movimientos ({histMovs.length})</div>
             <div className="table-wrap">
               <table>
                 <thead><tr><th>Fecha</th><th>Tipo</th><th>Cantidad</th><th>Lote</th><th>Vence</th><th>Responsable</th><th>Obs</th><th>Otros</th></tr></thead>

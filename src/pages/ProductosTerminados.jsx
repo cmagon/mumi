@@ -9,6 +9,13 @@ import Modal from '../components/ui/Modal'
 import MoneyInput from '../components/ui/MoneyInput'
 import Cargando from '../components/ui/Cargando'
 import { UNIDADES_ALEGRA, UNSPSC_ALIMENTOS } from '../lib/alegraCatalogos'
+import {
+  Settings, Plug, DollarSign, Link2, ClipboardList, Shuffle, Plus, Tags, Scale, ScrollText,
+  Pencil, X, RefreshCw, Check, AlertTriangle, FlaskConical, Unplug, RotateCw, BarChart3, TrendingUp, Package,
+} from 'lucide-react'
+import { del } from 'idb-keyval'
+
+const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const EMPTY_PROD = { nombre: '', sku: '', alegra_item_id: '', tipo: 'base', stock_min: '', costo_unitario: '', precio_mayor: '', precio_detal: '', imagen_url: '', activo: true, unidad_medida: 'unit', codigo_unspsc: '', categoria_alegra_id: '', categoria_alegra_nombre: '', surtido_a: '', surtido_b: '' }
 const EMPTY_AJUSTE = { tipo: 'entrada', cantidad: '', lote: '', motivo: '' }
@@ -43,11 +50,31 @@ export default function ProductosTerminados() {
   const { data: productos = [], isFetching: fetchingProds, isSuccess: okProds } = useQuery({
     queryKey: ['finished_products'],
     queryFn: async () => { const { data } = await supabase.from('finished_products').select('*').order('nombre'); return data || [] },
-    staleTime: 1000 * 60 * 5, refetchOnWindowFocus: false,
+    staleTime: 1000 * 60 * 5, refetchOnWindowFocus: false, refetchOnMount: 'always',
   })
   const { data: movimientos = [] } = useQuery({
     queryKey: ['finished_movements'],
     queryFn: async () => { const { data } = await supabase.from('finished_movements').select('*').order('created_at', { ascending: false }).limit(500); return data || [] },
+  })
+  // Movimientos para el ANÁLISIS mensual (producido vs vendido). Sin límite pequeño.
+  const { data: movAnalisis = [] } = useQuery({
+    queryKey: ['finished_mov_analisis'],
+    queryFn: async () => { const { data } = await supabase.from('finished_movements').select('finished_id, cantidad, tipo, origen, fecha, created_at').order('created_at', { ascending: false }).limit(8000); return data || [] },
+    enabled: esAdmin, staleTime: 5 * 60 * 1000,
+  })
+  const [tab, setTab] = useState('lista')
+  const [anioAn, setAnioAn] = useState(new Date().getFullYear())
+  // Histórico de ventas de Alegra (facturas de todos los años) para el análisis y la proyección
+  const { data: alegraVentas = { ventas: {} }, isFetching: cargandoVentas } = useQuery({
+    queryKey: ['alegra_ventas_hist'],
+    queryFn: async () => { const { data } = await supabase.functions.invoke('alegra-ventas', { body: {} }); return data || { ventas: {} } },
+    enabled: esAdmin && tab === 'analisis', retry: false, staleTime: 30 * 60 * 1000,
+  })
+  // Materias primas (para calcular la MP necesaria según la proyección)
+  const { data: rawMps = [] } = useQuery({
+    queryKey: ['raw_materials_min'],
+    queryFn: async () => { const { data } = await supabase.from('raw_materials').select('id, nombre, unidad'); return data || [] },
+    enabled: esAdmin, staleTime: 5 * 60 * 1000,
   })
   // Categorías de Alegra (para asignarlas a los productos)
   const { data: alegraCategorias = [] } = useQuery({
@@ -55,17 +82,30 @@ export default function ProductosTerminados() {
     queryFn: async () => { const { data } = await supabase.functions.invoke('alegra-categories', { body: {} }); return data?.items || [] },
     enabled: esAdmin, retry: false, staleTime: 5 * 60 * 1000,
   })
+  // Stock que tiene Alegra (para comparar y verificar sincronía). NO bloquea la tabla si Alegra falla.
+  const { data: alegraStock = {}, isFetching: cargandoAlegraStock } = useQuery({
+    queryKey: ['alegra_items_stock'],
+    queryFn: async () => {
+      const { data } = await supabase.functions.invoke('alegra-items', { body: {} })
+      const map = {}
+      for (const it of (data?.items || [])) if (it?.id != null) map[String(it.id)] = it.available
+      return map
+    },
+    enabled: esAdmin, retry: false, staleTime: 2 * 60 * 1000, refetchOnWindowFocus: false,
+  })
   // Fichas de producto: el costo del surtido se promedia desde el costo de la FICHA (no del catálogo)
   const { data: fichas = [], isFetching: fetchingFichas, isSuccess: okFichas } = useQuery({
     queryKey: ['fichas_costo_terminado'],
-    queryFn: async () => { const { data } = await supabase.from('products_costing').select('id, nombre, tipo, costo_final, precio_mayor, precio_detal, activo, imagen_url').order('nombre'); return data || [] },
-    staleTime: 1000 * 60 * 5, refetchOnWindowFocus: false,
+    queryFn: async () => { const { data } = await supabase.from('products_costing').select('id, nombre, tipo, costo_final, precio_mayor, precio_detal, activo, imagen_url, mp_id, ingredientes, rendimiento, desperdicio, peso_unidad').order('nombre'); return data || [] },
+    staleTime: 1000 * 60 * 5, refetchOnWindowFocus: false, refetchOnMount: 'always',
   })
   // Loader SOLO en la primera carga (hasta tener datos frescos: stock + estado de Alegra).
   // Una vez cargado se queda en caché y no vuelve a mostrar el loader en refrescos en segundo plano.
   const [yaCargo, setYaCargo] = useState(false)
   useEffect(() => { if (okProds && okFichas && !fetchingProds && !fetchingFichas) setYaCargo(true) }, [okProds, okFichas, fetchingProds, fetchingFichas])
   const cargandoProds = !yaCargo
+  // Recargar purgando la caché persistida (IndexedDB) y volviendo a pedir todo desde la app
+  const recargarPurgando = async () => { try { await del('mumi-query-cache') } catch { /* ignore */ } window.location.reload() }
   // Materias primas marcadas como vendibles (para crearlas como producto terminado)
   const { data: mpsVendibles = [] } = useQuery({
     queryKey: ['mps_vendibles'],
@@ -73,7 +113,12 @@ export default function ProductosTerminados() {
   })
   const [modalMp, setModalMp] = useState(false)
   const [modalFicha, setModalFicha] = useState(false)
-  const mpsDisponibles = mpsVendibles.filter(m => !productos.some(p => p.mp_id === m.id || (p.nombre || '').toLowerCase() === (m.nombre || '').toLowerCase()))
+  // Ficha MP (con costos) por materia prima: la MP solo puede agregarse a terminados si YA pasó por Fichas de Productos
+  const fichaMpDe = (mpId) => fichas.find(f => f.tipo === 'mp' && String(f.mp_id) === String(mpId) && f.activo !== false)
+  const mpsDisponibles = mpsVendibles.filter(m => fichaMpDe(m.id) && !productos.some(p => p.mp_id === m.id || (p.nombre || '').toLowerCase() === (m.nombre || '').toLowerCase()))
+  // Los productos tipo 'mp' reflejan el stock de la materia prima (Inventario MP), no un stock propio
+  const mpStockById = Object.fromEntries(mpsVendibles.map(m => [m.id, Number(m.stock) || 0]))
+  const stockReal = (p) => (p.tipo === 'mp' && p.mp_id != null && mpStockById[p.mp_id] != null) ? mpStockById[p.mp_id] : Number(p.stock || 0)
   // Fichas ACTIVAS (vendibles) que aún no están en el catálogo de terminados
   const fichasDisponibles = fichas.filter(f => (f.tipo || '') !== 'subproducto' && f.activo !== false &&
     !productos.some(p => p.product_id === f.id || (p.nombre || '').toLowerCase() === (f.nombre || '').toLowerCase()))
@@ -93,9 +138,13 @@ export default function ProductosTerminados() {
   })
   const crearDesdeMp = useMutation({
     mutationFn: async (m) => {
+      const f = fichaMpDe(m.id)   // ficha de MP con costos ya asignados
+      if (!f) throw new Error('Esta MP aún no tiene ficha de costos creada. Créala primero en Fichas de Productos.')
       const { error } = await supabase.from('finished_products').insert({
-        nombre: m.nombre, tipo: 'mp', mp_id: m.id,
-        costo_unitario: Math.round(Number(m.precio) || 0), precio_mayor: Math.round(Number(m.precio_venta) || 0),
+        nombre: f.nombre || m.nombre, tipo: 'mp', mp_id: m.id, product_id: f.id,
+        costo_unitario: Math.round(Number(f.costo_final) || Number(m.precio) || 0),
+        precio_mayor: Math.round(Number(f.precio_mayor) || Number(m.precio_venta) || 0),
+        precio_detal: Math.round(Number(f.precio_detal) || 0),
         stock: Number(m.stock) || 0, activo: true,
       })
       if (error) throw error
@@ -406,13 +455,18 @@ export default function ProductosTerminados() {
       <div className="page-header">
         <h1 className="page-title">Producto Terminado</h1>
         <div className="page-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={abrirConfig}>⚙ Configurar Alegra</button>}
-          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={abrirEnlace}>🔌 Enlazar con Alegra</button>}
-          <button className="btn btn-secondary btn-sm" onClick={() => actualizarCostos.mutate()} disabled={actualizarCostos.isPending}>{actualizarCostos.isPending ? 'Actualizando...' : '💲 Actualizar costos desde fichas'}</button>
-          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => sincronizarTodo.mutate()} disabled={sincronizarTodo.isPending}>{sincronizarTodo.isPending ? 'Sincronizando...' : '🔗 Sincronizar todo con Alegra'}</button>}
-          {fichasDisponibles.length > 0 && <button className="btn btn-secondary btn-sm" onClick={() => setModalFicha(true)}>📋 Agregar producto ({fichasDisponibles.length})</button>}
-          <button className="btn btn-secondary btn-sm" onClick={() => { setSelGen(baseProds.map(p => p.id)); setModalGen(true) }}>🔀 Generar surtidos</button>
-          <button className="btn btn-primary btn-sm" onClick={() => { setPForm(EMPTY_PROD); setPEditId(null); setModalProd(true) }}>+ Nuevo producto</button>
+          <button className="btn btn-secondary btn-sm" onClick={recargarPurgando} title="Recargar datos limpiando la caché"><Ico as={RotateCw} size={14} />Recargar</button>
+          {/* El resto de acciones se ocultan mientras se cargan los datos reales (evita botones erróneos) */}
+          {!cargandoProds && <>
+          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={abrirConfig}><Ico as={Settings} size={14} />Configurar Alegra</button>}
+          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={abrirEnlace}><Ico as={Plug} size={14} />Enlazar con Alegra</button>}
+          <button className="btn btn-secondary btn-sm" onClick={() => actualizarCostos.mutate()} disabled={actualizarCostos.isPending}>{actualizarCostos.isPending ? 'Actualizando...' : <><Ico as={DollarSign} size={14} />Actualizar costos desde fichas</>}</button>
+          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => sincronizarTodo.mutate()} disabled={sincronizarTodo.isPending}>{sincronizarTodo.isPending ? 'Sincronizando...' : <><Ico as={Link2} size={14} />Sincronizar todo con Alegra</>}</button>}
+          {fichasDisponibles.length > 0 && <button className="btn btn-secondary btn-sm" onClick={() => setModalFicha(true)}><Ico as={ClipboardList} size={14} />Agregar producto ({fichasDisponibles.length})</button>}
+          {mpsDisponibles.length > 0 && <button className="btn btn-secondary btn-sm" onClick={() => setModalMp(true)}><Ico as={FlaskConical} size={14} />Agregar MP vendible ({mpsDisponibles.length})</button>}
+          <button className="btn btn-secondary btn-sm" onClick={() => { setSelGen(baseProds.map(p => p.id)); setModalGen(true) }}><Ico as={Shuffle} size={14} />Generar surtidos</button>
+          <button className="btn btn-primary btn-sm" onClick={() => { setPForm(EMPTY_PROD); setPEditId(null); setModalProd(true) }}><Ico as={Plus} size={14} />Nuevo producto</button>
+          </>}
         </div>
       </div>
 
@@ -420,48 +474,63 @@ export default function ProductosTerminados() {
         Catálogo y stock de productos vendibles (base y surtidos). El stock sube al aprobar producción y baja al facturar en Alegra. Aquí puedes <strong>ajustar el stock manualmente</strong> (se sincroniza con Alegra) y <strong>editar los nombres</strong> que luego se eligen al empacar surtidos.
       </div>
 
+      <div className="tabs">
+        <button className={`tab-btn ${tab === 'lista' ? 'active' : ''}`} onClick={() => setTab('lista')}>Stock</button>
+        {esAdmin && <button className={`tab-btn ${tab === 'analisis' ? 'active' : ''}`} onClick={() => setTab('analisis')}>Análisis mensual</button>}
+      </div>
+
+      {tab === 'lista' && (
       <div className="card">
         <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          🏷️ Stock de productos terminados
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Tags size={16} aria-hidden="true" /> Stock de productos terminados</span>
           <input className="form-control" style={{ marginLeft: 'auto', maxWidth: 240 }} placeholder="Buscar nombre o SKU..." value={buscar} onChange={e => setBuscar(e.target.value)} />
         </div>
         {cargandoProds ? <Cargando texto="Cargando productos terminados…" /> : (
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Producto</th><th className="col-opcional-2">Tipo</th><th className="col-opcional">SKU</th><th className="col-opcional-2">Alegra</th><th className="td-number">Stock</th><th className="td-number col-opcional">Costo unit.</th><th className="col-opcional-2">Estado</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>Producto</th><th className="col-opcional-2">Tipo</th><th className="col-opcional">SKU</th><th className="col-opcional-2">Alegra</th><th className="td-number">Disponible</th><th className="td-number">Stock Alegra</th><th className="td-number col-opcional">Costo unit.</th><th className="col-opcional-2">Estado</th><th>Acciones</th></tr></thead>
             <tbody>
               {filtrados.length === 0
-                ? <tr><td colSpan={8} className="empty-table">Sin productos terminados.</td></tr>
+                ? <tr><td colSpan={9} className="empty-table">Sin productos terminados.</td></tr>
                 : filtrados.map(p => {
-                    const bajo = (p.stock_min || 0) > 0 && Number(p.stock || 0) <= Number(p.stock_min || 0)
+                    const reservado = Number(p.reservado || 0)
+                    const totalStock = stockReal(p)
+                    const disp = totalStock - reservado
+                    const bajo = (p.stock_min || 0) > 0 && disp <= Number(p.stock_min || 0)
                     return (
                       <tr key={p.id} style={p.activo === false ? { opacity: 0.55 } : undefined}>
                         <td><strong>{p.nombre}</strong></td>
-                        <td className="col-opcional-2"><span className={`badge ${p.tipo === 'surtido' ? 'badge-dorado' : p.tipo === 'mp' ? 'badge-gris' : 'badge-azul'}`}>{p.tipo === 'surtido' ? '🔀 Surtido' : p.tipo === 'mp' ? '🧪 MP' : 'Base'}</span></td>
+                        <td className="col-opcional-2"><span className={`badge ${p.tipo === 'surtido' ? 'badge-dorado' : p.tipo === 'mp' ? 'badge-gris' : 'badge-azul'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>{p.tipo === 'surtido' ? <><Shuffle size={11} aria-hidden="true" /> Surtido</> : p.tipo === 'mp' ? <><FlaskConical size={11} aria-hidden="true" /> MP</> : 'Base'}</span></td>
                         <td className="col-opcional">{p.sku || '—'}</td>
-                        <td className="col-opcional-2">{p.alegra_item_id ? '✓' : '—'}</td>
-                        <td className="td-number"><strong style={{ color: bajo ? 'var(--rojo)' : undefined }}>{fNum(p.stock)}</strong>{bajo && <div style={{ fontSize: '0.65rem', color: 'var(--rojo)' }}>⚠ bajo</div>}</td>
+                        <td className="col-opcional-2">{p.alegra_item_id ? <Check size={14} aria-hidden="true" style={{ color: 'var(--selva)' }} /> : '—'}</td>
+                        <td className="td-number"><strong style={{ color: bajo ? 'var(--rojo)' : undefined }}>{fNum(disp)}</strong>{bajo && <div style={{ fontSize: '0.65rem', color: 'var(--rojo)', display: 'flex', alignItems: 'center', gap: 2 }}><AlertTriangle size={10} aria-hidden="true" /> bajo</div>}{reservado > 0 && <div style={{ fontSize: '0.62rem', color: 'var(--tierra)' }}>Reservado: {fNum(reservado)} · Total: {fNum(totalStock)}</div>}{p.tipo === 'mp' && <div style={{ fontSize: '0.6rem', color: 'var(--texto-suave)' }}>stock de MP</div>}</td>
+                        {(() => {
+                          if (!p.alegra_item_id) return <td className="td-number" style={{ color: 'var(--texto-suave)' }}>—</td>
+                          const av = alegraStock[String(p.alegra_item_id)]
+                          if (av === undefined) return <td className="td-number" style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>{cargandoAlegraStock ? '…' : 's/d'}</td>
+                          const ok = Math.round(Number(av)) === Math.round(Number(p.stock || 0))
+                          return <td className="td-number"><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: ok ? 'var(--selva)' : 'var(--tierra)' }}>{fNum(av)} {ok ? <Check size={12} aria-hidden="true" /> : <AlertTriangle size={12} aria-hidden="true" />}</span></td>
+                        })()}
                         {(() => {
                           const costoMostrar = p.tipo === 'base' ? (Number(p.costo_unitario) || costoFicha(p)) : (Number(p.costo_unitario) || 0)
                           const desync = p.tipo === 'base' && costoFicha(p) > 0 && Math.round(costoFicha(p)) !== Math.round(Number(p.costo_unitario) || 0)
                           return (
                             <td className="td-number col-opcional">$ {costoMostrar.toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
-                              {p.tipo === 'base' && <div style={{ fontSize: '0.62rem', color: desync ? 'var(--tierra)' : 'var(--texto-suave)' }}>{desync ? '⚠ ficha (sin guardar)' : 'desde ficha'}</div>}
+                              {p.tipo === 'base' && <div style={{ fontSize: '0.62rem', color: desync ? 'var(--tierra)' : 'var(--texto-suave)', display: 'flex', alignItems: 'center', gap: 2 }}>{desync ? <><AlertTriangle size={10} aria-hidden="true" /> ficha (sin guardar)</> : 'desde ficha'}</div>}
                             </td>
                           )
                         })()}
                         <td className="col-opcional-2">{p.activo === false ? <span className="badge badge-gris">Inactivo</span> : <span className="badge badge-verde">Activo</span>}</td>
                         <td>
                           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                            <button className="btn btn-xs btn-primary" onClick={() => { setModalAjuste(p); setAForm(EMPTY_AJUSTE) }}>⚖ Ajustar</button>
-                            <button className="btn btn-xs btn-secondary" onClick={() => setKardexDe(p)}>📜 Kardex</button>
-                            {!p.alegra_item_id && esAdmin && <button className="btn btn-xs btn-dorado" title="Crear este producto en Alegra (inventariable, con todos sus datos)" disabled={crearEnAlegra.isPending} onClick={() => confirmar(`¿Crear "${p.nombre}" en Alegra como producto inventariable?\n\nSolo hazlo si NO existe ya en Alegra (para no duplicar).`).then(ok => ok && crearEnAlegra.mutate(p))}>➕ Crear en Alegra</button>}
-                            <button className="btn btn-xs btn-secondary" title={p.alegra_item_id ? 'Sincronizar stock y costo con Alegra' : 'Falta el ID del ítem en Alegra'} disabled={!p.alegra_item_id || sincronizarUno.isPending} onClick={() => sincronizarUno.mutate(p)}>🔗 Sincronizar</button>
-                            {p.alegra_item_id && esAdmin && <button className="btn btn-xs btn-secondary" title="Quitar el enlace con Alegra (para re-enlazar o crear de nuevo)" disabled={desenlazar.isPending} onClick={() => confirmar(`¿Desenlazar "${p.nombre}" de Alegra?\nNo borra nada en Alegra; solo quita el enlace en la app.`).then(ok => ok && desenlazar.mutate(p))}>🔌✕ Desenlazar</button>}
-                            <button className="btn btn-xs btn-secondary" onClick={() => { setPForm({ nombre: p.nombre, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '', tipo: p.tipo || 'base', stock_min: p.stock_min || '', costo_unitario: p.costo_unitario || '', precio_mayor: p.precio_mayor || '', precio_detal: p.precio_detal || '', imagen_url: p.imagen_url || '', activo: p.activo !== false, unidad_medida: p.unidad_medida || 'unit', codigo_unspsc: p.codigo_unspsc || '', categoria_alegra_id: p.categoria_alegra_id || '', categoria_alegra_nombre: p.categoria_alegra_nombre || '', surtido_a: p.surtido_a || '', surtido_b: p.surtido_b || '' }); setPEditId(p.id); setModalProd(true) }}>✏</button>
+                            <button className="btn btn-xs btn-primary" title="Ajustar stock" onClick={() => { setModalAjuste(p); setAForm(EMPTY_AJUSTE) }}><Scale size={13} aria-hidden="true" /></button>
+                            <button className="btn btn-xs btn-secondary" title="Kardex (movimientos)" onClick={() => setKardexDe(p)}><ScrollText size={13} aria-hidden="true" /></button>
+                            {!p.alegra_item_id && esAdmin && <button className="btn btn-xs btn-dorado" title="Crear en Alegra (inventariable, con todos sus datos). Solo si NO existe ya allá." disabled={crearEnAlegra.isPending} onClick={() => confirmar(`¿Crear "${p.nombre}" en Alegra como producto inventariable?\n\nSolo hazlo si NO existe ya en Alegra (para no duplicar).`).then(ok => ok && crearEnAlegra.mutate(p))}><Plus size={13} aria-hidden="true" /> Crear en Alegra</button>}
+                            <button className="btn btn-xs btn-secondary" title={p.alegra_item_id ? 'Sincronizar stock y costo con Alegra' : 'Falta el ID del ítem en Alegra'} disabled={!p.alegra_item_id || sincronizarUno.isPending} onClick={() => sincronizarUno.mutate(p)}><RefreshCw size={13} aria-hidden="true" /></button>
+                            <button className="btn btn-xs btn-secondary" onClick={() => { setPForm({ nombre: p.nombre, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '', tipo: p.tipo || 'base', stock_min: p.stock_min || '', costo_unitario: p.costo_unitario || '', precio_mayor: p.precio_mayor || '', precio_detal: p.precio_detal || '', imagen_url: p.imagen_url || '', activo: p.activo !== false, unidad_medida: p.unidad_medida || 'unit', codigo_unspsc: p.codigo_unspsc || '', categoria_alegra_id: p.categoria_alegra_id || '', categoria_alegra_nombre: p.categoria_alegra_nombre || '', surtido_a: p.surtido_a || '', surtido_b: p.surtido_b || '' }); setPEditId(p.id); setModalProd(true) }} title="Editar"><Pencil size={13} aria-hidden="true" /></button>
                             {esAdmin && (p.alegra_item_id
-                              ? <button className="btn btn-xs btn-danger" disabled title="Está enlazado a Alegra. Desenlázalo primero para poder eliminarlo." style={{ opacity: 0.5 }}>✕</button>
-                              : <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Quitar "${p.nombre}" SOLO del catálogo de Producto Terminado?\n\nEsto NO elimina la ficha de producto ni su costo. Podrás recrearlo desde la ficha cuando quieras.`).then(ok => ok && delProd.mutate(p.id))}>✕</button>)}
+                              ? <button className="btn btn-xs btn-danger" disabled title="Está enlazado a Alegra. Desenlázalo primero para poder eliminarlo." style={{ opacity: 0.5 }}><X size={13} aria-hidden="true" /></button>
+                              : <button className="btn btn-xs btn-danger" title="Quitar del catálogo" onClick={() => confirmar(`¿Quitar "${p.nombre}" SOLO del catálogo de Producto Terminado?\n\nEsto NO elimina la ficha de producto ni su costo. Podrás recrearlo desde la ficha cuando quieras.`).then(ok => ok && delProd.mutate(p.id))}><X size={13} aria-hidden="true" /></button>)}
                           </div>
                         </td>
                       </tr>
@@ -472,10 +541,178 @@ export default function ProductosTerminados() {
         </div>
         )}
       </div>
+      )}
+
+      {tab === 'analisis' && (() => {
+        const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
+        const nombreFP = Object.fromEntries(productos.map(p => [p.id, p.nombre]))
+        const mesDe = (m) => parseInt(String(m.fecha || m.created_at || '').slice(5, 7), 10) - 1
+        const anioDe = (m) => String(m.fecha || m.created_at || '').slice(0, 4)
+        const ventasAle = alegraVentas?.ventas || {}
+        const usarAlegra = Object.keys(ventasAle).length > 0   // hay histórico descargado de Alegra
+        // Años disponibles: de la producción registrada + del histórico de Alegra
+        const aniosVentas = Object.values(ventasAle).flatMap(v => Object.keys(v)).map(ym => ym.slice(0, 4))
+        const anios = [...new Set([...movAnalisis.map(anioDe), ...aniosVentas].filter(Boolean))].sort((a, b) => b.localeCompare(a))
+        // Producido por finished_id (del año elegido)
+        const prodByFid = {}
+        for (const m of movAnalisis) {
+          if (String(anioDe(m)) !== String(anioAn)) continue
+          if (m.tipo === 'entrada' && m.origen === 'produccion') {
+            const mes = mesDe(m); if (mes < 0 || mes > 11) continue
+            const arr = prodByFid[m.finished_id] || Array(12).fill(0); arr[mes] += Number(m.cantidad) || 0; prodByFid[m.finished_id] = arr
+          }
+        }
+        // Vendido: del histórico de Alegra (por SKU) si está; si no, de finished_movements (salidas alegra)
+        const vendFallback = {}
+        if (!usarAlegra) for (const m of movAnalisis) {
+          if (String(anioDe(m)) !== String(anioAn)) continue
+          if (m.tipo === 'salida' && m.origen === 'alegra') { const mes = mesDe(m); if (mes >= 0 && mes < 12) { const a = vendFallback[m.finished_id] || Array(12).fill(0); a[mes] += Number(m.cantidad) || 0; vendFallback[m.finished_id] = a } }
+        }
+        const rows = productos.map(p => {
+          const prod = prodByFid[p.id] || Array(12).fill(0)
+          const vend = Array(12).fill(0)
+          if (usarAlegra) {
+            const vmap = (p.alegra_item_id && ventasAle[String(p.alegra_item_id)]) || (p.sku && ventasAle[p.sku]) || {}
+            for (const [ym, q] of Object.entries(vmap)) { if (ym.slice(0, 4) === String(anioAn)) { const mes = parseInt(ym.slice(5, 7), 10) - 1; if (mes >= 0 && mes < 12) vend[mes] += Number(q) || 0 } }
+          } else { const fb = vendFallback[p.id]; if (fb) for (let i = 0; i < 12; i++) vend[i] += fb[i] }
+          // Promedio mensual con TODA la historia de Alegra (todos los años) → proyección más estable
+          const vmapFull = (p.alegra_item_id && ventasAle[String(p.alegra_item_id)]) || (p.sku && ventasAle[p.sku]) || {}
+          const mesesHist = Object.keys(vmapFull).length
+          const promHist = mesesHist > 0 ? Object.values(vmapFull).reduce((a, b) => a + (Number(b) || 0), 0) / mesesHist : 0
+          return { nombre: p.nombre, prod, vend, promHist, tProd: prod.reduce((a, b) => a + b, 0), tVend: vend.reduce((a, b) => a + b, 0) }
+        }).filter(r => r.tProd > 0 || r.tVend > 0).sort((a, b) => b.tVend - a.tVend)
+        const hoy = new Date()
+        const esAnioActual = String(anioAn) === String(hoy.getFullYear())
+        const mesesTranscurridos = esAnioActual ? (hoy.getMonth() + 1) : 12
+        const restoAnio = esAnioActual ? (11 - hoy.getMonth()) : 0
+        const totProd = MESES.map((_, i) => rows.reduce((s, r) => s + r.prod[i], 0))
+        const totVend = MESES.map((_, i) => rows.reduce((s, r) => s + r.vend[i], 0))
+        // ===== MP necesaria según la proyección (ingredientes principales) =====
+        const parseIngs = (v) => { try { return typeof v === 'string' ? JSON.parse(v) : (Array.isArray(v) ? v : []) } catch { return [] } }
+        const rawById = Object.fromEntries(rawMps.map(m => [String(m.id), m]))
+        // Promedio mensual para proyección: usa TODA la historia de Alegra si existe; si no, el año en curso.
+        const promDe = Object.fromEntries(rows.map(r => [r.nombre, r.promHist > 0 ? r.promHist : (mesesTranscurridos > 0 ? r.tVend / mesesTranscurridos : 0)]))
+        const mpNeed = {}
+        // Acumula la MP de una ficha para 'unidsMes' unidades/mes proyectadas de esa ficha (dulce base).
+        const acumularMpFicha = (f, unidsMes) => {
+          if (!f || !(unidsMes > 0)) return
+          const ings = parseIngs(f.ingredientes).filter(i => i.mpId && (parseFloat(i.cantidad) || 0) > 0)
+          const totalMezcla = ings.reduce((s, i) => s + (parseFloat(i.cantidad) || 0), 0)
+          const rend = parseFloat(f.rendimiento) || 62, desp = parseFloat(f.desperdicio) || 2, pu = parseFloat(f.peso_unidad) || 1000
+          const unidsBache = pu > 0 ? totalMezcla * (rend / 100) * (1 - desp / 100) / pu : 0
+          if (!(unidsBache > 0)) return
+          for (const i of ings) {
+            const gMes = ((parseFloat(i.cantidad) || 0) / unidsBache) * unidsMes
+            const key = String(i.mpId); const raw = rawById[key]
+            const cur = mpNeed[key] || { nombre: raw?.nombre || i.nombre || 'MP', unidad: raw?.unidad || 'Kg', gMes: 0 }
+            cur.gMes += gMes; mpNeed[key] = cur
+          }
+        }
+        const fichaPorId = Object.fromEntries(fichas.map(f => [String(f.id), f]))
+        for (const p of productos) {
+          const prom = promDe[p.nombre] || 0
+          if (!(prom > 0)) continue
+          if (p.tipo === 'surtido') {
+            // El surtido no tiene ficha propia: se explota en sus dos dulces base (surtido_a/surtido_b).
+            // Cada caja de surtido combina ambos sabores → media unidad de cada ficha base por caja vendida.
+            const fa = fichaPorId[String(p.surtido_a)], fb = fichaPorId[String(p.surtido_b)]
+            if (fa) acumularMpFicha(fa, prom * 0.5)
+            if (fb) acumularMpFicha(fb, prom * 0.5)
+            continue
+          }
+          const f = fichas.find(x => x.id === p.product_id) || fichas.find(x => (x.nombre || '').toLowerCase() === (p.nombre || '').toLowerCase())
+          acumularMpFicha(f, prom)
+        }
+        const mpRows = Object.values(mpNeed).sort((a, b) => b.gMes - a.gMes)
+        const convMp = (gMes, mult, unidad) => { const g = gMes * mult; return ['Kg', 'Litro'].includes(unidad) ? `${fNum(Math.round(g / 1000 * 100) / 100)} ${unidad}` : `${fNum(Math.round(g))} ${unidad || 'u'}` }
+        return (
+          <>
+            <div className="card">
+              <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><BarChart3 size={16} aria-hidden="true" /> Producido vs Vendido por mes</span>
+                <select className="form-control" style={{ width: 110, marginLeft: 'auto' }} value={anioAn} onChange={e => setAnioAn(Number(e.target.value))}>
+                  {(anios.length ? anios : [String(anioAn)]).map(a => <option key={a} value={a}>{a}</option>)}
+                </select>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Producto</th>{MESES.map(m => <th key={m} className="td-number">{m}</th>)}<th className="td-number">Total</th></tr></thead>
+                  <tbody>
+                    {rows.length === 0 ? <tr><td colSpan={14} className="empty-table">Sin datos de {anioAn}</td></tr> : rows.map(r => (
+                      <tr key={r.nombre}>
+                        <td><strong>{r.nombre}</strong></td>
+                        {MESES.map((_, i) => <td key={i} className="td-number" style={{ fontSize: '0.72rem' }}><span style={{ color: 'var(--selva)' }}>{r.prod[i] || '·'}</span>{' / '}<span style={{ color: 'var(--tierra)' }}>{r.vend[i] || '·'}</span></td>)}
+                        <td className="td-number"><strong style={{ color: 'var(--selva)' }}>{fNum(r.tProd)}</strong> / <strong style={{ color: 'var(--tierra)' }}>{fNum(r.tVend)}</strong></td>
+                      </tr>
+                    ))}
+                    {rows.length > 0 && <tr style={{ background: 'rgba(45,90,61,0.06)', fontWeight: 700 }}>
+                      <td>Total</td>{MESES.map((_, i) => <td key={i} className="td-number" style={{ fontSize: '0.72rem' }}><span style={{ color: 'var(--selva)' }}>{totProd[i] || '·'}</span> / <span style={{ color: 'var(--tierra)' }}>{totVend[i] || '·'}</span></td>)}
+                      <td className="td-number">{fNum(totProd.reduce((a, b) => a + b, 0))} / {fNum(totVend.reduce((a, b) => a + b, 0))}</td>
+                    </tr>}
+                  </tbody>
+                </table>
+              </div>
+              <small style={{ color: 'var(--texto-suave)' }}>Verde = <strong>producido</strong> · Marrón = <strong>vendido</strong> (facturas de Alegra). "·" = 0. Las ventas se llenan a medida que Alegra factura.</small>
+            </div>
+
+            <div className="card">
+              <div className="card-title"><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><TrendingUp size={16} aria-hidden="true" /> Proyección de venta</span></div>
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Producto</th><th className="td-number">Prom. mensual</th><th className="td-number">Próx. mes</th><th className="td-number">Trimestre</th><th className="td-number">Semestre</th><th className="td-number">Resto de {anioAn}</th><th className="td-number">Año siguiente</th></tr></thead>
+                  <tbody>
+                    {rows.length === 0 ? <tr><td colSpan={7} className="empty-table">Sin datos</td></tr> : rows.map(r => {
+                      const prom = r.promHist > 0 ? r.promHist : (mesesTranscurridos > 0 ? r.tVend / mesesTranscurridos : 0)
+                      return <tr key={r.nombre}>
+                        <td><strong>{r.nombre}</strong></td>
+                        <td className="td-number">{fNum(Math.round(prom))}</td>
+                        <td className="td-number">{fNum(Math.round(prom))}</td>
+                        <td className="td-number">{fNum(Math.round(prom * 3))}</td>
+                        <td className="td-number">{fNum(Math.round(prom * 6))}</td>
+                        <td className="td-number">{fNum(Math.round(prom * restoAnio))}</td>
+                        <td className="td-number">{fNum(Math.round(prom * 12))}</td>
+                      </tr>
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <small style={{ color: 'var(--texto-suave)' }}>Proyección = promedio mensual de ventas de Alegra sobre <strong>toda la historia disponible</strong> (todos los años facturados) × período.</small>
+            </div>
+
+            <div className="card">
+              <div className="card-title"><span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Package size={16} aria-hidden="true" /> Materia prima necesaria (según proyección)</span></div>
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Materia prima</th><th className="td-number">Próx. mes</th><th className="td-number">Trimestre</th><th className="td-number">Semestre</th><th className="td-number">Resto de {anioAn}</th><th className="td-number">Año siguiente</th></tr></thead>
+                  <tbody>
+                    {mpRows.length === 0 ? <tr><td colSpan={6} className="empty-table">Sin datos suficientes (necesita ventas y fichas con ingredientes vinculados).</td></tr> : mpRows.map((r, k) => (
+                      <tr key={k}>
+                        <td><strong>{r.nombre}</strong></td>
+                        <td className="td-number">{convMp(r.gMes, 1, r.unidad)}</td>
+                        <td className="td-number">{convMp(r.gMes, 3, r.unidad)}</td>
+                        <td className="td-number">{convMp(r.gMes, 6, r.unidad)}</td>
+                        <td className="td-number">{convMp(r.gMes, restoAnio, r.unidad)}</td>
+                        <td className="td-number">{convMp(r.gMes, 12, r.unidad)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <small style={{ color: 'var(--texto-suave)' }}>Estimación de MP (ingredientes vinculados a materia prima) según el promedio mensual de ventas proyectado, considerando rendimiento y desperdicio de cada ficha.</small>
+            </div>
+          </>
+        )
+      })()}
 
       {/* Modal crear/editar producto terminado */}
       <Modal open={modalProd} onClose={() => setModalProd(false)} title={pEditId ? 'Editar producto terminado' : 'Nuevo producto terminado'}
         footer={<>
+          {pEditId && pForm.alegra_item_id && esAdmin && (
+            <button className="btn btn-secondary" style={{ marginRight: 'auto' }} disabled={desenlazar.isPending}
+              onClick={() => confirmar(`¿Desenlazar "${pForm.nombre}" de Alegra?\nNo borra nada en Alegra; solo quita el enlace en la app.`).then(ok => { if (ok) { desenlazar.mutate({ id: pEditId, nombre: pForm.nombre }); setPForm(f => ({ ...f, alegra_item_id: '' })) } })}>
+              <Ico as={Unplug} size={14} />Desenlazar de Alegra
+            </button>
+          )}
           <button className="btn btn-secondary" onClick={() => setModalProd(false)}>Cancelar</button>
           <button className="btn btn-primary" onClick={() => saveProd.mutate()} disabled={saveProd.isPending}>Guardar</button>
         </>}>
@@ -529,7 +766,7 @@ export default function ProductosTerminados() {
           <div className="form-group" style={{ gridColumn: '1 / -1' }}>
             <label className="form-label">Código del producto/servicio (UNSPSC — clasificador DIAN) *</label>
             <input className="form-control" list="dl-unspsc" value={pForm.codigo_unspsc} onChange={e => setPForm(f => ({ ...f, codigo_unspsc: e.target.value }))} placeholder="Elige del catálogo o escribe el código (ej: 50181900)" />
-            <datalist id="dl-unspsc">{UNSPSC_ALIMENTOS.map(u => <option key={u.codigo} value={u.codigo}>{u.codigo} — {u.desc}</option>)}</datalist>
+            <datalist id="dl-unspsc">{UNSPSC_ALIMENTOS.map(u => <option key={u.codigo} value={u.codigo}>{u.codigo} — {u.desc}{u.grupo ? ` · ${u.grupo}` : ''}</option>)}</datalist>
             <small style={{ color: pForm.codigo_unspsc ? 'var(--texto-suave)' : 'var(--rojo)', fontSize: '0.72rem' }}>
               {(UNSPSC_ALIMENTOS.find(u => u.codigo === pForm.codigo_unspsc)?.desc)
                 || (pForm.codigo_unspsc ? 'Código personalizado.' : '⚠ Obligatorio para facturar. Estos códigos son UNSPSC reales (válidos para la DIAN); al sincronizar se envían a Alegra.')}
@@ -583,10 +820,10 @@ export default function ProductosTerminados() {
       </Modal>
 
       {/* Modal configurar credenciales de Alegra */}
-      <Modal open={modalConfig} onClose={() => setModalConfig(false)} title="⚙ Configurar conexión con Alegra"
+      <Modal open={modalConfig} onClose={() => setModalConfig(false)} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Settings size={18} aria-hidden="true" /> Configurar conexión con Alegra</span>}
         footer={<>
           <button className="btn btn-secondary" onClick={() => setModalConfig(false)}>Cerrar</button>
-          <button className="btn btn-secondary" onClick={probarConexion} disabled={probando || !cfgForm.email || !cfgForm.token}>{probando ? 'Probando...' : '🔌 Probar conexión'}</button>
+          <button className="btn btn-secondary" onClick={probarConexion} disabled={probando || !cfgForm.email || !cfgForm.token}>{probando ? 'Probando...' : <><Ico as={Plug} size={14} />Probar conexión</>}</button>
           <button className="btn btn-primary" onClick={() => guardarConfig.mutate()} disabled={guardarConfig.isPending}>Guardar</button>
         </>}>
         <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>Ingresa los datos de tu cuenta de Alegra. El <strong>token de API</strong> lo encuentras en Alegra → <strong>Configuración → API / Integraciones</strong>. Se guardan de forma segura y solo los administradores los ven.</div>
@@ -597,7 +834,7 @@ export default function ProductosTerminados() {
         <div style={{ borderTop: '1px solid var(--crema-oscuro)', marginTop: 12, paddingTop: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <strong style={{ fontSize: '0.88rem', color: 'var(--selva)' }}>Listas de precios</strong>
-            <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={cargarListas} disabled={cargandoListas || !cfgForm.email || !cfgForm.token}>{cargandoListas ? 'Cargando...' : '🔄 Cargar listas de Alegra'}</button>
+            <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={cargarListas} disabled={cargandoListas || !cfgForm.email || !cfgForm.token}>{cargandoListas ? 'Cargando...' : <><Ico as={RefreshCw} size={13} />Cargar listas de Alegra</>}</button>
           </div>
           <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', marginTop: 0 }}>Indica qué lista de Alegra recibe el precio <strong>mayor</strong> y cuál el <strong>detal/distribuidores</strong>. Se enviarán desde la ficha.</p>
           {listasPrecios && (
@@ -621,10 +858,10 @@ export default function ProductosTerminados() {
       </Modal>
 
       {/* Modal enlazar con Alegra */}
-      <Modal open={modalEnlace} onClose={() => setModalEnlace(false)} title="🔌 Enlazar productos con Alegra" size="modal-xl"
+      <Modal open={modalEnlace} onClose={() => setModalEnlace(false)} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Plug size={18} aria-hidden="true" /> Enlazar productos con Alegra</span>} size="modal-xl"
         footer={<>
           <button className="btn btn-secondary" onClick={() => setModalEnlace(false)}>Cerrar</button>
-          <button className="btn btn-secondary" onClick={escanearAlegra} disabled={cargandoAlegra}>{cargandoAlegra ? 'Escaneando...' : '🔄 Volver a escanear'}</button>
+          <button className="btn btn-secondary" onClick={escanearAlegra} disabled={cargandoAlegra}>{cargandoAlegra ? 'Escaneando...' : <><Ico as={RefreshCw} size={14} />Volver a escanear</>}</button>
           <button className="btn btn-primary" onClick={() => guardarEnlaces.mutate()} disabled={guardarEnlaces.isPending || cargandoAlegra || !alegraItems}>Guardar enlaces</button>
         </>}>
         {cargandoAlegra
@@ -650,15 +887,15 @@ export default function ProductosTerminados() {
                           const yaUsado = (id) => id && Object.entries(enlaces).some(([k, v]) => v === id && Number(k) !== p.id && k !== p.id)
                           return (
                             <tr key={p.id}>
-                              <td><strong>{p.nombre}</strong> {p.tipo === 'surtido' && <span className="badge badge-dorado" style={{ fontSize: '0.6rem' }}>🔀</span>}</td>
+                              <td><strong>{p.nombre}</strong> {p.tipo === 'surtido' && <span className="badge badge-dorado" style={{ fontSize: '0.6rem' }}><Shuffle size={10} aria-hidden="true" /></span>}</td>
                               <td>{p.sku || '—'}</td>
                               <td>
                                 <select className="form-control" value={sel} onChange={e => setEnlaces(m => ({ ...m, [p.id]: e.target.value }))} style={{ borderColor: yaUsado(sel) ? 'var(--rojo)' : undefined }}>
                                   <option value="">— Sin enlazar —</option>
                                   {alegraItems.filter(it => it.id === sel || !(ocultarFact && it.esServicio)).map(it => <option key={it.id} value={it.id}>{it.esServicio ? '🧾 ' : '📦 '}{it.name}{it.reference ? ` · ${it.reference}` : ''}{it.esServicio ? ' · solo facturación' : ` · stock ${it.available ?? 0}`}</option>)}
                                 </select>
-                                {yaUsado(sel) && <small style={{ color: 'var(--rojo)', fontSize: '0.68rem' }}>⚠ ese ítem ya está asignado a otro producto</small>}
-                                {sel && alegraItems.find(it => it.id === sel)?.esServicio && <small style={{ color: 'var(--tierra)', fontSize: '0.68rem' }}>⚠ es un ítem de solo facturación — el stock no se sincronizará.</small>}
+                                {yaUsado(sel) && <small style={{ color: 'var(--rojo)', fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: 3 }}><AlertTriangle size={11} aria-hidden="true" /> ese ítem ya está asignado a otro producto</small>}
+                                {sel && alegraItems.find(it => it.id === sel)?.esServicio && <small style={{ color: 'var(--tierra)', fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: 3 }}><AlertTriangle size={11} aria-hidden="true" /> es un ítem de solo facturación — el stock no se sincronizará.</small>}
                               </td>
                             </tr>
                           )
@@ -671,7 +908,7 @@ export default function ProductosTerminados() {
       </Modal>
 
       {/* Modal agregar fichas */}
-      <Modal open={modalFicha} onClose={() => setModalFicha(false)} title="📋 Agregar fichas de producto" size="modal-lg"
+      <Modal open={modalFicha} onClose={() => setModalFicha(false)} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><ClipboardList size={18} aria-hidden="true" /> Agregar fichas de producto</span>} size="modal-lg"
         footer={<button className="btn btn-secondary" onClick={() => setModalFicha(false)}>Cerrar</button>}>
         <p style={{ fontSize: '0.85rem', color: 'var(--texto-suave)' }}>Fichas de producto <strong>activas</strong> que aún no están en el catálogo de terminados. Al agregarlas quedan listas para enlazar/crear en Alegra. (Las nuevas fichas se agregan solas al guardarlas.)</p>
         <div className="table-wrap">
@@ -694,7 +931,7 @@ export default function ProductosTerminados() {
       </Modal>
 
       {/* Modal agregar MP vendibles */}
-      <Modal open={modalMp} onClose={() => setModalMp(false)} title="🧪 Agregar materias primas vendibles" size="modal-lg"
+      <Modal open={modalMp} onClose={() => setModalMp(false)} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><FlaskConical size={18} aria-hidden="true" /> Agregar materias primas vendibles</span>} size="modal-lg"
         footer={<button className="btn btn-secondary" onClick={() => setModalMp(false)}>Cerrar</button>}>
         <p style={{ fontSize: '0.85rem', color: 'var(--texto-suave)' }}>MPs marcadas como <strong>vendibles</strong> en Inventario que aún no están en el catálogo. Al agregarlas se crean como producto terminado (luego puedes enlazarlas/crearlas en Alegra).</p>
         <div className="table-wrap">
@@ -718,7 +955,7 @@ export default function ProductosTerminados() {
       </Modal>
 
       {/* Modal generar surtidos */}
-      <Modal open={modalGen} onClose={() => setModalGen(false)} title="🔀 Generar surtidos (combinaciones de sabores)" size="modal-lg"
+      <Modal open={modalGen} onClose={() => setModalGen(false)} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Shuffle size={18} aria-hidden="true" /> Generar surtidos (combinaciones de sabores)</span>} size="modal-lg"
         footer={<>
           <button className="btn btn-secondary" onClick={() => setModalGen(false)}>Cancelar</button>
           <button className="btn btn-primary" onClick={() => generarSurtidos.mutate()} disabled={generarSurtidos.isPending || !previewGen.length}>{generarSurtidos.isPending ? 'Aplicando...' : `Aplicar (${previewGen.length})`}</button>
@@ -745,7 +982,7 @@ export default function ProductosTerminados() {
               {previewGen.length === 0
                 ? <tr><td colSpan={5} className="empty-table">Selecciona 2+ productos para ver las combinaciones.</td></tr>
                 : previewGen.map((c, i) => <tr key={i}>
-                    <td>🔀 {c.nombre}</td>
+                    <td style={{ display: 'flex', alignItems: 'center', gap: 4 }}><Shuffle size={12} aria-hidden="true" /> {c.nombre}</td>
                     <td className="td-number">$ {Number(c.costo).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                     <td className="td-number">$ {Number(c.precio_mayor).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                     <td className="td-number">$ {Number(c.precio_detal).toLocaleString('es-CO', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>

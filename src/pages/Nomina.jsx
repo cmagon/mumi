@@ -11,6 +11,8 @@ import MoneyInput from '../components/ui/MoneyInput'
 import { useConfirm } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import * as XLSX from 'xlsx'
+import { BarChart3, ClipboardList, Clock, DollarSign, Download, FolderOpen, Pencil, Pin, Settings, Users, X } from 'lucide-react'
+const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const MESES_LABELS = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 const EMPTY_EMP = {
@@ -336,7 +338,7 @@ export default function Nomina() {
       <div className="tabs">
         <button className={`tab-btn ${tab === 'empleados' ? 'active' : ''}`} onClick={() => setTab('empleados')}>Empleados</button>
         {esAdmin && <button className={`tab-btn ${tab === 'nomina' ? 'active' : ''}`} onClick={() => setTab('nomina')}>Liquidación Nómina</button>}
-        {esAdmin && <button className={`tab-btn ${tab === 'parametros' ? 'active' : ''}`} onClick={() => setTab('parametros')}>⚙ Parámetros</button>}
+        {esAdmin && <button className={`tab-btn ${tab === 'parametros' ? 'active' : ''}`} onClick={() => setTab('parametros')}><Ico as={Settings} size={14} />Parámetros</button>}
       </div>
 
       {tab === 'parametros' && esAdmin && (
@@ -346,7 +348,7 @@ export default function Nomina() {
       {/* LIQUIDACIÓN NÓMINA */}
       {tab === 'nomina' && (
         <div className="card">
-          <div className="card-title">💰 Liquidación de Nómina</div>
+          <div className="card-title"><Ico as={DollarSign} size={14} />Liquidación de Nómina</div>
           <div className="form-grid">
             <div className="form-group">
               <label className="form-label">Empleado</label>
@@ -404,7 +406,7 @@ export default function Nomina() {
           {nomResultado && !liquidacionExistente && (
             <div className="grid-resp" style={{ gridTemplateColumns: '1fr 1fr', gap: 16, marginTop: 16 }}>
               <div className="card" style={{ margin: 0 }}>
-                <div className="card-title">📋 {nomEmpleado?.nombre} — {getTipoPagoLabel(nomResultado.tipo)}</div>
+                <div className="card-title"><Ico as={ClipboardList} size={14} />{nomEmpleado?.nombre} — {getTipoPagoLabel(nomResultado.tipo)}</div>
                 <div style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', marginBottom: 8 }}>{fFecha(nomDesde)} → {fFecha(nomHasta)} · {nomPeriodo}</div>
                 <table><tbody>
                   <tr><td>{nomResultado.esCPS ? 'Honorarios' : nomResultado.esDestajoHora ? 'Pago por horas (destajo)' : nomResultado.tipo === 'destajo' ? 'Pago por producción (destajo)' : 'Salario base'} ({nomPeriodo})</td><td className="td-number">{fCOP(nomResultado.salBase)}</td></tr>
@@ -420,7 +422,7 @@ export default function Nomina() {
                   {nomResultado.descuentoDias > 0 && <tr style={{ color: 'var(--rojo)' }}><td>(-) Días no laborados ({nomResultado.diasNoLaborados} × {fCOP(nomResultado.salario/30)})</td><td className="td-number">{fCOP(nomResultado.descuentoDias)}</td></tr>}
                   {nomResultado.descuentoHoras > 0 && <tr style={{ color: 'var(--rojo)' }}><td>(-) Horas faltantes ({nomResultado.horasFaltantes.toFixed(1)} h)</td><td className="td-number">{fCOP(nomResultado.descuentoHoras)}</td></tr>}
                   <tr style={{ fontWeight: 700, borderTop: '2px solid var(--crema-oscuro)', background: 'rgba(124,179,66,0.12)' }}>
-                    <td>💵 {nomResultado.esCPS ? 'NETO A PAGAR (honorarios)' : 'TOTAL A PAGAR'}<div style={{ fontWeight: 400, fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Lo que recibe el empleado</div></td>
+                    <td><Ico as={DollarSign} size={14} />{nomResultado.esCPS ? 'NETO A PAGAR (honorarios)' : 'TOTAL A PAGAR'}<div style={{ fontWeight: 400, fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Lo que recibe el empleado</div></td>
                     <td className="td-number" style={{ color: 'var(--selva)', fontSize: '1.05rem' }}>{fCOP(nomResultado.neto)}</td>
                   </tr>
                 </tbody></table>
@@ -429,7 +431,7 @@ export default function Nomina() {
               {nomResultado.esDestajoHora
                 ? (
                   <div className="card" style={{ margin: 0 }}>
-                    <div className="card-title">⏱ Destajo por hora</div>
+                    <div className="card-title"><Ico as={Clock} size={14} />Destajo por hora</div>
                     <div className="alert alert-warning" style={{ fontSize: '0.82rem' }}>
                       Modalidad <strong>sin prestaciones ni aportes</strong> (no contemplada en el CST para contrato laboral). El costo para la empresa es el mismo que se le paga.
                     </div>
@@ -455,7 +457,7 @@ export default function Nomina() {
                 )
                 : (
                   <div className="card" style={{ margin: 0 }}>
-                    <div className="card-title">📊 Provisiones y Aportes del Empleador</div>
+                    <div className="card-title"><Ico as={BarChart3} size={14} />Provisiones y Aportes del Empleador</div>
                   <div className="alert" style={{ fontSize: '0.78rem', background: 'rgba(139,94,60,0.08)', border: '1px solid rgba(139,94,60,0.25)', borderRadius: 'var(--radio)', padding: 8, marginBottom: 8 }}>
                     Esto <strong>NO se le paga al empleado</strong>: es el costo adicional que asume la empresa (prestaciones + aportes), aparte del salario.
                   </div>
@@ -486,14 +488,14 @@ export default function Nomina() {
                 onClick={() => guardarLiquidacion.mutate({ emp: nomEmpleado, periodo: nomPeriodo, desde: nomDesde, hasta: nomHasta, mes: parseInt(nomMes), anio: nomAño, resultado: nomResultado })}>
                 {guardarLiquidacion.isPending ? 'Guardando...' : '💾 Guardar registro'}
               </button>
-              <button className="btn btn-secondary" onClick={() => abrirListado(nomEmpleado)}>📋 Ver asistencia del empleado</button>
+              <button className="btn btn-secondary" onClick={() => abrirListado(nomEmpleado)}><Ico as={ClipboardList} size={14} />Ver asistencia del empleado</button>
             </div>
           )}
 
           {/* Registros de nómina guardados */}
           {registrosNomina.length > 0 && (
             <div style={{ marginTop: 20 }}>
-              <div className="card-title" style={{ fontSize: '0.95rem' }}>🗂 Registros guardados</div>
+              <div className="card-title" style={{ fontSize: '0.95rem' }}><Ico as={FolderOpen} size={14} />Registros guardados</div>
               <div className="table-wrap">
                 <table>
                   <thead><tr><th>Empleado</th><th>Período</th><th>Tipo</th><th>Neto</th><th>Guardado</th></tr></thead>
@@ -518,7 +520,7 @@ export default function Nomina() {
       {/* EMPLEADOS */}
       {tab === 'empleados' && (
         <div className="card">
-          <div className="card-title">👥 Lista de Empleados</div>
+          <div className="card-title"><Ico as={Users} size={14} />Lista de Empleados</div>
 
           <div className="table-wrap">
             <table>
@@ -534,16 +536,16 @@ export default function Nomina() {
                       <td><span className={`badge ${e.estado === 'activo' ? 'badge-verde' : 'badge-rojo'}`}>{e.estado}</span></td>
                       <td>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          <button className="btn btn-xs btn-primary" onClick={() => setAsistEmpModal(e)}>🕒 Registrar asistencia</button>
-                          <button className="btn btn-xs btn-secondary" onClick={() => abrirListado(e)}>📋 Ver listado</button>
+                          <button className="btn btn-xs btn-primary" onClick={() => setAsistEmpModal(e)}><Ico as={Clock} size={14} />Registrar asistencia</button>
+                          <button className="btn btn-xs btn-secondary" onClick={() => abrirListado(e)}><Ico as={ClipboardList} size={14} />Ver listado</button>
                           {esAdmin && (
                             <>
                               <button className="btn btn-xs btn-secondary" title="Editar empleado" onClick={() => {
                                 setFormEmp({ ...EMPTY_EMP, nombre: e.nombre, cargo: e.cargo, tipo_pago: e.tipo_pago, salario: e.salario, tarifa_destajo: e.tarifa_destajo ?? '', valor_hora: e.valor_hora ?? '', cedula: e.cedula || '', telefono: e.telefono || '', estado: e.estado, correo: e.correo || '', direccion: e.direccion || '', fecha_nacimiento: e.fecha_nacimiento || '', fecha_ingreso: e.fecha_ingreso || '', eps: e.eps || '', contacto_emergencia: e.contacto_emergencia || '' })
                                 setEmpEsUsuario(usuarios.some(u => u.login === e.cedula))
                                 setEditEmpId(e.id); setModalEmp(true)
-                              }}>✏</button>
-                              <button className="btn btn-xs btn-danger" title="Eliminar" onClick={() => confirmar('¿Eliminar empleado?').then(ok => ok && deleteEmp.mutate(e.id))}>✕</button>
+                              }}><Pencil size={13} aria-hidden="true" /></button>
+                              <button className="btn btn-xs btn-danger" title="Eliminar" onClick={() => confirmar('¿Eliminar empleado?').then(ok => ok && deleteEmp.mutate(e.id))}><X size={13} aria-hidden="true" /></button>
                             </>
                           )}
                         </div>
@@ -564,7 +566,7 @@ export default function Nomina() {
       )}
 
       {/* Modal de detalle del empleado (nombre, rol, estado + acciones) */}
-      <Modal open={!!detalleEmp} onClose={() => setDetalleEmp(null)} title="👤 Detalle del Empleado"
+      <Modal open={!!detalleEmp} onClose={() => setDetalleEmp(null)} title="Detalle del Empleado"
         footer={<button className="btn btn-secondary" onClick={() => setDetalleEmp(null)}>Cerrar</button>}
       >
         {detalleEmp && (
@@ -573,9 +575,9 @@ export default function Nomina() {
             <Fila et="Rol">{rolDeEmpleado(detalleEmp)}</Fila>
             <Fila et="Estado"><span className={`badge ${detalleEmp.estado === 'activo' ? 'badge-verde' : 'badge-rojo'}`}>{detalleEmp.estado}</span></Fila>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginTop: 16 }}>
-              <button className="btn btn-primary" onClick={() => { setAsistEmpModal(detalleEmp); setDetalleEmp(null) }}>🕒 Registrar asistencia</button>
-              <button className="btn btn-secondary" onClick={() => { abrirListado(detalleEmp); setDetalleEmp(null) }}>📋 Ver listado de asistencia</button>
-              {esAdmin && <button className="btn btn-dorado" onClick={() => { abrirEditarEmp(detalleEmp); setDetalleEmp(null) }}>✏ Editar</button>}
+              <button className="btn btn-primary" onClick={() => { setAsistEmpModal(detalleEmp); setDetalleEmp(null) }}><Ico as={Clock} size={14} />Registrar asistencia</button>
+              <button className="btn btn-secondary" onClick={() => { abrirListado(detalleEmp); setDetalleEmp(null) }}><Ico as={ClipboardList} size={14} />Ver listado de asistencia</button>
+              {esAdmin && <button className="btn btn-dorado" onClick={() => { abrirEditarEmp(detalleEmp); setDetalleEmp(null) }}><Ico as={Pencil} size={14} />Editar</button>}
             </div>
           </>
         )}
@@ -622,7 +624,7 @@ export default function Nomina() {
               {/* Marcar ausencias: solo nómina y solo en días laborales sin registro */}
               {esAdmin && esNomina && (
                 <div style={{ background: 'rgba(192,57,43,0.05)', border: '1px solid rgba(192,57,43,0.2)', borderRadius: 8, padding: 12, marginBottom: 14 }}>
-                  <div style={{ fontWeight: 600, color: 'var(--selva)', marginBottom: 8, fontSize: '0.88rem' }}>📌 Días laborales sin registro de {MESES_LABELS[lisMes]} (marcar inasistencia)</div>
+                  <div style={{ fontWeight: 600, color: 'var(--selva)', marginBottom: 8, fontSize: '0.88rem' }}><Ico as={Pin} size={14} />Días laborales sin registro de {MESES_LABELS[lisMes]} (marcar inasistencia)</div>
                   {sinRegistro.length === 0
                     ? <p style={{ fontSize: '0.82rem', color: 'var(--texto-suave)' }}>No hay días laborales sin registro en el mes. ✓</p>
                     : sinRegistro.map(f => (
@@ -659,8 +661,8 @@ export default function Nomina() {
                                 : <span className={`badge ${ausencia ? (reg.estado_dia === 'justificada' ? 'badge-dorado' : 'badge-rojo') : 'badge-verde'}`}>{ausencia ? (reg.estado_dia === 'justificada' ? 'Justificada' : 'Injustificada') : 'Asistió'}</span>}
                             </td>
                             {esAdmin && <td style={{ whiteSpace: 'nowrap' }}>
-                              {!ausencia && <button className="btn btn-xs btn-secondary" onClick={() => abrirEditReg(reg)}>✏ Editar</button>}{' '}
-                              <button className="btn btn-xs btn-danger" title="Eliminar este registro de hora" onClick={() => confirmar('¿Eliminar este registro de asistencia/hora?', { title: 'Eliminar registro', confirmText: 'Sí, eliminar' }).then(ok => ok && quitarFilaAsist(reg))}>✕</button>
+                              {!ausencia && <button className="btn btn-xs btn-secondary" onClick={() => abrirEditReg(reg)}><Ico as={Pencil} size={14} />Editar</button>}{' '}
+                              <button className="btn btn-xs btn-danger" title="Eliminar este registro de hora" onClick={() => confirmar('¿Eliminar este registro de asistencia/hora?', { title: 'Eliminar registro', confirmText: 'Sí, eliminar' }).then(ok => ok && quitarFilaAsist(reg))}><X size={13} aria-hidden="true" /></button>
                             </td>}
                           </tr>
                         )})}
@@ -674,7 +676,7 @@ export default function Nomina() {
       </Modal>
 
       {/* Modal editar fila de asistencia (admin) */}
-      <Modal open={!!editReg} onClose={() => setEditReg(null)} onSave={guardarEditReg} title="✏ Editar asistencia"
+      <Modal open={!!editReg} onClose={() => setEditReg(null)} onSave={guardarEditReg} title="Editar asistencia"
         footer={<>
           <button className="btn btn-secondary" onClick={() => setEditReg(null)}>Cancelar</button>
           <button className="btn btn-primary" onClick={guardarEditReg}>Guardar</button>
@@ -716,7 +718,7 @@ export default function Nomina() {
               <TimeField value={f.salida} onChange={v => updateFilaLote(i, 'salida', v)} />
             </div>
             <button className="btn btn-xs btn-danger" title="Eliminar fila" style={{ marginBottom: 4 }}
-              onClick={() => eliminarFilaLote(i)} disabled={loteFilas.length === 1}>✕</button>
+              onClick={() => eliminarFilaLote(i)} disabled={loteFilas.length === 1}><X size={13} aria-hidden="true" /></button>
           </div>
         ))}
         <button className="btn btn-sm btn-secondary" onClick={agregarFilaLote}>➕ Agregar fecha</button>
@@ -787,7 +789,7 @@ export default function Nomina() {
         </div>
         {formEmp.tipo_pago === 'destajo' && (
           <div className="form-group">
-            <label className="form-label">💰 Tarifa por unidad producida</label>
+            <label className="form-label"><Ico as={DollarSign} size={14} />Tarifa por unidad producida</label>
             <MoneyInput value={formEmp.tarifa_destajo} onChange={v => setFormEmp(f => ({ ...f, tarifa_destajo: v }))} />
             <small style={{ color: 'var(--texto-suave)', fontSize: '0.75rem' }}>El pago = unidades producidas (las ingresas al liquidar) × esta tarifa. Lleva prestaciones y aportes de ley.</small>
           </div>
@@ -795,7 +797,7 @@ export default function Nomina() {
         {formEmp.tipo_pago === 'destajo_hora' && (
           <>
             <div className="form-group">
-              <label className="form-label">⏱ Valor por hora</label>
+              <label className="form-label"><Ico as={Clock} size={14} />Valor por hora</label>
               <MoneyInput value={formEmp.valor_hora} onChange={v => setFormEmp(f => ({ ...f, valor_hora: v }))} />
               <small style={{ color: 'var(--texto-suave)', fontSize: '0.75rem' }}>El pago = horas trabajadas (según asistencia) × este valor.</small>
             </div>
@@ -876,7 +878,7 @@ function ParametrosNomina({ params, empleadosActivos = 0, onSaved }) {
     <div className="card">
       <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         ⚙ Parámetros de Liquidación (Código Sustantivo del Trabajo)
-        <button className="btn btn-secondary btn-sm" style={{ marginLeft: 'auto' }} onClick={precargar2026}>📥 Precargar datos 2026</button>
+        <button className="btn btn-secondary btn-sm" style={{ marginLeft: 'auto' }} onClick={precargar2026}><Ico as={Download} size={14} />Precargar datos 2026</button>
       </div>
       <div className="alert alert-info" style={{ fontSize: '0.83rem' }}>
         Estos valores se aplican a la liquidación según el <strong>tipo de pago</strong> de cada empleado.

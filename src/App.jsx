@@ -107,7 +107,7 @@ function ProtectedLayout() {
       <main className="main-content">
         <Outlet />
       </main>
-      <div id="toast-container" />
+      <div id="toast-container" role="status" aria-live="polite" aria-atomic="false" />
       <ConnStatus />
       <SavingOverlay />
       {asistModo && empVinculado && (

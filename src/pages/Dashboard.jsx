@@ -5,11 +5,14 @@ import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement,
   ArcElement, Tooltip, Legend,
 } from 'chart.js'
+import { Factory, Users, Package, Handshake, Lightbulb, TrendingUp, PieChart as PieIcon, ClipboardList, BookOpen, Bell, AlertTriangle, Clock, CheckCircle2, GraduationCap, Pin, Download } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fNum, fFecha, getRolLabel } from '../lib/businessLogic'
 import { fraseDelDia } from '../lib/frases'
 import { notificarVencimientosRegistros } from '../lib/notificaciones'
 import { useAuth } from '../context/AuthContext'
+
+const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, ArcElement, Tooltip, Legend)
 
@@ -155,14 +158,14 @@ export default function Dashboard() {
             <option value={2025}>2025</option>
             <option value={2026}>2026</option>
           </select>
-          <button className="btn btn-secondary btn-sm" onClick={() => window.print()}>⬇ PDF</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => window.print()} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Download size={15} aria-hidden="true" />PDF</button>
         </div>
       </div>
 
       {/* Saludo personalizado */}
       <div style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-          <span style={{ fontSize: '1.6rem' }}>👤</span>
+          <div style={{ width: 40, height: 40, borderRadius: '50%', background: 'rgba(45,90,61,0.1)', color: 'var(--selva)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}><Users size={20} aria-hidden="true" /></div>
           <div>
             <div style={{ fontSize: '1.05rem', fontWeight: 700, color: 'var(--selva, #2d5a3d)' }}>
               Hola, {profile?.nombre || 'Bienvenido'} 👋
@@ -175,7 +178,7 @@ export default function Dashboard() {
       {/* Frase del día */}
       <div className="card" style={{ background: 'linear-gradient(135deg, #2d5a3d 0%, #3d7a52 100%)', color: '#fff', marginBottom: 20 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
-          <span style={{ fontSize: '2rem', lineHeight: 1 }}>💡</span>
+          <Lightbulb size={26} style={{ flexShrink: 0, color: '#C8A94A' }} aria-hidden="true" />
           <div>
             <div style={{ fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: 1, opacity: 0.8, marginBottom: 4 }}>Frase del día</div>
             <div style={{ fontSize: '1.05rem', fontStyle: 'italic', lineHeight: 1.4 }}>“{frase.texto}”</div>
@@ -186,25 +189,25 @@ export default function Dashboard() {
 
       <div className="kpi-grid">
         <div className="kpi-card verde">
-          <div className="kpi-icon">🏭</div>
+          <div className="kpi-icon"><Factory aria-hidden="true" /></div>
           <div className="kpi-label">Producción Total ({año})</div>
           <div className="kpi-value">{fNum(totalProd)}</div>
           <div className="kpi-sub">unidades</div>
         </div>
         <div className="kpi-card dorado">
-          <div className="kpi-icon">💰</div>
+          <div className="kpi-icon"><Users aria-hidden="true" /></div>
           <div className="kpi-label">Empleados Activos</div>
           <div className="kpi-value">{empleadosActivos}</div>
           <div className="kpi-sub">personas</div>
         </div>
         <div className="kpi-card tierra">
-          <div className="kpi-icon">📦</div>
+          <div className="kpi-icon"><Package aria-hidden="true" /></div>
           <div className="kpi-label">Materias Primas</div>
           <div className="kpi-value">{mps.length}</div>
           <div className="kpi-sub">ítems registrados</div>
         </div>
         <div className="kpi-card lima">
-          <div className="kpi-icon">🤝</div>
+          <div className="kpi-icon"><Handshake aria-hidden="true" /></div>
           <div className="kpi-label">Clientes Registrados</div>
           <div className="kpi-value">{clientes.length}</div>
           <div className="kpi-sub">activos</div>
@@ -212,7 +215,7 @@ export default function Dashboard() {
       </div>
 
       <div className="card">
-        <div className="card-title">📈 Producción Mensual por Categoría</div>
+        <div className="card-title"><TrendingUp size={18} style={{ verticalAlign: '-4px', marginRight: 6, color: 'var(--selva)' }} aria-hidden="true" />Producción Mensual por Categoría</div>
         <div style={{ position: 'relative', height: 280 }}>
           <Bar data={barData} options={{ responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom' } }, scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } } }} />
         </div>
@@ -220,14 +223,14 @@ export default function Dashboard() {
 
       <div className="grid-resp" style={{ gridTemplateColumns: '1fr 1fr', gap: 20 }}>
         <div className="card">
-          <div className="card-title">🥧 Distribución por Producto</div>
+          <div className="card-title"><PieIcon size={18} style={{ verticalAlign: '-4px', marginRight: 6, color: 'var(--selva)' }} aria-hidden="true" />Distribución por Producto</div>
           {Object.keys(byProd).length > 0
             ? <div style={{ maxWidth: 360, margin: '0 auto' }}><Doughnut data={pieData} options={{ responsive: true, plugins: { legend: { position: 'bottom' } } }} /></div>
             : <p className="empty-table">Sin datos para {año}</p>
           }
         </div>
         <div className="card">
-          <div className="card-title">📋 Últimas Producciones</div>
+          <div className="card-title"><ClipboardList size={18} style={{ verticalAlign: '-4px', marginRight: 6, color: 'var(--selva)' }} aria-hidden="true" />Últimas Producciones</div>
           <div className="table-wrap">
             <table>
               <thead><tr><th>Producto</th><th>Fecha</th><th>Cantidad</th><th>Estado</th></tr></thead>
@@ -257,7 +260,7 @@ export default function Dashboard() {
       {regPlantillas.length > 0 && (
         <>
           <div className="card" style={{ marginTop: 20 }}>
-            <div className="card-title">📒 Cumplimiento de Registros SGC ({año}) <span className="badge badge-verde" style={{ marginLeft: 8 }}>{fNum(totalRegAño)} registros</span></div>
+            <div className="card-title"><BookOpen size={18} style={{ verticalAlign: '-4px', marginRight: 6, color: 'var(--selva)' }} aria-hidden="true" />Cumplimiento de Registros SGC ({año}) <span className="badge badge-verde" style={{ marginLeft: 8 }}>{fNum(totalRegAño)} registros</span></div>
             {Object.keys(porPrograma).length > 0
               ? <div style={{ position: 'relative', height: 260 }}>
                   <Bar data={regBarData} options={{ responsive: true, maintainAspectRatio: false, indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { precision: 0 } } } }} />
@@ -266,9 +269,9 @@ export default function Dashboard() {
           </div>
 
           <div className="card">
-            <div className="card-title">🔔 Vencimientos de programas periódicos</div>
+            <div className="card-title"><Bell size={18} style={{ verticalAlign: '-4px', marginRight: 6, color: 'var(--selva)' }} aria-hidden="true" />Vencimientos de programas periódicos</div>
             {vencimientos.length === 0
-              ? <p className="empty-table">✅ Todo al día. No hay registros vencidos ni próximos a vencer.</p>
+              ? <p className="empty-table"><Ico as={CheckCircle2} size={14} />Todo al día. No hay registros vencidos ni próximos a vencer.</p>
               : <div className="table-wrap">
                   <table>
                     <thead><tr><th>Estado</th><th>Registro</th><th>Programa</th><th>Próxima fecha</th></tr></thead>
@@ -292,21 +295,21 @@ export default function Dashboard() {
       {hayCalidad && (
         <>
           <div className="kpi-grid" style={{ marginTop: 20 }}>
-            <div className="kpi-card rojo"><div className="kpi-icon">⚠️</div><div className="kpi-label">NC abiertas</div><div className="kpi-value">{ncAbiertas}</div></div>
-            <div className="kpi-card dorado"><div className="kpi-icon">⏰</div><div className="kpi-label">ACPM vencidas</div><div className="kpi-value">{acpmVencidas}</div><div className="kpi-sub">compromiso vencido</div></div>
-            <div className="kpi-card verde"><div className="kpi-icon">✅</div><div className="kpi-label">NC cerradas</div><div className="kpi-value">{ncCerradas}</div></div>
-            <div className="kpi-card lima"><div className="kpi-icon">🎓</div><div className="kpi-label">Horas capacitación ({año})</div><div className="kpi-value">{horasCap}</div><div className="kpi-sub">{asistenciasCap} asistencias</div></div>
+            <div className="kpi-card rojo"><div className="kpi-icon"><AlertTriangle aria-hidden="true" /></div><div className="kpi-label">NC abiertas</div><div className="kpi-value">{ncAbiertas}</div></div>
+            <div className="kpi-card dorado"><div className="kpi-icon"><Clock aria-hidden="true" /></div><div className="kpi-label">ACPM vencidas</div><div className="kpi-value">{acpmVencidas}</div><div className="kpi-sub">compromiso vencido</div></div>
+            <div className="kpi-card verde"><div className="kpi-icon"><CheckCircle2 aria-hidden="true" /></div><div className="kpi-label">NC cerradas</div><div className="kpi-value">{ncCerradas}</div></div>
+            <div className="kpi-card lima"><div className="kpi-icon"><GraduationCap aria-hidden="true" /></div><div className="kpi-label">Horas capacitación ({año})</div><div className="kpi-value">{horasCap}</div><div className="kpi-sub">{asistenciasCap} asistencias</div></div>
           </div>
 
           <div className="grid-resp" style={{ gridTemplateColumns: '1fr 1fr', gap: 20 }}>
             <div className="card">
-              <div className="card-title">⚠️ No conformidades abiertas por severidad</div>
+              <div className="card-title"><AlertTriangle size={18} style={{ verticalAlign: '-4px', marginRight: 6, color: 'var(--selva)' }} aria-hidden="true" />No conformidades abiertas por severidad</div>
               {ncAbiertas > 0
                 ? <div style={{ maxWidth: 320, margin: '0 auto' }}><Doughnut data={ncSevData} options={{ responsive: true, plugins: { legend: { position: 'bottom' } } }} /></div>
-                : <p className="empty-table">✅ No hay no conformidades abiertas</p>}
+                : <p className="empty-table"><Ico as={CheckCircle2} size={14} />No hay no conformidades abiertas</p>}
             </div>
             <div className="card">
-              <div className="card-title">📌 Resumen de calidad</div>
+              <div className="card-title"><Pin size={18} style={{ verticalAlign: '-4px', marginRight: 6, color: 'var(--selva)' }} aria-hidden="true" />Resumen de calidad</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: '0.9rem' }}>
                 <div className="row" style={{ display: 'flex', justifyContent: 'space-between' }}><span>No conformidades totales</span><strong>{ncs.length}</strong></div>
                 <div className="row" style={{ display: 'flex', justifyContent: 'space-between' }}><span>% cierre</span><strong>{ncs.length ? Math.round(ncCerradas / ncs.length * 100) : 0}%</strong></div>
