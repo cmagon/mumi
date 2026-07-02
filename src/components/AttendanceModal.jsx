@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext'
 import { puedeVerSeccion } from '../lib/permisos'
 import Modal from './ui/Modal'
 import TimeField from './ui/TimeField'
+import { LogIn, LogOut, CalendarDays } from 'lucide-react'
 
 const hoyStr = () => new Date().toISOString().split('T')[0]
 const horaAhora = () => new Date().toTimeString().slice(0, 5)   // HH:MM
@@ -92,6 +93,10 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
   const totalDia = sesionesDia.reduce((s, f) => s + calcHoras(f.entrada, f.salida), 0)
   const sesionCompletaDia = sesionesDia.some(f => f.entrada && f.salida)
   const esFechaHoy = fecha === hoy
+  // Acción principal: ¿toca registrar SALIDA o ENTRADA?
+  const esSalida = esLogout || !!abiertaDia
+  const IconoAccion = esSalida ? LogOut : LogIn
+  const colorAccion = esSalida ? 'var(--dorado)' : 'var(--lima)'
 
   return (
     <Modal
@@ -103,14 +108,14 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
         <>
           {!esLogout && (abiertaDia
             ? <button className="btn btn-dorado" disabled={registrarSalida.isPending} onClick={() => registrarSalida.mutate()}>
-                {registrarSalida.isPending ? 'Registrando...' : '⬅ Registrar salida'}
+                <LogOut size={15} aria-hidden="true" />{registrarSalida.isPending ? 'Registrando...' : 'Registrar salida'}
               </button>
             : <button className="btn btn-success" disabled={registrarLlegada.isPending} onClick={() => registrarLlegada.mutate()}>
-                {registrarLlegada.isPending ? 'Registrando...' : '➡ Registrar llegada'}
+                <LogIn size={15} aria-hidden="true" />{registrarLlegada.isPending ? 'Registrando...' : 'Registrar llegada'}
               </button>
           )}
           {!esLogout && onRegistrarVarios && (
-            <button className="btn btn-dorado" onClick={onRegistrarVarios}>🗓 Registrar varios</button>
+            <button className="btn btn-dorado" onClick={onRegistrarVarios}><CalendarDays size={15} aria-hidden="true" />Registrar varios</button>
           )}
           {!esLogout && <button className="btn btn-secondary" onClick={onClose} disabled={sesionCompletaDia}>Omitir</button>}
           {!esLogout && (
@@ -127,7 +132,22 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
         </>
       }
     >
-      <div style={{ marginBottom: 14 }}>
+      {/* Encabezado intuitivo: icono grande + acción clara */}
+      <div style={{ textAlign: 'center', marginBottom: 18 }}>
+        <div style={{
+          width: 88, height: 88, margin: '0 auto 12px', borderRadius: '50%',
+          display: 'flex', alignItems: 'center', justifyContent: 'center',
+          background: esSalida ? 'rgba(200,169,74,0.15)' : 'rgba(124,179,66,0.15)',
+          border: `2px solid ${colorAccion}`,
+        }}>
+          <IconoAccion size={44} strokeWidth={2} aria-hidden="true" style={{ color: colorAccion }} />
+        </div>
+        <div style={{ fontFamily: "var(--fuente-titulos, 'Playfair Display'), serif", fontSize: '1.7rem', fontWeight: 700, color: 'var(--selva)', lineHeight: 1.1 }}>
+          {esSalida ? 'Registre salida' : 'Registre entrada'}
+        </div>
+      </div>
+
+      <div style={{ marginBottom: 14, textAlign: 'center' }}>
         <strong style={{ color: 'var(--selva)' }}>{objetivo?.nombre}</strong>
         {esOtro && <span className="badge badge-dorado" style={{ marginLeft: 8, fontSize: '0.7rem' }}>registrando por otra persona</span>}
       </div>

@@ -1,4 +1,10 @@
-// Selector de hora intuitivo (12 h con AM/PM). Trabaja con valores "HH:MM" en 24 h.
+// Selector de hora (12 h con AM/PM). Trabaja con valores "HH:MM" en 24 h.
+// - Escritorio (ratón): desplegables compactos.
+// - Móvil / tablet (táctil): botón tipo reloj que abre un selector de ruedas estilo "alarma".
+import { useEffect, useState } from 'react'
+import { Clock } from 'lucide-react'
+import TimeWheel from './TimeWheel'
+
 const HORAS12 = Array.from({ length: 12 }, (_, i) => i + 1)
 const MINUTOS = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'))
 
@@ -16,9 +22,54 @@ export function to24(h, m, ap) {
   return String(H).padStart(2, '0') + ':' + m
 }
 
+// ¿Dispositivo táctil / pantalla de tablet o móvil? → usar ruedas
+function useEsTactil() {
+  const consulta = '(pointer: coarse), (max-width: 1024px)'
+  const [tactil, setTactil] = useState(() => typeof window !== 'undefined' && window.matchMedia(consulta).matches)
+  useEffect(() => {
+    const mq = window.matchMedia(consulta)
+    const on = () => setTactil(mq.matches)
+    mq.addEventListener('change', on)
+    return () => mq.removeEventListener('change', on)
+  }, [])
+  return tactil
+}
+
 export default function TimeField({ value, onChange, disabled }) {
+  const tactil = useEsTactil()
+  const [abierto, setAbierto] = useState(false)
   const { h, m, ap } = to12(value)
   const set = (nh, nm, nap) => onChange(to24(nh, nm, nap))
+
+  // ---- Versión táctil: botón grande tipo reloj + ruedas ----
+  if (tactil) {
+    const etiqueta = value ? `${h}:${m} ${ap}` : 'Seleccionar hora'
+    return (
+      <>
+        <button
+          type="button"
+          className="form-control"
+          disabled={disabled}
+          onClick={() => setAbierto(true)}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer',
+            width: '100%', textAlign: 'left', minHeight: 46,
+            fontSize: '1.15rem', fontWeight: value ? 700 : 400,
+            color: value ? 'var(--selva)' : 'var(--texto-suave)',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          <Clock size={20} aria-hidden="true" style={{ color: 'var(--dorado)', flexShrink: 0 }} />
+          {etiqueta}
+        </button>
+        {abierto && (
+          <TimeWheel value={value} onClose={() => setAbierto(false)} onConfirm={onChange} />
+        )}
+      </>
+    )
+  }
+
+  // ---- Versión escritorio: desplegables ----
   const sel = { width: 'auto', padding: '6px 8px' }
   return (
     <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
