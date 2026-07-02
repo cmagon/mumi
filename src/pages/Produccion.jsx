@@ -8,6 +8,9 @@ import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
 import { notificar } from '../lib/notificaciones'
+import { getConfig } from '../lib/appConfig'
+import { setBusy } from '../lib/busy'
+import { descargarPlantillaProduccion, leerPlantillaProduccion } from '../lib/plantillaProduccion'
 import Modal from '../components/ui/Modal'
 import TimeField from '../components/ui/TimeField'
 import { useReorder } from '../hooks/useReorder'
@@ -71,6 +74,11 @@ export default function Produccion() {
   const [detalleRec, setDetalleRec] = useState(null)
   const [saving, setSaving] = useState(false)
   const [importando, setImportando] = useState(false)
+  const ptzRef = useRef()
+  const [importResult, setImportResult] = useState(null)   // { insertados, errores }
+  const [importOpen, setImportOpen] = useState(false)      // tabla de verificación previa a guardar
+  const [importFilas, setImportFilas] = useState([])       // filas editables leídas del Excel
+  const [importAvisos, setImportAvisos] = useState([])     // filas omitidas al leer
   const [ordenLink, setOrdenLink] = useState(null)   // id de orden si se llega desde "Registrar producción"
   const [subprocs, setSubprocs] = useState([])       // tiempos por proceso/subproceso (unificado con órdenes)
   const ordProc = useReorder(setSubprocs)
@@ -365,6 +373,75 @@ export default function Produccion() {
     }
   }
 
+  // ===== Importar registros de producción diaria desde la plantilla PTZ-RG-03 (con verificación) =====
+  const descargarPlantilla = async () => {
+    const cfg = getConfig()
+    try { await descargarPlantillaProduccion({ empresa: cfg.empresa, logoUrl: cfg.logo_url }) }
+    catch (e) { toast('No se pudo generar la plantilla: ' + (e.message || e), 'error') }
+  }
+  const normNombre = (s) => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ')
+  // Paso 1: leer el Excel y abrir la tabla de verificación (NO inserta todavía)
+  const importarPTZ = async (file) => {
+    if (!file) return
+    setImportando(true); setBusy(true)
+    try {
+      const { filas, errores } = await leerPlantillaProduccion(file)
+      if (!filas.length) { setImportResult({ insertados: 0, errores: errores.length ? errores : ['No se encontraron filas con datos válidos.'] }); return }
+      const editable = filas.map(f => {
+        const nf = normNombre(f.producto)
+        const match = terminados.find(t => normNombre(t.nombre) === nf)
+          || terminados.find(t => nf && (normNombre(t.nombre).includes(nf) || nf.includes(normNombre(t.nombre))))
+        return { ...f, prodId: match ? String(match.id) : '', producto: match ? match.nombre : f.producto }
+      })
+      setImportFilas(editable); setImportAvisos(errores); setImportOpen(true)
+    } catch (e) {
+      setImportResult({ insertados: 0, errores: ['Error al leer el archivo: ' + (e.message || e)] })
+      toast('Error al leer el archivo', 'error')
+    } finally { setImportando(false); setBusy(false); if (ptzRef.current) ptzRef.current.value = '' }
+  }
+  const updateImportFila = (i, campo, val) => setImportFilas(fs => fs.map((f, idx) => {
+    if (idx !== i) return f
+    if (campo === 'prodId') { const t = terminados.find(x => String(x.id) === String(val)); return { ...f, prodId: val, producto: t ? t.nombre : f.producto } }
+    return { ...f, [campo]: val }
+  }))
+  const quitarImportFila = (i) => setImportFilas(fs => fs.filter((_, idx) => idx !== i))
+  // Paso 2: confirmar → insertar los registros ya verificados
+  const confirmarImportacion = async () => {
+    const validas = importFilas.filter(f => String(f.producto || '').trim() && f.fecha)
+    if (!validas.length) { toast('No hay filas válidas (falta producto o fecha)', 'warning'); return }
+    setImportando(true); setBusy(true)
+    try {
+      const payload = validas.map(f => {
+        const uni = parseFloat(f.unidades) || 0, caj = parseFloat(f.cajas) || 0
+        const usaCajas = caj > 0
+        const cantidad = usaCajas ? caj : uni
+        const notaExtra = usaCajas && uni > 0 ? ` · Unidades: ${uni}` : ''
+        return {
+          producto: String(f.producto).trim(), fecha: f.fecha, lote: f.lote || '', vence: f.vence || null,
+          empaque: usaCajas ? 'CAJAS' : 'UNIDADES', cantidad,
+          inicio: f.inicio || null, fin: f.fin || null,
+          labor: (f.labor || 'PRODUCCION').trim(), responsable: (f.responsable || '').trim(),
+          obs: (f.obs || '') + notaExtra + ' · [Importado PTZ-RG-03]',
+          estado: 'conforme', completado: true, aprobado: true, tipo_registro: 'final', orden_id: null,
+        }
+      })
+      let insertados = 0
+      for (let i = 0; i < payload.length; i += 200) {
+        const chunk = payload.slice(i, i + 200)
+        const { error } = await supabase.from('production_records').insert(chunk)
+        if (error) throw error
+        insertados += chunk.length
+      }
+      qc.invalidateQueries({ queryKey: ['production_records'] })
+      setImportOpen(false); setImportFilas([])
+      setImportResult({ insertados, errores: importAvisos })
+      toast(`Importados ${insertados} registro(s) ✓`)
+    } catch (e) {
+      setImportResult({ insertados: 0, errores: ['Error al importar: ' + (e.message || e)] })
+      toast('Error al importar', 'error')
+    } finally { setImportando(false); setBusy(false) }
+  }
+
   // Filtros
   const filtrados = [...registros].filter(p => {
     try {
@@ -442,6 +519,13 @@ export default function Produccion() {
             <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', margin: 0, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
               {importando ? 'Importando...' : <><Upload size={14} aria-hidden="true" /> Importar Excel</>}
               <input type="file" accept=".xlsx,.xls,.csv" ref={importRef} onChange={handleImport} style={{ display: 'none' }} disabled={importando} />
+            </label>
+          )}
+          {!esOperario && <button className="btn btn-secondary btn-sm" onClick={descargarPlantilla}><Ico as={Download} size={14} />Plantilla PTZ-RG-03</button>}
+          {!esOperario && (
+            <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', margin: 0, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              {importando ? 'Importando...' : <><ClipboardList size={14} aria-hidden="true" /> Importar registros (PTZ-RG-03)</>}
+              <input type="file" accept=".xlsx,.xls" ref={ptzRef} onChange={e => { const f = e.target.files?.[0]; importarPTZ(f) }} style={{ display: 'none' }} disabled={importando} />
             </label>
           )}
           <button className="btn btn-secondary btn-sm" onClick={() => window.print()}><Ico as={Download} size={14} />PDF</button>
@@ -792,6 +876,86 @@ export default function Produccion() {
       </Modal>
 
       {/* Modal ver foto */}
+      {/* Verificación de registros importados (editar + relacionar producto antes de guardar) */}
+      <Modal open={importOpen} onClose={() => { setImportOpen(false); setImportFilas([]) }} title="🔎 Verificar registros a importar (PTZ-RG-03)" size="modal-xl"
+        footer={<>
+          <button className="btn btn-secondary" onClick={() => { setImportOpen(false); setImportFilas([]) }}>Cancelar</button>
+          <button className="btn btn-primary" disabled={importando} onClick={confirmarImportacion}>
+            <Ico as={Save} size={14} />{importando ? 'Guardando…' : `Guardar ${importFilas.filter(f => String(f.producto || '').trim() && f.fecha).length} registro(s)`}
+          </button>
+        </>}
+      >
+        <div className="alert alert-info" style={{ fontSize: '0.83rem' }}>
+          Revisa y corrige los datos. <strong>Relaciona cada fila con un producto del catálogo</strong> (se emparejó automáticamente por nombre; las filas sin producto se marcan en rojo). Se guardan como registros de producción diaria aprobados, sin afectar el stock.
+        </div>
+        {importAvisos.length > 0 && (
+          <details style={{ marginBottom: 8 }}>
+            <summary style={{ cursor: 'pointer', color: 'var(--tierra)', fontSize: '0.82rem' }}>{importAvisos.length} fila(s) omitida(s) al leer</summary>
+            <ul style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', paddingLeft: 18 }}>{importAvisos.map((e, i) => <li key={i}>{e}</li>)}</ul>
+          </details>
+        )}
+        <div className="table-wrap" style={{ maxHeight: '55vh', overflow: 'auto' }}>
+          <table style={{ fontSize: '0.8rem' }}>
+            <thead><tr>
+              <th>Fecha</th><th>Producto del catálogo</th><th>Lote</th><th>Vence</th>
+              <th className="td-number">Unid.</th><th className="td-number">Cajas</th>
+              <th>Inicio</th><th>Fin</th><th>Responsable</th><th>Obs.</th><th></th>
+            </tr></thead>
+            <tbody>
+              {importFilas.length === 0
+                ? <tr><td colSpan={11} className="empty-table">Sin filas</td></tr>
+                : importFilas.map((f, i) => {
+                  const sinProd = !String(f.producto || '').trim()
+                  const sinMatch = !f.prodId
+                  return (
+                    <tr key={i} style={sinProd ? { background: 'rgba(192,57,43,0.08)' } : undefined}>
+                      <td><input type="date" className="form-control" style={{ minWidth: 130, padding: '3px 5px' }} value={f.fecha || ''} onChange={e => updateImportFila(i, 'fecha', e.target.value)} /></td>
+                      <td>
+                        <select className="form-control" style={{ minWidth: 180, padding: '3px 5px', borderColor: sinMatch ? 'var(--rojo)' : undefined }} value={f.prodId} onChange={e => updateImportFila(i, 'prodId', e.target.value)}>
+                          <option value="">— {f.producto ? `sin vincular: "${f.producto}"` : 'elige producto'} —</option>
+                          {terminados.map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+                        </select>
+                      </td>
+                      <td><input className="form-control" style={{ minWidth: 90, padding: '3px 5px' }} value={f.lote || ''} onChange={e => updateImportFila(i, 'lote', e.target.value)} /></td>
+                      <td><input type="date" className="form-control" style={{ minWidth: 130, padding: '3px 5px' }} value={f.vence || ''} onChange={e => updateImportFila(i, 'vence', e.target.value)} /></td>
+                      <td><input type="number" className="form-control td-number" style={{ width: 66, padding: '3px 5px' }} value={f.unidades ?? ''} onChange={e => updateImportFila(i, 'unidades', e.target.value)} /></td>
+                      <td><input type="number" className="form-control td-number" style={{ width: 62, padding: '3px 5px' }} value={f.cajas ?? ''} onChange={e => updateImportFila(i, 'cajas', e.target.value)} /></td>
+                      <td><input className="form-control" style={{ width: 64, padding: '3px 5px' }} value={f.inicio || ''} onChange={e => updateImportFila(i, 'inicio', e.target.value)} placeholder="HH:MM" /></td>
+                      <td><input className="form-control" style={{ width: 64, padding: '3px 5px' }} value={f.fin || ''} onChange={e => updateImportFila(i, 'fin', e.target.value)} placeholder="HH:MM" /></td>
+                      <td><input className="form-control" style={{ minWidth: 110, padding: '3px 5px' }} value={f.responsable || ''} onChange={e => updateImportFila(i, 'responsable', e.target.value)} /></td>
+                      <td><input className="form-control" style={{ minWidth: 130, padding: '3px 5px' }} value={f.obs || ''} onChange={e => updateImportFila(i, 'obs', e.target.value)} /></td>
+                      <td><button className="btn btn-xs btn-danger" title="Quitar fila" onClick={() => quitarImportFila(i)}><X size={12} aria-hidden="true" /></button></td>
+                    </tr>
+                  )
+                })}
+            </tbody>
+          </table>
+        </div>
+      </Modal>
+
+      {/* Resultado de la importación */}
+      <Modal open={!!importResult} onClose={() => setImportResult(null)} title="📥 Importación de registros (PTZ-RG-03)"
+        footer={<button className="btn btn-primary" onClick={() => setImportResult(null)}>Cerrar</button>}
+      >
+        {importResult && (
+          <>
+            <div className={`alert ${importResult.insertados > 0 ? 'alert-success' : 'alert-info'}`} style={{ fontSize: '0.9rem' }}>
+              {importResult.insertados > 0
+                ? <><strong>{importResult.insertados}</strong> registro(s) importado(s) como producción diaria (aprobados, sin afectar el stock).</>
+                : 'No se importaron registros.'}
+            </div>
+            {importResult.errores?.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ fontWeight: 600, color: 'var(--tierra)', marginBottom: 6 }}>Filas omitidas / avisos ({importResult.errores.length}):</div>
+                <ul style={{ fontSize: '0.82rem', color: 'var(--texto-suave)', maxHeight: 220, overflow: 'auto', paddingLeft: 18 }}>
+                  {importResult.errores.map((e, i) => <li key={i}>{e}</li>)}
+                </ul>
+              </div>
+            )}
+          </>
+        )}
+      </Modal>
+
       <Modal open={verFotoModal} onClose={() => setVerFotoModal(false)} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Camera size={18} aria-hidden="true" /> Foto registro</span>} size="modal-lg">
         <div style={{ textAlign: 'center' }}>
           <img src={fotoVerUrl} alt="registro" style={{ maxWidth: '100%', maxHeight: '70vh', borderRadius: 4, objectFit: 'contain' }} />
