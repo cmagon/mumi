@@ -1,7 +1,8 @@
 import { createContext, useContext, useEffect, useState } from 'react'
 import { supabase, supabaseSignup } from '../lib/supabase'
-import { setPermisosOverride } from '../lib/permisos'
+import { setPermisosOverride, setRolPreview } from '../lib/permisos'
 import { setRolLabels } from '../lib/businessLogic'
+import { getDevRole, subscribeDevRole, limpiarDev } from '../lib/devMode'
 
 const AuthContext = createContext(null)
 
@@ -23,6 +24,8 @@ export function AuthProvider({ children }) {
   const [profile, setProfile] = useState(null)
   const [loading, setLoading] = useState(true)
   const [permisos, setPermisos] = useState(null)
+  const [devRole, setDevRole] = useState(getDevRole())
+  useEffect(() => subscribeDevRole(setDevRole), [])
 
   // Carga la configuración de permisos por rol (tabla role_permissions) y la aplica
   async function recargarPermisos() {
@@ -132,6 +135,7 @@ export function AuthProvider({ children }) {
 
   async function signOut() {
     clearLoginAt(); localStorage.removeItem(PROFILE_KEY)
+    limpiarDev(); setRolPreview(null)   // salir de cualquier modo desarrollador
     await supabase.auth.signOut()
     setUser(null)
     setProfile(null)
@@ -175,7 +179,24 @@ export function AuthProvider({ children }) {
     return data
   }
 
-  const value = { user, profile, loading, permisos, recargarPermisos, signIn, signOut, createUser, changePassword, adminResetPassword }
+  // Rol EFECTIVO: si el desarrollador está "editando la vista de un rol", toda la app
+  // (menú y accesos) se ve como ese rol. Para el resto de usuarios, es su rol real.
+  // La "vista de rol" se aplica siempre que haya un devRole activo (solo se puede activar desde
+  // la herramienta de desarrollador, que ya valida es_desarrollador). Así el menú/pestañas se
+  // filtran de forma fiable sin depender de que el flag ya esté cargado en el perfil.
+  const esDevPreview = !!devRole
+  const rolEfectivo = esDevPreview ? devRole : profile?.rol
+  // Aplica (o quita) el rol de previsualización a la capa de permisos DURANTE el render,
+  // para que menú, módulos y secciones/pestañas se vean tal cual ese rol sin desfase.
+  setRolPreview(esDevPreview ? devRole : null)
+  // Durante la vista de rol, TODA la app (incluidas las páginas que leen profile.rol para decidir
+  // sus pestañas/botones) recibe el rol previsualizado. Se conserva el resto del perfil real
+  // (id, nombre, es_desarrollador…) para que las herramientas de desarrollador sigan funcionando.
+  // Como la vista de rol es de solo lectura, cambiar el rol expuesto no afecta escrituras.
+  const profileExpuesto = (profile && esDevPreview)
+    ? { ...profile, rol: rolEfectivo, _rolReal: profile.rol }
+    : profile
+  const value = { user, profile: profileExpuesto, loading, permisos, rolEfectivo, esDevPreview, recargarPermisos, signIn, signOut, createUser, changePassword, adminResetPassword }
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

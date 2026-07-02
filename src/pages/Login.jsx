@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabase'
 import { getConfig, loadConfig } from '../lib/appConfig'
+import { limpiarDev } from '../lib/devMode'
 
 // Íconos SVG (en vez de emoji) — regla "no emoji como ícono"
 const svgProps = { viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 2, strokeLinecap: 'round', strokeLinejoin: 'round' }
@@ -56,6 +57,7 @@ export default function Login() {
     if (!login || !password) { setError('Ingresa usuario y contraseña'); return }
     setLoading(true); setError('')
     try {
+      limpiarDev()   // un inicio de sesión normal nunca queda en modo desarrollador
       await signIn(login, password)
       navigate('/dashboard')
     } catch {

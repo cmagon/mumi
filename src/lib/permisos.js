@@ -85,8 +85,17 @@ let _override = null
 export function setPermisosOverride(map) { _override = map || null }
 export function getPermisosOverride() { return _override }
 
+// ---- Rol de PREVISUALIZACIÓN (modo desarrollador "vista de rol") ----
+// Cuando está activo, TODA verificación de permisos usa este rol en lugar del real,
+// de modo que el menú, los módulos y las secciones/pestañas se ven tal cual ese rol.
+let _rolPreview = null
+export function setRolPreview(rol) { _rolPreview = rol || null }
+export function getRolPreview() { return _rolPreview }
+const rolEfectivoPerm = (rol) => _rolPreview || rol
+
 // ¿El rol puede ver el módulo?
-export function puedeVer(rol, modulo) {
+export function puedeVer(rolArg, modulo) {
+  const rol = rolEfectivoPerm(rolArg)
   if (rol === 'admin') return true                      // el admin ve todo, siempre
   const ov = _override?.[rol]?.modulos
   // Roles sin configuración conocida arrancan con acceso mínimo (solo Tablero)
@@ -96,7 +105,8 @@ export function puedeVer(rol, modulo) {
 
 // ¿El rol puede ver una sección concreta de un módulo?
 // Si no hay override de secciones definido → visible por defecto (siempre que vea el módulo).
-export function puedeVerSeccion(rol, modulo, seccion) {
+export function puedeVerSeccion(rolArg, modulo, seccion) {
+  const rol = rolEfectivoPerm(rolArg)
   if (rol === 'admin') return true
   if (!puedeVer(rol, modulo)) return false
   const sec = _override?.[rol]?.secciones?.[modulo]
@@ -104,6 +114,6 @@ export function puedeVerSeccion(rol, modulo, seccion) {
   return sec.includes(seccion)
 }
 
-export const esAdmin    = (rol) => rol === 'admin'
-export const esOperario = (rol) => rol === 'operario'
-export const esAuxiliar = (rol) => rol === 'auxiliar'
+export const esAdmin    = (rol) => rolEfectivoPerm(rol) === 'admin'
+export const esOperario = (rol) => rolEfectivoPerm(rol) === 'operario'
+export const esAuxiliar = (rol) => rolEfectivoPerm(rol) === 'auxiliar'

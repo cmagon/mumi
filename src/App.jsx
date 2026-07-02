@@ -10,6 +10,7 @@ import MobileHeader from './components/Layout/MobileHeader'
 import AttendanceModal from './components/AttendanceModal'
 import ConnStatus from './components/ConnStatus'
 import SavingOverlay from './components/ui/SavingOverlay'
+import DevModeBanner from './components/DevModeBanner'
 import Login from './pages/Login'
 import Compartido from './pages/Compartido'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -57,7 +58,7 @@ function useResponsiveTableLabels() {
 }
 
 function ProtectedLayout() {
-  const { user, profile, loading, signOut } = useAuth()
+  const { user, profile, loading, signOut, rolEfectivo, esDevPreview } = useAuth()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [asistModo, setAsistModo] = useState(null)   // null | 'login' | 'logout'
@@ -66,7 +67,8 @@ function ProtectedLayout() {
   useResponsiveTableLabels()
 
   // Empleado vinculado al usuario (por nombre). Los admin no fichan asistencia.
-  const esEmpleadoFichable = !!profile && profile.rol !== 'admin'
+  // En "vista de rol" se usa el rol EFECTIVO para reflejar lo que ese rol vería.
+  const esEmpleadoFichable = !!profile && rolEfectivo !== 'admin'
   const { data: empleados = [] } = useQuery({
     queryKey: ['empleados'],
     queryFn: async () => { const { data } = await supabase.from('employees').select('*'); return data || [] },
@@ -100,11 +102,12 @@ function ProtectedLayout() {
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
         onLogout={pedirCierre}
-        puedeFichar={!!empVinculado}
-        onRegistrarAsistencia={() => { setSidebarOpen(false); setAsistModo('login') }}
+        puedeFichar={esDevPreview ? (rolEfectivo !== 'admin') : !!empVinculado}
+        onRegistrarAsistencia={() => { setSidebarOpen(false); if (esDevPreview && !empVinculado) return; setAsistModo('login') }}
       />
       <MobileHeader onMenuClick={() => setSidebarOpen(true)} />
       <main className="main-content">
+        <DevModeBanner />
         <Outlet />
       </main>
       <div id="toast-container" role="status" aria-live="polite" aria-atomic="false" />
@@ -123,15 +126,15 @@ function ProtectedLayout() {
 }
 
 function AdminRoute({ children }) {
-  const { profile } = useAuth()
-  if (profile && profile.rol !== 'admin') return <Navigate to="/dashboard" replace />
+  const { rolEfectivo, profile } = useAuth()
+  if (profile && rolEfectivo !== 'admin') return <Navigate to="/dashboard" replace />
   return children
 }
 
 // Bloquea el acceso a un módulo si el rol no tiene permiso
 function ModRoute({ modulo, children }) {
-  const { profile } = useAuth()
-  if (profile && !puedeVer(profile.rol, modulo)) return <Navigate to="/dashboard" replace />
+  const { rolEfectivo, profile } = useAuth()
+  if (profile && !puedeVer(rolEfectivo, modulo)) return <Navigate to="/dashboard" replace />
   return children
 }
 

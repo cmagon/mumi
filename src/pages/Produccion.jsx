@@ -15,6 +15,7 @@ import Modal from '../components/ui/Modal'
 import TimeField from '../components/ui/TimeField'
 import { useReorder } from '../hooks/useReorder'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
+import { puedeVerSeccion } from '../lib/permisos'
 import * as XLSX from 'xlsx'
 import {
   Download, Upload, Plus, Check, Pencil, Trash2, X, BarChart3, DollarSign, Link2,
@@ -58,9 +59,14 @@ export default function Produccion() {
   const qc = useQueryClient()
   const { profile } = useAuth()
   const esAdmin = profile?.rol === 'admin'
+  // Permiso configurable (asignable por el admin en Usuarios): descargar registros y ver el
+  // Análisis Mensual. El admin siempre puede; para otros roles depende de la sección 'analisis'.
+  const puedeAnalisis = puedeVerSeccion(profile?.rol, 'produccion', 'analisis')
   const fileRef = useRef()
   const importRef = useRef()
   const [tab, setTab] = useState('lista')
+  // Si no tiene permiso de análisis, nunca dejar la vista en esa pestaña
+  useEffect(() => { if (!puedeAnalisis && tab === 'analisis') setTab('lista') }, [puedeAnalisis, tab])
   const [filtroMes, setFiltroMes] = useState('')
   const [filtroAño, setFiltroAño] = useState(String(new Date().getFullYear()))
   const [filtroProd, setFiltroProd] = useState('')
@@ -511,6 +517,12 @@ export default function Produccion() {
   // Totales por mes (fila de cierre) y total general del año
   const totalesMes = Array.from({ length: 12 }, (_, m) => analisis.reduce((s, row) => s + (row.meses[m] || 0), 0))
   const totalAnio = totalesMes.reduce((s, v) => s + v, 0)
+  // Si el año elegido para el análisis no tiene datos pero hay otros años (p. ej. registros
+  // importados de años anteriores), selecciona automáticamente el año más reciente con datos.
+  useEffect(() => {
+    if (aniosDisponibles.length && !aniosDisponibles.includes(anioAnalisis)) setAnioAnalisis(aniosDisponibles[0])
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aniosDisponibles.join('|')])
 
   const exportarExcel = () => {
     const ws = XLSX.utils.aoa_to_sheet([
@@ -546,7 +558,7 @@ export default function Produccion() {
       <div className="page-header">
         <h1 className="page-title">Registro de Producción</h1>
         <div className="page-actions">
-          <div style={{ position: 'relative', display: 'inline-block' }} onMouseLeave={() => setMenuDesc(false)}>
+          {puedeAnalisis && <div style={{ position: 'relative', display: 'inline-block' }} onMouseLeave={() => setMenuDesc(false)}>
             <button className="btn btn-secondary btn-sm" onClick={() => setMenuDesc(v => !v)}><Ico as={Download} size={14} />Descargar registros ▾</button>
             {menuDesc && (
               <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 30, background: 'var(--blanco, #fff)', border: '1px solid var(--crema-oscuro)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.15)', minWidth: 210, overflow: 'hidden' }}>
@@ -554,7 +566,7 @@ export default function Produccion() {
                 <button className="btn btn-menu" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 12px', background: 'none', border: 'none', borderTop: '1px solid var(--crema-oscuro)', cursor: 'pointer' }} onClick={descargarPdfPTZ}>📄 PDF — formato PTZ-RG-03</button>
               </div>
             )}
-          </div>
+          </div>}
           {!esOperario && <button className="btn btn-secondary btn-sm" onClick={descargarPlantilla}><Ico as={Download} size={14} />Plantilla PTZ-RG-03</button>}
           {!esOperario && (
             <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', margin: 0, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -568,7 +580,7 @@ export default function Produccion() {
 
       <div className="tabs">
         <button className={`tab-btn ${tab === 'lista' ? 'active' : ''}`} onClick={() => setTab('lista')}>Registros</button>
-        <button className={`tab-btn ${tab === 'analisis' ? 'active' : ''}`} onClick={() => setTab('analisis')}>Análisis Mensual</button>
+        {puedeAnalisis && <button className={`tab-btn ${tab === 'analisis' ? 'active' : ''}`} onClick={() => setTab('analisis')}>Análisis Mensual</button>}
       </div>
 
       {tab === 'lista' && (
@@ -664,7 +676,7 @@ export default function Produccion() {
         </div>
       )}
 
-      {tab === 'analisis' && (
+      {tab === 'analisis' && puedeAnalisis && (
         <div className="card">
           <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}><BarChart3 size={16} aria-hidden="true" /> Resumen de Producción por Mes
             <select className="form-control" style={{ width: 120, marginLeft: 'auto' }} value={anioAnalisis} onChange={e => setAnioAnalisis(e.target.value)}>

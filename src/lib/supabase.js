@@ -1,5 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { setBusy } from './busy'
+import { motivoBloqueoEscritura } from './devMode'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
@@ -25,13 +26,32 @@ function _trackWrite(builder) {
   }
   return builder
 }
+// Constructor "bloqueado": emula un builder de Supabase que, al await, devuelve { error }.
+// Cualquier método de filtro (.eq, .select, .single, .match, …) devuelve el mismo objeto para
+// permitir el encadenamiento; then/catch/finally resuelven al resultado de error.
+function _bloqueado(mensaje) {
+  const resultado = { data: null, error: { message: mensaje, code: 'DEV_READONLY' } }
+  const p = Promise.resolve(resultado)
+  const handler = { get(t, prop) {
+    if (prop === 'then' || prop === 'catch' || prop === 'finally') return t[prop].bind(t)
+    return () => proxy
+  } }
+  const proxy = new Proxy(p, handler)
+  return proxy
+}
+
 const _origFrom = supabase.from.bind(supabase)
 supabase.from = (table) => {
   const qb = _origFrom(table)
   for (const m of ['insert', 'update', 'upsert', 'delete']) {
     if (typeof qb[m] !== 'function') continue
     const orig = qb[m].bind(qb)
-    qb[m] = (...args) => _trackWrite(orig(...args))
+    qb[m] = (...args) => {
+      // Modo desarrollador: vista de rol (solo lectura) o impersonación sin edición → bloquear.
+      const motivo = motivoBloqueoEscritura(table)
+      if (motivo) { try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('dev-bloqueo', { detail: motivo })) } catch { /* noop */ } return _bloqueado(motivo) }
+      return _trackWrite(orig(...args))
+    }
   }
   return qb
 }

@@ -35,7 +35,7 @@ const NAV_ITEMS = [
 ]
 
 export default function Sidebar({ open, onClose, onLogout, puedeFichar, onRegistrarAsistencia }) {
-  const { profile, signOut } = useAuth()
+  const { profile, signOut, rolEfectivo, esDevPreview } = useAuth()
   const navigate = useNavigate()
   const [pwdModal, setPwdModal] = useState(false)
   const [cfg, setCfg] = useState(getConfig())
@@ -77,7 +77,7 @@ export default function Sidebar({ open, onClose, onLogout, puedeFichar, onRegist
           <div className="user-meta">
             <div className="user-greeting">Hola,</div>
             <div className="user-name">{profile?.nombre || '—'}</div>
-            <div className="user-role">{getRolLabel(profile?.rol)}</div>
+            <div className="user-role">{getRolLabel(rolEfectivo)}{esDevPreview && <span style={{ marginLeft: 6, fontSize: '0.62rem', background: 'var(--dorado)', color: '#fff', padding: '1px 5px', borderRadius: 6 }}>vista de rol</span>}</div>
           </div>
         </div>
 
@@ -93,7 +93,7 @@ export default function Sidebar({ open, onClose, onLogout, puedeFichar, onRegist
             let seccionPend = null
             NAV_ITEMS.forEach((item, i) => {
               if (item.section) { seccionPend = item.section; return }
-              if (!puedeVer(profile?.rol, RUTA_MODULO[item.to])) return
+              if (!puedeVer(rolEfectivo, RUTA_MODULO[item.to])) return
               if (seccionPend) { out.push(<div key={`s${i}`} className="nav-section-title">{seccionPend}</div>); seccionPend = null }
               out.push(
                 <NavLink

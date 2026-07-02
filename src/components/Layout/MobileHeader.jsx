@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { Leaf, Menu } from 'lucide-react'
 import NotificationBell from '../NotificationBell'
+import DevUserSwitch from '../DevUserSwitch'
 import { getConfig, loadConfig } from '../../lib/appConfig'
 
 export default function MobileHeader({ onMenuClick }) {
@@ -16,7 +17,8 @@ export default function MobileHeader({ onMenuClick }) {
           : <Leaf size={20} aria-hidden="true" />}
         <span>{cfg.empresa || 'Mumi Amazonia'}</span>
       </Link>
-      <div style={{ marginLeft: 'auto' }}>
+      <div style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+        <DevUserSwitch />
         <NotificationBell variant="header" />
       </div>
     </div>
