@@ -18,7 +18,7 @@ export default function MobileHeader({ onMenuClick }) {
         <span>{cfg.empresa || 'Mumi Amazonia'}</span>
       </Link>
       <div style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 2 }}>
-        <DevUserSwitch />
+        <span className="solo-desktop" style={{ display: 'inline-flex' }}><DevUserSwitch /></span>
         <NotificationBell variant="header" />
       </div>
     </div>

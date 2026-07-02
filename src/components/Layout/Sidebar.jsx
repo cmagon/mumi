@@ -10,6 +10,7 @@ import { getRolLabel } from '../../lib/businessLogic'
 import { puedeVer, RUTA_MODULO } from '../../lib/permisos'
 import { getConfig, loadConfig } from '../../lib/appConfig'
 import ChangePasswordModal from '../ChangePasswordModal'
+import DevUserSwitch from '../DevUserSwitch'
 
 const NAV_ITEMS = [
   { section: 'Principal' },
@@ -109,6 +110,8 @@ export default function Sidebar({ open, onClose, onLogout, puedeFichar, onRegist
             })
             return out
           })()}
+          {/* Modo desarrollador: en móvil va aquí (en escritorio está en el encabezado) */}
+          <div className="solo-movil"><DevUserSwitch variant="menu" /></div>
         </nav>
 
         <div className="sidebar-footer" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>

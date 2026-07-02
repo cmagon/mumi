@@ -12,7 +12,7 @@ import { Wrench, X, LayoutDashboard, LogIn } from 'lucide-react'
 // Herramienta de DESARROLLADOR (solo para usuarios con es_desarrollador = true).
 // 1) Editar la vista del Tablero por ROL → se guarda en la nube y aplica a todos los usuarios del rol.
 // 2) Entrar como cualquier usuario (re-login real) para probar datos/permisos de ese rol.
-export default function DevUserSwitch() {
+export default function DevUserSwitch({ variant = 'header' }) {
   const { profile, signIn } = useAuth()
   const toast = useToast()
   const navigate = useNavigate()
@@ -79,19 +79,27 @@ export default function DevUserSwitch() {
 
   return (
     <>
-      <button
-        onClick={() => setOpen(o => !o)}
-        title="Herramientas de desarrollador"
-        aria-label="Herramientas de desarrollador"
-        style={{
-          position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-          width: 38, height: 38, borderRadius: '50%', border: 'none', cursor: 'pointer',
-          background: 'transparent', color: 'var(--header-fg-strong, #fff)',
-        }}
-      >
-        <Wrench size={19} aria-hidden="true" />
-        {devRole && <span style={{ position: 'absolute', top: 2, right: 2, width: 9, height: 9, borderRadius: '50%', background: 'var(--dorado)' }} />}
-      </button>
+      {variant === 'menu' ? (
+        <button className="nav-item" onClick={() => setOpen(o => !o)} style={{ width: '100%', position: 'relative' }}>
+          <span className="nav-icon"><Wrench size={18} aria-hidden="true" /></span>
+          Modo desarrollador
+          {devRole && <span style={{ marginLeft: 'auto', fontSize: '0.62rem', background: 'var(--dorado)', color: '#fff', padding: '1px 6px', borderRadius: 6 }}>vista de rol</span>}
+        </button>
+      ) : (
+        <button
+          onClick={() => setOpen(o => !o)}
+          title="Herramientas de desarrollador"
+          aria-label="Herramientas de desarrollador"
+          style={{
+            position: 'relative', display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+            width: 38, height: 38, borderRadius: '50%', border: 'none', cursor: 'pointer',
+            background: 'transparent', color: 'var(--header-fg-strong, #fff)',
+          }}
+        >
+          <Wrench size={19} aria-hidden="true" />
+          {devRole && <span style={{ position: 'absolute', top: 2, right: 2, width: 9, height: 9, borderRadius: '50%', background: 'var(--dorado)' }} />}
+        </button>
+      )}
 
       {open && (
         <div style={{
