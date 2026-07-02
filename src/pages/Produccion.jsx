@@ -10,7 +10,7 @@ import { useAuth } from '../context/AuthContext'
 import { notificar } from '../lib/notificaciones'
 import { getConfig } from '../lib/appConfig'
 import { setBusy } from '../lib/busy'
-import { descargarPlantillaProduccion, leerPlantillaProduccion } from '../lib/plantillaProduccion'
+import { descargarPlantillaProduccion, leerPlantillaProduccion, exportarRegistrosExcelPTZ, exportarRegistrosPDFPTZ } from '../lib/plantillaProduccion'
 import Modal from '../components/ui/Modal'
 import TimeField from '../components/ui/TimeField'
 import { useReorder } from '../hooks/useReorder'
@@ -79,6 +79,7 @@ export default function Produccion() {
   const [importOpen, setImportOpen] = useState(false)      // tabla de verificación previa a guardar
   const [importFilas, setImportFilas] = useState([])       // filas editables leídas del Excel
   const [importAvisos, setImportAvisos] = useState([])     // filas omitidas al leer
+  const [menuDesc, setMenuDesc] = useState(false)          // desplegable "Descargar registros"
   const [ordenLink, setOrdenLink] = useState(null)   // id de orden si se llega desde "Registrar producción"
   const [subprocs, setSubprocs] = useState([])       // tiempos por proceso/subproceso (unificado con órdenes)
   const ordProc = useReorder(setSubprocs)
@@ -116,6 +117,18 @@ export default function Produccion() {
     queryKey: ['finished_movements_entradas'],
     queryFn: async () => { const { data } = await supabase.from('finished_movements').select('finished_id, cantidad, fecha, tipo, origen').eq('tipo', 'entrada').eq('origen', 'produccion'); return data || [] },
   })
+
+  // Documento vivo PTZ-RG-03 (sección Documentación): su archivo es la plantilla de descarga/lectura.
+  // Si se actualiza allí, aquí se refleja automáticamente. Si no existe, se usa el archivo empaquetado.
+  const { data: ptzDoc } = useQuery({
+    queryKey: ['doc_ptz_rg_03'],
+    queryFn: async () => {
+      const { data } = await supabase.from('documentos').select('codigo, nombre, storage_url, version, eliminado_at')
+        .is('eliminado_at', null).eq('codigo', 'PTZ-RG-03').order('version', { ascending: false }).limit(1).maybeSingle()
+      return data || null
+    },
+  })
+  const ptzUrl = ptzDoc?.storage_url || ''
 
   const { data: empleados = [] } = useQuery({
     queryKey: ['empleados'],
@@ -375,9 +388,8 @@ export default function Produccion() {
 
   // ===== Importar registros de producción diaria desde la plantilla PTZ-RG-03 (con verificación) =====
   const descargarPlantilla = async () => {
-    const cfg = getConfig()
-    try { await descargarPlantillaProduccion({ empresa: cfg.empresa, logoUrl: cfg.logo_url }) }
-    catch (e) { toast('No se pudo generar la plantilla: ' + (e.message || e), 'error') }
+    try { await descargarPlantillaProduccion(ptzUrl) }
+    catch (e) { toast('No se pudo descargar la plantilla: ' + (e.message || e), 'error') }
   }
   const normNombre = (s) => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ')
   // Paso 1: leer el Excel y abrir la tabla de verificación (NO inserta todavía)
@@ -442,6 +454,20 @@ export default function Produccion() {
     } finally { setImportando(false); setBusy(false) }
   }
 
+  // ===== Descargar registros en el formato original PTZ-RG-03 (Excel o PDF) =====
+  const descargarExcelPTZ = async () => {
+    setMenuDesc(false); setBusy(true)
+    try { await exportarRegistrosExcelPTZ(filtrados, { templateUrl: ptzUrl }) }
+    catch (e) { toast('No se pudo generar el Excel: ' + (e.message || e), 'error') }
+    finally { setBusy(false) }
+  }
+  const descargarPdfPTZ = () => {
+    setMenuDesc(false)
+    const cfg = getConfig()
+    try { exportarRegistrosPDFPTZ(filtrados, { empresa: cfg.empresa, logoUrl: cfg.logo_url }) }
+    catch (e) { toast(e.message || 'No se pudo generar el PDF', 'error') }
+  }
+
   // Filtros
   const filtrados = [...registros].filter(p => {
     try {
@@ -455,6 +481,8 @@ export default function Produccion() {
 
   const aprobados = registros.filter(r => r.aprobado !== false)
   const prodNames = [...new Set(registros.map(r => r.producto))].sort()
+  // Años realmente presentes en los registros (+ el año actual), para no ofrecer años vacíos
+  const aniosRegistros = [...new Set([String(new Date().getFullYear()), ...registros.map(r => String(r.fecha || '').slice(0, 4)).filter(Boolean)])].sort((a, b) => b.localeCompare(a))
   // Año/mes tomados del texto 'YYYY-MM-DD' para evitar el desfase de zona horaria
   const anioDe = (f) => String(f || '').slice(0, 4)
   const mesDe = (f) => (parseInt(String(f || '').slice(5, 7), 10) || 0) - 1   // 0-11
@@ -464,9 +492,13 @@ export default function Produccion() {
   // saldo NO entra aquí) + producción de subproductos (MP fabricadas internamente, que no son producto
   // terminado y por eso no generan entrada de terminado).
   const nombreFP = Object.fromEntries(finishedProds.map(p => [p.id, p.nombre]))
+  // Registros IMPORTADOS (PTZ-RG-03): no generan finished_movements (para no afectar el stock),
+  // así que se cuentan directo desde production_records para que sí aparezcan en el análisis.
+  const esImportado = (r) => /\[Importado PTZ-RG-03\]/.test(r.obs || '')
   const entradasAnalisis = [
     ...entradasTerminado.map(m => ({ nombre: nombreFP[m.finished_id] || '(producto terminado)', fecha: m.fecha, cant: Number(m.cantidad) || 0 })),
     ...aprobados.filter(r => r.tipo_registro === 'subproducto').map(r => ({ nombre: r.producto, fecha: r.fecha, cant: Number(r.cantidad) || 0 })),
+    ...aprobados.filter(r => (r.tipo_registro || 'final') !== 'subproducto' && esImportado(r)).map(r => ({ nombre: r.producto, fecha: r.fecha, cant: Number(r.cantidad) || 0 })),
   ].filter(e => e.nombre)
   const aniosDisponibles = [...new Set(entradasAnalisis.map(e => anioDe(e.fecha)).filter(Boolean))].sort((a, b) => b.localeCompare(a))
   const entradasAnio = entradasAnalisis.filter(e => anioDe(e.fecha) === anioAnalisis)
@@ -514,13 +546,15 @@ export default function Produccion() {
       <div className="page-header">
         <h1 className="page-title">Registro de Producción</h1>
         <div className="page-actions">
-          <button className="btn btn-secondary btn-sm" onClick={exportarExcel}><Ico as={Download} size={14} />Excel</button>
-          {!esOperario && (
-            <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', margin: 0, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-              {importando ? 'Importando...' : <><Upload size={14} aria-hidden="true" /> Importar Excel</>}
-              <input type="file" accept=".xlsx,.xls,.csv" ref={importRef} onChange={handleImport} style={{ display: 'none' }} disabled={importando} />
-            </label>
-          )}
+          <div style={{ position: 'relative', display: 'inline-block' }} onMouseLeave={() => setMenuDesc(false)}>
+            <button className="btn btn-secondary btn-sm" onClick={() => setMenuDesc(v => !v)}><Ico as={Download} size={14} />Descargar registros ▾</button>
+            {menuDesc && (
+              <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 30, background: 'var(--blanco, #fff)', border: '1px solid var(--crema-oscuro)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.15)', minWidth: 210, overflow: 'hidden' }}>
+                <button className="btn btn-menu" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 12px', background: 'none', border: 'none', cursor: 'pointer' }} onClick={descargarExcelPTZ}>📊 Excel — formato PTZ-RG-03</button>
+                <button className="btn btn-menu" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 12px', background: 'none', border: 'none', borderTop: '1px solid var(--crema-oscuro)', cursor: 'pointer' }} onClick={descargarPdfPTZ}>📄 PDF — formato PTZ-RG-03</button>
+              </div>
+            )}
+          </div>
           {!esOperario && <button className="btn btn-secondary btn-sm" onClick={descargarPlantilla}><Ico as={Download} size={14} />Plantilla PTZ-RG-03</button>}
           {!esOperario && (
             <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', margin: 0, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -528,7 +562,6 @@ export default function Produccion() {
               <input type="file" accept=".xlsx,.xls" ref={ptzRef} onChange={e => { const f = e.target.files?.[0]; importarPTZ(f) }} style={{ display: 'none' }} disabled={importando} />
             </label>
           )}
-          <button className="btn btn-secondary btn-sm" onClick={() => window.print()}><Ico as={Download} size={14} />PDF</button>
           <button className="btn btn-primary btn-sm" onClick={() => { setForm(EMPTY); setEditId(null); setDetalleRec(null); setFotos([]); setOrdenLink(null); setSubprocs([]); setModal(true) }}><Ico as={Plus} size={14} />Nuevo Registro</button>
         </div>
       </div>
@@ -552,8 +585,7 @@ export default function Produccion() {
               {MESES.slice(1).map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
             </select>
             <select className="form-control" value={filtroAño} onChange={e => setFiltroAño(e.target.value)} style={{ width: 'auto' }}>
-              <option value="2025">2025</option>
-              <option value="2026">2026</option>
+              {aniosRegistros.map(a => <option key={a} value={a}>{a}</option>)}
             </select>
             <select className="form-control" value={filtroProd} onChange={e => setFiltroProd(e.target.value)} style={{ width: 'auto' }}>
               <option value="">Todos los productos</option>

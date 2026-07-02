@@ -29,86 +29,15 @@ async function fetchLogoBase64(url) {
   try { const res = await fetch(url); const blob = await res.blob(); return await new Promise((ok) => { const r = new FileReader(); r.onloadend = () => ok(r.result); r.onerror = () => ok(null); r.readAsDataURL(blob) }) } catch { return null }
 }
 
-export async function descargarPlantillaProduccion({ empresa = 'Mumi Amazonia', logoUrl = '', ejemplos = [] } = {}) {
-  const wb = new ExcelJS.Workbook()
-  const ws = wb.addWorksheet('PRODUCCIÓN DIARIA', { properties: { defaultRowHeight: 15 }, pageSetup: { paperSize: 9, orientation: 'landscape', fitToPage: true, fitToWidth: 1 } })
-  ws.columns = COLUMNAS_PLANTILLA.map(c => ({ width: c.ancho }))
-  const nCols = COLUMNAS_PLANTILLA.length
-  const lastColLetter = ws.getColumn(nCols).letter
-
-  // ===== Encabezado tipo PTZ-RG-03 =====
-  ws.mergeCells(`A1:${ws.getColumn(nCols - 2).letter}4`)
-  const head = ws.getCell('A1')
-  head.value = `${empresa.toUpperCase()}\nCONTROL DE PRODUCCIÓN DIARIA`
-  head.font = { name: 'Arial', size: 16, bold: true, color: { argb: 'FFFFFFFF' } }
-  head.alignment = { vertical: 'middle', horizontal: 'center', wrapText: true }
-  head.fill = { type: 'gradient', gradient: 'angle', degree: 0, stops: [{ position: 0, color: { argb: VERDE } }, { position: 1, color: { argb: VERDE2 } }] }
-  for (let i = 1; i <= 4; i++) ws.getRow(i).height = 20
-  if (logoUrl) {
-    const b64 = await fetchLogoBase64(logoUrl)
-    if (b64) { try { const ext = (b64.match(/^data:image\/(\w+);/) || [])[1] || 'png'; const id = wb.addImage({ base64: b64, extension: ext === 'jpeg' ? 'jpeg' : (ext === 'svg+xml' ? 'png' : ext) }); ws.addImage(id, { tl: { col: 0.1, row: 0.1 }, ext: { width: 66, height: 58 } }) } catch { /* svg */ } }
-  }
-  // Bloque de código/versión a la derecha
-  const metaCol = nCols - 1
-  const meta = [['CÓDIGO', 'PTZ-RG-03'], ['VERSIÓN', '1'], ['PÁGINA', '1']]
-  meta.forEach((m, i) => {
-    const rr = i + 1
-    const a = ws.getCell(rr, metaCol), b = ws.getCell(rr, nCols)
-    a.value = m[0]; b.value = m[1]
-    a.font = { bold: true, size: 9 }; b.font = { size: 9 }
-    a.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: CREMA } }
-    a.border = borde; b.border = borde
-    a.alignment = { horizontal: 'center', vertical: 'middle' }; b.alignment = { horizontal: 'center', vertical: 'middle' }
-  })
-  const fRow = ws.getCell(4, metaCol); fRow.value = 'FECHA'; fRow.font = { bold: true, size: 9 }; fRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: CREMA } }; fRow.border = borde; fRow.alignment = { horizontal: 'center', vertical: 'middle' }
-  const fVal = ws.getCell(4, nCols); fVal.border = borde
-
-  // ===== Fila de instrucciones =====
-  ws.mergeCells(`A5:${lastColLetter}5`)
-  const ins = ws.getCell('A5')
-  ins.value = 'Llena una fila por registro. Fechas en formato dd/mm/aaaa · Horas en formato HH:MM (24h) · UNIDADES o CAJAS según cómo se contó · No borres la fila de encabezados.'
-  ins.font = { italic: true, size: 9, color: { argb: VERDE } }
-  ins.alignment = { horizontal: 'left', vertical: 'middle' }
-  ins.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: CREMA } }
-
-  // ===== Encabezados de columnas (fila 6) =====
-  const HEADER_ROW = 6
-  COLUMNAS_PLANTILLA.forEach((c, i) => {
-    const cell = ws.getCell(HEADER_ROW, i + 1)
-    cell.value = c.label
-    cell.font = { bold: true, size: 10, color: { argb: VERDE } }
-    cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: DORADO } }
-    cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
-    cell.border = borde
-  })
-  ws.getRow(HEADER_ROW).height = 24
-  ws.views = [{ state: 'frozen', ySplit: HEADER_ROW }]
-
-  // ===== Filas de ejemplo o vacías con bordes y formato =====
-  const filas = ejemplos.length ? ejemplos : [
-    { fecha: new Date(), lote: 'EJ0107', producto: 'Ejemplo — bocadillo', unidades: '', cajas: 40, inicio: '08:00', fin: '12:30', labor: 'PRODUCCIÓN', responsable: 'Nombre operario', obs: 'Fila de ejemplo (puedes borrarla)' },
-  ]
-  const TOTAL_FILAS = Math.max(filas.length + 30, 40)
-  for (let r = 0; r < TOTAL_FILAS; r++) {
-    const rowIdx = HEADER_ROW + 1 + r
-    const data = filas[r] || {}
-    COLUMNAS_PLANTILLA.forEach((c, i) => {
-      const cell = ws.getCell(rowIdx, i + 1)
-      const v = data[c.key]
-      if (v !== undefined && v !== '') cell.value = v
-      cell.border = borde
-      if (c.tipo === 'fecha') cell.numFmt = 'dd/mm/yyyy'
-      if (c.tipo === 'hora') cell.numFmt = 'hh:mm'
-      if (c.tipo === 'num') cell.alignment = { horizontal: 'right' }
-      cell.font = { size: 10 }
-    })
-  }
-
-  const buf = await wb.xlsx.writeBuffer()
-  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+// Descarga la plantilla EXACTA. Usa la URL del documento vivo (sección Documentación) si se pasa;
+// si no, cae al archivo empaquetado. Así, si el documento se actualiza allí, este botón lo refleja.
+export async function descargarPlantillaProduccion(url) {
+  const res = await fetch(url || PTZ_URL)
+  if (!res.ok) throw new Error('No se encontró la plantilla original PTZ-RG-03.')
+  const blob = await res.blob()
   const a = document.createElement('a')
   a.href = URL.createObjectURL(blob)
-  a.download = 'Plantilla PTZ-RG-03 Produccion.xlsx'
+  a.download = 'PTZ-RG-03 REGISTRO CONTROL PRODUCCIÓN DIARIA.xlsx'
   a.click()
   setTimeout(() => URL.revokeObjectURL(a.href), 2000)
 }
@@ -148,7 +77,7 @@ export async function leerPlantillaProduccion(file) {
   const buf = await file.arrayBuffer()
   const wb = XLSX.read(buf, { type: 'array' })   // seriales crudos: las fechas se convierten manualmente (sin desfase de zona horaria)
   const sh = wb.Sheets[wb.SheetNames[0]]
-  const matrix = XLSX.utils.sheet_to_json(sh, { header: 1, defval: '', blankrows: false })
+  const matrix = XLSX.utils.sheet_to_json(sh, { header: 1, defval: '', blankrows: true })
   // Buscar la fila de encabezados (la que contenga FECHA y PRODUCTO)
   let hRow = -1
   for (let i = 0; i < matrix.length; i++) {
@@ -156,17 +85,26 @@ export async function leerPlantillaProduccion(file) {
     if (set.includes('FECHA') && set.includes('PRODUCTO')) { hRow = i; break }
   }
   if (hRow < 0) return { filas: [], errores: ['No se encontró la fila de encabezados (debe incluir FECHA y PRODUCTO). ¿Usaste la plantilla?'] }
-  const headers = matrix[hRow].map(norm)
-  const idx = {}
-  for (const c of COLUMNAS_PLANTILLA) {
-    // acepta variantes: "FECHA VENCIMIENTO" o "FECHA DE VENCIMIENTO"
-    const posibles = [norm(c.label), norm(c.label.replace('VENCIMIENTO', 'DE VENCIMIENTO'))]
-    idx[c.key] = headers.findIndex(h => posibles.includes(h))
+  // El archivo es el formato ORIGINAL PTZ-RG-03: las columnas están en posiciones fijas
+  // (celdas fusionadas → el valor queda en la columna ancla del grupo).
+  const idxPorNombre = (txt) => matrix[hRow].map(norm).findIndex(h => h === norm(txt))
+  const COL = {
+    fecha: 0, lote: 3, vence: 6, producto: 9, unidades: 17, cajas: 19,
+    inicio: 21, fin: 24, labor: 27, responsable: 30, obs: 33,
   }
+  // Si el encabezado real está corrido (otra versión), reajusta por nombre cuando se encuentre.
+  const ajusta = (k, ...nombres) => { for (const n of nombres) { const j = idxPorNombre(n); if (j >= 0) { COL[k] = j; return } } }
+  ajusta('fecha', 'FECHA'); ajusta('lote', 'LOTE'); ajusta('vence', 'FECHA DE VENCIMIENTO', 'FECHA VENCIMIENTO', 'VENCIMIENTO')
+  ajusta('producto', 'PRODUCTO'); ajusta('labor', 'LABOR'); ajusta('responsable', 'RESPONSABLE'); ajusta('obs', 'OBSERVACIONES')
+  // Sub-encabezado UNIDAD/CAJAS (fila siguiente al encabezado en el formato original)
+  const sub = (matrix[hRow + 1] || []).map(norm)
+  const jUnidad = sub.findIndex(h => h === 'UNIDAD' || h === 'UNIDADES'); if (jUnidad >= 0) COL.unidades = jUnidad
+  const jCajas = sub.findIndex(h => h === 'CAJAS'); if (jCajas >= 0) COL.cajas = jCajas
+  const dataIni = (sub.includes('UNIDAD') || sub.includes('UNIDADES') || sub.includes('CAJAS')) ? hRow + 2 : hRow + 1
   const filas = [], errores = []
-  for (let i = hRow + 1; i < matrix.length; i++) {
+  for (let i = dataIni; i < matrix.length; i++) {
     const row = matrix[i]
-    const get = (k) => idx[k] >= 0 ? row[idx[k]] : ''
+    const get = (k) => row[COL[k]]
     const producto = String(get('producto') || '').trim()
     const fecha = toYMD(get('fecha'))
     const unidades = toNum(get('unidades'))
@@ -190,4 +128,128 @@ export async function leerPlantillaProduccion(file) {
     })
   }
   return { filas, errores }
+}
+
+// ============================================================================
+// EXPORTACIÓN de registros usando la MISMA plantilla original PTZ-RG-03.
+// ============================================================================
+const PTZ_URL = '/plantillas/PTZ-RG-03.xlsx'
+const DATA_ROW_INI = 9        // primera fila de datos en el formato original
+const DATA_ROW_FIN = 46       // última fila con formato preexistente
+// Grupos de columnas fusionadas por celda (1-based) y columna ancla donde se escribe el valor
+const GRUPOS = [
+  { key: 'fecha',       anchor: 1,  span: [1, 3] },
+  { key: 'lote',        anchor: 4,  span: [4, 6] },
+  { key: 'vence',       anchor: 7,  span: [7, 9] },
+  { key: 'producto',    anchor: 10, span: [10, 17] },
+  { key: 'unidades',    anchor: 18, span: [18, 19] },
+  { key: 'cajas',       anchor: 20, span: [20, 21] },
+  { key: 'inicio',      anchor: 22, span: [22, 24] },
+  { key: 'fin',         anchor: 25, span: [25, 27] },
+  { key: 'labor',       anchor: 28, span: [28, 30] },
+  { key: 'responsable', anchor: 31, span: [31, 33] },
+  { key: 'obs',         anchor: 34, span: [34, 37] },
+]
+const fmtDMY = (ymd) => { if (!ymd) return ''; const m = String(ymd).match(/^(\d{4})-(\d{2})-(\d{2})/); return m ? `${m[3]}/${m[2]}/${m[1]}` : String(ymd) }
+const hm = (t) => { if (!t) return ''; const m = String(t).match(/^(\d{1,2}):(\d{2})/); return m ? `${String(+m[1]).padStart(2, '0')}:${m[2]}` : String(t) }
+// Normaliza un registro de la BD a los campos de las columnas del formato
+const aFila = (r) => {
+  const empaque = String(r.empaque || 'UNIDADES').toUpperCase()
+  const cant = parseFloat(r.cantidad) || 0
+  return {
+    fecha: fmtDMY(r.fecha), lote: r.lote || '', vence: fmtDMY(r.vence), producto: r.producto || '',
+    unidades: empaque.includes('CAJA') ? '' : (cant || ''), cajas: empaque.includes('CAJA') ? (cant || '') : '',
+    inicio: hm(r.inicio), fin: hm(r.fin), labor: r.labor || '', responsable: r.responsable || '', obs: r.obs || '',
+  }
+}
+
+export async function exportarRegistrosExcelPTZ(registros = [], { templateUrl = '' } = {}) {
+  const filas = registros.map(aFila)
+  const wb = new ExcelJS.Workbook()
+  const res = await fetch(templateUrl || PTZ_URL)
+  if (!res.ok) throw new Error('No se encontró la plantilla original PTZ-RG-03.')
+  await wb.xlsx.load(await res.arrayBuffer())
+  const ws = wb.worksheets[0]
+  const bordeFino = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } }
+
+  filas.forEach((f, i) => {
+    const row = DATA_ROW_INI + i
+    // Si sobrepasan las filas preexistentes, replicar fusiones y bordes del formato
+    if (row > DATA_ROW_FIN) {
+      for (const g of GRUPOS) {
+        try { ws.mergeCells(row, g.span[0], row, g.span[1]) } catch { /* ya fusionada */ }
+        for (let c = g.span[0]; c <= g.span[1]; c++) ws.getCell(row, c).border = bordeFino
+      }
+      ws.getRow(row).height = 16
+    }
+    for (const g of GRUPOS) {
+      const cell = ws.getCell(row, g.anchor)
+      cell.value = f[g.key] === '' ? null : f[g.key]
+      cell.alignment = { vertical: 'middle', horizontal: g.key === 'producto' || g.key === 'obs' ? 'left' : 'center', wrapText: true }
+    }
+  })
+
+  const buf = await wb.xlsx.writeBuffer()
+  const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+  const a = document.createElement('a')
+  a.href = URL.createObjectURL(blob)
+  a.download = 'PTZ-RG-03 REGISTRO CONTROL PRODUCCIÓN DIARIA.xlsx'
+  a.click()
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000)
+}
+
+// PDF: mismo formato PTZ-RG-03, renderizado como HTML e impreso a PDF por el navegador.
+export function exportarRegistrosPDFPTZ(registros = [], { empresa = 'Mumi Amazonia', logoUrl = '' } = {}) {
+  const filas = registros.map(aFila)
+  const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
+  const filasHtml = filas.map(f => `<tr>
+    <td>${esc(f.fecha)}</td><td>${esc(f.lote)}</td><td>${esc(f.vence)}</td><td class="l">${esc(f.producto)}</td>
+    <td>${esc(f.unidades)}</td><td>${esc(f.cajas)}</td><td>${esc(f.inicio)}</td><td>${esc(f.fin)}</td>
+    <td>${esc(f.labor)}</td><td>${esc(f.responsable)}</td><td class="l">${esc(f.obs)}</td></tr>`).join('')
+  // completar hasta 20 filas vacías para conservar el aspecto del formato
+  const vacias = Math.max(0, 20 - filas.length)
+  const filasVacias = Array.from({ length: vacias }).map(() => '<tr>' + '<td></td>'.repeat(11) + '</tr>').join('')
+  const html = `<!doctype html><html><head><meta charset="utf-8"><title>PTZ-RG-03 Registro Control Producción Diaria</title>
+  <style>
+    @page { size: landscape; margin: 10mm; }
+    body { font-family: Arial, sans-serif; color:#222; }
+    .head { display:flex; border:1px solid #333; }
+    .head .logo { width:90px; border-right:1px solid #333; display:flex; align-items:center; justify-content:center; padding:4px; }
+    .head .logo img { max-width:82px; max-height:60px; }
+    .head .titulo { flex:1; display:flex; align-items:center; justify-content:center; text-align:center; font-weight:bold; font-size:15px; }
+    .head .meta { width:170px; border-left:1px solid #333; font-size:10px; }
+    .head .meta div { display:flex; border-bottom:1px solid #333; }
+    .head .meta div:last-child { border-bottom:none; }
+    .head .meta b { width:52%; padding:2px 4px; border-right:1px solid #333; background:#f3f0e8; }
+    .head .meta span { padding:2px 4px; }
+    table { width:100%; border-collapse:collapse; margin-top:6px; font-size:9px; }
+    th, td { border:1px solid #333; padding:3px 4px; text-align:center; }
+    th { background:#e9e4d6; }
+    td.l, th.l { text-align:left; }
+  </style></head><body>
+    <div class="head">
+      <div class="logo">${logoUrl ? `<img src="${esc(logoUrl)}">` : ''}</div>
+      <div class="titulo">${esc(empresa.toUpperCase())}<br>CONTROL DE PRODUCCIÓN DIARIA</div>
+      <div class="meta">
+        <div><b>CÓDIGO</b><span>PTZ-RG-03</span></div>
+        <div><b>VERSIÓN</b><span>1</span></div>
+        <div><b>PÁGINA</b><span>1</span></div>
+        <div><b>FECHA</b><span>${esc(fmtDMY(new Date().toISOString().slice(0, 10)))}</span></div>
+      </div>
+    </div>
+    <table>
+      <thead><tr>
+        <th>FECHA</th><th>LOTE</th><th>FECHA DE VENCIMIENTO</th><th class="l">PRODUCTO</th>
+        <th>UNIDAD</th><th>CAJAS</th><th>HORA INICIO</th><th>HORA FINAL</th>
+        <th>LABOR</th><th>RESPONSABLE</th><th class="l">OBSERVACIONES</th>
+      </tr></thead>
+      <tbody>${filasHtml}${filasVacias}</tbody>
+    </table>
+  </body></html>`
+  const w = window.open('', '_blank')
+  if (!w) throw new Error('El navegador bloqueó la ventana emergente. Permite las ventanas emergentes para descargar el PDF.')
+  w.document.write(html)
+  w.document.close()
+  w.focus()
+  setTimeout(() => { w.print() }, 400)
 }

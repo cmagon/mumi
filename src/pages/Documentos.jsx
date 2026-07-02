@@ -712,7 +712,7 @@ export default function Documentos() {
                     <div key={full} className={`card doc-folder ${puedeReordenar ? ordReorder.rowClassName(fi) : ''}`} style={{ cursor: 'pointer', textAlign: 'center', padding: 16, margin: 0, position: 'relative' }} onClick={() => setRuta(full)} {...(puedeReordenar ? ordReorder.rowProps(fi) : {})}>
                       {puedeReordenar && <span {...ordReorder.handleProps(fi)} onClick={e => e.stopPropagation()} style={{ position: 'absolute', top: 6, left: 8, cursor: 'grab', color: 'var(--texto-suave)' }}>⠿</span>}
                       <span style={{ position: 'absolute', top: 6, right: 10, fontWeight: 700, color: 'var(--dorado)', fontSize: '0.85rem' }}>{fi + 1}</span>
-                      <div style={{ fontSize: '2.6rem', lineHeight: 1 }}><FolderOpen size={13} aria-hidden="true" /></div>
+                      <div style={{ lineHeight: 1, marginBottom: 6 }}><FolderOpen size={46} strokeWidth={1.5} aria-hidden="true" style={{ color: 'var(--dorado)' }} /></div>
                       <div style={{ fontWeight: 600, fontSize: '0.85rem', marginTop: 6 }}>{nombreSeg(full)}</div>
                       <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', marginTop: 2 }}>{sub.length} doc{sub.length === 1 ? '' : 's'}{nSub > 0 ? ` · ${nSub} subcarpeta(s)` : ''}</div>
                       <div style={{ display: 'flex', gap: 4, justifyContent: 'center', marginTop: 6, flexWrap: 'wrap' }} onClick={e => e.stopPropagation()}>
