@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { fFecha, fCOP, fNum, calcularNomina, calcHoras, fmtHoras, SMV, getRolLabel, PARAMS_NOMINA_DEFAULT, TIPOS_PAGO, getTipoPagoLabel } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
 import { useAuth } from '../context/AuthContext'
+import { withBusy } from '../lib/busy'
 import Modal from '../components/ui/Modal'
 import AttendanceModal from '../components/AttendanceModal'
 import TimeField from '../components/ui/TimeField'
@@ -174,19 +175,21 @@ export default function Nomina() {
     // No-admin: no puede modificar registros de días anteriores salvo que el campo esté vacío (lo olvidó)
     if (!esAdmin && fecha < hoy && valorPrevio) { toast('No puedes modificar registros de días anteriores', 'warning'); return }
     const ahora = new Date().toISOString()
-    if (existing) {
-      const datos = { [campo]: valor }
-      if (campo === 'entrada' && !existing.entrada_ts) datos.entrada_ts = ahora
-      if (campo === 'salida'  && !existing.salida_ts)  datos.salida_ts  = ahora
-      if (valorPrevio) { datos.editado_ts = ahora; datos.editado_por = profile?.nombre || '' }  // fue una edición
-      await supabase.from('attendance').update(datos).eq('id', existing.id)
-    } else {
-      const datos = { emp_id: empId, fecha, [campo]: valor }
-      if (campo === 'entrada') datos.entrada_ts = ahora
-      if (campo === 'salida')  datos.salida_ts  = ahora
-      await supabase.from('attendance').insert(datos)
-    }
-    qc.invalidateQueries({ queryKey: ['attendance'] })
+    await withBusy((async () => {
+      if (existing) {
+        const datos = { [campo]: valor }
+        if (campo === 'entrada' && !existing.entrada_ts) datos.entrada_ts = ahora
+        if (campo === 'salida'  && !existing.salida_ts)  datos.salida_ts  = ahora
+        if (valorPrevio) { datos.editado_ts = ahora; datos.editado_por = profile?.nombre || '' }  // fue una edición
+        await supabase.from('attendance').update(datos).eq('id', existing.id)
+      } else {
+        const datos = { emp_id: empId, fecha, [campo]: valor }
+        if (campo === 'entrada') datos.entrada_ts = ahora
+        if (campo === 'salida')  datos.salida_ts  = ahora
+        await supabase.from('attendance').insert(datos)
+      }
+      qc.invalidateQueries({ queryKey: ['attendance'] })
+    })())
   }
 
   // Abre el listado de asistencia en el mes actual
@@ -198,19 +201,25 @@ export default function Nomina() {
 
   // Marca el estado del día de una fila existente — solo admin
   const setEstadoDia = async (reg, val) => {
-    await supabase.from('attendance').update({ estado_dia: val }).eq('id', reg.id)
-    qc.invalidateQueries({ queryKey: ['attendance'] })
+    await withBusy((async () => {
+      await supabase.from('attendance').update({ estado_dia: val }).eq('id', reg.id)
+      qc.invalidateQueries({ queryKey: ['attendance'] })
+    })())
   }
   // Marca una AUSENCIA en un día laboral sin registro (crea la fila) — solo admin
   const marcarAusencia = async (fecha, estado) => {
-    const existing = asistencia.find(a => a.emp_id === listadoEmp.id && a.fecha === fecha)
-    if (existing) await supabase.from('attendance').update({ estado_dia: estado }).eq('id', existing.id)
-    else await supabase.from('attendance').insert({ emp_id: listadoEmp.id, fecha, estado_dia: estado })
-    qc.invalidateQueries({ queryKey: ['attendance'] })
+    await withBusy((async () => {
+      const existing = asistencia.find(a => a.emp_id === listadoEmp.id && a.fecha === fecha)
+      if (existing) await supabase.from('attendance').update({ estado_dia: estado }).eq('id', existing.id)
+      else await supabase.from('attendance').insert({ emp_id: listadoEmp.id, fecha, estado_dia: estado })
+      qc.invalidateQueries({ queryKey: ['attendance'] })
+    })())
   }
   const quitarFilaAsist = async (reg) => {
-    await supabase.from('attendance').delete().eq('id', reg.id)
-    qc.invalidateQueries({ queryKey: ['attendance'] })
+    await withBusy((async () => {
+      await supabase.from('attendance').delete().eq('id', reg.id)
+      qc.invalidateQueries({ queryKey: ['attendance'] })
+    })())
   }
   // Lista de fechas hábiles (YYYY-MM-DD) en un rango
   const listarDiasHabiles = (desde, hasta, diasLab = 6) => {
@@ -232,12 +241,14 @@ export default function Nomina() {
       toast('La salida no puede ser anterior a la entrada', 'warning'); return
     }
     const ahora = new Date().toISOString()
-    await supabase.from('attendance').update({
-      entrada: editForm.entrada || null,
-      salida: editForm.salida || null,
-      editado_ts: ahora, editado_por: profile?.nombre || '',
-    }).eq('id', editReg.id)
-    qc.invalidateQueries({ queryKey: ['attendance'] })
+    await withBusy((async () => {
+      await supabase.from('attendance').update({
+        entrada: editForm.entrada || null,
+        salida: editForm.salida || null,
+        editado_ts: ahora, editado_por: profile?.nombre || '',
+      }).eq('id', editReg.id)
+      qc.invalidateQueries({ queryKey: ['attendance'] })
+    })())
     setEditReg(null); toast('Asistencia actualizada ✓')
   }
 
@@ -259,16 +270,18 @@ export default function Nomina() {
     if (fechasSet.size !== loteFilas.length) { toast('Hay fechas repetidas en el lote', 'warning'); return }
 
     const ahora = new Date().toISOString()
-    for (const f of loteFilas) {
-      const existing = asistencia.find(a => a.emp_id === loteEmp.id && a.fecha === f.fecha)
-      const datos = { entrada: f.entrada, salida: f.salida }
-      if (existing) {
-        await supabase.from('attendance').update({ ...datos, editado_ts: ahora, editado_por: profile?.nombre || '' }).eq('id', existing.id)
-      } else {
-        await supabase.from('attendance').insert({ emp_id: loteEmp.id, fecha: f.fecha, ...datos, entrada_ts: ahora, salida_ts: ahora })
+    await withBusy((async () => {
+      for (const f of loteFilas) {
+        const existing = asistencia.find(a => a.emp_id === loteEmp.id && a.fecha === f.fecha)
+        const datos = { entrada: f.entrada, salida: f.salida }
+        if (existing) {
+          await supabase.from('attendance').update({ ...datos, editado_ts: ahora, editado_por: profile?.nombre || '' }).eq('id', existing.id)
+        } else {
+          await supabase.from('attendance').insert({ emp_id: loteEmp.id, fecha: f.fecha, ...datos, entrada_ts: ahora, salida_ts: ahora })
+        }
       }
-    }
-    qc.invalidateQueries({ queryKey: ['attendance'] })
+      qc.invalidateQueries({ queryKey: ['attendance'] })
+    })())
     setLoteModal(false)
     toast(`Asistencia registrada en ${loteFilas.length} fecha(s) ✓`)
   }
@@ -872,7 +885,7 @@ function ParametrosNomina({ params, empleadosActivos = 0, onSaved }) {
   const guardar = async () => {
     setSaving(true)
     try {
-      const { error } = await supabase.from('payroll_settings').upsert({ id: 1, params: p, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+      const { error } = await withBusy(supabase.from('payroll_settings').upsert({ id: 1, params: p, updated_at: new Date().toISOString() }, { onConflict: 'id' }))
       if (error) throw error
       toast('Parámetros guardados ✓')
       onSaved?.()

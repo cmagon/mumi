@@ -1,9 +1,40 @@
 import { createClient } from '@supabase/supabase-js'
+import { setBusy } from './busy'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+// ── Loader/bloqueo global automático en TODA escritura ──────────────────────────
+// Instrumenta el query builder para que cualquier insert/update/upsert/delete marque
+// "guardando…" (SavingOverlay) mientras la operación está en curso, sin tener que
+// envolver manualmente cada guardado en las páginas. Las lecturas (select) no se marcan.
+function _trackWrite(builder) {
+  if (!builder || typeof builder.then !== 'function') return builder
+  const origThen = builder.then.bind(builder)
+  let started = false, ended = false
+  const start = () => { if (!started) { started = true; setBusy(true) } }
+  const end = () => { if (started && !ended) { ended = true; setBusy(false) } }
+  builder.then = (onF, onR) => {
+    start()
+    return origThen(
+      (v) => { end(); return onF ? onF(v) : v },
+      (e) => { end(); if (onR) return onR(e); throw e },
+    )
+  }
+  return builder
+}
+const _origFrom = supabase.from.bind(supabase)
+supabase.from = (table) => {
+  const qb = _origFrom(table)
+  for (const m of ['insert', 'update', 'upsert', 'delete']) {
+    if (typeof qb[m] !== 'function') continue
+    const orig = qb[m].bind(qb)
+    qb[m] = (...args) => _trackWrite(orig(...args))
+  }
+  return qb
+}
 
 // Cliente SOLO para crear usuarios (signUp): no persiste sesión, así no reemplaza
 // la sesión del admin que está creando el usuario.
