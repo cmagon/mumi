@@ -54,7 +54,8 @@ export default function Compartido() {
   const { data: share, isLoading } = useQuery({
     queryKey: ['share', token],
     // Se lee SIEMPRE como anónimo (cliente sin sesión) para que una sesión OTP vencida no rompa el enlace
-    queryFn: async () => { const { data } = await supabaseSignup.from('document_shares').select('*').eq('token', token).maybeSingle(); return data },
+    // Acceso público SOLO por token vía función SECURITY DEFINER (evita enumerar todas las comparticiones)
+    queryFn: async () => { const { data } = await supabaseSignup.rpc('get_share', { p_token: token }); return Array.isArray(data) ? data[0] || null : data },
     retry: 1,
     refetchInterval: 30000,   // detecta si el admin amplía el tiempo y reactiva la edición sola
   })

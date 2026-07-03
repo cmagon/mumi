@@ -11,7 +11,7 @@ export default function ChangePasswordModal({ open, onClose }) {
   const [saving, setSaving] = useState(false)
 
   const guardar = async () => {
-    if (p1.length < 4) { toast('La contraseña debe tener al menos 4 caracteres', 'warning'); return }
+    if (p1.length < 8) { toast('La contraseña debe tener al menos 8 caracteres', 'warning'); return }
     if (p1 !== p2) { toast('Las contraseñas no coinciden', 'warning'); return }
     setSaving(true)
     try {

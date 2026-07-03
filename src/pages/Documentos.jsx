@@ -348,6 +348,26 @@ export default function Documentos() {
     toast('Proceso eliminado')
   }
 
+  // Eliminar un GRUPO completo (proceso + subcarpetas) con TODOS sus documentos → van a la papelera
+  // (recuperables hasta 90 días). Solo admin.
+  const eliminarProcesoConDocs = async (proceso) => {
+    const docs = docsSubtree(proceso)
+    if (docs.length === 0) return eliminarProcesoVacio(proceso)
+    const ok = await confirmar(
+      `Se enviarán a la papelera ${docs.length} documento(s) del grupo "${nombreSeg(proceso)}" (incluyendo sus subcarpetas). Podrás recuperarlos hasta 90 días. ¿Continuar?`,
+      { title: 'Eliminar grupo y su contenido', confirmText: 'Sí, eliminar' })
+    if (!ok) return
+    try {
+      const ahora = new Date().toISOString()
+      for (const d of docs) { const { error } = await supabase.from('documentos').update({ eliminado_at: ahora }).eq('id', d.id); if (error) throw error }
+      const nuevoOrden = ordenProcesos.filter(p => p !== proceso && !p.startsWith(proceso + '/'))
+      await persistirOrden(nuevoOrden); setOrdenProcesos(nuevoOrden)
+      if (carpetaAbierta === proceso) setCarpetaAbierta(null)
+      qc.invalidateQueries({ queryKey: ['documentos'] }); qc.invalidateQueries({ queryKey: ['documentos_papelera'] })
+      toast(`Grupo "${nombreSeg(proceso)}" eliminado — ${docs.length} documento(s) en la papelera`)
+    } catch (e) { toast(e.message, 'error'); qc.invalidateQueries({ queryKey: ['documentos'] }) }
+  }
+
   // Renombrar un proceso: actualiza los documentos y el orden guardado
   const aplicarRenombre = async (viejo, nuevo) => {
     const n = (nuevo || '').trim().replace(/^\/+|\/+$/g, ''); if (!n || n === viejo) return
@@ -720,6 +740,7 @@ export default function Documentos() {
                         {conArchivo.length > 0 && <button className="btn btn-xs btn-secondary" title="Descargar ZIP" disabled={zipProc === full} onClick={() => descargarZip(full, sub)}><Download size={13} aria-hidden="true" /></button>}
                         {puedeEditarDocs && <button className="btn btn-xs btn-secondary" title="Renombrar" onClick={() => renombrarProceso(full)}><Pencil size={13} aria-hidden="true" /></button>}
                         {puedeEditarDocs && vacia && <button className="btn btn-xs btn-danger" title="Eliminar carpeta vacía" onClick={() => eliminarCarpeta(full)}><Trash2 size={13} aria-hidden="true" /></button>}
+                        {esAdmin && !vacia && <button className="btn btn-xs btn-danger" title="Eliminar carpeta y todos sus documentos (a la papelera)" onClick={() => eliminarProcesoConDocs(full)}><Trash2 size={13} aria-hidden="true" /></button>}
                       </div>
                     </div>
                   )
@@ -776,6 +797,7 @@ export default function Documentos() {
                 {docs.some(d => d.storage_path) && <button className="btn btn-xs btn-secondary" title="Descargar todos en ZIP" disabled={zipProc === proceso} onClick={() => descargarZip(proceso, docs)}>{zipProc === proceso ? 'Generando…' : '⬇ ZIP'}</button>}
                 {puedeEditarDocs && proceso !== 'Sin proceso' && <button className="btn btn-xs btn-secondary" title="Renombrar proceso" onClick={() => renombrarProceso(proceso)}><Ico as={Pencil} size={14} />Renombrar</button>}
                 {puedeEditarDocs && docs.length === 0 && !documentos.some(d => (d.proceso || 'Sin proceso') === proceso) && <button className="btn btn-xs btn-danger" title="Eliminar proceso vacío" onClick={() => eliminarProcesoVacio(proceso)}><Trash2 size={13} aria-hidden="true" /></button>}
+                {esAdmin && proceso !== 'Sin proceso' && docsSubtree(proceso).length > 0 && <button className="btn btn-xs btn-danger" title="Eliminar el grupo y todos sus documentos (a la papelera)" onClick={() => eliminarProcesoConDocs(proceso)}><Ico as={Trash2} size={13} />Eliminar grupo</button>}
               </div>
               <div className="table-wrap">
                 <table>

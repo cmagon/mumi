@@ -2,16 +2,27 @@
 // Desplegar:  supabase functions deploy enviar-correo
 // Secretos:   supabase secrets set RESEND_API_KEY=re_xxx  CORREO_FROM="Mumi <documentos@tudominio.com>"
 import { serve } from 'https://deno.land/std@0.177.0/http/server.ts'
+import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
+const err = (msg: string, status: number) =>
+  new Response(JSON.stringify({ error: msg }), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 
 serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   try {
+    // Exigir sesión válida: evita que la función quede como relay de correo abierto.
+    const authHeader = req.headers.get('Authorization') || ''
+    const asUser = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
+      global: { headers: { Authorization: authHeader } },
+    })
+    const { data: { user } } = await asUser.auth.getUser()
+    if (!user) return err('No autenticado', 401)
+
     const { to, subject, html } = await req.json()
     if (!to || !subject) return new Response(JSON.stringify({ error: 'Faltan datos' }), { status: 400, headers: { ...cors, 'Content-Type': 'application/json' } })
     const apiKey = Deno.env.get('RESEND_API_KEY')

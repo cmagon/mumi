@@ -5,7 +5,7 @@ import { writeOrQueue } from '../lib/offlineQueue'
 import { fFecha, calcHoras, fmtHoras } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
 import { useAuth } from '../context/AuthContext'
-import { puedeVerSeccion } from '../lib/permisos'
+import { puedeSeccionExplicita } from '../lib/permisos'
 import Modal from './ui/Modal'
 import TimeField from './ui/TimeField'
 import { LogIn, LogOut, CalendarDays } from 'lucide-react'
@@ -25,17 +25,25 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
   const [fecha, setFecha] = useState(hoy)   // fecha que se está registrando (no aplica en logout)
 
   // ¿Puede registrar la asistencia de OTRA persona? (admin siempre; otros por permiso de sección)
-  const puedeOtros = !esLogout && !!profile && (profile.rol === 'admin' || puedeVerSeccion(profile.rol, 'nomina', 'asistencia_otros'))
+  // Solo si el admin le otorgó EXPLÍCITAMENTE la sección "asistencia_otros" (opt-in), o es admin.
+  const puedeOtros = !esLogout && !!profile && puedeSeccionExplicita(profile.rol, 'nomina', 'asistencia_otros')
   const [empSel, setEmpSel] = useState(emp)   // empleado sobre el que se registra (por defecto, uno mismo)
   const objetivo = esLogout ? emp : (empSel || emp)   // en logout siempre soy yo
   const esOtro = objetivo?.id !== emp?.id
 
-  // Lista de empleados para el selector (solo si tiene el permiso)
-  const { data: empleados = [] } = useQuery({
+  // Nombres de usuarios con rol admin (para excluirlos del selector: los admin no fichan)
+  const { data: adminNombres = [] } = useQuery({
+    queryKey: ['admin_nombres_asist'],
+    queryFn: async () => { const { data } = await supabase.from('user_profiles').select('nombre').eq('rol', 'admin'); return (data || []).map(u => (u.nombre || '').trim().toLowerCase()) },
+    enabled: puedeOtros,
+  })
+  // Lista de empleados para el selector (solo si tiene el permiso). Se excluyen los que son admin.
+  const { data: empleadosRaw = [] } = useQuery({
     queryKey: ['empleados_asist'],
     queryFn: async () => { const { data } = await supabase.from('employees').select('id, nombre, estado').order('nombre'); return (data || []).filter(e => !e.estado || e.estado === 'activo') },
     enabled: puedeOtros,
   })
+  const empleados = empleadosRaw.filter(e => !adminNombres.includes((e.nombre || '').trim().toLowerCase()))
 
   const { data: filas = [], refetch } = useQuery({
     queryKey: ['attendance_emp', objetivo?.id],

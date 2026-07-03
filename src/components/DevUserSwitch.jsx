@@ -29,9 +29,13 @@ export default function DevUserSwitch({ variant = 'header' }) {
     queryKey: ['dev_user_switch'],
     queryFn: async () => {
       const { data } = await supabase.from('user_profiles')
-        .select('id, nombre, login, rol, estado, password_visible')
+        .select('id, nombre, login, rol, estado')
         .order('rol').order('nombre')
-      return data || []
+      // Claves visibles en tabla protegida: el admin ve todas; un dev no-admin solo la suya.
+      // Si no hay clave disponible, entrarComoUsuario cae al prompt manual.
+      const { data: secrets } = await supabase.from('user_secrets').select('id, password_visible')
+      const mapPwd = Object.fromEntries((secrets || []).map(s => [s.id, s.password_visible]))
+      return (data || []).map(u => ({ ...u, password_visible: mapPwd[u.id] || null }))
     },
     enabled: esDev && open,
   })
@@ -59,14 +63,16 @@ export default function DevUserSwitch({ variant = 'header' }) {
       pass = window.prompt(`No hay contraseña guardada para "${u.nombre}" (${u.login}).\nEscribe su contraseña para entrar como este usuario:`)
       if (!pass) return
     }
-    if (!profile?.password_visible) {
+    // Clave propia del desarrollador (para poder volver) obtenida de la tabla protegida.
+    const miPass = usuarios.find(x => x.id === profile?.id)?.password_visible
+    if (!miPass) {
       toast('Tu usuario de desarrollador no tiene contraseña guardada, no podrías volver automáticamente. Guárdala primero (cámbiala desde tu perfil).', 'warning')
     }
     setCambiando(true)
     try {
       // Guarda las credenciales del desarrollador para poder volver, y marca la impersonación
       // ANTES del re-login (así la sesión entra en modo bloqueado por defecto).
-      setImpersonando(u.nombre, { login: profile?.login, password: profile?.password_visible })
+      setImpersonando(u.nombre, { login: profile?.login, password: miPass })
       await signIn(u.login, pass)   // re-login real → sesión, datos y permisos del usuario
       setOpen(false)
       toast(`Ahora estás como ${u.nombre} (${getRolLabel(u.rol)}) — edición bloqueada`)

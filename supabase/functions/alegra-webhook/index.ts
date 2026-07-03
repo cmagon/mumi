@@ -31,7 +31,10 @@ const json = (o: unknown, s = 200) => new Response(JSON.stringify(o), { status: 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   const url = new URL(req.url)
-  if (WEBHOOK_SECRET && url.searchParams.get('secret') !== WEBHOOK_SECRET) return json({ error: 'no autorizado' }, 401)
+  // Fallar CERRADO: sin secreto configurado, o con secreto incorrecto, se rechaza.
+  // Configura el secreto con: supabase secrets set ALEGRA_WEBHOOK_SECRET=...
+  if (!WEBHOOK_SECRET) return json({ error: 'webhook no configurado' }, 503)
+  if (url.searchParams.get('secret') !== WEBHOOK_SECRET) return json({ error: 'no autorizado' }, 401)
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
   try {
@@ -39,7 +42,8 @@ Deno.serve(async (req) => {
     const doc = body?.data || body?.invoice || body
     const docId = String(doc?.id ?? body?.id ?? '')
     const evento = String(body?.event || body?.type || '').toLowerCase()
-    if (!docId) return json({ error: 'sin id de documento' }, 400)
+    // Ping de verificación de Alegra (body vacío al crear la suscripción): responder 2XX.
+    if (!docId) return json({ ok: true, msg: 'ping' })
 
     const txt = (evento + ' ' + String(doc?.status || '')).toLowerCase()
     const esRemision = /remission|remisi/.test(txt) || doc?.numberTemplate?.documentType === 'remission'

@@ -34,7 +34,7 @@ Deno.serve(async (req) => {
 
     // 2) Cambiar la contraseña del usuario objetivo
     const { user_id, password } = await req.json()
-    if (!user_id || !password || String(password).length < 4) return json({ error: 'Datos inválidos' }, 400)
+    if (!user_id || !password || String(password).length < 8) return json({ error: 'La contraseña debe tener al menos 8 caracteres' }, 400)
 
     const { error } = await admin.auth.admin.updateUserById(user_id, { password })
     if (error) return json({ error: error.message }, 400)

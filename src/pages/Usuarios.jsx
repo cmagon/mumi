@@ -46,7 +46,10 @@ export default function Usuarios() {
     queryKey: ['user_profiles'],
     queryFn: async () => {
       const { data } = await supabase.from('user_profiles').select('*').order('nombre')
-      return data || []
+      // Las claves visibles viven en user_secrets (solo el admin puede leerlas)
+      const { data: secrets } = await supabase.from('user_secrets').select('id, password_visible')
+      const mapPwd = Object.fromEntries((secrets || []).map(s => [s.id, s.password_visible]))
+      return (data || []).map(u => ({ ...u, password_visible: mapPwd[u.id] || null }))
     },
   })
 
@@ -128,7 +131,7 @@ export default function Usuarios() {
 
   const abrirReset = (u) => { setPwdUser(u); setPwdValue(u.login) }   // sugerencia: la cédula
   const ejecutarReset = async () => {
-    if (!pwdValue || pwdValue.length < 4) { toast('La contraseña debe tener al menos 4 caracteres', 'warning'); return }
+    if (!pwdValue || pwdValue.length < 8) { toast('La contraseña debe tener al menos 8 caracteres', 'warning'); return }
     try {
       await adminResetPassword(pwdUser.id, pwdValue)
       toast('Contraseña restablecida ✓')

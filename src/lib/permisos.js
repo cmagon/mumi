@@ -114,6 +114,15 @@ export function puedeVerSeccion(rolArg, modulo, seccion) {
   return sec.includes(seccion)
 }
 
+// Permiso de sección ESTRICTO (opt-in): true SOLO si el admin la otorgó explícitamente al rol.
+// Para acciones sensibles que deben estar ocultas por defecto (p. ej. registrar asistencia de otros).
+export function puedeSeccionExplicita(rolArg, modulo, seccion) {
+  const rol = rolEfectivoPerm(rolArg)
+  if (rol === 'admin') return true
+  const sec = _override?.[rol]?.secciones?.[modulo]
+  return Array.isArray(sec) && sec.includes(seccion)
+}
+
 export const esAdmin    = (rol) => rolEfectivoPerm(rol) === 'admin'
 export const esOperario = (rol) => rolEfectivoPerm(rol) === 'operario'
 export const esAuxiliar = (rol) => rolEfectivoPerm(rol) === 'auxiliar'

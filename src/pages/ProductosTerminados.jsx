@@ -10,8 +10,9 @@ import MoneyInput from '../components/ui/MoneyInput'
 import Cargando from '../components/ui/Cargando'
 import { UNIDADES_ALEGRA, UNSPSC_ALIMENTOS } from '../lib/alegraCatalogos'
 import {
-  Settings, Plug, DollarSign, Link2, ClipboardList, Shuffle, Plus, Tags, Scale, ScrollText,
+  Settings, Plug, DollarSign, ClipboardList, Shuffle, Plus, Tags, Scale, ScrollText,
   Pencil, X, RefreshCw, Check, AlertTriangle, FlaskConical, Unplug, RotateCw, BarChart3, TrendingUp, Package,
+  ArrowUpFromLine, ArrowDownToLine,
 } from 'lucide-react'
 import { del } from 'idb-keyval'
 
@@ -317,6 +318,17 @@ export default function ProductosTerminados() {
     onError: (e) => toast('No se pudo sincronizar: ' + e.message, 'error'),
   })
 
+  // Trae DESDE Alegra: remisiones (reservan) y facturas (descuentan stock / liberan reserva).
+  const traerDesdeAlegra = useMutation({
+    mutationFn: async () => { const { data, error } = await supabase.functions.invoke('alegra-sync-stock', { body: {} }); if (error) throw error; if (data?.error) throw new Error(data.error); return data },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['finished_products'] }); qc.invalidateQueries({ queryKey: ['finished_movements'] })
+      const partes = [data?.reservas && `${data.reservas} reserva(s)`, data?.descuentos && `${data.descuentos} descuento(s)`, data?.liberaciones && `${data.liberaciones} liberación(es)`, data?.devoluciones && `${data.devoluciones} devolución(es)`].filter(Boolean)
+      toast(partes.length ? `Traído desde Alegra: ${partes.join(', ')} ✓` : 'Todo al día con Alegra ✓')
+    },
+    onError: (e) => toast('No se pudo traer desde Alegra: ' + e.message, 'error'),
+  })
+
   // Genera TODOS los surtidos (pares) entre las FICHAS elegidas, con costo = promedio de los dos
   const baseProds = useMemo(() => fichas.filter(f => (f.tipo || '') !== 'subproducto'), [fichas])
   const previewGen = useMemo(() => {
@@ -461,7 +473,8 @@ export default function ProductosTerminados() {
           {esAdmin && <button className="btn btn-secondary btn-sm" onClick={abrirConfig}><Ico as={Settings} size={14} />Configurar Alegra</button>}
           {esAdmin && <button className="btn btn-secondary btn-sm" onClick={abrirEnlace}><Ico as={Plug} size={14} />Enlazar con Alegra</button>}
           <button className="btn btn-secondary btn-sm" onClick={() => actualizarCostos.mutate()} disabled={actualizarCostos.isPending}>{actualizarCostos.isPending ? 'Actualizando...' : <><Ico as={DollarSign} size={14} />Actualizar costos desde fichas</>}</button>
-          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => sincronizarTodo.mutate()} disabled={sincronizarTodo.isPending}>{sincronizarTodo.isPending ? 'Sincronizando...' : <><Ico as={Link2} size={14} />Sincronizar todo con Alegra</>}</button>}
+          {esAdmin && <button className="btn btn-secondary btn-sm" title="Envía el stock de la app hacia Alegra" onClick={() => sincronizarTodo.mutate()} disabled={sincronizarTodo.isPending}>{sincronizarTodo.isPending ? 'Enviando...' : <><Ico as={ArrowUpFromLine} size={14} />Enviar stock a Alegra</>}</button>}
+          {esAdmin && <button className="btn btn-secondary btn-sm" title="Trae remisiones (reservan) y facturas (descuentan) desde Alegra" onClick={() => traerDesdeAlegra.mutate()} disabled={traerDesdeAlegra.isPending}>{traerDesdeAlegra.isPending ? 'Trayendo...' : <><Ico as={ArrowDownToLine} size={14} />Traer ventas de Alegra</>}</button>}
           {fichasDisponibles.length > 0 && <button className="btn btn-secondary btn-sm" onClick={() => setModalFicha(true)}><Ico as={ClipboardList} size={14} />Agregar producto ({fichasDisponibles.length})</button>}
           {mpsDisponibles.length > 0 && <button className="btn btn-secondary btn-sm" onClick={() => setModalMp(true)}><Ico as={FlaskConical} size={14} />Agregar MP vendible ({mpsDisponibles.length})</button>}
           <button className="btn btn-secondary btn-sm" onClick={() => { setSelGen(baseProds.map(p => p.id)); setModalGen(true) }}><Ico as={Shuffle} size={14} />Generar surtidos</button>

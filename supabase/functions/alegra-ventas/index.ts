@@ -8,6 +8,7 @@
 // Despliegue:  supabase functions deploy alegra-ventas
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { requireUser } from '../_shared/auth.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -23,6 +24,7 @@ async function getCreds(supabase: any) {
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
+  const guard = await requireUser(req); if (guard.resp) return guard.resp
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
   const { email, token } = await getCreds(supabase)
   if (!email || !token) return json({ error: 'Configura el correo y el token de Alegra en la app.' })
