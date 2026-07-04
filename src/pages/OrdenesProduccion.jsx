@@ -143,6 +143,7 @@ export default function OrdenesProduccion() {
   const [prepFotoFile, setPrepFotoFile] = useState(null)
   const [prepFotoPrev, setPrepFotoPrev] = useState('')
   const [modalConfirmEnvio, setModalConfirmEnvio] = useState(false)
+  const [empaquePrevio, setEmpaquePrevio] = useState(null)   // { plan, faltantes } para el previo en el cierre
   const prepFotoRef = useRef()
   // Receta del producto seleccionado en Nueva Orden (para planear por ingrediente disponible)
   const [prodReceta, setProdReceta] = useState(null)   // { ings, unidsBacheNet, bache, pesoUnidad, pesoSubp }
@@ -769,6 +770,19 @@ export default function OrdenesProduccion() {
     if (prepConforme === null) { toast('Marca si la producción es CONFORME o NO CONFORME', 'warning'); return }
     if (prepSurtido === null) { toast('Indica si EMPACÓ SURTIDO (SI/NO)', 'warning'); return }
     if (prepHaySobrante === null) { toast('Indica si SOBRÓ PRODUCCIÓN / quedó sin empacar (SI/NO)', 'warning'); return }
+    // Previo del empaque a descontar (bolsas/cajas) según lo empacado
+    setEmpaquePrevio(null)
+    if (ordenPrep) {
+      const unidades = parseFloat(prepUnidades) || 0
+      const extrasUnid = prepLotesExtra.filter(e => (parseFloat(e.unidades) || 0) > 0).reduce((s, e) => s + (parseFloat(e.unidades) || 0), 0)
+      const _sobranteSubp = (prepHaySobrante && prepSobranteUnidad === 'subporciones') ? (parseFloat(prepSobrantePeso) || 0) : 0
+      prepararEmpaque(ordenPrep, {
+        unidadesEmpacadas: unidades + extrasUnid,
+        subpEmpacadas: Math.max(0, (parseFloat(prepCantSubp) || 0) - _sobranteSubp),
+        surtidoUnid: parseFloat(prepSurtidoCantidad) || 0,
+        esPorcionado: prepPorciona, esSurtido: !!prepSurtido,
+      }).then(setEmpaquePrevio).catch(() => setEmpaquePrevio(null))
+    }
     setModalConfirmEnvio(true)
   }
 
@@ -811,6 +825,15 @@ export default function OrdenesProduccion() {
       const extras = prepLotesExtra.filter(e => (parseFloat(e.unidades) || 0) > 0)
       const extrasUnid = extras.reduce((s, e) => s + (parseFloat(e.unidades) || 0), 0)
       const unidadesTotal = unidades + extrasUnid
+      // ===== EMPAQUE: verificar stock (bloquea el cierre si falta) según lo realmente empacado =====
+      const _sobranteSubp = (prepHaySobrante && prepSobranteUnidad === 'subporciones') ? (parseFloat(prepSobrantePeso) || 0) : 0
+      const subpEmpacadas = Math.max(0, (parseFloat(prepCantSubp) || 0) - _sobranteSubp)
+      const { plan: empaquePlan, faltantes: empaqueFaltan } = await prepararEmpaque(o, {
+        unidadesEmpacadas: unidadesTotal, subpEmpacadas,
+        surtidoUnid: parseFloat(prepSurtidoCantidad) || 0,
+        esPorcionado: prepPorciona, esSurtido: !!prepSurtido,
+      })
+      if (empaqueFaltan.length) throw new Error(errorEmpaque(empaqueFaltan))
       // Si quien cierra y envía es un admin, la orden se aprueba automáticamente (no requiere otra aprobación)
       const autoAprob = esAdmin
       // 1) Crear/actualizar el registro de producción vinculado a la orden
@@ -879,6 +902,8 @@ export default function OrdenesProduccion() {
       }
       // Consumo definitivo de la MP reservada (solo en línea; offline se reconcilia al sincronizar)
       if (!r.queued) { try { await consumirMP(o) } catch (e) { console.warn('No se pudo consumir MP:', e) } }
+      // Descuento del EMPAQUE realmente usado (bolsas por porción, cajas por surtido). Ya se verificó stock.
+      if (!r.queued) { try { await aplicarEmpaque(o, empaquePlan) } catch (e) { console.warn('No se pudo descontar empaque:', e) } }
       // Si un subproducto se auto-aprueba (admin), genera la entrada de inventario MP igual que al aprobar
       if (!r.queued && autoAprob && o.es_subproducto && o.mp_id) {
         try {
@@ -1240,6 +1265,58 @@ export default function OrdenesProduccion() {
     }
     // Pasa la trazabilidad a lotes_mp y limpia la reserva (ya es consumo definitivo)
     await supabase.from('production_orders').update({ lotes_mp: reservas, lotes_reservados: null }).eq('id', o.id)
+  }
+
+  // ===== EMPAQUE (bolsas/cajas) — descuento por lo REALMENTE empacado =====
+  // Se identifica por nombre/categoría de la MP. Relación 1:1:
+  //  · Bolsa → 1 por porción/subporción empacada (o por unidad si no es porcionado, p.ej. infusiones).
+  //  · Caja  → 1 por unidad empacada como surtido (o por unidad si no es surtido).
+  //  · Otro empaque → 1 por unidad empacada.
+  const KW_BOLSA = /bolsa|filtro|metaliz|sobre|sachet|doypack|funda|flexible/i
+  const KW_CAJA  = /caja|estuche|display|corrugad|plegadiz|cart(o|ó)n/i
+  const tipoEmpaque = (mp) => { const t = `${mp?.nombre || ''} ${mp?.categoria || ''}`; return KW_BOLSA.test(t) ? 'bolsa' : (KW_CAJA.test(t) ? 'caja' : 'otro') }
+
+  // Calcula el plan de descuento y VERIFICA stock (lanza error si falta → bloquea el cierre).
+  const prepararEmpaque = async (o, { unidadesEmpacadas = 0, subpEmpacadas = 0, surtidoUnid = 0, esPorcionado = false, esSurtido = false }) => {
+    if (o.es_subproducto || o.es_prueba || o.origen !== 'producto' || !o.origen_id) return []
+    const { data: prod } = await supabase.from('products_costing').select('empaque, bache, merma').eq('id', o.origen_id).single()
+    let emps = []; try { emps = Array.isArray(prod?.empaque) ? prod.empaque : JSON.parse(prod?.empaque || '[]') } catch { emps = [] }
+    // Unidades netas por bache (para deducir la relación empaque-por-unidad de la ficha, p.ej. 12 filtros/caja)
+    const unidsBache = (parseFloat(prod?.bache) || 0) * (1 - (parseFloat(prod?.merma) || 0) / 100)
+    const plan = []
+    for (const e of emps.filter(x => x.mpId)) {
+      const { data: mp } = await supabase.from('raw_materials').select('id, nombre, categoria, stock, unidad').eq('id', parseInt(e.mpId)).single()
+      if (!mp) continue
+      const tipo = tipoEmpaque(mp)
+      // Relación de la ficha: empaques por unidad producida = cantidad(por bache) ÷ unidades por bache.
+      // Ej: infusión con 12 filtros/caja → ratio 12; caja → ratio 1.
+      const ratio = unidsBache > 0 ? (parseFloat(e.cantidad) || 0) / unidsBache : 1
+      const porRatio = unidadesEmpacadas * ratio
+      // Bocadillos: bolsa = subporciones reales, caja = surtido real (exacto, 1:1).
+      // Infusiones y demás: por unidades empacadas × relación de la ficha (respeta 12 filtros/caja, etc.).
+      let qty = tipo === 'bolsa' ? (esPorcionado ? subpEmpacadas : porRatio)
+        : tipo === 'caja' ? (esSurtido ? surtidoUnid : porRatio)
+        : porRatio
+      qty = Math.round(qty)
+      if (qty <= 0) continue
+      plan.push({ mp, qty, tipo, stock: Math.round(Number(mp.stock) || 0) })
+    }
+    const faltantes = plan.filter(p => (Number(p.mp.stock) || 0) < p.qty)
+    return { plan, faltantes }
+  }
+  const errorEmpaque = (faltantes) => 'Empaque insuficiente para cerrar: ' + faltantes.map(p => `${p.mp.nombre} (necesita ${fNum(p.qty)}, hay ${fNum(p.stock)})`).join(' · ')
+  // Descuenta el empaque del stock (+ movimiento de salida). Se llama tras cerrar la orden.
+  const aplicarEmpaque = async (o, plan) => {
+    if (!plan || !plan.length) return
+    const hoy = o.fecha_prod || new Date().toISOString().split('T')[0]
+    for (const p of plan) {
+      await supabase.from('raw_materials').update({ stock: (Number(p.mp.stock) || 0) - p.qty }).eq('id', p.mp.id)
+      await supabase.from('inventory_movements').insert({
+        mp_id: p.mp.id, tipo: 'salida', cantidad: p.qty, fecha: hoy,
+        responsable: o.operario || '', obs: `Empaque (${p.tipo}) orden #${opNum(o.id)} (${o.producto})`,
+        extra: { orden_id: o.id, empaque: true, tipo: p.tipo },
+      })
+    }
   }
 
   // SUMA stock de PRODUCTO TERMINADO al aprobar una producción (fuente de verdad del inventario
@@ -2236,7 +2313,7 @@ export default function OrdenesProduccion() {
       <Modal open={modalConfirmEnvio} onClose={() => setModalConfirmEnvio(false)} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><CheckCircle2 size={18} aria-hidden="true" /> Confirmar y enviar producción</span>}
         footer={<>
           <button className="btn btn-secondary" onClick={() => setModalConfirmEnvio(false)}>✏ Editar</button>
-          <button className="btn btn-success" onClick={confirmarEnviar} disabled={savingEvid}>{savingEvid ? 'Enviando...' : 'Confirmar y enviar'}</button>
+          <button className="btn btn-success" onClick={confirmarEnviar} disabled={savingEvid || (empaquePrevio?.faltantes?.length > 0)}>{savingEvid ? 'Enviando...' : 'Confirmar y enviar'}</button>
         </>}>
         {ordenPrep && (
           <div style={{ fontSize: '0.9rem' }}>
@@ -2260,6 +2337,26 @@ export default function OrdenesProduccion() {
               <tr><td><b>Observaciones</b></td><td>{prepObs || '—'}</td></tr>
               <tr><td><b>Foto</b></td><td>{prepFotoFile || prepFotoPrev ? '✓ adjunta' : '—'}</td></tr>
             </tbody></table>
+
+            {/* Previo del empaque a descontar */}
+            {empaquePrevio && empaquePrevio.plan.length > 0 && (
+              <div style={{ marginTop: 10, border: '1px solid var(--crema-oscuro)', borderRadius: 8, padding: 10 }}>
+                <div style={{ fontWeight: 700, color: 'var(--selva)', marginBottom: 6, display: 'flex', alignItems: 'center', gap: 6 }}><Package size={15} aria-hidden="true" /> Empaque que se descontará del inventario</div>
+                <table><tbody>
+                  {empaquePrevio.plan.map((p, i) => {
+                    const falta = (p.stock < p.qty)
+                    return <tr key={i} style={falta ? { color: 'var(--rojo)' } : undefined}>
+                      <td>{p.mp.nombre} <span className={`badge ${p.tipo === 'bolsa' ? 'badge-azul' : p.tipo === 'caja' ? 'badge-dorado' : 'badge-gris'}`} style={{ fontSize: '0.6rem' }}>{p.tipo}</span></td>
+                      <td className="td-number"><strong>{fNum(p.qty)}</strong></td>
+                      <td className="td-number" style={{ color: 'var(--texto-suave)' }}>stock: {fNum(p.stock)}{falta ? ' ⚠' : ''}</td>
+                    </tr>
+                  })}
+                </tbody></table>
+                {empaquePrevio.faltantes.length > 0
+                  ? <div className="alert alert-danger" style={{ marginTop: 8, fontSize: '0.82rem' }}>No hay empaque suficiente. Carga stock del empaque en Inventario para poder cerrar.</div>
+                  : <small style={{ color: 'var(--texto-suave)' }}>Se descuenta al confirmar. Bolsas por porción · Cajas por surtido · Infusiones por la relación de la ficha.</small>}
+              </div>
+            )}
           </div>
         )}
       </Modal>
