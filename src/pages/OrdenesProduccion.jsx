@@ -216,8 +216,11 @@ export default function OrdenesProduccion() {
   // Estructura del lote: NN+AA (consecutivo del año + año a 2 dígitos). Ej: 0126 = lote 01 de 2026.
   const ultimoLoteOrden = (ordenes.find(o => (o.lote || '').trim()) || {}).lote || ''
   const anioYY = String(new Date().getFullYear()).slice(2)
-  // Mayor consecutivo del año actual entre los lotes de las órdenes (formato NN+AA)
+  // Mayor consecutivo del año actual entre los lotes de las órdenes (formato NN+AA).
+  // Se EXCLUYE la orden que se está diligenciando: así, al usar/guardar su propio lote, la
+  // sugerencia no salta al siguiente número (sigue sugiriendo el mismo hasta crear otra orden).
   const maxSeqAnio = ordenes
+    .filter(o => o.id !== ordenPrep?.id)
     .map(o => (o.lote || '').trim())
     .filter(l => /^\d{3,4}$/.test(l) && l.slice(-2) === anioYY)
     .map(l => parseInt(l.slice(0, -2)))
@@ -2008,7 +2011,9 @@ export default function OrdenesProduccion() {
               {(() => { const loteSug = ordenPrep?.es_subproducto ? loteFechaHoy : siguienteLoteSugerido; return (
               <div className="form-group" style={{ margin: 0 }}><label className="form-label">Lote *</label><input className="form-control" value={prepLote} onChange={e => setPrepLote(e.target.value)} placeholder={`Sugerido: ${loteSug}`} />
                 <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 3 }}>
-                  <button type="button" className="btn btn-xs btn-secondary" onClick={() => setPrepLote(loteSug)}>Usar sugerido: {loteSug}</button>
+                  {prepLote.trim() === loteSug
+                    ? <span style={{ color: 'var(--selva)' }}>✓ Usando el lote sugerido ({loteSug})</span>
+                    : <button type="button" className="btn btn-xs btn-secondary" onClick={() => setPrepLote(loteSug)}>Usar sugerido: {loteSug}</button>}
                 </small>
               </div>
               )})()}
