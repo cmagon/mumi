@@ -172,6 +172,8 @@ export default function OrdenesProduccion() {
   const [prepDatos, setPrepDatos]   = useState(null)   // datos previstos (mezcla, unidades, costos)
   const [prepFicha, setPrepFicha]   = useState(null)   // { url, nombre } ficha técnica
   const [ordenDetalle, setOrdenDetalle] = useState(null)   // orden para ver detalles
+  const [detalleIngs, setDetalleIngs] = useState([])       // ingredientes calculados de la orden en detalle
+  const [alistado, setAlistado] = useState({})             // check LOCAL de "alistar ingredientes" en el modal de proceso
   const [modalAudit, setModalAudit] = useState(false)      // registro de creación (solo admin)
   const [form, setForm]             = useState(EMPTY_ORDEN)
   const [ordenActiva, setOrdenActiva] = useState(null)
@@ -357,7 +359,9 @@ export default function OrdenesProduccion() {
   // Carga datos de la orden (ingredientes calculados + lote/vence/fecha/procesos)
   const prepararDatos = async (o) => {
     setOrdenPrep(o); setPrepIngs([]); setPrepInfo(null); setPrepDatos(null); setPrepFicha(null)
-    setPrepLote(o.lote || (o.es_subproducto ? loteFechaHoy : siguienteLoteSugerido) || ''); setPrepVence(o.vence || '')
+    // No se auto-asigna el lote: se deja el que ya tuviera la orden (si venía de una edición previa);
+    // en el modal de proceso solo se SUGIERE (placeholder + botón "Usar sugerido").
+    setPrepLote(o.lote || ''); setPrepVence(o.vence || '')
     setPrepFechaInicio(o.fecha_inicio || '')
     setPrepModoAvanzado(!!o.modo_avanzado); setPrepHoraInicio(o.inicio || ''); setPrepHoraFin(o.fin || '')
     setPrepDestajo(Array.isArray(o.destajo) ? o.destajo : [])
@@ -421,6 +425,59 @@ export default function OrdenesProduccion() {
         setPrepFicha(rec.ficha_url ? { url: rec.ficha_url, nombre: rec.ficha_nombre } : null)
       }
     }
+  }
+
+  // Calcula SOLO la lista de ingredientes (nombre + gramos) de una orden, sin tocar el estado del
+  // modal de proceso. Se usa para mostrar los ingredientes dentro del modal de Detalles.
+  const calcIngredientesOrden = async (o) => {
+    const parse = (v) => { try { return Array.isArray(v) ? v : JSON.parse(v || '[]') } catch { return [] } }
+    const cantidad = parseFloat(o.cantidad_plan) || 0
+    if (o.origen === 'producto' && o.origen_id) {
+      const { data: prod } = await supabase.from('products_costing').select('bache, peso_unidad, rendimiento, desperdicio, ingredientes').eq('id', o.origen_id).single()
+      if (!prod) return []
+      const rend = parseFloat(prod.rendimiento) || 62, desp = parseFloat(prod.desperdicio) || 2, pu = parseFloat(prod.peso_unidad) || 1000
+      const ingsRaw = parse(prod.ingredientes)
+      const totalMezclaBache = ingsRaw.reduce((s, i) => s + (parseFloat(i.cantidad) || 0), 0)
+      const unidsBacheNet = pu > 0 ? (totalMezclaBache * (rend / 100) * (1 - desp / 100)) / pu : (parseFloat(prod.bache) || 0)
+      const bachesPlan = parseFloat(o.baches_plan) || 0
+      const baches = bachesPlan > 0 ? bachesPlan : snapBaches(unidsBacheNet > 0 ? cantidad / unidsBacheNet : ((parseFloat(prod.bache) || 0) > 0 ? cantidad / parseFloat(prod.bache) : 0))
+      return ingsRaw.map(i => ({ nombre: i.nombre, gramos: (parseFloat(i.cantidad) || 0) * baches }))
+    } else if (o.origen === 'receta' && o.origen_id) {
+      const { data: rec } = await supabase.from('recipes').select('ingredientes, rendimiento, desperdicio, peso_unidad').eq('id', o.origen_id).single()
+      if (!rec) return []
+      const rend = parseFloat(rec.rendimiento) || 62, desp = parseFloat(rec.desperdicio) || 2, pu = parseFloat(rec.peso_unidad) || 1000
+      const denom = (rend / 100) * (1 - desp / 100)
+      const bachesPlan = parseFloat(o.baches_plan) || 0
+      const totalMezcla = bachesPlan > 0 ? bachesPlan * BASE_RECETA : (denom > 0 ? (cantidad * pu) / denom : 0)
+      return parse(rec.ingredientes).map(i => ({ nombre: i.nombre, gramos: totalMezcla * ((parseFloat(i.pct) || 0) / 100) }))
+    }
+    return []
+  }
+
+  // Carga los ingredientes cada vez que se abre el modal de Detalles
+  useEffect(() => {
+    let cancel = false
+    if (!ordenDetalle) { setDetalleIngs([]); return }
+    calcIngredientesOrden(ordenDetalle).then(ings => { if (!cancel) setDetalleIngs(ings) }).catch(() => { if (!cancel) setDetalleIngs([]) })
+    return () => { cancel = true }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ordenDetalle?.id])
+
+  // Al abrir el modal de proceso, carga el checklist de "alistar ingredientes" guardado en la orden
+  useEffect(() => { if (modalProceso) setAlistado((ordenPrep?.alistado && typeof ordenPrep.alistado === 'object') ? ordenPrep.alistado : {}) }, [modalProceso, ordenPrep?.id])
+
+  // Marca/desmarca un ingrediente como alistado y lo GUARDA en la orden (soporta offline)
+  const toggleAlistado = (k, val) => {
+    setAlistado(prev => {
+      const next = { ...prev, [k]: val }
+      if (!val) delete next[k]
+      if (ordenPrep?.id) {
+        writeOrQueue({ table: 'production_orders', action: 'update', match: { id: ordenPrep.id }, payload: { alistado: next } })
+          .then(() => qc.invalidateQueries({ queryKey: ['production_orders'] }))
+          .catch(() => {})
+      }
+      return next
+    })
   }
 
   // Abre el modal de Ingredientes (cálculo + impresión)
@@ -1406,31 +1463,39 @@ export default function OrdenesProduccion() {
       </div>
 
       {saldosMezcla.length > 0 && (
-        <div className="card" style={{ borderLeft: '4px solid var(--lima)' }}>
-          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Recycle size={16} aria-hidden="true" /> Saldos de mezcla en proceso ({saldosMezcla.length})
-            <button className="btn btn-sm btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => navigate('/porempacar')}>Gestionar productos por empacar</button>
+        <details className="acordeon-item" style={{ borderLeft: '4px solid var(--lima)' }}>
+          <summary>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+              <Recycle size={16} aria-hidden="true" /> Saldos de mezcla en proceso
+              <span className="badge badge-dorado">{saldosMezcla.length}</span>
+            </span>
+          </summary>
+          <div className="acordeon-body">
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+              <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', margin: 0 }}>Sobrantes de producción sin empacar. Se pueden empacar al diligenciar una orden del mismo producto.</p>
+              <button className="btn btn-sm btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => navigate('/porempacar')}>Gestionar productos por empacar</button>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Producto</th><th>Lote</th><th className="td-number">Disponible</th><th>Vence</th><th>Origen</th></tr></thead>
+                <tbody>
+                  {saldosMezcla.map(s => {
+                    const est = estadoLote(s.vencimiento)
+                    return (
+                      <tr key={s.id}>
+                        <td><strong>{s.producto}</strong></td>
+                        <td>{s.lote || '(s/n)'}</td>
+                        <td className="td-number">{fCant(s.peso)} {s.unidad}</td>
+                        <td style={{ color: est === 'vencido' ? 'var(--rojo)' : est === 'por_vencer' ? 'var(--tierra)' : undefined }}>{fmtVence(s.vencimiento)} {est === 'vencido' ? '⛔' : est === 'por_vencer' ? '⚠' : ''}</td>
+                        <td style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>{s.orden_origen ? `OP-${opNum(s.orden_origen)}` : '—'}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
-          <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', marginTop: -4 }}>Sobrantes de producción sin empacar. Se pueden empacar al diligenciar una orden del mismo producto.</p>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Producto</th><th>Lote</th><th className="td-number">Disponible</th><th>Vence</th><th>Origen</th></tr></thead>
-              <tbody>
-                {saldosMezcla.map(s => {
-                  const est = estadoLote(s.vencimiento)
-                  return (
-                    <tr key={s.id}>
-                      <td><strong>{s.producto}</strong></td>
-                      <td>{s.lote || '(s/n)'}</td>
-                      <td className="td-number">{fCant(s.peso)} {s.unidad}</td>
-                      <td style={{ color: est === 'vencido' ? 'var(--rojo)' : est === 'por_vencer' ? 'var(--tierra)' : undefined }}>{fmtVence(s.vencimiento)} {est === 'vencido' ? '⛔' : est === 'por_vencer' ? '⚠' : ''}</td>
-                      <td style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>{s.orden_origen ? `OP-${opNum(s.orden_origen)}` : '—'}</td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
+        </details>
       )}
 
       <div className="card">
@@ -1438,7 +1503,7 @@ export default function OrdenesProduccion() {
         {cargandoOrdenes ? <Cargando texto="Cargando órdenes…" /> : (
         <div className="table-wrap">
           <table>
-            <thead><tr><th>#</th><th className="col-opcional">Emitida</th><th>Producto</th><th>Lote</th><th className="col-opcional">Tipo</th><th>Cant. plan</th><th className="col-opcional-2">Operario</th><th>Estado</th><th className="col-opcional-2">Resultado</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>#</th><th className="col-opcional">Emitida</th><th>Producto</th><th>Lote</th><th className="col-opcional movil-hide">Tipo</th><th className="movil-hide">Cant. plan</th><th className="col-opcional-2 movil-hide">Operario</th><th>Estado</th><th className="col-opcional-2 movil-hide">Resultado</th><th>Acciones</th></tr></thead>
             <tbody>
               {visibles.length === 0
                 ? <tr><td colSpan={10} className="empty-table">No hay órdenes</td></tr>
@@ -1451,28 +1516,27 @@ export default function OrdenesProduccion() {
                       <td className="col-opcional">{o.created_at ? fFecha(o.created_at.split('T')[0]) : '—'}</td>
                       <td><strong>{o.producto}</strong>{o.notas_orden && <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>{o.notas_orden}</div>}</td>
                       <td>{o.lote || '—'}{o.surtido && o.lote_mezcla && <div style={{ fontSize: '0.7rem', color: 'var(--tierra)', display: 'flex', alignItems: 'center', gap: 3 }}><Shuffle size={11} aria-hidden="true" /> {o.lote_mezcla}</div>}</td>
-                      <td className="col-opcional">{o.es_prueba ? <span className="badge badge-dorado" style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><FlaskConical size={11} aria-hidden="true" /> Prueba</span> : o.es_subproducto ? <span className="badge badge-dorado">Subproducto</span> : <span className="badge badge-azul">Terminado</span>}</td>
-                      <td className="td-number">{fNum(o.cantidad_plan)} {o.unidad}</td>
-                      <td className="col-opcional-2">{o.operario}</td>
+                      <td className="col-opcional movil-hide">{o.es_prueba ? <span className="badge badge-dorado" style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><FlaskConical size={11} aria-hidden="true" /> Prueba</span> : o.es_subproducto ? <span className="badge badge-dorado">Subproducto</span> : <span className="badge badge-azul">Terminado</span>}</td>
+                      <td className="td-number movil-hide">{fNum(o.cantidad_plan)} {o.unidad}</td>
+                      <td className="col-opcional-2 movil-hide">{o.operario}</td>
                       <td><span className={`badge ${est.badge}`}>{est.txt}</span>{o.estado === 'rechazada' && o.motivo_rechazo && <div style={{ fontSize: '0.72rem', color: 'var(--rojo)' }}>{o.motivo_rechazo}</div>}</td>
-                      <td className="td-number col-opcional-2">{o.cantidad_result != null ? `${fNum(o.cantidad_result)}` : '—'}</td>
-                      <td onClick={e => e.stopPropagation()}>
-                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          <button className="btn btn-xs btn-secondary" title="Ver detalles" onClick={() => setOrdenDetalle(o)}><Eye size={13} aria-hidden="true" /></button>
+                      <td className="td-number col-opcional-2 movil-hide">{o.cantidad_result != null ? `${fNum(o.cantidad_result)}` : '—'}</td>
+                      <td className="celda-acciones" onClick={e => e.stopPropagation()}>
+                        <div className="ordenes-acciones" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                          <button className="btn btn-xs btn-secondary" title="Ver detalles" onClick={() => setOrdenDetalle(o)}><Eye size={13} aria-hidden="true" />Detalles</button>
                           {/* Quien ejecuta la orden: el operario dueño */}
                           {esMia && o.estado === 'pendiente' && <button className="btn btn-xs btn-primary" onClick={() => tomarOrden.mutate(o)}><Ico as={Play} size={13} />Tomar</button>}
                           {esMia && (o.estado === 'en_proceso' || o.estado === 'rechazada') && <>
                             <button className="btn btn-xs btn-secondary" onClick={() => openPreparar(o)}><Ico as={Calculator} size={13} />Ingredientes</button>
                             <button className="btn btn-xs btn-primary" onClick={() => openProceso(o)}><Ico as={Play} size={13} />Iniciar proceso</button>
                           </>}
-                          {/* El admin puede imprimir cualquier orden sin tomarla */}
-                          {esAdmin && !esMia && <button className="btn btn-xs btn-dorado" title="Imprimir orden" onClick={() => openPreparar(o)}><Printer size={13} aria-hidden="true" /></button>}
+                          {/* (El botón "Imprimir" se quitó de aquí: los ingredientes se ven en Detalles y en el modal de proceso) */}
                           {/* El admin puede diligenciar el proceso de órdenes de OTROS (en las suyas ya tiene "Iniciar proceso") */}
                           {esAdmin && !esMia && (o.estado === 'pendiente' || o.estado === 'en_proceso' || o.estado === 'rechazada') && (
                             <button className="btn btn-xs btn-primary" title="Diligenciar proceso, cerrar y enviar (se aprueba automáticamente)" onClick={() => adminDiligenciar(o)}><Ico as={Play} size={13} />Diligenciar proceso</button>
                           )}
                           {/* Editar la orden mientras esté pendiente (no tomada) */}
-                          {(esAdmin || esOperario) && o.estado === 'pendiente' && <button className="btn btn-xs btn-secondary" title="Modificar orden" onClick={() => openEditarOrden(o)}><Pencil size={13} aria-hidden="true" /></button>}
+                          {(esAdmin || esOperario) && o.estado === 'pendiente' && <button className="btn btn-xs btn-secondary" title="Modificar orden" onClick={() => openEditarOrden(o)}><Pencil size={13} aria-hidden="true" />Editar</button>}
                           {/* Ventana de 1 día hábil para corregir el envío (no-admin) */}
                           {!esAdmin && esMia && o.estado === 'ejecutada' && dentroVentanaEdicion(o) && (
                             <button className="btn btn-xs btn-secondary" title="Anular el envío para corregirlo (1 día hábil)" onClick={() => confirmar('¿Anular el envío para corregir el registro?').then(ok => ok && anularEnvio.mutate(o))}><Ico as={Undo2} size={13} />Anular envío</button>
@@ -1488,8 +1552,8 @@ export default function OrdenesProduccion() {
                           {esAdmin && (o.estado === 'ejecutada' || o.estado === 'aprobada') && (
                             <button className="btn btn-xs btn-secondary" title="Devolver orden: elimina el registro, devuelve el stock terminado y vuelve a 'en proceso' para reeditarla" disabled={devolverOrden.isPending} onClick={() => confirmar(`¿Devolver la orden #${opNum(o.id)}?\n\nSe ELIMINA su registro de producción, se DEVUELVE el stock que sumó al producto terminado y vuelve a "en proceso" para reeditarla.`).then(ok => ok && devolverOrden.mutate(o))}><Ico as={Undo2} size={13} />Devolver</button>
                           )}
-                          {esAdmin && o.estado !== 'ejecutada' && o.estado !== 'aprobada' && <button className="btn btn-xs btn-danger" title="Eliminar orden (solo admin)" onClick={() => confirmarEliminarOrden(o)}><Trash2 size={13} aria-hidden="true" /></button>}
-                          {(o.estado === 'aprobada' || (esAdmin && o.estado !== 'ejecutada')) && o.foto_url && <button className="btn btn-xs btn-secondary" title="Ver/registrar foto" onClick={() => openEjecutar(o)}><Camera size={13} aria-hidden="true" /></button>}
+                          {esAdmin && o.estado !== 'ejecutada' && o.estado !== 'aprobada' && <button className="btn btn-xs btn-danger" title="Eliminar orden (solo admin)" onClick={() => confirmarEliminarOrden(o)}><Trash2 size={13} aria-hidden="true" />Eliminar</button>}
+                          {(o.estado === 'aprobada' || (esAdmin && o.estado !== 'ejecutada')) && o.foto_url && <button className="btn btn-xs btn-secondary" title="Ver/registrar foto" onClick={() => openEjecutar(o)}><Camera size={13} aria-hidden="true" />Foto</button>}
                         </div>
                       </td>
                     </tr>
@@ -1605,7 +1669,7 @@ export default function OrdenesProduccion() {
             <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Calcula cuántas unidades saldrían con la cantidad que tienes de ese ingrediente (considera rendimiento y desperdicio).</small>
           </div>
         )}
-        <div className="alert alert-info" style={{ fontSize: '0.8rem' }}>El <strong>lote</strong> y la <strong>fecha de vencimiento</strong> se definen al <strong>diligenciar el proceso</strong> (con el lote sugerido automáticamente).</div>
+        <div className="alert alert-info" style={{ fontSize: '0.8rem' }}>El <strong>lote</strong> y la <strong>fecha de vencimiento</strong> se definen al <strong>diligenciar el proceso</strong> (el sistema <strong>sugiere</strong> el lote, pero no lo asigna: lo confirmas tú).</div>
         {/* Lotes de MP en stock: sugerencia PEPS (cuál gastar primero) + alertas de vencimiento */}
         {!empacarSaldo && form.origen === 'producto' && prodReceta && prodReceta.ings.some(i => i.mpId) && (
           <div className="form-group" style={{ background: 'rgba(124,179,66,0.06)', padding: 10, borderRadius: 'var(--radio)' }}>
@@ -1816,6 +1880,47 @@ export default function OrdenesProduccion() {
         </>}>
         {ordenPrep && (
           <>
+            {/* Alistar ingredientes: acordeón con checklist LOCAL (no se guarda; solo ayuda al operario) */}
+            <details className="acordeon-item" style={{ marginBottom: 12, borderLeft: '4px solid var(--lima)' }}>
+              <summary>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                  <FlaskConical size={16} aria-hidden="true" /> Alistar ingredientes
+                  {prepIngs.length > 0 && <span className="badge badge-dorado">{Object.values(alistado).filter(Boolean).length}/{prepIngs.length}</span>}
+                </span>
+              </summary>
+              <div className="acordeon-body">
+                {prepIngs.length === 0
+                  ? <p className="empty-table" style={{ margin: 0 }}>Sin receta vinculada a esta orden (o aún cargando).</p>
+                  : (() => {
+                      const totalG = prepIngs.reduce((s, i) => s + (i.gramos || 0), 0)
+                      return (
+                        <div className="table-wrap">
+                          <table>
+                            <thead><tr><th style={{ width: 40 }}>✓</th><th>Ingrediente</th><th className="td-number">Cantidad a usar</th></tr></thead>
+                            <tbody>
+                              {prepIngs.map((i, k) => {
+                                const ok = !!alistado[k]
+                                return (
+                                  <tr key={k} style={{ background: ok ? 'rgba(124,179,66,0.16)' : 'transparent', transition: 'background 0.2s ease' }}>
+                                    <td data-label="✓" style={{ textAlign: 'center' }}>
+                                      <input type="checkbox" checked={ok} onChange={e => toggleAlistado(k, e.target.checked)}
+                                        aria-label={`Alistado: ${i.nombre}`} style={{ width: 20, height: 20, cursor: 'pointer', accentColor: 'var(--selva)' }} />
+                                    </td>
+                                    <td style={{ fontWeight: ok ? 600 : 400, color: ok ? 'var(--selva)' : 'inherit' }}>{i.nombre}</td>
+                                    <td className="td-number">{fCant(i.gramos)} g</td>
+                                  </tr>
+                                )
+                              })}
+                              <tr style={{ fontWeight: 700, background: 'rgba(124,179,66,0.08)' }}><td></td><td>TOTAL</td><td className="td-number">{fCant(totalG)} g</td></tr>
+                            </tbody>
+                          </table>
+                          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Marca cada ingrediente a medida que lo pesas. Es solo una ayuda visual (no se guarda).</small>
+                        </div>
+                      )
+                    })()}
+              </div>
+            </details>
+
             <div className="form-grid-2" style={{ background: 'rgba(124,179,66,0.06)', padding: 10, borderRadius: 'var(--radio)', marginBottom: 12 }}>
               <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de inicio de fabricación *</label>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
@@ -1823,11 +1928,13 @@ export default function OrdenesProduccion() {
                   <button type="button" className="btn btn-xs btn-secondary" onClick={() => setPrepFechaInicio(hoyISO())}>Hoy</button>
                 </div>
               </div>
-              <div className="form-group" style={{ margin: 0 }}><label className="form-label">Lote *</label><input className="form-control" value={prepLote} onChange={e => setPrepLote(e.target.value)} placeholder={`Ej: ${siguienteLoteSugerido}`} />
+              {(() => { const loteSug = ordenPrep?.es_subproducto ? loteFechaHoy : siguienteLoteSugerido; return (
+              <div className="form-group" style={{ margin: 0 }}><label className="form-label">Lote *</label><input className="form-control" value={prepLote} onChange={e => setPrepLote(e.target.value)} placeholder={`Sugerido: ${loteSug}`} />
                 <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 3 }}>
-                  <button type="button" className="btn btn-xs btn-secondary" onClick={() => setPrepLote(siguienteLoteSugerido)}>Usar siguiente: {siguienteLoteSugerido}</button>
+                  <button type="button" className="btn btn-xs btn-secondary" onClick={() => setPrepLote(loteSug)}>Usar sugerido: {loteSug}</button>
                 </small>
               </div>
+              )})()}
               <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de vencimiento *</label><input type="date" className="form-control" value={prepVence} onChange={e => setPrepVence(e.target.value)} disabled={!prepFechaInicio} />{prepFechaInicio ? <QuickVence opts={venceOpts} onEdit={editarVenceOpts} onPick={setPrepVence} base={prepFechaInicio} /> : <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Llena primero la fecha de fabricación.</small>}</div>
             </div>
 
@@ -2203,6 +2310,38 @@ export default function OrdenesProduccion() {
               {o.estado === 'rechazada' && o.motivo_rechazo && <p style={{ fontSize: '0.85rem', color: 'var(--rojo)' }}><strong>Motivo de rechazo:</strong> {o.motivo_rechazo}</p>}
               {o.estado === 'aprobada' && <p style={{ fontSize: '0.85rem', color: 'var(--selva)' }}><strong>Aprobada por:</strong> {o.aprobado_por} · {o.fecha_aprob ? fFecha(o.fecha_aprob.split('T')[0]) : ''}</p>}
               {o.foto_url && <div style={{ marginTop: 8 }}><img src={o.foto_url} alt="resultado" style={{ maxWidth: '100%', maxHeight: 240, borderRadius: 4 }} /></div>}
+
+              {/* Ingredientes de la orden (misma info que la vista de impresión) */}
+              <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 12 }}><Ico as={FlaskConical} size={15} />Ingredientes</div>
+              {detalleIngs.length === 0
+                ? <p className="empty-table">Sin receta vinculada a esta orden (o aún cargando).</p>
+                : (() => {
+                    const totalG = detalleIngs.reduce((s, i) => s + (i.gramos || 0), 0)
+                    // Lote(s) de MP realmente consumidos (trazabilidad PEPS), por nombre de ingrediente
+                    const lotesPorIng = {}
+                    ;(Array.isArray(o.lotes_mp) ? o.lotes_mp : []).forEach(t => {
+                      const txt = (t.lotes || []).map(l => `${l.lote || 's/lote'}${l.vencimiento ? ' (vence ' + fFecha(l.vencimiento) + ')' : ''}`).join(' · ')
+                      if (t.nombre) lotesPorIng[String(t.nombre).trim().toLowerCase()] = txt
+                    })
+                    return (
+                      <div className="table-wrap">
+                        <table>
+                          <thead><tr><th>Ingrediente</th><th className="td-number">%</th><th className="td-number">Cantidad a usar</th><th>Lote MP</th></tr></thead>
+                          <tbody>
+                            {detalleIngs.map((i, k) => (
+                              <tr key={k}>
+                                <td>{i.nombre}</td>
+                                <td className="td-number">{totalG > 0 ? (i.gramos / totalG * 100).toFixed(1) : '0'}%</td>
+                                <td className="td-number">{fCant(i.gramos)} g</td>
+                                <td style={{ fontSize: '0.8rem', color: 'var(--texto-suave)' }}>{lotesPorIng[String(i.nombre).trim().toLowerCase()] || '—'}</td>
+                              </tr>
+                            ))}
+                            <tr style={{ fontWeight: 700, background: 'rgba(124,179,66,0.08)' }}><td>TOTAL</td><td className="td-number">100%</td><td className="td-number">{fCant(totalG)} g</td><td></td></tr>
+                          </tbody>
+                        </table>
+                      </div>
+                    )
+                  })()}
 
               {/* Costos del lote (solo admin) */}
               {esAdmin && (() => {

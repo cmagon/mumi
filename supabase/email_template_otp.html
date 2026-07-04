@@ -1,17 +1,21 @@
 <!--
   Plantilla para Supabase → Authentication → Email Templates → "Magic Link"
-  Asunto:  Tu código de acceso a editar Mumi Amazonía
+  Asunto sugerido:  Tu código de verificación — Mumi Amazonía
   Clave: usa {{ .Token }} (el CÓDIGO), NO {{ .ConfirmationURL }} (el enlace).
+  NOTA: esta MISMA plantilla se usa para dos flujos (ambos con signInWithOtp):
+        1) código para editar documentos compartidos, y
+        2) código para recuperar la contraseña.
+        Por eso el texto es genérico ("código de verificación").
 -->
 <div style="font-family:Arial,Helvetica,sans-serif;max-width:480px;margin:0 auto;padding:24px;background:#f5f0e8;border-radius:12px">
   <div style="text-align:center;margin-bottom:16px">
     <div style="font-size:1.4rem;font-weight:bold;color:#2d5a3d">🌿 Mumi Amazonía</div>
-    <div style="font-size:0.85rem;color:#888">Gestión Documental</div>
+    <div style="font-size:0.85rem;color:#888">Sistema de Gestión</div>
   </div>
   <div style="background:#ffffff;border-radius:10px;padding:24px;text-align:center;box-shadow:0 2px 10px rgba(0,0,0,0.06)">
-    <p style="color:#333;font-size:0.95rem;margin:0 0 8px">Tu código de acceso para <strong>editar</strong> los documentos compartidos:</p>
+    <p style="color:#333;font-size:0.95rem;margin:0 0 8px">Tu código de verificación:</p>
     <div style="font-size:2.2rem;font-weight:bold;letter-spacing:8px;color:#2d5a3d;background:#eef4ea;border-radius:8px;padding:14px 0;margin:14px 0">{{ .Token }}</div>
-    <p style="color:#888;font-size:0.8rem;margin:8px 0 0">Ingresa este código en la página para activar el modo edición.<br/>Caduca en pocos minutos. Si no lo solicitaste, ignora este correo.</p>
+    <p style="color:#888;font-size:0.8rem;margin:8px 0 0">Ingresa este código en la página para continuar.<br/>Caduca en pocos minutos. Si no lo solicitaste, ignora este correo.</p>
   </div>
   <p style="text-align:center;color:#aaa;font-size:0.72rem;margin-top:16px">© Mumi Amazonía</p>
 </div>

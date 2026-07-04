@@ -740,6 +740,22 @@ html { -webkit-text-size-adjust: 100%; }
   /* Botones de acciÃ³n que envuelvan sin desbordar */
   .table-wrap td > div { flex-wrap: wrap; justify-content: flex-end; }
 }
+/* ===== ÓRDENES DE PRODUCCIÓN: compactar en móvil ===== */
+@media (max-width: 1024px) {
+  /* Columnas que se ocultan en la tarjeta móvil (dejamos #, fecha, producto, lote, estado, acciones) */
+  .movil-hide { display: none !important; }
+  /* Botones de acción: grandes, a lo ancho y centrados (icono + texto) */
+  .ordenes-acciones { flex-direction: column !important; gap: 8px !important; width: 100%; align-items: stretch !important; }
+  .ordenes-acciones > button {
+    width: 100%; justify-content: center;
+    min-height: 44px; font-size: 0.9rem; padding: 10px 14px;
+  }
+  .ordenes-acciones > button svg { width: 17px; height: 17px; }
+  /* La celda de acciones ocupa todo el ancho de la tarjeta */
+  .table-wrap td.celda-acciones { display: block; }
+  .table-wrap td.celda-acciones::before { display: none; }
+}
+
 /* ===== ACCESIBILIDAD: RESPETAR "REDUCIR MOVIMIENTO" =====
    Usuarios con vestibular/mareos: se anulan animaciones y transiciones no esenciales. */
 @media (prefers-reduced-motion: reduce) {

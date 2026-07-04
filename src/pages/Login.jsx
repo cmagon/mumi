@@ -34,6 +34,11 @@ export default function Login() {
   const [error, setError]       = useState('')
   const [loading, setLoading]   = useState(false)
   const [msgRec, setMsgRec]     = useState('')
+  const [recStep, setRecStep]   = useState('')      // '' | 'solicitar' | 'codigo'
+  const [recEmail, setRecEmail] = useState('')
+  const [recCodigo, setRecCodigo] = useState('')
+  const [recP1, setRecP1]       = useState('')
+  const [recLoading, setRecLoading] = useState(false)
   const [cfg, setCfg]           = useState(getConfig())
   const { signIn } = useAuth()
   const navigate = useNavigate()
@@ -41,15 +46,53 @@ export default function Login() {
   // Carga la marca personalizable (logo, nombre, eslogan) aunque no haya sesión
   useEffect(() => { loadConfig().then(setCfg).catch(() => {}) }, [])
 
-  const recuperarPassword = async () => {
+  // Paso 0: abrir el formulario de recuperación (pide correo de recuperación).
+  const abrirRecuperar = () => {
     if (!login.trim()) { setError('Escribe tu usuario y pulsa "Recuperar contraseña"'); return }
-    setError('')
+    setError(''); setMsgRec(''); setRecStep('solicitar')
+  }
+
+  // Paso 1: validar usuario+correo y, si aplica, pedirle a Supabase que envíe el código OTP.
+  const enviarCodigo = async () => {
+    if (!recEmail.trim()) { setError('Escribe tu correo de recuperación'); return }
+    setError(''); setMsgRec(''); setRecLoading(true)
     try {
-      await supabase.from('password_requests').insert({ usuario: login.trim(), mensaje: 'Solicitud de recuperación de contraseña desde el login' })
-      setMsgRec('✓ Tu solicitud fue enviada al administrador. Él te asignará una nueva contraseña.')
+      const { data, error } = await supabase.functions.invoke('password-reset-request', {
+        body: { login: login.trim(), email: recEmail.trim() },
+      })
+      if (error || data?.error) throw new Error(data?.error || 'No se pudo procesar')
+      if (data?.modo === 'codigo') {
+        const { error: otpErr } = await supabase.auth.signInWithOtp({ email: recEmail.trim() })
+        if (otpErr) throw otpErr
+        setRecStep('codigo')
+        setMsgRec(`Te enviamos un código a ${recEmail.trim()}. Revísalo e ingrésalo abajo.`)
+      } else {
+        setRecStep(''); setMsgRec('✓ Tu solicitud fue enviada al administrador. Él te asignará una nueva contraseña.')
+      }
     } catch {
-      setMsgRec('No se pudo enviar la solicitud. Contacta al administrador.')
-    }
+      setMsgRec('No se pudo enviar la solicitud. Verifica tus datos o contacta al administrador.')
+    } finally { setRecLoading(false) }
+  }
+
+  // Paso 2: verificar el código (OTP) y cambiar la contraseña vía Edge Function.
+  const confirmarRecuperacion = async () => {
+    if (recCodigo.trim().length < 6) { setError('Ingresa el código de 6 dígitos'); return }
+    if (recP1.length < 8) { setError('La nueva contraseña debe tener al menos 8 caracteres'); return }
+    setError(''); setRecLoading(true)
+    try {
+      const { error: vErr } = await supabase.auth.verifyOtp({ email: recEmail.trim(), token: recCodigo.trim(), type: 'email' })
+      if (vErr) throw new Error('Código incorrecto o expirado')
+      const { data, error } = await supabase.functions.invoke('password-reset-confirm', {
+        body: { login: login.trim(), password: recP1 },
+      })
+      await supabase.auth.signOut()   // cierra la sesión temporal del correo de recuperación
+      if (error || data?.error) throw new Error(data?.error || 'No se pudo restablecer')
+      setRecStep(''); setRecCodigo(''); setRecP1(''); setRecEmail('')
+      setPassword(recP1); setError('')
+      setMsgRec('✓ Contraseña actualizada. Ya puedes iniciar sesión.')
+    } catch (e) {
+      setError(e.message || 'Código incorrecto o expirado')
+    } finally { setRecLoading(false) }
   }
 
   const handleSubmit = async (e) => {
@@ -193,7 +236,7 @@ export default function Login() {
           </div>
         )}
 
-        <button type="button" onClick={recuperarPassword} className="login-link" style={{
+        <button type="button" onClick={abrirRecuperar} className="login-link" style={{
           marginTop: 16, background: 'none', border: 'none', cursor: 'pointer',
           color: 'rgba(200,169,74,0.85)', fontSize: '0.82rem', textDecoration: 'underline',
           transition: 'color 150ms ease'
@@ -208,6 +251,69 @@ export default function Login() {
             </div>
           )}
         </div>
+
+        {recStep === 'solicitar' && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(200,169,74,0.25)', textAlign: 'left' }}>
+            <div style={{ color: 'rgba(245,240,232,0.7)', fontSize: '0.78rem', marginBottom: 8 }}>
+              Escribe tu correo de recuperación. Te enviaremos un código para restablecer la contraseña.
+            </div>
+            <div className="login-field" style={fieldWrap}>
+              <IconoUsuarioCampo style={fieldIcon} aria-hidden="true" />
+              <input type="email" placeholder="Correo de recuperación" value={recEmail}
+                onChange={e => setRecEmail(e.target.value)} autoComplete="email"
+                aria-label="Correo de recuperación" style={fieldInput} />
+            </div>
+            <button type="button" onClick={enviarCodigo} disabled={recLoading}
+              style={{
+                width: '100%', padding: 12, marginTop: 4,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                background: 'linear-gradient(135deg, var(--dorado, #C8A94A), var(--tierra-claro, #a87450))',
+                color: 'var(--selva, #2d5a3d)', border: 'none', borderRadius: 12,
+                fontWeight: 700, fontSize: '0.9rem', letterSpacing: 0.5, textTransform: 'uppercase',
+                cursor: recLoading ? 'not-allowed' : 'pointer', opacity: recLoading ? 0.85 : 1
+              }}>
+              {recLoading && <span className="login-spinner" aria-hidden="true" />}
+              {recLoading ? 'Enviando…' : 'Enviar código'}
+            </button>
+            <button type="button" onClick={() => { setRecStep(''); setRecEmail(''); setMsgRec('') }}
+              className="login-link" style={{ marginTop: 10, background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(245,240,232,0.6)', fontSize: '0.78rem' }}>
+              Cancelar
+            </button>
+          </div>
+        )}
+
+        {recStep === 'codigo' && (
+          <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid rgba(200,169,74,0.25)', textAlign: 'left' }}>
+            <div className="login-field" style={fieldWrap}>
+              <IconoCandado style={fieldIcon} aria-hidden="true" />
+              <input type="text" inputMode="numeric" maxLength={6} placeholder="Código de 6 dígitos"
+                value={recCodigo} onChange={e => setRecCodigo(e.target.value.replace(/\D/g, ''))}
+                aria-label="Código de recuperación" style={{ ...fieldInput, letterSpacing: 4 }} />
+            </div>
+            <div className="login-field" style={fieldWrap}>
+              <IconoCandado style={fieldIcon} aria-hidden="true" />
+              <input type={verPass ? 'text' : 'password'} placeholder="Nueva contraseña (mín. 8)"
+                value={recP1} onChange={e => setRecP1(e.target.value)} autoComplete="new-password"
+                aria-label="Nueva contraseña" style={fieldInput} />
+            </div>
+            <button type="button" onClick={confirmarRecuperacion} disabled={recLoading}
+              style={{
+                width: '100%', padding: 12, marginTop: 4,
+                display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 10,
+                background: 'linear-gradient(135deg, var(--dorado, #C8A94A), var(--tierra-claro, #a87450))',
+                color: 'var(--selva, #2d5a3d)', border: 'none', borderRadius: 12,
+                fontWeight: 700, fontSize: '0.9rem', letterSpacing: 0.5, textTransform: 'uppercase',
+                cursor: recLoading ? 'not-allowed' : 'pointer', opacity: recLoading ? 0.85 : 1
+              }}>
+              {recLoading && <span className="login-spinner" aria-hidden="true" />}
+              {recLoading ? 'Guardando…' : 'Cambiar contraseña'}
+            </button>
+            <button type="button" onClick={() => { setRecStep(''); setRecCodigo(''); setRecP1(''); setMsgRec('') }}
+              className="login-link" style={{ marginTop: 10, background: 'none', border: 'none', cursor: 'pointer', color: 'rgba(245,240,232,0.6)', fontSize: '0.78rem' }}>
+              Cancelar
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

@@ -733,10 +733,13 @@ export default function Costos() {
   const updProc = (id, f, v) => setProcesos(p => p.map(r => r._id === id ? { ...r, [f]: v } : r))
   const updEmp  = (id, f, v) => setEmpaque(p => p.map(r => r._id === id ? { ...r, [f]: v } : r))
 
+  // Presentación (g/ml equivalentes por unidad de compra): Kg/Litro = 1000; Gramo/Mililitro = 1.
+  // Así el costo por gramo del ingrediente = precio ÷ presentación queda correcto según la unidad de la MP.
+  const presDeUnidad = (u) => (u === 'Gramo' || u === 'Mililitro') ? 1 : 1000
   // Seleccionar MP de la lista → autocompleta nombre y precio
   const handleSelectMP = (id, mpId) => {
     const mp = mps.find(m => String(m.id) === String(mpId))
-    setIngredientes(p => p.map(r => r._id === id ? { ...r, mpId, nombre: mp?.nombre||'', precio: mp?String(mp.precio):'', presentacion: 1000, precioOverride: false } : r))
+    setIngredientes(p => p.map(r => r._id === id ? { ...r, mpId, nombre: mp?.nombre||'', precio: mp?String(mp.precio):'', presentacion: presDeUnidad(mp?.unidad), precioOverride: false } : r))
   }
 
   // Toggle lista ↔ manual

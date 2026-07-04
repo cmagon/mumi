@@ -26,16 +26,25 @@ const MOTIVOS_SALIDA = [
   { value: 'ajuste', label: 'Ajuste de conteo' },
 ]
 const motivoLabel = (m) => (MOTIVOS_SALIDA.find(x => x.value === m)?.label || m)
-const UNIDADES = ['Kg','Litro','Unidad']
+const UNIDADES = ['Kg','Gramo','Litro','Mililitro','Unidad']
 // Sufijo corto para mostrar el precio según la unidad
-const sufijoUnidad = (u) => u === 'Kg' ? '/Kg' : u === 'Litro' ? '/L' : u === 'Unidad' ? '/u' : `/${u || 'u'}`
-// Cantidad de un movimiento expresada en gramos/ml (Kg→g, Litro→ml); las unidades sueltas quedan igual
+const sufijoUnidad = (u) => u === 'Kg' ? '/Kg' : u === 'Gramo' ? '/g' : u === 'Litro' ? '/L' : u === 'Mililitro' ? '/ml' : u === 'Unidad' ? '/u' : `/${u || 'u'}`
+// Etiqueta "por X" para el precio según la unidad
+const porUnidad = (u) => u === 'Litro' ? 'por Litro' : u === 'Gramo' ? 'por Gramo' : u === 'Mililitro' ? 'por Mililitro' : u === 'Unidad' ? 'por Unidad' : 'por Kg'
+// Cantidad de un movimiento expresada en gramos/ml (Kg→g, Litro→ml); g/ml y unidades quedan igual
 const fCantMov = (cant, unidad) => {
   const v = Number(cant) || 0
   if (unidad === 'Kg') return `${fNum(v * 1000)} g`
   if (unidad === 'Litro') return `${fNum(v * 1000)} ml`
+  if (unidad === 'Gramo') return `${fNum(v)} g`
+  if (unidad === 'Mililitro') return `${fNum(v)} ml`
   return `${fNum(v)} ${unidad || ''}`.trim()
 }
+// Factor para pasar de la unidad de PRECIO (Kg/Litro) a la unidad BASE de stock (g/ml). g/ml/Unidad = 1.
+const factorU = (u) => (u === 'Kg' || u === 'Litro') ? 1000 : 1
+const baseLbl = (u) => (u === 'Kg' || u === 'Gramo') ? 'g' : (u === 'Litro' || u === 'Mililitro') ? 'ml' : (u || 'u')
+// Convierte una cantidad interna (en unidad de precio) a texto en unidad base (g/ml/u)
+const fBase = (cantInterna, unidad) => `${fNum((Number(cantInterna) || 0) * factorU(unidad))} ${baseLbl(unidad)}`
 // Los empaques no requieren lote, vencimiento ni campos adicionales
 const esEmpaque = (categoria) => /empaque|envase/i.test(categoria || '')
 
@@ -126,11 +135,14 @@ export default function Inventario() {
   // ---- MP CRUD ----
   const saveMP = useMutation({
     mutationFn: async (datos) => {
+      // El usuario ingresa stock/stock_min en unidad BASE (g/ml/u); se guarda internamente en la
+      // unidad de precio (Kg/Litro) dividiendo por el factor (1000 para Kg/Litro).
+      const fac = factorU(datos.unidad)
       const payload = {
         ...datos,
         precio: parseFloat(datos.precio) || 0,
-        stock_min: parseFloat(datos.stock_min) || 0,
-        stock: parseFloat(datos.stock) || 0,
+        stock_min: (parseFloat(datos.stock_min) || 0) / fac,
+        stock: (parseFloat(datos.stock) || 0) / fac,
         vencimiento: datos.vencimiento || null,
         extra: datos.extra || {},
         vendible: !!datos.vendible,
@@ -150,7 +162,7 @@ export default function Inventario() {
 
   const deleteMP = useMutation({
     mutationFn: async (mp) => {
-      if ((mp.stock || 0) !== 0) throw new Error(`No se puede eliminar "${mp.nombre}": tiene stock (${fNum(mp.stock)} ${mp.unidad}). Ajústalo a 0 primero.`)
+      if ((mp.stock || 0) !== 0) throw new Error(`No se puede eliminar "${mp.nombre}": tiene stock (${fBase(mp.stock, mp.unidad)}). Ajústalo a 0 primero.`)
       const { error } = await supabase.from('raw_materials').delete().eq('id', mp.id); if (error) throw error
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['raw_materials'] }); toast('Materia prima eliminada') },
@@ -160,11 +172,12 @@ export default function Inventario() {
   // ---- Movimiento ----
   const saveMov = useMutation({
     mutationFn: async () => {
-      const cantidad = parseFloat(formMov.cantidad) || 0
       if (!formMov.mp_id) throw new Error('Selecciona la materia prima')
-      if (!cantidad) throw new Error('Ingresa una cantidad')
       const mpId = parseInt(formMov.mp_id)
       const mp = mps.find(m => m.id === mpId)
+      // El usuario ingresa la cantidad en unidad BASE (g/ml/u); se guarda en la unidad de precio.
+      const cantidad = (parseFloat(formMov.cantidad) || 0) / factorU(mp?.unidad)
+      if (!cantidad) throw new Error('Ingresa una cantidad')
       const extra = { ...(formMov.extra || {}) }
       // PEPS: entrada crea lote; salida consume del lote más antiguo/próximo a vencer
       if (formMov.tipo === 'entrada' && !esEmpaque(mp?.categoria)) {
@@ -251,7 +264,8 @@ export default function Inventario() {
   })
 
   const openEditMP = (mp) => {
-    setFormMP({ nombre: mp.nombre, categoria: mp.categoria, tipo: mp.tipo, unidad: mp.unidad, precio: mp.precio, stock_min: mp.stock_min, stock: mp.stock || 0, lote: mp.lote || '', vencimiento: mp.vencimiento || '', obs: mp.obs || '', extra: mp.extra || {}, vendible: !!mp.vendible, precio_venta: mp.precio_venta || '' })
+    const fac = factorU(mp.unidad)
+    setFormMP({ nombre: mp.nombre, categoria: mp.categoria, tipo: mp.tipo, unidad: mp.unidad, precio: mp.precio, stock_min: (mp.stock_min || 0) * fac, stock: (mp.stock || 0) * fac, lote: mp.lote || '', vencimiento: mp.vencimiento || '', obs: mp.obs || '', extra: mp.extra || {}, vendible: !!mp.vendible, precio_venta: mp.precio_venta || '' })
     setEditMPId(mp.id); setModalMP(true)
   }
   const openMovimiento = (mpId = '', tipo = 'entrada') => {
@@ -274,8 +288,8 @@ export default function Inventario() {
 
   const exportarExcel = () => {
     const ws = XLSX.utils.aoa_to_sheet([
-      ['Materia Prima','Categoría','Unidad','Stock Actual','Stock Mínimo','Lote','Vencimiento','Estado'],
-      ...mps.map(m => { const { label } = getEstadoStock(m.stock, m.stock_min); return [m.nombre, m.categoria, m.unidad, m.stock || 0, m.stock_min || 0, m.lote || '', m.vencimiento || '', label] })
+      ['Materia Prima','Categoría','Unidad precio','Stock Actual','Stock Mínimo','Unidad stock','Lote','Vencimiento','Estado'],
+      ...mps.map(m => { const { label } = getEstadoStock(m.stock, m.stock_min); return [m.nombre, m.categoria, m.unidad, (m.stock || 0) * factorU(m.unidad), (m.stock_min || 0) * factorU(m.unidad), baseLbl(m.unidad), m.lote || '', m.vencimiento || '', label] })
     ])
     const wb = XLSX.utils.book_new(); XLSX.utils.book_append_sheet(wb, ws, 'Inventario')
     XLSX.writeFile(wb, 'Inventario_MumiAmazonia.xlsx'); toast('Excel exportado ✓')
@@ -321,12 +335,12 @@ export default function Inventario() {
               return (
                 <AccordionItem key={m.id}
                   titulo={<>{m.nombre} {m.tipo === 'interno' && <span className="badge badge-dorado" style={{ fontSize: '0.6rem' }}>interno</span>}</>}
-                  sub={<><span className={`badge ${badge}`} style={{ fontSize: '0.62rem' }}>{label}</span> · {fNum(m.stock || 0)} {m.unidad}</>}
+                  sub={<><span className={`badge ${badge}`} style={{ fontSize: '0.62rem' }}>{label}</span> · {fBase(m.stock, m.unidad)}</>}
                 >
                   <Fila et="Categoría">{m.categoria}</Fila>
                   <Fila et="Precio">${fNum(m.precio || 0)}{sufijoUnidad(m.unidad)}</Fila>
-                  <Fila et="Stock">{fNum(m.stock || 0)} {m.unidad}</Fila>
-                  <Fila et="Stock mín.">{fNum(m.stock_min || 0)}</Fila>
+                  <Fila et="Stock">{fBase(m.stock, m.unidad)}</Fila>
+                  <Fila et="Stock mín.">{fBase(m.stock_min, m.unidad)}</Fila>
                   <Fila et="Lote">{lv.lote || '—'}</Fila>
                   <Fila et="Vence">{lv.vence ? fFecha(lv.vence) : '—'}</Fila>
                   <div className="acordeon-acciones">
@@ -361,8 +375,8 @@ export default function Inventario() {
                       <td className="col-opcional-2"><span className="badge badge-gris">{m.categoria}</span></td>
                       <td className="col-opcional-2">{m.unidad}</td>
                       <td className="td-number">${fNum(m.precio || 0)}<small style={{ color: 'var(--texto-suave)' }}>{sufijoUnidad(m.unidad)}</small></td>
-                      <td className="td-number"><strong>{fNum(m.stock || 0)}</strong></td>
-                      <td className="td-number col-opcional-2">{fNum(m.stock_min || 0)}</td>
+                      <td className="td-number"><strong>{fBase(m.stock, m.unidad)}</strong></td>
+                      <td className="td-number col-opcional-2">{fBase(m.stock_min, m.unidad)}</td>
                       <td className="col-opcional">{lv.lote || '—'}</td>
                       <td className="col-opcional">{lv.vence ? fFecha(lv.vence) : '—'}</td>
                       <td className="col-opcional"><span className={`badge ${badge}`}>{label}</span></td>
@@ -448,13 +462,13 @@ export default function Inventario() {
             </select>
           </div>
           <div className="form-group">
-            <label className="form-label">Precio {formMP.unidad === 'Litro' ? 'por Litro' : formMP.unidad === 'Unidad' ? 'por Unidad' : 'por Kg'}</label>
+            <label className="form-label">Precio {porUnidad(formMP.unidad)}</label>
             <MoneyInput value={formMP.precio} onChange={v => setFormMP(f => ({ ...f, precio: v }))} />
           </div>
         </div>
         <div className="form-grid-2">
-          <div className="form-group"><label className="form-label">Stock mínimo</label><input type="number" className="form-control" value={formMP.stock_min} onChange={e => setFormMP(f => ({ ...f, stock_min: e.target.value }))} /></div>
-          <div className="form-group"><label className="form-label">Stock actual</label><input type="number" className="form-control" value={formMP.stock} onChange={e => setFormMP(f => ({ ...f, stock: e.target.value }))} /></div>
+          <div className="form-group"><label className="form-label">Stock mínimo <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(en {baseLbl(formMP.unidad)})</small></label><input type="number" className="form-control" value={formMP.stock_min} onChange={e => setFormMP(f => ({ ...f, stock_min: e.target.value }))} /></div>
+          <div className="form-group"><label className="form-label">Stock actual <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(en {baseLbl(formMP.unidad)}{factorU(formMP.unidad) > 1 ? ` · 1 ${formMP.unidad}=${factorU(formMP.unidad)}${baseLbl(formMP.unidad)}` : ''})</small></label><input type="number" className="form-control" value={formMP.stock} onChange={e => setFormMP(f => ({ ...f, stock: e.target.value }))} /></div>
         </div>
         <div className="form-group" style={{ background: 'rgba(124,179,66,0.07)', borderRadius: 'var(--radio)', padding: 10 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600 }}>
@@ -502,7 +516,7 @@ export default function Inventario() {
         </div>
         <div className="form-grid-2">
           <div className="form-group">
-            <label className="form-label">Cantidad {formMov.tipo === 'ajuste' && <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(+ suma / − resta)</small>}</label>
+            <label className="form-label">Cantidad {formMov.mp_id && <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(en {baseLbl(mps.find(m => String(m.id) === String(formMov.mp_id))?.unidad)})</small>} {formMov.tipo === 'ajuste' && <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(+ suma / − resta)</small>}</label>
             <input type="number" className="form-control" value={formMov.cantidad} onChange={e => setFormMov(f => ({ ...f, cantidad: e.target.value }))} min={formMov.tipo === 'ajuste' ? undefined : 0} />
           </div>
           <div className="form-group"><label className="form-label">Fecha</label><input type="date" className="form-control" value={formMov.fecha} onChange={e => setFormMov(f => ({ ...f, fecha: e.target.value }))} /></div>
@@ -513,7 +527,7 @@ export default function Inventario() {
           const u = mpSel?.unidad || 'Kg'
           return (
             <div className="form-group">
-              <label className="form-label">Costo {u === 'Litro' ? 'por Litro' : u === 'Unidad' ? 'por Unidad' : 'por Kg'} <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>— opcional, actualiza el precio de la MP</small></label>
+              <label className="form-label">Costo {porUnidad(u)} <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>— opcional, actualiza el precio de la MP</small></label>
               <MoneyInput value={formMov.costo} onChange={v => setFormMov(f => ({ ...f, costo: v }))} placeholder={mpSel ? `Actual: $ ${fNum(mpSel.precio)}` : '$ 0'} />
             </div>
           )
@@ -532,7 +546,7 @@ export default function Inventario() {
               <select className="form-control" value={formMov.lote_id} onChange={e => setFormMov(f => ({ ...f, lote_id: e.target.value }))}>
                 <option value="">Automático (PEPS: el más antiguo/próximo a vencer)</option>
                 {lotesDe(parseInt(formMov.mp_id)).map(l => (
-                  <option key={l.id} value={l.id}>Lote {l.lote || '(s/n)'} · {fNum(l.cantidad_actual)} disp.{l.vencimiento ? ` · vence ${l.vencimiento}` : ''}</option>
+                  <option key={l.id} value={l.id}>Lote {l.lote || '(s/n)'} · {fBase(l.cantidad_actual, mpSel?.unidad)} disp.{l.vencimiento ? ` · vence ${l.vencimiento}` : ''}</option>
                 ))}
               </select>
             </div>
@@ -601,7 +615,7 @@ export default function Inventario() {
             <>
               <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>
                 Las salidas consumen primero el lote <strong>más próximo a vencer / más antiguo</strong> (PEPS).
-                Saldo en lotes: <strong>{fNum(totalLotes)} {lotesMP.unidad}</strong>.
+                Saldo en lotes: <strong>{fBase(totalLotes, lotesMP.unidad)}</strong>.
                 {desfase !== 0 && <span style={{ color: 'var(--rojo)', display: 'inline-flex', alignItems: 'center', gap: 3 }}> <AlertTriangle size={12} aria-hidden="true" /> Difiere del stock general ({fNum(lotesMP.stock || 0)}) en {fNum(desfase)}. Ajusta con una entrada/salida.</span>}
               </div>
               <div className="table-wrap">
@@ -619,9 +633,9 @@ export default function Inventario() {
                             <td>{l.lote || '—'}</td>
                             <td>{fFecha(l.fecha_entrada)}</td>
                             <td>{l.vencimiento ? fFecha(l.vencimiento) : '—'}</td>
-                            <td className="td-number">{fNum(l.cantidad_inicial)}</td>
-                            <td className="td-number"><strong>{fNum(l.cantidad_actual)}</strong></td>
-                            <td className="td-number">{(l.cantidad_reservada || 0) > 0 ? <span style={{ color: 'var(--tierra)' }}>{fNum(l.cantidad_reservada)}</span> : '—'}</td>
+                            <td className="td-number">{fBase(l.cantidad_inicial, lotesMP.unidad)}</td>
+                            <td className="td-number"><strong>{fBase(l.cantidad_actual, lotesMP.unidad)}</strong></td>
+                            <td className="td-number">{(l.cantidad_reservada || 0) > 0 ? <span style={{ color: 'var(--tierra)' }}>{fBase(l.cantidad_reservada, lotesMP.unidad)}</span> : '—'}</td>
                             <td className="td-number">{l.costo_unitario ? fNum(l.costo_unitario) : '—'}</td>
                             <td>{agotado ? <span className="badge">Agotado</span> : est === 'vencido' ? <span className="badge badge-rojo">Vencido</span> : est === 'por_vencer' ? <span className="badge badge-dorado">Por vencer</span> : <span className="badge badge-verde">Vigente</span>}</td>
                           </tr>
@@ -643,8 +657,8 @@ export default function Inventario() {
           <>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16, fontSize: '0.88rem' }}>
               <div><strong>Categoría:</strong> {histMP.categoria}</div>
-              <div><strong>Stock actual:</strong> {fNum(histMP.stock || 0)} {histMP.unidad}</div>
-              <div><strong>Stock mínimo:</strong> {fNum(histMP.stock_min || 0)}</div>
+              <div><strong>Stock actual:</strong> {fBase(histMP.stock, histMP.unidad)}</div>
+              <div><strong>Stock mínimo:</strong> {fBase(histMP.stock_min, histMP.unidad)}</div>
               <div><strong>Lote actual:</strong> {histMP.lote || '—'}</div>
               <div><strong>Vence:</strong> {histMP.vencimiento ? fFecha(histMP.vencimiento) : '—'}</div>
               <div><strong>Precio:</strong> ${fNum(histMP.precio || 0)}</div>

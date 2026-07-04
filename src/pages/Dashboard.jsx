@@ -180,6 +180,10 @@ export default function Dashboard() {
   }
 
   // Inventario de materias primas
+  // El stock se guarda en unidad de precio (Kg/Litro) pero se muestra en base (g/ml/u)
+  const factorU = (u) => (u === 'Kg' || u === 'Litro') ? 1000 : 1
+  const baseLbl = (u) => (u === 'Kg' || u === 'Gramo') ? 'g' : (u === 'Litro' || u === 'Mililitro') ? 'ml' : (u || 'u')
+  const fBaseStock = (m) => `${fNum((m.stock || 0) * factorU(m.unidad))} ${baseLbl(m.unidad)}`
   const bajoStock = mps.filter(m => (m.stock || 0) > 0 && (m.stock_min || 0) > 0 && m.stock <= m.stock_min)
   const sinStock = mps.filter(m => (m.stock || 0) <= 0)
   const alertaMP = [...sinStock.map(m => ({ ...m, _estado: 'sin' })), ...bajoStock.map(m => ({ ...m, _estado: 'bajo' }))]
@@ -287,8 +291,8 @@ export default function Dashboard() {
                 <tr key={m.id}>
                   <td>{m.nombre}</td>
                   <td><span className={`badge ${m._estado === 'sin' ? 'badge-rojo' : 'badge-dorado'}`}>{m._estado === 'sin' ? 'SIN STOCK' : 'BAJO'}</span></td>
-                  <td className="td-number">{fNum(m.stock || 0)} {m.unidad}</td>
-                  <td className="td-number">{fNum(m.stock_min || 0)}</td>
+                  <td className="td-number">{fBaseStock(m)}</td>
+                  <td className="td-number">{fNum((m.stock_min || 0) * factorU(m.unidad))} {baseLbl(m.unidad)}</td>
                 </tr>
               ))}
             </tbody>
