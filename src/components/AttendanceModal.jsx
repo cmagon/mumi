@@ -130,10 +130,17 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
           )}
           {!esLogout && <button className="btn btn-secondary" onClick={onClose}>Cerrar</button>}
           {esLogout && abierta && (
-            <button className="btn btn-primary" disabled={registrarSalida.isPending}
-              onClick={() => registrarSalida.mutateAsync().then(() => onLogout?.()).catch(() => {})}>
-              {registrarSalida.isPending ? 'Registrando...' : 'Registrar salida y cerrar sesión'}
-            </button>
+            <>
+              {/* Se permite cerrar sesión aunque no registre la salida: queda pendiente y se avisa */}
+              <button className="btn btn-secondary" disabled={registrarSalida.isPending}
+                onClick={() => { toast('Cerraste sesión con una asistencia pendiente (sin hora de salida). Regístrala luego.', 'warning'); onLogout?.() }}>
+                Cerrar sin registrar
+              </button>
+              <button className="btn btn-primary" disabled={registrarSalida.isPending}
+                onClick={() => registrarSalida.mutateAsync().then(() => onLogout?.()).catch(() => {})}>
+                {registrarSalida.isPending ? 'Registrando...' : 'Registrar salida y cerrar sesión'}
+              </button>
+            </>
           )}
         </>
       }
@@ -201,8 +208,8 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
       </div>
 
       {esLogout && abierta && (
-        <div className="alert alert-info" style={{ fontSize: '0.85rem', marginTop: 8 }}>
-          Tienes una llegada sin salida (entrada {abierta.entrada}). Registra tu salida para cerrar sesión.
+        <div className="alert alert-warning" style={{ fontSize: '0.85rem', marginTop: 8 }}>
+          Tienes una <strong>llegada sin salida</strong> (entrada {abierta.entrada}). Puedes registrar tu salida ahora, o <strong>cerrar sin registrar</strong>: quedará como asistencia pendiente para completarla después.
         </div>
       )}
 

@@ -62,13 +62,15 @@ body {
 
 .sidebar {
   width: var(--sidebar-w);
-  min-height: 100vh;
+  min-height: 100vh; height: 100vh;
   background: var(--selva);
   position: fixed; left: 0; top: 0; bottom: 0;
   z-index: 100;
   display: flex; flex-direction: column;
   transition: transform 0.3s ease;
-  overflow-y: auto;
+  /* La marca y el usuario quedan arriba, el pie (cerrar sesión) SIEMPRE abajo visible,
+     y solo la lista de navegación hace scroll cuando no cabe (pantallas pequeñas). */
+  overflow: hidden;
 }
 .sidebar-brand {
   padding: 24px 20px 20px;
@@ -109,7 +111,7 @@ body {
   font-size: 0.7rem; color: var(--header-fg, var(--dorado)); font-weight: 600;
   letter-spacing: 0.3px; text-transform: uppercase; margin-top: 1px;
 }
-.sidebar-nav { flex: 1; padding: 8px 0; }
+.sidebar-nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px 0; }
 .nav-section-title {
   padding: 14px 20px 6px;
   font-size: 0.65rem; font-weight: 600;
@@ -125,8 +127,11 @@ body {
   cursor: pointer;
   transition: var(--transicion);
   font-size: 0.9rem;
-  border-left: 3px solid transparent;
   text-decoration: none;
+  /* Reset para cuando `.nav-item` se usa en un <button> (p. ej. "Modo desarrollador"):
+     sin esto el botón toma el fondo/borde por defecto del navegador y el texto claro se ve "en blanco". */
+  background: transparent; border: 0; border-left: 3px solid transparent;
+  font-family: inherit; text-align: left; width: auto;
 }
 .nav-item:hover { background: rgba(127,127,127,0.12); color: var(--header-fg-strong, var(--crema)); }
 .nav-item.active {
@@ -154,8 +159,10 @@ body {
 }
 .btn-link-emp:hover { color: var(--lima); }
 .sidebar-footer {
-  padding: 16px 20px;
+  padding: 14px 20px;
   border-top: 1px solid rgba(255,255,255,0.07);
+  flex-shrink: 0;               /* nunca se encoge: el pie queda siempre visible abajo */
+  background: var(--selva);
 }
 .btn-sidebar {
   width: 100%; padding: 9px;
@@ -756,6 +763,23 @@ html { -webkit-text-size-adjust: 100%; }
    Se sigue mostrando si estás SIN CONEXIÓN o hay elementos por sincronizar. */
 @media (max-width: 1024px) {
   .conn-status.conn-idle { display: none !important; }
+}
+
+/* ===== ÓRDENES DE PRODUCCIÓN: diferenciar mejor cada fila ===== */
+/* Escritorio: separador más marcado entre órdenes + rayado sutil (zebra) */
+.tabla-ordenes tbody tr { border-bottom: 2px solid var(--crema-oscuro); }
+.tabla-ordenes tbody tr:nth-child(even) td { background: rgba(45,90,61,0.035); }
+.tabla-ordenes tbody tr:hover td { background: rgba(45,90,61,0.07); }
+/* Móvil: cada orden es una tarjeta con borde más definido y separación */
+@media (max-width: 1024px) {
+  .table-wrap .tabla-ordenes tbody, .table-wrap .tabla-ordenes tr { /* no-op de seguridad */ }
+  .table-wrap .tabla-ordenes tr {
+    border: 1.5px solid var(--selva);
+    border-left: 4px solid var(--selva);
+    margin-bottom: 14px;
+    box-shadow: 0 2px 8px rgba(26,58,42,0.10);
+  }
+  .table-wrap .tabla-ordenes tr:nth-child(even) { background: var(--blanco); }
 }
 
 /* ===== ÓRDENES DE PRODUCCIÓN: compactar en móvil ===== */

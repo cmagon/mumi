@@ -319,6 +319,25 @@ export default function OrdenesProduccion() {
   const recordsDeOrden = (id) => prodRecords.filter(r => r.orden_id === id)
   // Últimos 5 lotes guardados (para empaque surtido/mezclado)
   const ultimos5Lotes = [...new Set(ordenes.map(o => o.lote).concat(prodRecords.map(r => r.lote)).filter(Boolean))].slice(0, 5)
+  // Mapa lote → producto (para el surtido: filtrar por tipo de producto y mostrar el nombre).
+  const productoDeLoteMap = (() => {
+    const m = {}
+    const put = (lote, prod) => { const k = String(lote || '').trim(); if (k && prod && !m[k]) m[k] = prod }
+    prodRecords.forEach(r => put(r.lote, r.producto))
+    ordenes.forEach(o => put(o.lote, o.producto))
+    saldosMezcla.forEach(s => put(s.lote, s.producto))
+    return m
+  })()
+  // "Tipo" de producto = primera palabra (ej. "Bocadillo de seje" → "bocadillo") para agrupar sabores
+  const tipoProducto = (nombre) => String(nombre || '').trim().toLowerCase().split(/\s+/)[0] || ''
+  // Lotes sugeridos para el surtido: mismo tipo que el producto actual, con su nombre. Excluye el lote propio.
+  const lotesSurtidoDe = (productoActual, loteActual) => {
+    const tipo = tipoProducto(productoActual)
+    return Object.entries(productoDeLoteMap)
+      .filter(([lote, prod]) => tipoProducto(prod) === tipo && lote !== String(loteActual || '').trim())
+      .map(([lote, prod]) => ({ lote, prod }))
+      .slice(0, 15)
+  }
   const tieneLoteCompletado = (id) => recordsDeOrden(id).some(r => r.completado)
 
   // Eliminar orden (solo admin). Si tiene registros vinculados, avisa que también se borran.
@@ -382,11 +401,11 @@ export default function OrdenesProduccion() {
         const saved = Array.isArray(o.procesos_tiempos) ? o.procesos_tiempos : []
         const fichaProcs = parse(prod.procesos).filter(p => (p.nombre || '').trim())
         if (saved.length) {
-          // Respeta el ORDEN guardado (incluido el reordenamiento por arrastre) y sus datos
-          const result = saved.map(s => ({ nombre: s.nombre, inicio: s.inicio || '', fin: s.fin || '', fecha: s.fecha || '' }))
-          fichaProcs.forEach(f => { if (!result.some(r => r.nombre === f.nombre)) result.push({ nombre: f.nombre, inicio: '', fin: '', fecha: '' }) })
-          setPrepProcesos(result)
+          // Ya se diligenció: se respetan EXACTAMENTE los procesos guardados (orden + datos).
+          // NO se re-agregan los de la ficha, para que los que el usuario ELIMINÓ no reaparezcan.
+          setPrepProcesos(saved.map(s => ({ nombre: s.nombre, inicio: s.inicio || '', fin: s.fin || '', fecha: s.fecha || '' })))
         } else {
+          // Primera vez: se arma desde la ficha (mano de obra) como punto de partida.
           setPrepProcesos(fichaProcs.map(p => ({ nombre: p.nombre, inicio: '', fin: '', fecha: '' })))
         }
         const rend = parseFloat(prod.rendimiento) || 62, desp = parseFloat(prod.desperdicio) || 2, pu = parseFloat(prod.peso_unidad) || 1000
@@ -492,16 +511,19 @@ export default function OrdenesProduccion() {
     // Empaque de saldo: la salida real son las unidades empacadas del saldo (van como "lote empacado"),
     // por eso la producción principal queda en 0 y el saldo se pre-carga listo para consumir.
     const packInfo = (o.empaque_saldo && Array.isArray(o.saldo_pack) && o.saldo_pack[0]) ? o.saldo_pack[0] : null
+    // Respuestas SI/NO guardadas tal cual (si existe el borrador); si no, sin marcar
+    const ps = (o.prep_sino && typeof o.prep_sino === 'object') ? o.prep_sino : {}
+    const triState = (v) => (v === true || v === false) ? v : null
     setPrepUnidades(o.empaque_saldo ? '0' : (o.cantidad_result || '')); setPrepPesoFinal(o.peso_final || ''); setPrepPesoDesp(o.peso_desperdicio || '')
-    setPrepObs(o.obs_result || ''); setPrepResp(o.operario || profile?.nombre || ''); setPrepConforme(null)
-    setPrepSurtido(null); setPrepLoteMezcla(o.lote_mezcla || ''); setPrepProductoSurtido(o.producto_surtido || '')
+    setPrepObs(o.obs_result || ''); setPrepResp(o.operario || profile?.nombre || ''); setPrepConforme(triState(ps.conforme))
+    setPrepSurtido(triState(ps.surtido ?? o.surtido)); setPrepLoteMezcla(o.lote_mezcla || ''); setPrepProductoSurtido(o.producto_surtido || '')
     setPrepPorciona(false); setPrepCantSubp(o.cant_subporciones || '')
     setPrepFotoFile(null); setPrepFotoPrev(o.foto_url || '')
     if (packInfo) {
       const s = saldosMezcla.find(x => String(x.id) === String(packInfo.saldo_id))
       setPrepLotesExtra([{ lote: s?.lote || o.lote || '', vence: s?.vencimiento || o.vence || '', unidades: String(o.cantidad_plan || ''), conforme: true, saldo_id: packInfo.saldo_id, peso_consumido: String(packInfo.cantidad || ''), surtido: false, lote_mezcla: '' }])
     } else setPrepLotesExtra([])
-    setPrepHaySobrante(null); setPrepSobrantePeso(o.sobrante_peso || ''); setPrepSobranteUnidad(o.sobrante_unidad || 'g')
+    setPrepHaySobrante(triState(ps.hay_sobrante)); setPrepSobrantePeso(o.sobrante_peso || ''); setPrepSobranteUnidad(o.sobrante_unidad || 'g')
     setPrepSurtidoCantidad(o.surtido_cantidad != null ? String(o.surtido_cantidad) : '')
     setPrepSurtidoConsumos({})
     await prepararDatos(o); setModalProceso(true)
@@ -543,6 +565,9 @@ export default function OrdenesProduccion() {
         hay_sobrante: !!prepHaySobrante, sobrante_peso: prepHaySobrante && prepSobrantePeso !== '' ? (parseFloat(prepSobrantePeso) || 0) : null, sobrante_unidad: prepHaySobrante ? prepSobranteUnidad : null,
         destajo: prepDestajo.filter(d => d.nombre?.trim() || d.cantidad || d.tarifa),
       } })
+      // Respuestas SI/NO tal cual (tri-estado true/false/null) — escritura aparte y tolerante:
+      // si la columna prep_sino aún no existe (falta migración v82), no rompe el autoguardado.
+      try { await supabase.from('production_orders').update({ prep_sino: { conforme: prepConforme, surtido: prepSurtido, hay_sobrante: prepHaySobrante } }).eq('id', ordenPrep.id) } catch { /* columna opcional */ }
       setAutoSavedAt(new Date().toLocaleTimeString('es-CO'))
       qc.invalidateQueries({ queryKey: ['production_orders'] })
       if (!silent) toast(r.queued ? 'Progreso guardado sin conexión — se sincronizará 📴' : 'Guardado ✓')
@@ -778,10 +803,9 @@ export default function OrdenesProduccion() {
     if (ordenPrep) {
       const unidades = parseFloat(prepUnidades) || 0
       const extrasUnid = prepLotesExtra.filter(e => (parseFloat(e.unidades) || 0) > 0).reduce((s, e) => s + (parseFloat(e.unidades) || 0), 0)
-      const _sobranteSubp = (prepHaySobrante && prepSobranteUnidad === 'subporciones') ? (parseFloat(prepSobrantePeso) || 0) : 0
       prepararEmpaque(ordenPrep, {
         unidadesEmpacadas: unidades + extrasUnid,
-        subpEmpacadas: Math.max(0, (parseFloat(prepCantSubp) || 0) - _sobranteSubp),
+        subpTotal: parseFloat(prepCantSubp) || 0,
         surtidoUnid: parseFloat(prepSurtidoCantidad) || 0,
         esPorcionado: prepPorciona, esSurtido: !!prepSurtido,
       }).then(setEmpaquePrevio).catch(() => setEmpaquePrevio(null))
@@ -828,12 +852,10 @@ export default function OrdenesProduccion() {
       const extras = prepLotesExtra.filter(e => (parseFloat(e.unidades) || 0) > 0)
       const extrasUnid = extras.reduce((s, e) => s + (parseFloat(e.unidades) || 0), 0)
       const unidadesTotal = unidades + extrasUnid
-      // ===== EMPAQUE: verificar stock (bloquea el cierre si falta) según lo realmente empacado =====
-      const _sobranteSubp = (prepHaySobrante && prepSobranteUnidad === 'subporciones') ? (parseFloat(prepSobrantePeso) || 0) : 0
-      const subpEmpacadas = Math.max(0, (parseFloat(prepCantSubp) || 0) - _sobranteSubp)
-      // Empaque a descontar (se permite stock negativo, igual que los ingredientes; no bloquea).
+      // ===== EMPAQUE a descontar (se permite stock negativo, igual que los ingredientes; no bloquea).
+      // Bolsas = TOTAL de subporciones producidas (cada una lleva su bolsa aunque quede como saldo).
       const { plan: empaquePlan } = await prepararEmpaque(o, {
-        unidadesEmpacadas: unidadesTotal, subpEmpacadas,
+        unidadesEmpacadas: unidadesTotal, subpTotal: parseFloat(prepCantSubp) || 0,
         surtidoUnid: parseFloat(prepSurtidoCantidad) || 0,
         esPorcionado: prepPorciona, esSurtido: !!prepSurtido,
       })
@@ -1270,17 +1292,19 @@ export default function OrdenesProduccion() {
     await supabase.from('production_orders').update({ lotes_mp: reservas, lotes_reservados: null }).eq('id', o.id)
   }
 
-  // ===== EMPAQUE (bolsas/cajas) — descuento por lo REALMENTE empacado =====
+  // ===== EMPAQUE (bolsas/cajas) — descuento según lo producido/empacado =====
   // Se identifica por nombre/categoría de la MP. Relación 1:1:
-  //  · Bolsa → 1 por porción/subporción empacada (o por unidad si no es porcionado, p.ej. infusiones).
+  //  · Bolsa → 1 por CADA subporción PRODUCIDA (cada subporción se envuelve en su bolsa de
+  //            polipropileno, aunque parte quede como saldo para empacar después). Si no es
+  //            porcionado (p.ej. infusiones), por unidad × relación de la ficha (12 filtros/caja).
   //  · Caja  → 1 por unidad empacada como surtido (o por unidad si no es surtido).
-  //  · Otro empaque → 1 por unidad empacada.
+  //  · Otro empaque → por unidad × relación de la ficha.
   const KW_BOLSA = /bolsa|filtro|metaliz|sobre|sachet|doypack|funda|flexible/i
   const KW_CAJA  = /caja|estuche|display|corrugad|plegadiz|cart(o|ó)n/i
   const tipoEmpaque = (mp) => { const t = `${mp?.nombre || ''} ${mp?.categoria || ''}`; return KW_BOLSA.test(t) ? 'bolsa' : (KW_CAJA.test(t) ? 'caja' : 'otro') }
 
   // Calcula el plan de descuento y VERIFICA stock (lanza error si falta → bloquea el cierre).
-  const prepararEmpaque = async (o, { unidadesEmpacadas = 0, subpEmpacadas = 0, surtidoUnid = 0, esPorcionado = false, esSurtido = false }) => {
+  const prepararEmpaque = async (o, { unidadesEmpacadas = 0, subpTotal = 0, surtidoUnid = 0, esPorcionado = false, esSurtido = false }) => {
     if (o.es_subproducto || o.es_prueba || o.origen !== 'producto' || !o.origen_id) return []
     const { data: prod } = await supabase.from('products_costing').select('empaque, bache, merma').eq('id', o.origen_id).single()
     let emps = []; try { emps = Array.isArray(prod?.empaque) ? prod.empaque : JSON.parse(prod?.empaque || '[]') } catch { emps = [] }
@@ -1297,7 +1321,7 @@ export default function OrdenesProduccion() {
       const porRatio = unidadesEmpacadas * ratio
       // Bocadillos: bolsa = subporciones reales, caja = surtido real (exacto, 1:1).
       // Infusiones y demás: por unidades empacadas × relación de la ficha (respeta 12 filtros/caja, etc.).
-      let qty = tipo === 'bolsa' ? (esPorcionado ? subpEmpacadas : porRatio)
+      let qty = tipo === 'bolsa' ? (esPorcionado ? subpTotal : porRatio)
         : tipo === 'caja' ? (esSurtido ? surtidoUnid : porRatio)
         : porRatio
       qty = Math.round(qty)
@@ -1582,11 +1606,11 @@ export default function OrdenesProduccion() {
         <div className="card-title"><Ico as={ClipboardList} size={16} />{esAdmin ? 'Todas las órdenes' : 'Mis órdenes asignadas'}</div>
         {cargandoOrdenes ? <Cargando texto="Cargando órdenes…" /> : (
         <div className="table-wrap">
-          <table>
-            <thead><tr><th>#</th><th className="col-opcional">Emitida</th><th>Producto</th><th>Lote</th><th className="col-opcional movil-hide">Tipo</th><th className="movil-hide">Cant. plan</th><th className="col-opcional-2 movil-hide">Operario</th><th>Estado</th><th className="col-opcional-2 movil-hide">Resultado</th><th>Acciones</th></tr></thead>
+          <table className="tabla-ordenes">
+            <thead><tr><th>#</th><th className="col-opcional">Emitida</th><th>Producto</th><th>Lote</th><th>Vence</th><th className="col-opcional movil-hide">Tipo</th><th className="movil-hide">Cant. plan</th><th className="col-opcional-2 movil-hide">Operario</th><th>Estado</th><th className="col-opcional-2 movil-hide">Resultado</th><th>Acciones</th></tr></thead>
             <tbody>
               {visibles.length === 0
-                ? <tr><td colSpan={10} className="empty-table">No hay órdenes</td></tr>
+                ? <tr><td colSpan={11} className="empty-table">No hay órdenes</td></tr>
                 : visibles.map(o => {
                   const est = ESTADO_LABEL[o.estado] || ESTADO_LABEL.pendiente
                   const esMia = o.operario === profile?.nombre
@@ -1596,6 +1620,7 @@ export default function OrdenesProduccion() {
                       <td className="col-opcional">{o.created_at ? fFecha(o.created_at.split('T')[0]) : '—'}</td>
                       <td><strong>{o.producto}</strong>{o.notas_orden && <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>{o.notas_orden}</div>}</td>
                       <td>{o.lote || '—'}{o.surtido && o.lote_mezcla && <div style={{ fontSize: '0.7rem', color: 'var(--tierra)', display: 'flex', alignItems: 'center', gap: 3 }}><Shuffle size={11} aria-hidden="true" /> {o.lote_mezcla}</div>}</td>
+                      <td style={{ color: o.vence ? (estadoLote(o.vence) === 'vencido' ? 'var(--rojo)' : estadoLote(o.vence) === 'por_vencer' ? 'var(--tierra)' : undefined) : undefined }}>{o.vence ? fmtVence(o.vence) : '—'}</td>
                       <td className="col-opcional movil-hide">{o.es_prueba ? <span className="badge badge-dorado" style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><FlaskConical size={11} aria-hidden="true" /> Prueba</span> : o.es_subproducto ? <span className="badge badge-dorado">Subproducto</span> : <span className="badge badge-azul">Terminado</span>}</td>
                       <td className="td-number movil-hide">{fNum(o.cantidad_plan)} {o.unidad}</td>
                       <td className="col-opcional-2 movil-hide">{o.operario}</td>
@@ -2104,19 +2129,28 @@ export default function OrdenesProduccion() {
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 6 }}>
                         {tokens.map(t => (
                           <span key={t} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, background: 'var(--selva)', color: 'var(--crema)', borderRadius: 14, padding: '2px 6px 2px 10px', fontSize: '0.78rem', fontWeight: 600 }}>
-                            {t}<button type="button" onClick={() => removeLote(t)} style={{ border: 'none', background: 'transparent', color: 'var(--crema)', cursor: 'pointer', fontSize: '0.85rem', lineHeight: 1 }} title="Quitar">✕</button>
+                            {t}{productoDeLoteMap[t] ? ` · ${productoDeLoteMap[t]}` : ''}<button type="button" onClick={() => removeLote(t)} style={{ border: 'none', background: 'transparent', color: 'var(--crema)', cursor: 'pointer', fontSize: '0.85rem', lineHeight: 1 }} title="Quitar">✕</button>
                           </span>
                         ))}
                         {tokens.length === 0 && <span style={{ color: 'var(--texto-suave)', fontSize: '0.75rem' }}>Aún no agregaste lotes.</span>}
                       </div>
-                      <div style={{ display: 'flex', gap: 6 }}>
-                        <input className="form-control" list="dl-lotes-mezcla" value={nuevoLoteMezcla} onChange={e => setNuevoLoteMezcla(e.target.value)}
-                          onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addLote(nuevoLoteMezcla) } }}
-                          placeholder="Escribe o elige un lote y pulsa Agregar (ej: 160626)" />
-                        <datalist id="dl-lotes-mezcla">{ultimos5Lotes.map(l => <option key={l} value={l} />)}</datalist>
-                        <button type="button" className="btn btn-secondary" style={{ whiteSpace: 'nowrap' }} onClick={() => addLote(nuevoLoteMezcla)}>+ Agregar</button>
-                      </div>
-                      <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Últimos lotes: {ultimos5Lotes.join(', ') || '—'}</small>
+                      {(() => {
+                        const sug = lotesSurtidoDe(ordenPrep.producto, prepLote).filter(x => !tokens.includes(x.lote))
+                        return <>
+                          <div style={{ display: 'flex', gap: 6 }}>
+                            <input className="form-control" list="dl-lotes-mezcla" value={nuevoLoteMezcla} onChange={e => setNuevoLoteMezcla(e.target.value)}
+                              onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addLote(nuevoLoteMezcla) } }}
+                              placeholder={`Lote de ${tipoProducto(ordenPrep.producto) || 'producto'} (elige de la lista o escríbelo)`} />
+                            <datalist id="dl-lotes-mezcla">{sug.map(x => <option key={x.lote} value={x.lote}>{x.lote} — {x.prod}</option>)}</datalist>
+                            <button type="button" className="btn btn-secondary" style={{ whiteSpace: 'nowrap' }} onClick={() => addLote(nuevoLoteMezcla)}>+ Agregar</button>
+                          </div>
+                          {sug.length > 0
+                            ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
+                                {sug.map(x => <button type="button" key={x.lote} className="btn btn-xs btn-secondary" title={`Agregar lote ${x.lote}`} onClick={() => addLote(x.lote)}>{x.lote} · {x.prod}</button>)}
+                              </div>
+                            : <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>No hay otros lotes de {tipoProducto(ordenPrep.producto) || 'este producto'} registrados.</small>}
+                        </>
+                      })()}
                     </>
                   })()}
                   <label className="form-label" style={{ marginTop: 8 }}>Producto surtido resultante <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(elige del catálogo de Producto Terminado; se sugiere según el lote)</small></label>
