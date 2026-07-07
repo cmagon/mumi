@@ -108,10 +108,8 @@ export default function DevUserSwitch({ variant = 'header' }) {
       )}
 
       {open && (
-        <div style={{
-          position: 'fixed', right: 10, top: 56, zIndex: 6000, width: 300, maxHeight: '75vh', overflow: 'auto',
-          background: 'var(--blanco, #fff)', border: '1px solid var(--crema-oscuro)', borderRadius: 12, boxShadow: '0 10px 30px rgba(0,0,0,0.25)',
-        }}>
+        <div className="dev-pop-overlay" onClick={() => setOpen(false)}>
+        <div className="dev-pop" onClick={e => e.stopPropagation()}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', borderBottom: '1px solid var(--crema-oscuro)', position: 'sticky', top: 0, background: 'var(--blanco, #fff)' }}>
             <strong style={{ color: 'var(--selva)', fontSize: '0.9rem', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Wrench size={15} aria-hidden="true" /> Desarrollador</strong>
             <button onClick={() => setOpen(false)} style={{ border: 'none', background: 'none', cursor: 'pointer', color: 'var(--texto-suave)' }}><X size={16} aria-hidden="true" /></button>
@@ -165,6 +163,7 @@ export default function DevUserSwitch({ variant = 'header' }) {
               </>
             )}
           </div>
+        </div>
         </div>
       )}
     </>

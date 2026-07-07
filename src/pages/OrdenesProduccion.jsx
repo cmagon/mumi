@@ -66,11 +66,11 @@ const labelMeses = (m) => m % 12 === 0 ? `${m / 12} año${m / 12 > 1 ? 's' : ''}
 const VENCE_OPTS_DEFAULT = [1, 2, 3, 6, 12, 24]
 const getVenceOpts = () => { try { const v = JSON.parse(localStorage.getItem('mumi_vence_opts')); return Array.isArray(v) && v.length ? v : VENCE_OPTS_DEFAULT } catch { return VENCE_OPTS_DEFAULT } }
 // Botones rápidos (configurables) para fijar la fecha de vencimiento
-function QuickVence({ onPick, opts, onEdit, base }) {
+function QuickVence({ onPick, opts, onEdit, base, disabled }) {
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 4, alignItems: 'center' }}>
       {opts.map(m => (
-        <button key={m} type="button" className="btn btn-xs btn-secondary" onClick={() => onPick(desdeFechaMeses(base, m))}>+{labelMeses(m)}</button>
+        <button key={m} type="button" className="btn btn-xs btn-secondary" disabled={disabled} onClick={() => onPick(desdeFechaMeses(base, m))}>+{labelMeses(m)}</button>
       ))}
       {base && <span style={{ fontSize: '0.66rem', color: 'var(--texto-suave)' }}>(desde fabricación)</span>}
       {onEdit && <button type="button" className="btn btn-xs btn-secondary" title="Personalizar opciones" onClick={onEdit}>⚙</button>}
@@ -330,13 +330,20 @@ export default function OrdenesProduccion() {
   })()
   // "Tipo" de producto = primera palabra (ej. "Bocadillo de seje" → "bocadillo") para agrupar sabores
   const tipoProducto = (nombre) => String(nombre || '').trim().toLowerCase().split(/\s+/)[0] || ''
-  // Lotes sugeridos para el surtido: mismo tipo que el producto actual, con su nombre. Excluye el lote propio.
+  // Lotes sugeridos para el surtido: SOLO los que tienen SALDO PENDIENTE por empacar (mezcla_saldos),
+  // del mismo TIPO que el producto actual, con su nombre y cantidad disponible. Excluye el lote propio.
   const lotesSurtidoDe = (productoActual, loteActual) => {
     const tipo = tipoProducto(productoActual)
-    return Object.entries(productoDeLoteMap)
-      .filter(([lote, prod]) => tipoProducto(prod) === tipo && lote !== String(loteActual || '').trim())
-      .map(([lote, prod]) => ({ lote, prod }))
-      .slice(0, 15)
+    const la = String(loteActual || '').trim()
+    const porLote = {}
+    saldosMezcla.forEach(s => {
+      const lote = String(s.lote || '').trim()
+      if (!lote || lote === la || !(s.peso > 0)) return
+      if (tipoProducto(s.producto) !== tipo) return
+      if (!porLote[lote]) porLote[lote] = { lote, prod: s.producto, peso: 0, unidad: s.unidad || 'g' }
+      porLote[lote].peso += (parseFloat(s.peso) || 0)
+    })
+    return Object.values(porLote).slice(0, 20)
   }
   const tieneLoteCompletado = (id) => recordsDeOrden(id).some(r => r.completado)
 
@@ -793,6 +800,12 @@ export default function OrdenesProduccion() {
     if (!(parseFloat(prepUnidades) >= 0) || prepUnidades === '') { toast('Ingresa las unidades obtenidas', 'warning'); return }
     if (prepPorciona && !(parseFloat(prepCantSubp) > 0)) { toast('Ingresa la CANTIDAD DE SUBPORCIONES', 'warning'); return }
     if (prepSurtido && !(parseFloat(prepSurtidoCantidad) > 0)) { toast('Ingresa la CANTIDAD EMPACADA SURTIDA', 'warning'); return }
+    if (prepSurtido) {
+      const toks = String(prepLoteMezcla).split(/[,;]/).map(s => s.trim()).filter(Boolean)
+      const selSaldos = saldosMezcla.filter(s => (s.peso > 0) && toks.includes(String(s.lote || '').trim()))
+      const maxSurt = selSaldos.length ? Math.min(...selSaldos.map(s => parseFloat(s.peso) || 0)) : undefined
+      if (maxSurt !== undefined && (parseFloat(prepSurtidoCantidad) || 0) > maxSurt) { toast(`No puedes empacar más de ${fCant(maxSurt)} — es lo disponible por empacar del lote elegido.`, 'warning'); return }
+    }
     if (prepHaySobrante && !(parseFloat(prepSobrantePeso) > 0)) { toast('Marcaste que quedó sin empacar: ingresa la CANTIDAD', 'warning'); return }
     if (prepHaySobrante && prepPorciona && (prepSobranteUnidad === 'subporciones') && parseFloat(prepSobrantePeso) > (parseFloat(prepCantSubp) || 0)) { toast('La cantidad sin empacar no puede superar las subporciones producidas', 'warning'); return }
     if (prepConforme === null) { toast('Marca si la producción es CONFORME o NO CONFORME', 'warning'); return }
@@ -2030,7 +2043,7 @@ export default function OrdenesProduccion() {
               <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de inicio de fabricación *</label>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <input type="date" className="form-control" value={prepFechaInicio} onChange={e => setPrepFechaInicio(e.target.value)} />
-                  <button type="button" className="btn btn-xs btn-secondary" onClick={() => setPrepFechaInicio(hoyISO())}>Hoy</button>
+                  <button type="button" className="btn btn-xs btn-secondary" disabled={!!prepFechaInicio} onClick={() => setPrepFechaInicio(hoyISO())}>Hoy</button>
                 </div>
               </div>
               {(() => { const loteSug = ordenPrep?.es_subproducto ? loteFechaHoy : siguienteLoteSugerido; return (
@@ -2042,7 +2055,7 @@ export default function OrdenesProduccion() {
                 </small>
               </div>
               )})()}
-              <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de vencimiento *</label><input type="date" className="form-control" value={prepVence} onChange={e => setPrepVence(e.target.value)} disabled={!prepFechaInicio} />{prepFechaInicio ? <QuickVence opts={venceOpts} onEdit={editarVenceOpts} onPick={setPrepVence} base={prepFechaInicio} /> : <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Llena primero la fecha de fabricación.</small>}</div>
+              <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de vencimiento *</label><input type="date" className="form-control" value={prepVence} onChange={e => setPrepVence(e.target.value)} disabled={!prepFechaInicio} />{prepFechaInicio ? <QuickVence opts={venceOpts} onEdit={editarVenceOpts} onPick={setPrepVence} base={prepFechaInicio} disabled={!!prepVence} /> : <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Llena primero la fecha de fabricación.</small>}</div>
             </div>
 
             <div style={{ background: 'rgba(0,0,0,0.02)', padding: 10, borderRadius: 'var(--radio)', marginBottom: 12 }}>
@@ -2063,8 +2076,8 @@ export default function OrdenesProduccion() {
               {/* MODO BÁSICO: solo hora inicio y hora fin */}
               {!prepModoAvanzado && (
                 <div style={{ display: 'flex', gap: 16, flexWrap: 'wrap' }}>
-                  <div><label style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Hora inicio</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><TimeField value={prepHoraInicio} onChange={setPrepHoraInicio} /><button type="button" className="btn btn-xs btn-secondary" title="Ahora" onClick={() => setPrepHoraInicio(horaAhora())}><Clock size={13} aria-hidden="true" /></button></div></div>
-                  <div><label style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Hora fin</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><TimeField value={prepHoraFin} onChange={setPrepHoraFin} /><button type="button" className="btn btn-xs btn-secondary" title="Ahora" onClick={() => setPrepHoraFin(horaAhora())}><Clock size={13} aria-hidden="true" /></button></div></div>
+                  <div><label style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Hora inicio</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><TimeField value={prepHoraInicio} onChange={setPrepHoraInicio} /><button type="button" className="btn btn-xs btn-secondary" title="Ahora" disabled={!!prepHoraInicio} onClick={() => setPrepHoraInicio(horaAhora())}><Clock size={13} aria-hidden="true" /></button></div></div>
+                  <div><label style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Hora fin</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><TimeField value={prepHoraFin} onChange={setPrepHoraFin} /><button type="button" className="btn btn-xs btn-secondary" title="Ahora" disabled={!!prepHoraFin} onClick={() => setPrepHoraFin(horaAhora())}><Clock size={13} aria-hidden="true" /></button></div></div>
                 </div>
               )}
               {/* MODO AVANZADO: todos los procesos con fecha, hora inicio y fin */}
@@ -2075,9 +2088,9 @@ export default function OrdenesProduccion() {
                   <div key={i} className={ordProc.rowClassName(i)} {...ordProc.rowProps(i)} style={{ display: 'grid', gridTemplateColumns: 'auto 1.3fr 1.2fr 1.1fr 1.1fr auto', gap: 8, alignItems: 'end', marginBottom: 8, borderBottom: '1px dashed var(--crema-oscuro)', paddingBottom: 8 }}>
                     <span {...ordProc.handleProps(i)} style={{ ...ordProc.handleProps(i).style, alignSelf: 'center', paddingBottom: 0 }}>⠿</span>
                     <div><label style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>Proceso/subproceso</label><input className="form-control" value={p.nombre} onChange={e => upd('nombre', e.target.value)} placeholder="Ej: Mezclado, Horneo..." /></div>
-                    <div><label style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>Fecha</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><input type="date" className="form-control" value={p.fecha || ''} onChange={e => upd('fecha', e.target.value)} /><button type="button" className="btn btn-xs btn-secondary" title="Hoy" onClick={() => upd('fecha', hoyISO())}>Hoy</button></div></div>
-                    <div><label style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>Inicio</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><TimeField value={p.inicio} onChange={v => upd('inicio', v)} /><button type="button" className="btn btn-xs btn-secondary" title="Ahora" onClick={() => upd('inicio', horaAhora())}><Clock size={13} aria-hidden="true" /></button></div></div>
-                    <div><label style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>Fin</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><TimeField value={p.fin} onChange={v => upd('fin', v)} /><button type="button" className="btn btn-xs btn-secondary" title="Ahora" onClick={() => upd('fin', horaAhora())}><Clock size={13} aria-hidden="true" /></button></div></div>
+                    <div><label style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>Fecha</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><input type="date" className="form-control" value={p.fecha || ''} onChange={e => upd('fecha', e.target.value)} /><button type="button" className="btn btn-xs btn-secondary" title="Hoy" disabled={!!p.fecha} onClick={() => upd('fecha', hoyISO())}>Hoy</button></div></div>
+                    <div><label style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>Inicio</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><TimeField value={p.inicio} onChange={v => upd('inicio', v)} /><button type="button" className="btn btn-xs btn-secondary" title="Ahora" disabled={!!p.inicio} onClick={() => upd('inicio', horaAhora())}><Clock size={13} aria-hidden="true" /></button></div></div>
+                    <div><label style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>Fin</label><div style={{ display: 'flex', gap: 4, alignItems: 'center' }}><TimeField value={p.fin} onChange={v => upd('fin', v)} /><button type="button" className="btn btn-xs btn-secondary" title="Ahora" disabled={!!p.fin} onClick={() => upd('fin', horaAhora())}><Clock size={13} aria-hidden="true" /></button></div></div>
                     <button type="button" className="btn btn-xs btn-danger" onClick={() => setPrepProcesos(arr => arr.filter((_, idx) => idx !== i))}>✕</button>
                   </div>
                 )
@@ -2140,15 +2153,15 @@ export default function OrdenesProduccion() {
                           <div style={{ display: 'flex', gap: 6 }}>
                             <input className="form-control" list="dl-lotes-mezcla" value={nuevoLoteMezcla} onChange={e => setNuevoLoteMezcla(e.target.value)}
                               onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addLote(nuevoLoteMezcla) } }}
-                              placeholder={`Lote de ${tipoProducto(ordenPrep.producto) || 'producto'} (elige de la lista o escríbelo)`} />
-                            <datalist id="dl-lotes-mezcla">{sug.map(x => <option key={x.lote} value={x.lote}>{x.lote} — {x.prod}</option>)}</datalist>
+                              placeholder={`Lote de ${tipoProducto(ordenPrep.producto) || 'producto'} con saldo pendiente`} />
+                            <datalist id="dl-lotes-mezcla">{sug.map(x => <option key={x.lote} value={x.lote}>{x.lote} — {x.prod} (disp. {fCant(x.peso)} {x.unidad})</option>)}</datalist>
                             <button type="button" className="btn btn-secondary" style={{ whiteSpace: 'nowrap' }} onClick={() => addLote(nuevoLoteMezcla)}>+ Agregar</button>
                           </div>
                           {sug.length > 0
                             ? <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
-                                {sug.map(x => <button type="button" key={x.lote} className="btn btn-xs btn-secondary" title={`Agregar lote ${x.lote}`} onClick={() => addLote(x.lote)}>{x.lote} · {x.prod}</button>)}
+                                {sug.map(x => <button type="button" key={x.lote} className="btn btn-xs btn-secondary" title={`Agregar lote ${x.lote} (disp. ${fCant(x.peso)} ${x.unidad})`} onClick={() => addLote(x.lote)}>{x.lote} · {x.prod} <span style={{ opacity: 0.8 }}>({fCant(x.peso)} {x.unidad})</span></button>)}
                               </div>
-                            : <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>No hay otros lotes de {tipoProducto(ordenPrep.producto) || 'este producto'} registrados.</small>}
+                            : <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>No hay lotes de {tipoProducto(ordenPrep.producto) || 'este producto'} con saldo pendiente por empacar.</small>}
                         </>
                       })()}
                     </>
@@ -2162,8 +2175,19 @@ export default function OrdenesProduccion() {
                   {prepProductoSurtido && !terminados.some(t => t.nombre === prepProductoSurtido) && (
                     <small style={{ color: 'var(--rojo)', fontSize: '0.72rem' }}>⚠ "{prepProductoSurtido}" no existe en el catálogo. Créalo en <strong>Producto Terminado</strong> para no afectar el stock.</small>
                   )}
-                  <label className="form-label" style={{ marginTop: 8 }}>Cantidad empacada surtida (unidades/cajas) *</label>
-                  <input type="number" className="form-control" value={prepSurtidoCantidad} onChange={e => setPrepSurtidoCantidad(e.target.value)} min={0} placeholder="Unidades o cajas empacadas surtidas" />
+                  {(() => {
+                    const toks = String(prepLoteMezcla).split(/[,;]/).map(s => s.trim()).filter(Boolean)
+                    const selSaldos = saldosMezcla.filter(s => (s.peso > 0) && toks.includes(String(s.lote || '').trim()))
+                    const maxSurt = selSaldos.length ? Math.min(...selSaldos.map(s => parseFloat(s.peso) || 0)) : undefined
+                    const excede = maxSurt !== undefined && (parseFloat(prepSurtidoCantidad) || 0) > maxSurt
+                    return <>
+                      <label className="form-label" style={{ marginTop: 8 }}>Cantidad empacada surtida (unidades/cajas) *
+                        {maxSurt !== undefined && <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}> — disponible por empacar: {fCant(maxSurt)} {selSaldos[0]?.unidad || ''}</small>}
+                      </label>
+                      <input type="number" className="form-control" style={excede ? { borderColor: 'var(--rojo)' } : undefined} value={prepSurtidoCantidad} onChange={e => setPrepSurtidoCantidad(e.target.value)} min={0} max={maxSurt} placeholder="Unidades o cajas empacadas surtidas" />
+                      {excede && <small style={{ color: 'var(--rojo)', fontSize: '0.72rem' }}>⚠ No puedes empacar más de <strong>{fCant(maxSurt)}</strong> — es lo disponible por empacar del lote elegido.</small>}
+                    </>
+                  })()}
                   <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
                     Es el <strong>stock</strong> que se suma al producto terminado surtido. El <strong>lote de la caja (rótulo final)</strong> será el más reciente: <strong>{loteCaja(prepLoteMezcla, prepLote) || '(elige el lote arriba)'}</strong>.
                   </small>

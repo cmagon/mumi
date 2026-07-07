@@ -6,7 +6,7 @@ import { estadoLote } from '../lib/lotes'
 import { useToast } from '../hooks/useToast'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
-import { Recycle, Trash2 } from 'lucide-react'
+import { Recycle, Trash2, Pencil } from 'lucide-react'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const fCant = (n) => Number(n || 0).toLocaleString('es-CO', { maximumFractionDigits: 3 })
@@ -20,6 +20,8 @@ export default function ProductosPorEmpacar() {
   const [buscar, setBuscar] = useState('')
   const [modalBaja, setModalBaja] = useState(null)   // saldo a dar de baja
   const [bForm, setBForm] = useState({ cantidad: '', motivo: '' })
+  const [modalEditar, setModalEditar] = useState(null)   // saldo a editar cantidad
+  const [eForm, setEForm] = useState({ cantidad: '', motivo: '' })
 
   const { data: saldos = [] } = useQuery({
     queryKey: ['mezcla_saldos'],
@@ -51,6 +53,23 @@ export default function ProductosPorEmpacar() {
       await supabase.from('saldo_bajas').insert({ saldo_id: s.id, producto: s.producto, lote: s.lote || '', cantidad: cant, unidad: s.unidad || '', motivo: bForm.motivo, creado_por: profile?.nombre || '' })
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['mezcla_saldos'] }); qc.invalidateQueries({ queryKey: ['saldo_bajas'] }); setModalBaja(null); toast('Baja registrada ✓') },
+    onError: (e) => toast(e.message, 'error'),
+  })
+
+  // Editar (corregir) la cantidad pendiente de un saldo. Deja registro del ajuste.
+  const abrirEditar = (s) => { setModalEditar(s); setEForm({ cantidad: String(s.peso), motivo: '' }) }
+  const editarSaldo = useMutation({
+    mutationFn: async () => {
+      const s = modalEditar
+      const nueva = parseFloat(eForm.cantidad)
+      if (!(nueva >= 0)) throw new Error('Ingresa la nueva cantidad (0 o más)')
+      if (!eForm.motivo.trim()) throw new Error('Indica el motivo del ajuste')
+      const delta = nueva - Number(s.peso)
+      await supabase.from('mezcla_saldos').update({ peso: nueva, estado: nueva <= 0 ? 'baja' : 'disponible' }).eq('id', s.id)
+      // Se registra el ajuste en el mismo historial (cantidad con signo: + aumenta, − reduce)
+      await supabase.from('saldo_bajas').insert({ saldo_id: s.id, producto: s.producto, lote: s.lote || '', cantidad: delta, unidad: s.unidad || '', motivo: `[Ajuste de cantidad] ${eForm.motivo}`, creado_por: profile?.nombre || '' })
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['mezcla_saldos'] }); qc.invalidateQueries({ queryKey: ['saldo_bajas'] }); setModalEditar(null); toast('Cantidad actualizada ✓') },
     onError: (e) => toast(e.message, 'error'),
   })
 
@@ -95,7 +114,10 @@ export default function ProductosPorEmpacar() {
                           <td className="td-number">{fCant(s.peso)} {s.unidad}</td>
                           <td className="col-opcional" style={{ color: est === 'vencido' ? 'var(--rojo)' : est === 'por_vencer' ? 'var(--tierra)' : undefined }}>{fmtV(s.vencimiento)} {est === 'vencido' ? '⛔' : est === 'por_vencer' ? '⚠' : ''}</td>
                           <td className="col-opcional-2" style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>{s.created_at ? fFecha(s.created_at.slice(0, 10)) : '—'}</td>
-                          <td><button className="btn btn-xs btn-danger" onClick={() => abrirBaja(s)}><Ico as={Trash2} size={14} />Dar de baja</button></td>
+                          <td style={{ whiteSpace: 'nowrap' }}>
+                            <button className="btn btn-xs btn-secondary" onClick={() => abrirEditar(s)}><Ico as={Pencil} size={14} />Editar</button>{' '}
+                            <button className="btn btn-xs btn-danger" onClick={() => abrirBaja(s)}><Ico as={Trash2} size={14} />Dar de baja</button>
+                          </td>
                         </tr>
                       )
                     })}
@@ -129,6 +151,22 @@ export default function ProductosPorEmpacar() {
           </div>
         </div>
       )}
+
+      {/* Modal editar cantidad */}
+      <Modal open={!!modalEditar} onClose={() => setModalEditar(null)} title={`✏ Editar cantidad — ${modalEditar?.producto || ''}`}
+        footer={<>
+          <button className="btn btn-secondary" onClick={() => setModalEditar(null)}>Cancelar</button>
+          <button className="btn btn-primary" onClick={() => editarSaldo.mutate()} disabled={editarSaldo.isPending}>{editarSaldo.isPending ? 'Guardando...' : 'Guardar cantidad'}</button>
+        </>}>
+        {modalEditar && (
+          <div>
+            <p style={{ fontSize: '0.85rem' }}>Lote <strong>{modalEditar.lote || '(s/n)'}</strong> · Actual: <strong>{fCant(modalEditar.peso)} {modalEditar.unidad}</strong></p>
+            <div className="form-group"><label className="form-label">Nueva cantidad pendiente ({modalEditar.unidad})</label><input type="number" className="form-control" value={eForm.cantidad} onChange={e => setEForm(f => ({ ...f, cantidad: e.target.value }))} min={0} step="any" /></div>
+            <div className="form-group"><label className="form-label">Motivo del ajuste</label><input className="form-control" value={eForm.motivo} onChange={e => setEForm(f => ({ ...f, motivo: e.target.value }))} placeholder="Ej: recuento, corrección, se dañaron algunas..." /></div>
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Corrige la cantidad pendiente por empacar. El ajuste (diferencia) queda en el historial. Si la dejas en 0, el saldo se cierra.</small>
+          </div>
+        )}
+      </Modal>
 
       {/* Modal dar de baja */}
       <Modal open={!!modalBaja} onClose={() => setModalBaja(null)} title={`🗑 Dar de baja — ${modalBaja?.producto || ''}`}

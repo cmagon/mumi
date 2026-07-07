@@ -2,14 +2,14 @@ import { useState, useEffect } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Calculator, Package, Tags, ClipboardList, Factory, Users, Handshake,
-  Camera, FolderOpen, NotebookText, AlertTriangle, GraduationCap, Settings, KeyRound,
-  Clock, Leaf, LogOut, User,
+  Camera, FolderOpen, NotebookText, AlertTriangle, GraduationCap, Settings,
+  Clock, Leaf, LogOut, User, KeyRound, Recycle,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { getRolLabel } from '../../lib/businessLogic'
 import { puedeVer, RUTA_MODULO } from '../../lib/permisos'
 import { getConfig, loadConfig } from '../../lib/appConfig'
-import ChangePasswordModal from '../ChangePasswordModal'
+import ProfileModal from '../ProfileModal'
 import DevUserSwitch from '../DevUserSwitch'
 
 const NAV_ITEMS = [
@@ -21,6 +21,7 @@ const NAV_ITEMS = [
   { to: '/terminados', icon: Tags, label: 'Producto Terminado' },
   { to: '/ordenes',    icon: ClipboardList, label: 'Órdenes de Producción' },
   { to: '/produccion', icon: Factory, label: 'Registro de Producción' },
+  { to: '/porempacar', icon: Recycle, label: 'Productos por Empacar' },
   { section: 'Personal' },
   { to: '/nomina',     icon: Users, label: 'Asistencia & Nómina' },
   { section: 'Comercial' },
@@ -38,7 +39,7 @@ const NAV_ITEMS = [
 export default function Sidebar({ open, onClose, onLogout, puedeFichar, onRegistrarAsistencia }) {
   const { profile, signOut, rolEfectivo, esDevPreview } = useAuth()
   const navigate = useNavigate()
-  const [pwdModal, setPwdModal] = useState(false)
+  const [perfilModal, setPerfilModal] = useState(false)
   const [cfg, setCfg] = useState(getConfig())
   useEffect(() => { loadConfig().then(setCfg).catch(() => {}) }, [])
 
@@ -79,6 +80,9 @@ export default function Sidebar({ open, onClose, onLogout, puedeFichar, onRegist
             <div className="user-greeting">Hola,</div>
             <div className="user-name">{profile?.nombre || '—'}</div>
             <div className="user-role">{getRolLabel(rolEfectivo)}{esDevPreview && <span style={{ marginLeft: 6, fontSize: '0.62rem', background: 'var(--dorado)', color: '#fff', padding: '1px 5px', borderRadius: 6 }}>vista de rol</span>}</div>
+            <button className="user-config-btn" onClick={() => { setPerfilModal(true); onClose?.() }}>
+              <User size={13} aria-hidden="true" /> Mi perfil
+            </button>
           </div>
         </div>
 
@@ -114,16 +118,13 @@ export default function Sidebar({ open, onClose, onLogout, puedeFichar, onRegist
           <div className="solo-movil"><DevUserSwitch variant="menu" /></div>
         </nav>
 
-        <div className="sidebar-footer" style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-          <button className="btn-sidebar" onClick={() => setPwdModal(true)} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            <KeyRound size={16} aria-hidden="true" /> Cambiar contraseña
-          </button>
+        <div className="sidebar-footer">
           <button className="btn-logout" onClick={handleLogout} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
             <LogOut size={16} aria-hidden="true" /> Cerrar Sesión
           </button>
         </div>
       </aside>
-      <ChangePasswordModal open={pwdModal} onClose={() => setPwdModal(false)} />
+      <ProfileModal open={perfilModal} onClose={() => setPerfilModal(false)} />
     </>
   )
 }

@@ -111,6 +111,16 @@ body {
   font-size: 0.7rem; color: var(--header-fg, var(--dorado)); font-weight: 600;
   letter-spacing: 0.3px; text-transform: uppercase; margin-top: 1px;
 }
+/* Botón "Configuración" (perfil del usuario) bajo el nombre, dentro de la tarjeta de usuario */
+.user-config-btn {
+  margin-top: 6px; padding: 4px 8px;
+  display: inline-flex; align-items: center; gap: 5px;
+  background: rgba(255,255,255,0.08); border: 1px solid rgba(200,169,74,0.35);
+  color: var(--header-fg-strong, var(--crema)); font: inherit; font-size: 0.72rem; font-weight: 600;
+  border-radius: 8px; cursor: pointer; transition: var(--transicion);
+}
+.user-config-btn:hover { background: rgba(200,169,74,0.18); border-color: var(--dorado); }
+
 .sidebar-nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px 0; }
 .nav-section-title {
   padding: 14px 20px 6px;
@@ -751,6 +761,24 @@ html { -webkit-text-size-adjust: 100%; }
   /* Botones de acciÃ³n que envuelvan sin desbordar */
   .table-wrap td > div { flex-wrap: wrap; justify-content: flex-end; }
 }
+/* Panel de herramientas de desarrollador: dropdown arriba-derecha en escritorio,
+   y POPUP CENTRADO (con fondo oscuro) en móvil/tablet. */
+.dev-pop-overlay { position: fixed; inset: 0; z-index: 6000; }
+.dev-pop {
+  position: fixed; right: 10px; top: 56px; width: 300px; max-height: 75vh; overflow: auto;
+  background: var(--blanco, #fff); border: 1px solid var(--crema-oscuro); border-radius: 12px;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.25);
+}
+@media (max-width: 1024px) {
+  .dev-pop-overlay { background: rgba(0,0,0,0.45); display: flex; align-items: center; justify-content: center; padding: 16px; }
+  .dev-pop { position: static; right: auto; top: auto; width: min(380px, 100%); max-height: 82vh; animation: modalIn 0.2s ease; }
+}
+
+/* En el menú lateral en móvil no hace falta el eslogan (ahorra espacio) */
+@media (max-width: 1024px) {
+  .brand-tagline { display: none; }
+}
+
 /* Empleados (Nómina): en móvil la celda de acciones ocupa TODO el ancho (sin etiqueta) y
    los botones se muestran en 2 columnas. Si son impares, el último ocupa toda la fila. */
 @media (max-width: 1024px) {
