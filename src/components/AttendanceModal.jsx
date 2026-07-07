@@ -29,7 +29,11 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
   const puedeOtros = !esLogout && !!profile && puedeSeccionExplicita(profile.rol, 'nomina', 'asistencia_otros')
   const [empSel, setEmpSel] = useState(emp)   // empleado sobre el que se registra (por defecto, uno mismo)
   const objetivo = esLogout ? emp : (empSel || emp)   // en logout siempre soy yo
-  const esOtro = objetivo?.id !== emp?.id
+  // "Yo" = el USUARIO LOGUEADO (profile), no necesariamente `emp` (que puede ser el operario
+  // que el admin abrió para ficharle). Se compara por nombre.
+  const mismoQueYo = (x) => !!x && !!profile && (x.nombre || '').trim().toLowerCase() === (profile.nombre || '').trim().toLowerCase()
+  const empEsYo = mismoQueYo(emp)
+  const esOtro = !mismoQueYo(objetivo)   // registrando por otra persona si el objetivo no soy yo
 
   // Nombres de usuarios con rol admin (para excluirlos del selector: los admin no fichan)
   const { data: adminNombres = [] } = useQuery({
@@ -71,7 +75,7 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
         payload: { emp_id: objetivo.id, fecha, entrada: hora, entrada_ts: new Date().toISOString(), ...(esOtro ? { editado_por: profile?.nombre || '' } : {}) },
       })
     },
-    onSuccess: (r) => { refetch(); qc.invalidateQueries({ queryKey: ['attendance'] }); toast(r?.queued ? 'Llegada guardada sin conexión — se sincronizará 📴' : 'Llegada registrada ✓'); setHora(horaAhora()) },
+    onSuccess: (r) => { refetch(); qc.invalidateQueries({ queryKey: ['attendance'] }); toast(r?.queued ? 'Llegada guardada sin conexión — se sincronizará 📴' : 'Llegada registrada ✓'); setHora(horaAhora()); if (!esLogout) onClose?.() },
     onError: (e) => toast(e.message, 'error'),
   })
 
@@ -86,7 +90,7 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
         match: { id: obj.id },
       })
     },
-    onSuccess: (r) => { refetch(); qc.invalidateQueries({ queryKey: ['attendance'] }); toast(r?.queued ? 'Salida guardada sin conexión — se sincronizará 📴' : 'Salida registrada ✓'); setHora(horaAhora()) },
+    onSuccess: (r) => { refetch(); qc.invalidateQueries({ queryKey: ['attendance'] }); toast(r?.queued ? 'Salida guardada sin conexión — se sincronizará 📴' : 'Salida registrada ✓'); setHora(horaAhora()); if (!esLogout) onClose?.() },
     onError: (e) => toast(e.message, 'error'),
   })
 
@@ -99,7 +103,6 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
   if (modo === 'logout' && !abierta) return null
 
   const totalDia = sesionesDia.reduce((s, f) => s + calcHoras(f.entrada, f.salida), 0)
-  const sesionCompletaDia = sesionesDia.some(f => f.entrada && f.salida)
   const esFechaHoy = fecha === hoy
   // Acción principal: ¿toca registrar SALIDA o ENTRADA?
   const esSalida = esLogout || !!abiertaDia
@@ -111,7 +114,7 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
       open
       guard={false}
       onClose={esLogout ? undefined : onClose}
-      title="Registro de Asistencia"
+      title={esOtro ? `Asistencia de ${objetivo?.nombre || ''}` : 'Registro de Asistencia'}
       footer={
         <>
           {!esLogout && (abiertaDia
@@ -125,12 +128,7 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
           {!esLogout && onRegistrarVarios && (
             <button className="btn btn-dorado" onClick={onRegistrarVarios}><CalendarDays size={15} aria-hidden="true" />Registrar varios</button>
           )}
-          {!esLogout && <button className="btn btn-secondary" onClick={onClose} disabled={sesionCompletaDia}>Omitir</button>}
-          {!esLogout && (
-            <button className="btn btn-primary" onClick={onClose} disabled={sesionesDia.length === 0}>
-              Aceptar
-            </button>
-          )}
+          {!esLogout && <button className="btn btn-secondary" onClick={onClose}>Cerrar</button>}
           {esLogout && abierta && (
             <button className="btn btn-primary" disabled={registrarSalida.isPending}
               onClick={() => registrarSalida.mutateAsync().then(() => onLogout?.()).catch(() => {})}>
@@ -165,7 +163,7 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
         <div className="form-group">
           <label className="form-label">Registrar asistencia de</label>
           <select className="form-control" value={objetivo?.id || ''} onChange={e => { const id = e.target.value; setEmpSel(String(id) === String(emp?.id) ? emp : (empleados.find(x => String(x.id) === String(id)) || emp)); setHora(horaAhora()) }}>
-            {emp && <option value={emp.id}>{emp.nombre} (yo)</option>}
+            {emp && <option value={emp.id}>{emp.nombre}{empEsYo ? ' (yo)' : ''}</option>}
             {empleados.filter(x => String(x.id) !== String(emp?.id)).map(x => <option key={x.id} value={x.id}>{x.nombre}</option>)}
           </select>
         </div>

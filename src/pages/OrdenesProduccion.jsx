@@ -831,12 +831,12 @@ export default function OrdenesProduccion() {
       // ===== EMPAQUE: verificar stock (bloquea el cierre si falta) según lo realmente empacado =====
       const _sobranteSubp = (prepHaySobrante && prepSobranteUnidad === 'subporciones') ? (parseFloat(prepSobrantePeso) || 0) : 0
       const subpEmpacadas = Math.max(0, (parseFloat(prepCantSubp) || 0) - _sobranteSubp)
-      const { plan: empaquePlan, faltantes: empaqueFaltan } = await prepararEmpaque(o, {
+      // Empaque a descontar (se permite stock negativo, igual que los ingredientes; no bloquea).
+      const { plan: empaquePlan } = await prepararEmpaque(o, {
         unidadesEmpacadas: unidadesTotal, subpEmpacadas,
         surtidoUnid: parseFloat(prepSurtidoCantidad) || 0,
         esPorcionado: prepPorciona, esSurtido: !!prepSurtido,
       })
-      if (empaqueFaltan.length) throw new Error(errorEmpaque(empaqueFaltan))
       // Si quien cierra y envía es un admin, la orden se aprueba automáticamente (no requiere otra aprobación)
       const autoAprob = esAdmin
       // 1) Crear/actualizar el registro de producción vinculado a la orden
@@ -2318,7 +2318,7 @@ export default function OrdenesProduccion() {
       <Modal open={modalConfirmEnvio} onClose={() => setModalConfirmEnvio(false)} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><CheckCircle2 size={18} aria-hidden="true" /> Confirmar y enviar producción</span>}
         footer={<>
           <button className="btn btn-secondary" onClick={() => setModalConfirmEnvio(false)}>✏ Editar</button>
-          <button className="btn btn-success" onClick={confirmarEnviar} disabled={savingEvid || (empaquePrevio?.faltantes?.length > 0)}>{savingEvid ? 'Enviando...' : 'Confirmar y enviar'}</button>
+          <button className="btn btn-success" onClick={confirmarEnviar} disabled={savingEvid}>{savingEvid ? 'Enviando...' : 'Confirmar y enviar'}</button>
         </>}>
         {ordenPrep && (
           <div style={{ fontSize: '0.9rem' }}>
@@ -2358,7 +2358,7 @@ export default function OrdenesProduccion() {
                   })}
                 </tbody></table>
                 {empaquePrevio.faltantes.length > 0
-                  ? <div className="alert alert-danger" style={{ marginTop: 8, fontSize: '0.82rem' }}>No hay empaque suficiente. Carga stock del empaque en Inventario para poder cerrar.</div>
+                  ? <div className="alert alert-warning" style={{ marginTop: 8, fontSize: '0.82rem' }}>⚠ El stock de algún empaque quedará en <strong>negativo</strong> (no bloquea). Recarga el empaque en Inventario cuando puedas.</div>
                   : <small style={{ color: 'var(--texto-suave)' }}>Se descuenta al confirmar. Bolsas por porción · Cajas por surtido · Infusiones por la relación de la ficha.</small>}
               </div>
             )}
