@@ -38,8 +38,11 @@ export default function ConnStatus() {
     ? (pend > 0 ? `Sin conexión · ${pend} sin guardar` : 'Sin conexión')
     : (msg || (pend > 0 ? `${pend} por sincronizar` : 'En línea'))
 
+  // Estado "ocioso": en línea, sin pendientes ni mensaje → en móvil se oculta (no aporta y estorba)
+  const idle = online && pend === 0 && !msg
+
   return (
-    <div style={{
+    <div className={`conn-status${idle ? ' conn-idle' : ''}`} style={{
       position: 'fixed', bottom: 14, right: 14, zIndex: 3000,
       display: 'flex', alignItems: 'center', gap: 8,
       background: bg, color: '#fff',

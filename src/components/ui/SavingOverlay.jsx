@@ -23,7 +23,7 @@ export default function SavingOverlay() {
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 5000,
-      background: 'rgba(26,58,42,0.35)', backdropFilter: 'blur(1px)',
+      background: 'rgba(26,58,42,0.35)', backdropFilter: 'blur(1px)', WebkitBackdropFilter: 'blur(1px)',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
     }}>
       <div style={{ background: 'var(--blanco, #fff)', borderRadius: 14, padding: '26px 30px', textAlign: 'center', maxWidth: 340, boxShadow: '0 12px 40px rgba(0,0,0,0.3)' }}>

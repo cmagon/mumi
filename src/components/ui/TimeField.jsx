@@ -29,8 +29,9 @@ function useEsTactil() {
   useEffect(() => {
     const mq = window.matchMedia(consulta)
     const on = () => setTactil(mq.matches)
-    mq.addEventListener('change', on)
-    return () => mq.removeEventListener('change', on)
+    // Safari < 14 no soporta addEventListener en MediaQueryList (usa addListener)
+    if (mq.addEventListener) { mq.addEventListener('change', on); return () => mq.removeEventListener('change', on) }
+    mq.addListener(on); return () => mq.removeListener(on)
   }, [])
   return tactil
 }

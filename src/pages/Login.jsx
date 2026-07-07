@@ -101,6 +101,7 @@ export default function Login() {
     setLoading(true); setError('')
     try {
       limpiarDev()   // un inicio de sesión normal nunca queda en modo desarrollador
+      sessionStorage.removeItem('asistPreguntada')   // en un login nuevo, el modal de asistencia vuelve a aparecer una vez
       await signIn(login, password)
       navigate('/dashboard')
     } catch {

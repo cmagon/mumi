@@ -138,22 +138,36 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
         </>
       }
     >
-      {/* Encabezado intuitivo: icono grande + acción clara */}
-      <div style={{ textAlign: 'center', marginBottom: 18 }}>
-        <div style={{
-          width: 88, height: 88, margin: '0 auto 12px', borderRadius: '50%',
+      {/* Estilos: en pantallas bajas/estrechas se compacta el encabezado para que quepa completo */}
+      <style>{`
+        .asis-hero-ic { width: 84px; height: 84px; }
+        .asis-hero-ic svg { width: 42px; height: 42px; }
+        .asis-hero-tt { font-size: 1.6rem; }
+        @media (max-height: 740px), (max-width: 400px) {
+          .asis-hero { margin-bottom: 10px !important; }
+          .asis-hero-ic { width: 54px; height: 54px; margin-bottom: 6px !important; }
+          .asis-hero-ic svg { width: 28px; height: 28px; }
+          .asis-hero-tt { font-size: 1.2rem; }
+          .asis-name { margin-bottom: 8px !important; }
+        }
+      `}</style>
+
+      {/* Encabezado intuitivo: icono + acción clara */}
+      <div className="asis-hero" style={{ textAlign: 'center', marginBottom: 16 }}>
+        <div className="asis-hero-ic" style={{
+          margin: '0 auto 10px', borderRadius: '50%',
           display: 'flex', alignItems: 'center', justifyContent: 'center',
           background: esSalida ? 'rgba(200,169,74,0.15)' : 'rgba(124,179,66,0.15)',
           border: `2px solid ${colorAccion}`,
         }}>
-          <IconoAccion size={44} strokeWidth={2} aria-hidden="true" style={{ color: colorAccion }} />
+          <IconoAccion strokeWidth={2} aria-hidden="true" style={{ color: colorAccion }} />
         </div>
-        <div style={{ fontFamily: "var(--fuente-titulos, 'Playfair Display'), serif", fontSize: '1.7rem', fontWeight: 700, color: 'var(--selva)', lineHeight: 1.1 }}>
+        <div className="asis-hero-tt" style={{ fontFamily: "var(--fuente-titulos, 'Playfair Display'), serif", fontWeight: 700, color: 'var(--selva)', lineHeight: 1.1 }}>
           {esSalida ? 'Registre salida' : 'Registre entrada'}
         </div>
       </div>
 
-      <div style={{ marginBottom: 14, textAlign: 'center' }}>
+      <div className="asis-name" style={{ marginBottom: 12, textAlign: 'center' }}>
         <strong style={{ color: 'var(--selva)' }}>{objetivo?.nombre}</strong>
         {esOtro && <span className="badge badge-dorado" style={{ marginLeft: 8, fontSize: '0.7rem' }}>registrando por otra persona</span>}
       </div>
@@ -193,18 +207,20 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
       )}
 
       {/* Sesiones de la fecha */}
-      <div style={{ marginTop: 16 }}>
+      <div style={{ marginTop: 14 }}>
         <div style={{ fontWeight: 600, color: 'var(--selva)', fontSize: '0.85rem', marginBottom: 6 }}>
           Sesiones del {esFechaHoy ? 'día' : fFecha(fecha)} {totalDia > 0 && <span style={{ fontWeight: 400, color: 'var(--texto-suave)' }}>· Total {fmtHoras(totalDia)} h</span>}
         </div>
         {sesionesDia.length === 0
           ? <p style={{ fontSize: '0.82rem', color: 'var(--texto-suave)' }}>Aún no hay sesiones en esta fecha.</p>
-          : sesionesDia.map(f => (
-            <div key={f.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', padding: '4px 0', borderBottom: '1px solid rgba(0,0,0,0.05)' }}>
-              <span>Entrada {f.entrada || '—'} → Salida {f.salida || <span style={{ color: 'var(--tierra)' }}>pendiente</span>}</span>
-              <strong>{f.salida ? fmtHoras(calcHoras(f.entrada, f.salida)) + ' h' : ''}</strong>
-            </div>
-          ))}
+          : <div style={{ maxHeight: '22vh', overflowY: 'auto' }}>
+              {sesionesDia.map(f => (
+                <div key={f.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', padding: '4px 0', borderBottom: '1px solid rgba(0,0,0,0.05)' }}>
+                  <span>Entrada {f.entrada || '—'} → Salida {f.salida || <span style={{ color: 'var(--tierra)' }}>pendiente</span>}</span>
+                  <strong>{f.salida ? fmtHoras(calcHoras(f.entrada, f.salida)) + ' h' : ''}</strong>
+                </div>
+              ))}
+            </div>}
       </div>
     </Modal>
   )

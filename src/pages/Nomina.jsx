@@ -537,7 +537,7 @@ export default function Nomina() {
 
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Nombre</th><th>Rol</th>{esAdmin && <th>Salario Base</th>}<th>Estado</th><th>Acciones</th></tr></thead>
+              <thead><tr><th>Nombre</th><th>Rol</th>{esAdmin && <th>Salario Base</th>}<th>Estado</th><th></th></tr></thead>
               <tbody>
                 {empleadosVisibles.length === 0
                   ? <tr><td colSpan={esAdmin ? 5 : 4} className="empty-table">Sin empleados</td></tr>
@@ -547,8 +547,8 @@ export default function Nomina() {
                       <td>{rolDeEmpleado(e)}</td>
                       {esAdmin && <td className="td-number">{fCOP(e.salario)}</td>}
                       <td><span className={`badge ${e.estado === 'activo' ? 'badge-verde' : 'badge-rojo'}`}>{e.estado}</span></td>
-                      <td>
-                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      <td className="celda-acciones">
+                        <div className="acciones-emp" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           <button className="btn btn-xs btn-primary" onClick={() => setAsistEmpModal(e)}><Ico as={Clock} size={14} />Registrar asistencia</button>
                           <button className="btn btn-xs btn-secondary" onClick={() => abrirListado(e)}><Ico as={ClipboardList} size={14} />Ver listado</button>
                           {esAdmin && (
@@ -641,8 +641,8 @@ export default function Nomina() {
                   {sinRegistro.length === 0
                     ? <p style={{ fontSize: '0.82rem', color: 'var(--texto-suave)' }}>No hay días laborales sin registro en el mes. ✓</p>
                     : sinRegistro.map(f => (
-                      <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', padding: '4px 0', borderBottom: '1px solid rgba(0,0,0,0.05)' }}>
-                        <span style={{ flex: 1 }}>{fFecha(f)}</span>
+                      <div key={f} style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', fontSize: '0.85rem', padding: '4px 0', borderBottom: '1px solid rgba(0,0,0,0.05)' }}>
+                        <span style={{ flex: '1 1 120px' }}>{fFecha(f)}</span>
                         <button className="btn btn-xs btn-dorado" onClick={() => marcarAusencia(f, 'justificada')}>Justificada</button>
                         <button className="btn btn-xs btn-danger" onClick={() => marcarAusencia(f, 'injustificada')}>Injustificada</button>
                       </div>
@@ -655,7 +655,7 @@ export default function Nomina() {
                 : (
                   <div className="table-wrap">
                     <table>
-                      <thead><tr><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Horas</th>{esAdmin && <th>Registrado</th>}<th>Estado</th>{esAdmin && <th>Acción</th>}</tr></thead>
+                      <thead><tr><th>Fecha</th><th>Entrada</th><th>Salida</th><th>Horas</th>{esAdmin && <th>Registrado</th>}<th>Estado</th>{esAdmin && <th></th>}</tr></thead>
                       <tbody>
                         {filas.map(reg => {
                           const ausencia = !reg.entrada   // fila sin entrada = ausencia marcada
@@ -675,9 +675,11 @@ export default function Nomina() {
                                   </select>
                                 : <span className={`badge ${ausencia ? (reg.estado_dia === 'justificada' ? 'badge-dorado' : 'badge-rojo') : 'badge-verde'}`}>{ausencia ? (reg.estado_dia === 'justificada' ? 'Justificada' : 'Injustificada') : 'Asistió'}</span>}
                             </td>
-                            {esAdmin && <td style={{ whiteSpace: 'nowrap' }}>
-                              {!ausencia && <button className="btn btn-xs btn-secondary" onClick={() => abrirEditReg(reg)}><Ico as={Pencil} size={14} />Editar</button>}{' '}
-                              <button className="btn btn-xs btn-danger" title="Eliminar este registro de hora" onClick={() => confirmar('¿Eliminar este registro de asistencia/hora?', { title: 'Eliminar registro', confirmText: 'Sí, eliminar' }).then(ok => ok && quitarFilaAsist(reg))}><X size={13} aria-hidden="true" /></button>
+                            {esAdmin && <td>
+                              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
+                                {!ausencia && <button className="btn btn-xs btn-secondary" onClick={() => abrirEditReg(reg)}><Ico as={Pencil} size={14} />Editar</button>}
+                                <button className="btn btn-xs btn-danger" title="Eliminar este registro de hora" onClick={() => confirmar('¿Eliminar este registro de asistencia/hora?', { title: 'Eliminar registro', confirmText: 'Sí, eliminar' }).then(ok => ok && quitarFilaAsist(reg))}><X size={13} aria-hidden="true" />Eliminar</button>
+                              </div>
                             </td>}
                           </tr>
                         )})}

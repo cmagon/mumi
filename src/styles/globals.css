@@ -395,7 +395,10 @@ tr:hover td { background: rgba(26,58,42,0.03); }
 .modal-overlay.active { display: flex; }
 .modal {
   background: var(--blanco); border-radius: 8px;
-  width: min(600px, 100%); max-height: 90vh; overflow-y: auto;
+  width: min(600px, 100%); max-height: 90vh;
+  /* Columna flex: encabezado y pie fijos; solo el cuerpo hace scroll (así los botones
+     de acción nunca quedan cortados fuera de la pantalla, sobre todo en móviles). */
+  display: flex; flex-direction: column; overflow: hidden;
   box-shadow: 0 20px 60px rgba(0,0,0,0.3);
   animation: modalIn 0.25s ease;
   position: relative;
@@ -407,13 +410,14 @@ tr:hover td { background: rgba(26,58,42,0.03); }
   padding: 20px 24px 16px;
   border-bottom: 1px solid var(--crema-oscuro);
   display: flex; align-items: center; justify-content: space-between;
+  flex-shrink: 0;
 }
 .modal-title { font-family: var(--fuente-titulos, 'Playfair Display'), serif; font-size: 1.2rem; color: var(--selva); }
 .modal-close { background: none; border: none; font-size: 1.4rem; cursor: pointer; color: var(--texto-suave); padding: 4px; }
 .modal-close:hover { color: var(--rojo); }
-.modal-body { padding: 24px; overflow-x: hidden; }   /* nada se sale horizontalmente del modal */
+.modal-body { padding: 24px; overflow-x: hidden; overflow-y: auto; flex: 1 1 auto; -webkit-overflow-scrolling: touch; }   /* nada se sale horizontalmente; el cuerpo hace scroll vertical */
 .modal-body .table-wrap { overflow-x: auto; }         /* las tablas dentro del modal hacen su propio scroll */
-.modal-footer { padding: 16px 24px; border-top: 1px solid var(--crema-oscuro); display: flex; gap: 8px; justify-content: flex-end; }
+.modal-footer { padding: 16px 24px; border-top: 1px solid var(--crema-oscuro); display: flex; gap: 8px; justify-content: flex-end; flex-shrink: 0; flex-wrap: wrap; }
 
 /* ==================== TABS ==================== */
 .tabs { display: flex; gap: 0; border-bottom: 2px solid var(--crema-oscuro); margin-bottom: 24px; overflow-x: auto; }
@@ -740,6 +744,20 @@ html { -webkit-text-size-adjust: 100%; }
   /* Botones de acciÃ³n que envuelvan sin desbordar */
   .table-wrap td > div { flex-wrap: wrap; justify-content: flex-end; }
 }
+/* Empleados (Nómina): en móvil la celda de acciones ocupa TODO el ancho (sin etiqueta) y
+   los botones se muestran en 2 columnas. Si son impares, el último ocupa toda la fila. */
+@media (max-width: 1024px) {
+  .acciones-emp { display: grid !important; grid-template-columns: 1fr 1fr; gap: 8px; width: 100%; }
+  .acciones-emp > button { width: 100%; justify-content: center; min-height: 40px; }
+  .acciones-emp > button:last-child:nth-child(odd) { grid-column: 1 / -1; }
+}
+
+/* En móvil se oculta el indicador "En línea" ocioso (online sin pendientes).
+   Se sigue mostrando si estás SIN CONEXIÓN o hay elementos por sincronizar. */
+@media (max-width: 1024px) {
+  .conn-status.conn-idle { display: none !important; }
+}
+
 /* ===== ÓRDENES DE PRODUCCIÓN: compactar en móvil ===== */
 @media (max-width: 1024px) {
   /* Columnas que se ocultan en la tarjeta móvil (dejamos #, fecha, producto, lote, estado, acciones) */

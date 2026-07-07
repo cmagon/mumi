@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { Routes, Route, Navigate, Outlet, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from './context/AuthContext'
@@ -62,7 +62,6 @@ function ProtectedLayout() {
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [asistModo, setAsistModo] = useState(null)   // null | 'login' | 'logout'
-  const loginPreguntado = useRef(false)
   useEffect(() => { loadConfig() }, [])
   useResponsiveTableLabels()
 
@@ -76,12 +75,17 @@ function ProtectedLayout() {
   })
   const empVinculado = esEmpleadoFichable ? empleados.find(e => e.nombre === profile?.nombre) : null
 
-  // Al entrar: mostrar el modal de asistencia una sola vez
+  // Al INICIAR SESIÓN: mostrar el modal de asistencia una sola vez.
+  // Se usa sessionStorage (persiste entre RECARGAS de la misma sesión, pero se limpia al
+  // cerrar sesión), así el modal NO reaparece cada vez que el operario recarga la página.
   useEffect(() => {
-    if (empVinculado && !loginPreguntado.current) { loginPreguntado.current = true; setAsistModo('login') }
-  }, [empVinculado])
+    if (!empVinculado || !profile?.id) return
+    if (sessionStorage.getItem('asistPreguntada') === String(profile.id)) return
+    sessionStorage.setItem('asistPreguntada', String(profile.id))
+    setAsistModo('login')
+  }, [empVinculado, profile?.id])
 
-  const cerrarSesion = async () => { setAsistModo(null); await signOut(); navigate('/login') }
+  const cerrarSesion = async () => { setAsistModo(null); sessionStorage.removeItem('asistPreguntada'); await signOut(); navigate('/login') }
   const pedirCierre = () => { if (empVinculado) setAsistModo('logout'); else cerrarSesion() }
 
   if (loading) {

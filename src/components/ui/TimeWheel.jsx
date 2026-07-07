@@ -43,6 +43,7 @@ function Rueda({ items, value, onChange, ancho = 72 }) {
       onScroll={alHacerScroll}
       style={{
         height: ALTO, width: ancho, overflowY: 'auto', scrollSnapType: 'y mandatory',
+        WebkitOverflowScrolling: 'touch',   // scroll con inercia en iOS Safari
         scrollbarWidth: 'none', msOverflowStyle: 'none', position: 'relative',
       }}
       className="tw-rueda"
