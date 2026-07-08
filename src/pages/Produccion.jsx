@@ -487,6 +487,29 @@ export default function Produccion() {
 
   const aprobados = registros.filter(r => r.aprobado !== false)
   const prodNames = [...new Set(registros.map(r => r.producto))].sort()
+  // Nombre del PRODUCTO FINAL que va a stock de producto terminado (con presentación, p.ej. "Galleta de Arazá x40g").
+  // Para surtido → el producto surtido resultante; si no, el del catálogo que corresponda al producto base.
+  const normNom = (s) => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ')
+  // Palabras clave (ignora conectores y la presentación tipo "x40g") para emparejar por contenido
+  const STOP = new Set(['de', 'la', 'el', 'los', 'las', 'con', 'y', 'x', 'mumi', 'del', 'en', 'a'])
+  const tokensNom = (s) => normNom(s).split(' ').filter(w => w.length > 1 && !STOP.has(w) && !/^x?\d+(g|gr|ml|kg|und|u)?$/.test(w))
+  const nombreFinal = (p) => {
+    if (p.surtido && p.producto_surtido) return p.producto_surtido
+    const np = normNom(p.producto)
+    if (!np) return p.producto || '—'
+    // 1) Coincidencia exacta. 2) El nombre final contiene TODAS las palabras clave del producto base
+    //    (ej. "galleta de asai" → "Galleta Mumi de Asaí x 40g"). 3) Fallback por inclusión.
+    const bt = tokensNom(p.producto)
+    const fp = terminados.find(t => normNom(t.nombre) === np)
+      || (bt.length ? terminados.find(t => { const tt = tokensNom(t.nombre); return bt.every(w => tt.includes(w)) }) : null)
+      || terminados.find(t => { const tn = normNom(t.nombre); return tn.startsWith(np) || tn.includes(np) })
+    return fp ? fp.nombre : (p.producto || '—')
+  }
+  // Lotes que componen un registro surtido (propio + combinados), ordenados por consecutivo.
+  const lotesSurtido = (p) => {
+    const rankLote = (l) => { const m = String(l || '').match(/^(\d+)(\d{2})$/); return m ? (parseInt(m[2]) * 100000 + parseInt(m[1])) : (parseInt(l) || 0) }
+    return [...new Set([p.lote, ...String(p.lote_mezcla || '').split(/[,;+]/)].map(l => String(l || '').trim()).filter(Boolean))].sort((a, b) => rankLote(a) - rankLote(b))
+  }
   // Años realmente presentes en los registros (+ el año actual), para no ofrecer años vacíos
   const aniosRegistros = [...new Set([String(new Date().getFullYear()), ...registros.map(r => String(r.fecha || '').slice(0, 4)).filter(Boolean)])].sort((a, b) => b.localeCompare(a))
   // Año/mes tomados del texto 'YYYY-MM-DD' para evitar el desfase de zona horaria
@@ -506,17 +529,20 @@ export default function Produccion() {
     ...aprobados.filter(r => r.tipo_registro === 'subproducto').map(r => ({ nombre: r.producto, fecha: r.fecha, cant: Number(r.cantidad) || 0 })),
     ...aprobados.filter(r => (r.tipo_registro || 'final') !== 'subproducto' && esImportado(r)).map(r => ({ nombre: r.producto, fecha: r.fecha, cant: Number(r.cantidad) || 0 })),
   ].filter(e => e.nombre)
-  const aniosDisponibles = [...new Set(entradasAnalisis.map(e => anioDe(e.fecha)).filter(Boolean))].sort((a, b) => b.localeCompare(a))
-  const entradasAnio = entradasAnalisis.filter(e => anioDe(e.fecha) === anioAnalisis)
-  const analisis = [...new Set(entradasAnio.map(e => e.nombre))].sort().map(pr => {
-    const meses = Array.from({ length: 12 }, (_, m) =>
-      entradasAnio.filter(e => e.nombre === pr && mesDe(e.fecha) === m).reduce((s, e) => s + e.cant, 0)
-    )
-    return { nombre: pr, meses, total: meses.reduce((s, v) => s + v, 0) }
+  const aniosDisponibles = [...new Set([...entradasAnalisis.map(e => anioDe(e.fecha)), ...aprobados.filter(r => (r.tipo_registro || 'final') !== 'subproducto').map(r => anioDe(r.fecha))].filter(Boolean))].sort((a, b) => b.localeCompare(a))
+  // Producido en el listado: subporciones (porcionados) o unidades — para la columna del registro.
+  const cantProducida = (r) => r.cant_subporciones != null ? (Number(r.cant_subporciones) || 0) : (Number(r.cantidad) || 0)
+  const cantEmpacada = (r) => r.surtido ? (Number(r.surtido_cantidad) || 0) : cantProducida(r)
+
+  // ===== Análisis mensual: CANTIDADES FINALES PRODUCIDAS (en unidades), por producto base, por mes.
+  // No usa subporciones ni el producto surtido: cuenta las UNIDADES finales producidas (r.cantidad).
+  const recsAnio = aprobados.filter(r => (r.tipo_registro || 'final') !== 'subproducto' && anioDe(r.fecha) === anioAnalisis && r.producto)
+  const analisisComb = [...new Set(recsAnio.map(r => r.producto))].sort().map(pr => {
+    const meses = Array.from({ length: 12 }, (_, m) => recsAnio.filter(r => r.producto === pr && mesDe(r.fecha) === m).reduce((s, r) => s + (Number(r.cantidad) || 0), 0))
+    return { nombre: pr, meses, total: meses.reduce((a, b) => a + b, 0) }
   })
-  // Totales por mes (fila de cierre) y total general del año
-  const totalesMes = Array.from({ length: 12 }, (_, m) => analisis.reduce((s, row) => s + (row.meses[m] || 0), 0))
-  const totalAnio = totalesMes.reduce((s, v) => s + v, 0)
+  const totalesMes = Array.from({ length: 12 }, (_, m) => analisisComb.reduce((s, row) => s + (row.meses[m] || 0), 0))
+  const totalAnio = totalesMes.reduce((a, b) => a + b, 0)
   // Si el año elegido para el análisis no tiene datos pero hay otros años (p. ej. registros
   // importados de años anteriores), selecciona automáticamente el año más reciente con datos.
   useEffect(() => {
@@ -611,14 +637,14 @@ export default function Produccion() {
               : filtrados.map(p => (
                 <AccordionItem key={p.id}
                   titulo={<>{p.producto} {p.completado ? <span className="badge badge-verde" style={{ fontSize: '0.6rem' }}>Completado</span> : <span className="badge badge-dorado" style={{ fontSize: '0.6rem' }}>En proceso</span>}</>}
-                  sub={<>Lote {p.lote || '—'} · {fNum(p.cantidad)} {p.empaque || ''}</>}
+                  sub={<><span style={{ color: 'var(--texto-suave)' }}>→ {nombreFinal(p)}</span> · Lote {p.lote || '—'} · {fNum(p.cantidad)} {p.empaque || ''}</>}
                 >
-                  <Fila et="Tipo">{p.tipo_registro === 'subproducto' ? 'Subproducto' : 'Producto final'}</Fila>
                   <Fila et="Lote">{p.lote || '—'}</Fila>
-                  <Fila et="Etapas">{Array.isArray(p.etapas) ? p.etapas.length : 0}</Fila>
-                  <Fila et="Fecha">{fFecha(p.fecha)}</Fila>
+                  <Fila et="Fecha fabricación">{fFecha(p.fecha)}</Fila>
+                  <Fila et="Vence">{p.vence ? fFecha(p.vence) : '—'}</Fila>
                   <Fila et="Empaque">{p.empaque || '—'}</Fila>
-                  <Fila et="Cant. final">{fNum(p.cantidad)}</Fila>
+                  <Fila et="Producida">{fNum(cantProducida(p))}{p.cant_subporciones != null ? ` subporc. (= ${fNum(p.cantidad || 0)} und)` : ''}</Fila>
+                  <Fila et="Empacada (a stock)">{fNum(cantEmpacada(p))}{p.surtido ? ' surtido' : ''}</Fila>
                   <Fila et="Estado">{p.estado || 'conforme'}{p.aprobado === false ? ' · Pendiente aprob.' : ''}</Fila>
                   <div className="acordeon-acciones">
                     {!esOperario && p.aprobado === false && <button className="btn btn-xs btn-success" onClick={() => aprobarRegistro.mutate(p.id)}><Ico as={Check} size={13} />Aprobar</button>}
@@ -635,23 +661,31 @@ export default function Produccion() {
           {/* ===== Versión desktop: tabla ===== */}
           <div className="table-wrap solo-desktop">
             <table>
-              <thead><tr><th>Producto</th><th className="col-opcional">Tipo</th><th>Lote</th><th className="col-opcional">Etapas</th><th className="col-opcional-2">Fecha</th><th className="col-opcional">Empaque</th><th>Cant. final</th><th className="col-opcional-2">Avance</th><th>Estado</th><th>Acciones</th></tr></thead>
+              <thead><tr><th>Producto</th><th>Lote</th><th className="col-opcional-2">Fecha fabricación</th><th className="col-opcional-2">Vence</th><th className="col-opcional">Empaque</th><th className="td-number">Producida</th><th className="td-number">Empacada</th><th className="col-opcional-2">Avance</th><th>Estado</th><th>Acciones</th></tr></thead>
               <tbody>
                 {filtrados.length === 0
                   ? <tr><td colSpan={10} className="empty-table">Sin registros</td></tr>
                   : filtrados.map(p => (
                     <tr key={p.id}>
-                      <td><strong>{p.producto}</strong>{p.surtido && (() => {
-                        const rankLote = (l) => { const m = String(l || '').match(/^(\d+)(\d{2})$/); return m ? (parseInt(m[2]) * 100000 + parseInt(m[1])) : (parseInt(l) || 0) }
-                        const lotes = [...new Set([p.lote, ...String(p.lote_mezcla || '').split(/[,;+]/)].map(l => String(l || '').trim()).filter(Boolean))].sort((a, b) => rankLote(a) - rankLote(b))
-                        return lotes.length > 0 ? <div style={{ fontSize: '0.72rem', color: 'var(--tierra)', display: 'flex', alignItems: 'center', gap: 3 }}><Shuffle size={11} aria-hidden="true" /> {lotes.join(' + ')}</div> : null
-                      })()}</td>
-                      <td className="col-opcional"><span className={`badge ${p.tipo_registro === 'subproducto' ? 'badge-dorado' : 'badge-azul'}`}>{p.tipo_registro === 'subproducto' ? 'Subprod.' : 'Final'}</span></td>
+                      <td><strong>{p.producto}</strong>
+                        <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>→ {nombreFinal(p)}</div>
+                        {p.surtido && (() => {
+                          const rankLote = (l) => { const m = String(l || '').match(/^(\d+)(\d{2})$/); return m ? (parseInt(m[2]) * 100000 + parseInt(m[1])) : (parseInt(l) || 0) }
+                          const lotes = [...new Set([p.lote, ...String(p.lote_mezcla || '').split(/[,;+]/)].map(l => String(l || '').trim()).filter(Boolean))].sort((a, b) => rankLote(a) - rankLote(b))
+                          return lotes.length > 0 ? <div style={{ fontSize: '0.72rem', color: 'var(--tierra)', display: 'flex', alignItems: 'center', gap: 3 }}><Shuffle size={11} aria-hidden="true" /> {lotes.join(' + ')}</div> : null
+                        })()}</td>
                       <td><strong>{p.lote || '—'}</strong></td>
-                      <td className="td-number col-opcional">{Array.isArray(p.etapas) ? p.etapas.length : 0}</td>
                       <td className="col-opcional-2">{fFecha(p.fecha)}</td>
+                      <td className="col-opcional-2">{p.vence ? fFecha(p.vence) : '—'}</td>
                       <td className="col-opcional">{p.empaque || '—'}</td>
-                      <td className="td-number"><strong>{fNum(p.cantidad)}</strong></td>
+                      <td className="td-number">
+                        <strong style={{ color: 'var(--selva)' }}>{fNum(cantProducida(p))}</strong>
+                        {p.cant_subporciones != null && <div style={{ fontSize: '0.68rem', color: 'var(--texto-suave)' }}>subporc. <br />= {fNum(p.cantidad || 0)} und</div>}
+                      </td>
+                      <td className="td-number">
+                        <strong style={{ color: 'var(--tierra)' }}>{fNum(cantEmpacada(p))}</strong>
+                        {p.surtido && <div style={{ fontSize: '0.68rem', color: 'var(--texto-suave)' }}>surtido</div>}
+                      </td>
                       <td className="col-opcional-2">{p.completado ? <span className="badge badge-verde">Completado</span> : <span className="badge badge-dorado">En proceso</span>}</td>
                       <td>
                         <span className={`badge ${p.estado === 'no conforme' ? 'badge-rojo' : 'badge-verde'}`}>{p.estado || 'conforme'}</span>
@@ -683,17 +717,20 @@ export default function Produccion() {
               {(aniosDisponibles.length ? aniosDisponibles : [anioAnalisis]).map(a => <option key={a} value={a}>{a}</option>)}
             </select>
           </div>
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.75rem', display: 'block', marginBottom: 8 }}>
+            Cantidades <strong>finales producidas</strong> (en unidades), por producto. No incluye subporciones ni el desglose del surtido.
+          </small>
 
-          {/* ===== Versión móvil: acordeón (un producto por tarjeta, meses con producción) ===== */}
+          {/* ===== Versión móvil: acordeón ===== */}
           <div className="solo-movil">
-            {analisis.length === 0
+            {analisisComb.length === 0
               ? <p className="empty-table">Sin datos</p>
-              : analisis.map(row => (
-                <AccordionItem key={row.nombre} titulo={row.nombre} sub={`Total: ${row.total}`}>
+              : analisisComb.map(row => (
+                <AccordionItem key={row.nombre} titulo={row.nombre} sub={`Total: ${fNum(row.total)}`}>
                   {row.meses.every(v => !v)
                     ? <p style={{ color: 'var(--texto-suave)', fontSize: '0.85rem' }}>Sin producción registrada</p>
-                    : row.meses.map((v, i) => v > 0 && <Fila key={i} et={MESES[i + 1]}>{v}</Fila>)}
-                  <Fila et="Total año">{row.total}</Fila>
+                    : row.meses.map((v, i) => v > 0 && <Fila key={i} et={MESES[i + 1]}>{fNum(v)}</Fila>)}
+                  <Fila et="Total año">{fNum(row.total)}</Fila>
                 </AccordionItem>
               ))}
           </div>
@@ -701,18 +738,18 @@ export default function Produccion() {
           {/* ===== Versión desktop: tabla ===== */}
           <div className="table-wrap solo-desktop">
             <table>
-              <thead><tr><th>Producto</th>{MESES.slice(1).map(m => <th key={m}>{m}</th>)}<th>Total</th></tr></thead>
+              <thead><tr><th>Producto</th>{MESES.slice(1).map(m => <th key={m} className="td-number">{m}</th>)}<th className="td-number">Total</th></tr></thead>
               <tbody>
-                {analisis.length === 0
+                {analisisComb.length === 0
                   ? <tr><td colSpan={14} className="empty-table">Sin producción aprobada en {anioAnalisis}</td></tr>
-                  : analisis.map(row => (
+                  : analisisComb.map(row => (
                   <tr key={row.nombre}>
                     <td><strong>{row.nombre}</strong></td>
                     {row.meses.map((v, i) => <td key={i} className="td-number">{v > 0 ? fNum(v) : '—'}</td>)}
                     <td className="td-number"><strong>{fNum(row.total)}</strong></td>
                   </tr>
                 ))}
-                {analisis.length > 0 && (
+                {analisisComb.length > 0 && (
                   <tr style={{ background: 'rgba(45,90,61,0.06)', fontWeight: 700 }}>
                     <td><strong>Total mes</strong></td>
                     {totalesMes.map((v, i) => <td key={i} className="td-number">{v > 0 ? fNum(v) : '—'}</td>)}
@@ -1013,15 +1050,32 @@ export default function Produccion() {
         {detalleRec && (
           <>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 12, marginBottom: 16, fontSize: '0.88rem' }} className="grid-resp">
-              <div><strong>Tipo:</strong> {detalleRec.tipo_registro === 'subproducto' ? 'Subproducto' : 'Producto final'}</div>
+              <div><strong>Producto final:</strong> {nombreFinal(detalleRec)}</div>
               <div><strong>Estado:</strong> {detalleRec.completado ? <span className="badge badge-verde">Completado</span> : <span className="badge badge-dorado">En proceso</span>} {detalleRec.estado === 'no conforme' && <span className="badge badge-rojo">No conforme</span>}</div>
-              <div><strong>Cantidad final:</strong> {fNum(detalleRec.cantidad || 0)} {detalleRec.empaque}</div>
-              <div><strong>Peso final:</strong> {fNum(detalleRec.peso_final || 0)}</div>
-              <div><strong>Peso desperdicio:</strong> {fNum(detalleRec.peso_desperdicio || 0)}</div>
+              <div><strong>Cantidad producida:</strong> {fNum(detalleRec.cantidad || 0)} {detalleRec.empaque}{detalleRec.cant_subporciones != null ? ` (= ${fNum(detalleRec.cant_subporciones)} subporciones)` : ''}</div>
+              <div><strong>Empacada (a stock):</strong> {detalleRec.surtido ? `${fNum(detalleRec.surtido_cantidad || 0)} und surtidas` : `${fNum(detalleRec.cantidad || 0)}`}{detalleRec.surtido && detalleRec.cant_subporciones != null ? ` (usó subporciones de este lote)` : ''}</div>
+              <div><strong>Fecha fabricación:</strong> {fFecha(detalleRec.fecha)}</div>
+              <div><strong>Vence:</strong> {detalleRec.vence ? fFecha(detalleRec.vence) : '—'}</div>
+              <div><strong>Peso final / desperdicio:</strong> {fNum(detalleRec.peso_final || 0)} / {fNum(detalleRec.peso_desperdicio || 0)}</div>
               {detalleRec.cant_subporciones != null && <div><strong>Subporciones:</strong> {fNum(detalleRec.cant_subporciones || 0)} {detalleRec.peso_subporcion ? `(${fNum(detalleRec.peso_subporcion)} g c/u)` : ''}</div>}
               {detalleRec.orden_id && <div><strong>Origen:</strong> <button type="button" className="btn-link-emp" onClick={() => navigate('/ordenes', { state: { verOrden: detalleRec.orden_id } })} title="Ver detalles de la orden">📋 Orden de producción OP-{opNum(detalleRec.orden_id)}</button></div>}
               {detalleRec.aprobado === false && <div><strong>Aprobación:</strong> <span className="badge badge-dorado">Pendiente</span></div>}
             </div>
+            {/* Detalle del SURTIDO: lotes combinados y el producto FABRICADO de cada uno (no el nombre final) */}
+            {detalleRec.surtido && (
+              <div className="card" style={{ background: 'rgba(200,169,74,0.08)', marginBottom: 12 }}>
+                <div className="card-title" style={{ fontSize: '0.92rem' }}><Ico as={Shuffle} size={15} />Empaque surtido — lotes combinados</div>
+                <div style={{ fontSize: '0.86rem', marginBottom: 6 }}><strong>Producto final:</strong> {detalleRec.producto_surtido || nombreFinal(detalleRec)}</div>
+                <div className="table-wrap"><table>
+                  <thead><tr><th>Lote</th><th>Producto fabricado</th></tr></thead>
+                  <tbody>
+                    {lotesSurtido(detalleRec).map(l => (
+                      <tr key={l}><td><strong>{l}</strong></td><td>{productoDeLote(l) || (String(l) === String(detalleRec.lote) ? detalleRec.producto : '—')}</td></tr>
+                    ))}
+                  </tbody>
+                </table></div>
+              </div>
+            )}
             {/* Costos del lote (solo admin) */}
             {esAdmin && (() => {
               const prod = productos.find(p => p.nombre === detalleRec.producto)

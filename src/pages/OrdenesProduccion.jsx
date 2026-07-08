@@ -133,6 +133,7 @@ export default function OrdenesProduccion() {
   const [prepHaySobrante, setPrepHaySobrante] = useState(null)   // null = sin marcar (obligatorio)
   const [prepSobrantePeso, setPrepSobrantePeso] = useState('')
   const [prepSobranteUnidad, setPrepSobranteUnidad] = useState('g')
+  const [prepSobranteManual, setPrepSobranteManual] = useState(false)   // el usuario tocó el sobrante → no auto-sugerir
   // Cantidad de unidades/cajas empacadas surtidas (stock del producto terminado surtido)
   const [prepSurtidoCantidad, setPrepSurtidoCantidad] = useState('')
   // Consumo del saldo de cada lote combinado en el surtido { saldoId: cantidad }
@@ -174,6 +175,7 @@ export default function OrdenesProduccion() {
   const [prepFicha, setPrepFicha]   = useState(null)   // { url, nombre } ficha técnica
   const [ordenDetalle, setOrdenDetalle] = useState(null)   // orden para ver detalles
   const [detalleIngs, setDetalleIngs] = useState([])       // ingredientes calculados de la orden en detalle
+  const [detalleFicha, setDetalleFicha] = useState(null)   // { rend, desp, pu } de la ficha (para el rendimiento)
   const [alistado, setAlistado] = useState({})             // check LOCAL de "alistar ingredientes" en el modal de proceso
   const [modalAudit, setModalAudit] = useState(false)      // registro de creación (solo admin)
   const [form, setForm]             = useState(EMPTY_ORDEN)
@@ -205,9 +207,17 @@ export default function OrdenesProduccion() {
     queryKey: ['mezcla_saldos'],
     queryFn: async () => { const { data } = await supabase.from('mezcla_saldos').select('*').eq('estado', 'disponible').gt('peso', 0).order('vencimiento', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true }); return data || [] },
   })
-  // Saldos disponibles de un producto (por nombre y/o origen_id)
-  const saldosDeProducto = (nombre, origenId) => saldosMezcla.filter(s =>
-    (origenId && String(s.origen_id) === String(origenId)) || (s.producto && nombre && s.producto === nombre))
+  // Reservado de un saldo por otras órdenes EN PROCESO (aún no cerradas). Se excluye la orden actual.
+  const reservadoDeSaldo = (saldoId, exceptId) => (ordenes || [])
+    .filter(o => o.estado === 'en_proceso' && o.id !== exceptId && Array.isArray(o.saldos_reservados))
+    .reduce((s, o) => s + o.saldos_reservados.filter(x => String(x.saldo_id) === String(saldoId)).reduce((a, b) => a + (Number(b.cantidad) || 0), 0), 0)
+  // Peso DISPONIBLE de un saldo = peso total − reservado por órdenes en proceso.
+  const dispSaldo = (s, exceptId) => Math.max(0, (Number(s?.peso) || 0) - reservadoDeSaldo(s?.id, exceptId))
+  // Saldos disponibles de un producto (por nombre y/o origen_id) con peso ya descontado por reservas.
+  const saldosDeProducto = (nombre, origenId, exceptId) => saldosMezcla
+    .filter(s => (origenId && String(s.origen_id) === String(origenId)) || (s.producto && nombre && s.producto === nombre))
+    .map(s => ({ ...s, peso: dispSaldo(s, exceptId), pesoTotal: Number(s.peso) || 0 }))
+    .filter(s => s.peso > 0 || (ordenPrep && prepLotesExtra.some(e => e.saldo_id === s.id)))
 
   const lotesDeMP = (mpId) => lotesMP.filter(l => String(l.mp_id) === String(mpId))
     .sort((a, b) => ((a.vencimiento || '9999-99-99') < (b.vencimiento || '9999-99-99') ? -1 : a.vencimiento === b.vencimiento ? ((a.fecha_entrada || '') < (b.fecha_entrada || '') ? -1 : 1) : 1))
@@ -314,7 +324,7 @@ export default function OrdenesProduccion() {
   // Registros de producción vinculados a órdenes (para habilitar "Enviar y cerrar")
   const { data: prodRecords = [] } = useQuery({
     queryKey: ['production_records'],
-    queryFn: async () => { const { data } = await supabase.from('production_records').select('id, orden_id, completado, cantidad, lote'); return data || [] },
+    queryFn: async () => { const { data } = await supabase.from('production_records').select('id, orden_id, completado, cantidad, lote, producto, empaque, vence, surtido, producto_surtido, lote_mezcla, cant_subporciones, peso_subporcion'); return data || [] },
   })
   const recordsDeOrden = (id) => prodRecords.filter(r => r.orden_id === id)
   // Últimos 5 lotes guardados (para empaque surtido/mezclado)
@@ -338,10 +348,11 @@ export default function OrdenesProduccion() {
     const porLote = {}
     saldosMezcla.forEach(s => {
       const lote = String(s.lote || '').trim()
-      if (!lote || lote === la || !(s.peso > 0)) return
+      const disp = dispSaldo(s, ordenPrep?.id)   // descuenta lo reservado por otras órdenes en proceso
+      if (!lote || lote === la || !(disp > 0)) return
       if (tipoProducto(s.producto) !== tipo) return
       if (!porLote[lote]) porLote[lote] = { lote, prod: s.producto, peso: 0, unidad: s.unidad || 'g' }
-      porLote[lote].peso += (parseFloat(s.peso) || 0)
+      porLote[lote].peso += disp
     })
     return Object.values(porLote).slice(0, 20)
   }
@@ -430,7 +441,9 @@ export default function OrdenesProduccion() {
           return { nombre: i.nombre, gramos, costo }
         })
         setPrepIngs(ings)
-        setPrepInfo({ bache: unidsBacheNet, baches, pesoUnidad: pu })
+        // mezclaPorUnid = gramos de MEZCLA que consume cada unidad final (= totalMezclaBache/unidsBacheNet).
+        // Es el factor correcto para convertir unidades empacadas ↔ gramos de saldo gastados.
+        setPrepInfo({ bache: unidsBacheNet, baches, pesoUnidad: pu, mezclaPorUnid: unidsBacheNet > 0 ? totalMezclaBache / unidsBacheNet : pu })
         setPrepDatos(calcDatosPrevistos(ings, rend, desp, pu))
         setPrepFicha(prod.ficha_url ? { url: prod.ficha_url, nombre: prod.ficha_nombre } : null)
       }
@@ -450,7 +463,7 @@ export default function OrdenesProduccion() {
           return { nombre: i.nombre, gramos, costo }
         })
         setPrepIngs(ings)
-        setPrepInfo({ totalMezcla, pesoUnidad: pu })
+        setPrepInfo({ totalMezcla, pesoUnidad: pu, mezclaPorUnid: denom > 0 ? pu / denom : pu })
         setPrepDatos(calcDatosPrevistos(ings, rend, desp, pu))
         setPrepFicha(rec.ficha_url ? { url: rec.ficha_url, nombre: rec.ficha_nombre } : null)
       }
@@ -464,31 +477,31 @@ export default function OrdenesProduccion() {
     const cantidad = parseFloat(o.cantidad_plan) || 0
     if (o.origen === 'producto' && o.origen_id) {
       const { data: prod } = await supabase.from('products_costing').select('bache, peso_unidad, rendimiento, desperdicio, ingredientes').eq('id', o.origen_id).single()
-      if (!prod) return []
+      if (!prod) return { ings: [], ficha: null }
       const rend = parseFloat(prod.rendimiento) || 62, desp = parseFloat(prod.desperdicio) || 2, pu = parseFloat(prod.peso_unidad) || 1000
       const ingsRaw = parse(prod.ingredientes)
       const totalMezclaBache = ingsRaw.reduce((s, i) => s + (parseFloat(i.cantidad) || 0), 0)
       const unidsBacheNet = pu > 0 ? (totalMezclaBache * (rend / 100) * (1 - desp / 100)) / pu : (parseFloat(prod.bache) || 0)
       const bachesPlan = parseFloat(o.baches_plan) || 0
       const baches = bachesPlan > 0 ? bachesPlan : snapBaches(unidsBacheNet > 0 ? cantidad / unidsBacheNet : ((parseFloat(prod.bache) || 0) > 0 ? cantidad / parseFloat(prod.bache) : 0))
-      return ingsRaw.map(i => ({ nombre: i.nombre, gramos: (parseFloat(i.cantidad) || 0) * baches }))
+      return { ings: ingsRaw.map(i => ({ nombre: i.nombre, gramos: (parseFloat(i.cantidad) || 0) * baches })), ficha: { rend, desp, pu } }
     } else if (o.origen === 'receta' && o.origen_id) {
       const { data: rec } = await supabase.from('recipes').select('ingredientes, rendimiento, desperdicio, peso_unidad').eq('id', o.origen_id).single()
-      if (!rec) return []
+      if (!rec) return { ings: [], ficha: null }
       const rend = parseFloat(rec.rendimiento) || 62, desp = parseFloat(rec.desperdicio) || 2, pu = parseFloat(rec.peso_unidad) || 1000
       const denom = (rend / 100) * (1 - desp / 100)
       const bachesPlan = parseFloat(o.baches_plan) || 0
       const totalMezcla = bachesPlan > 0 ? bachesPlan * BASE_RECETA : (denom > 0 ? (cantidad * pu) / denom : 0)
-      return parse(rec.ingredientes).map(i => ({ nombre: i.nombre, gramos: totalMezcla * ((parseFloat(i.pct) || 0) / 100) }))
+      return { ings: parse(rec.ingredientes).map(i => ({ nombre: i.nombre, gramos: totalMezcla * ((parseFloat(i.pct) || 0) / 100) })), ficha: { rend, desp, pu } }
     }
-    return []
+    return { ings: [], ficha: null }
   }
 
   // Carga los ingredientes cada vez que se abre el modal de Detalles
   useEffect(() => {
     let cancel = false
-    if (!ordenDetalle) { setDetalleIngs([]); return }
-    calcIngredientesOrden(ordenDetalle).then(ings => { if (!cancel) setDetalleIngs(ings) }).catch(() => { if (!cancel) setDetalleIngs([]) })
+    if (!ordenDetalle) { setDetalleIngs([]); setDetalleFicha(null); return }
+    calcIngredientesOrden(ordenDetalle).then(res => { if (!cancel) { setDetalleIngs(res.ings || []); setDetalleFicha(res.ficha || null) } }).catch(() => { if (!cancel) { setDetalleIngs([]); setDetalleFicha(null) } })
     return () => { cancel = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ordenDetalle?.id])
@@ -531,6 +544,8 @@ export default function OrdenesProduccion() {
       setPrepLotesExtra([{ lote: s?.lote || o.lote || '', vence: s?.vencimiento || o.vence || '', unidades: String(o.cantidad_plan || ''), conforme: true, saldo_id: packInfo.saldo_id, peso_consumido: String(packInfo.cantidad || ''), surtido: false, lote_mezcla: '' }])
     } else setPrepLotesExtra([])
     setPrepHaySobrante(triState(ps.hay_sobrante)); setPrepSobrantePeso(o.sobrante_peso || ''); setPrepSobranteUnidad(o.sobrante_unidad || 'g')
+    // Si ya se había respondido/guardado el sobrante, se respeta (manual); si es la 1ª vez, se auto-sugiere.
+    setPrepSobranteManual(o.sobrante_peso != null || ps.hay_sobrante != null)
     setPrepSurtidoCantidad(o.surtido_cantidad != null ? String(o.surtido_cantidad) : '')
     setPrepSurtidoConsumos({})
     await prepararDatos(o); setModalProceso(true)
@@ -552,6 +567,25 @@ export default function OrdenesProduccion() {
   }
 
   // Imprimir la orden con los ingredientes — ajustado a UNA sola página
+  // Consumo PREVISTO de saldos de mezcla por esta orden (surtido + empaque de saldo).
+  // Se usa tanto para la RESERVA (mientras la orden está abierta) como para reponer al devolverla.
+  const calcSaldosConsumidos = () => {
+    const surt = []
+    if (prepSurtido) {
+      const tokens = String(prepLoteMezcla).split(/[,;]/).map(s => s.trim()).filter(Boolean)
+      const matchSaldos = saldosMezcla.filter(s => (s.peso > 0) && tokens.includes(String(s.lote || '').trim()))
+      for (const s of matchSaldos) {
+        const v = prepSurtidoConsumos[s.id]
+        const cant = (v !== undefined && v !== '') ? (parseFloat(v) || 0) : (matchSaldos.length === 1 ? (parseFloat(prepSurtidoCantidad) || 0) : 0)
+        if (cant > 0) surt.push({ saldo_id: s.id, cantidad: cant })
+      }
+    }
+    return [
+      ...surt,
+      ...prepLotesExtra.filter(e => e.saldo_id && (parseFloat(e.peso_consumido) || 0) > 0).map(e => ({ saldo_id: e.saldo_id, cantidad: parseFloat(e.peso_consumido) || 0 })),
+    ]
+  }
+
   // Guarda TODOS los campos del proceso (datos + resultado) en la orden
   const guardarProcesoData = async (silent = true) => {
     if (!ordenPrep) return
@@ -575,6 +609,8 @@ export default function OrdenesProduccion() {
       // Respuestas SI/NO tal cual (tri-estado true/false/null) — escritura aparte y tolerante:
       // si la columna prep_sino aún no existe (falta migración v82), no rompe el autoguardado.
       try { await supabase.from('production_orders').update({ prep_sino: { conforme: prepConforme, surtido: prepSurtido, hay_sobrante: prepHaySobrante } }).eq('id', ordenPrep.id) } catch { /* columna opcional */ }
+      // Reserva del saldo mientras la orden esté abierta (escritura aparte y tolerante si falta la columna v83).
+      try { await supabase.from('production_orders').update({ saldos_reservados: calcSaldosConsumidos() }).eq('id', ordenPrep.id) } catch { /* columna opcional */ }
       setAutoSavedAt(new Date().toLocaleTimeString('es-CO'))
       qc.invalidateQueries({ queryKey: ['production_orders'] })
       if (!silent) toast(r.queued ? 'Progreso guardado sin conexión — se sincronizará 📴' : 'Guardado ✓')
@@ -588,6 +624,31 @@ export default function OrdenesProduccion() {
     return () => clearTimeout(t)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prepLote, prepVence, prepFechaInicio, prepModoAvanzado, prepHoraInicio, prepHoraFin, prepProcesos, prepUnidades, prepPesoFinal, prepPesoDesp, prepPesoSubp, prepCantSubp, prepObs, prepSurtido, prepLoteMezcla, prepProductoSurtido, prepSurtidoCantidad, prepHaySobrante, prepSobrantePeso, prepSobranteUnidad, prepResp, prepConforme, prepLotesExtra, prepDestajo, autoguardar, modalProceso])
+
+  // Auto-sugerir el SOBRANTE (lo producido que quedó SIN empacar), mientras el usuario no lo edite.
+  //   Porcionado: subporciones producidas − (unidades empacadas × subporciones por unidad).
+  //   No porcionado: peso final (g) − (unidades empacadas × gramos de mezcla por unidad).
+  // El usuario puede sobrescribir (marca prepSobranteManual) para poner más o menos.
+  useEffect(() => {
+    if (!modalProceso || prepSobranteManual || prepSurtido) return
+    const pu = parseFloat(prepInfo?.pesoUnidad) || 0
+    const mezclaPorUnid = parseFloat(prepInfo?.mezclaPorUnid) || pu
+    const packed = parseFloat(prepUnidades) || 0
+    let leftover = 0, unidad = 'g'
+    if (prepPorciona) {
+      const psub = parseFloat(prepPesoSubp) || 0
+      const subPorUnid = psub > 0 ? pu / psub : 1
+      leftover = (parseFloat(prepCantSubp) || 0) - packed * subPorUnid
+      unidad = 'subporciones'
+    } else {
+      leftover = (parseFloat(prepPesoFinal) || 0) - packed * mezclaPorUnid
+      unidad = 'g'
+    }
+    leftover = Math.round(leftover * 100) / 100
+    if (leftover >= 1) { setPrepHaySobrante(true); setPrepSobrantePeso(String(leftover)); setPrepSobranteUnidad(unidad) }
+    else { setPrepHaySobrante(false); setPrepSobrantePeso('') }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalProceso, prepSobranteManual, prepSurtido, prepPorciona, prepUnidades, prepCantSubp, prepPesoFinal, prepPesoSubp, prepInfo])
 
   // Registra la orden en el libro "Orden de Producción" (PTZ-OR-01) con la evidencia firmada.
   const registrarOrdenEnLibro = async (o, file, firma) => {
@@ -802,8 +863,8 @@ export default function OrdenesProduccion() {
     if (prepSurtido && !(parseFloat(prepSurtidoCantidad) > 0)) { toast('Ingresa la CANTIDAD EMPACADA SURTIDA', 'warning'); return }
     if (prepSurtido) {
       const toks = String(prepLoteMezcla).split(/[,;]/).map(s => s.trim()).filter(Boolean)
-      const selSaldos = saldosMezcla.filter(s => (s.peso > 0) && toks.includes(String(s.lote || '').trim()))
-      const maxSurt = selSaldos.length ? Math.min(...selSaldos.map(s => parseFloat(s.peso) || 0)) : undefined
+      const selSaldos = saldosMezcla.filter(s => (dispSaldo(s, ordenPrep?.id) > 0) && toks.includes(String(s.lote || '').trim()))
+      const maxSurt = selSaldos.length ? Math.min(...selSaldos.map(s => dispSaldo(s, ordenPrep?.id))) : undefined
       if (maxSurt !== undefined && (parseFloat(prepSurtidoCantidad) || 0) > maxSurt) { toast(`No puedes empacar más de ${fCant(maxSurt)} — es lo disponible por empacar del lote elegido.`, 'warning'); return }
     }
     if (prepHaySobrante && !(parseFloat(prepSobrantePeso) > 0)) { toast('Marcaste que quedó sin empacar: ingresa la CANTIDAD', 'warning'); return }
@@ -899,7 +960,7 @@ export default function OrdenesProduccion() {
           producto: o.producto, fecha: fechaIni, lote: ex.lote || prepLote, vence: ex.vence || prepVence || null,
           empaque: o.unidad || 'UNIDADES', cantidad: exUnid, inicio: inicioGlobal || null, fin: finGlobal || null,
           labor: 'PRODUCCION', responsable: prepResp || o.operario || '', obs: (prepObs ? prepObs + ' · ' : '') + (ex.saldo_id ? 'Empacado de saldo en proceso' : 'Lote empacado adicional'),
-          estado: ex.conforme && exUnid > 0 ? 'conforme' : 'no conforme', completado: true, foto_url, orden_id: o.id, aprobado: autoAprob,
+          estado: prepConforme && exUnid > 0 ? 'conforme' : 'no conforme', completado: true, foto_url, orden_id: o.id, aprobado: autoAprob,
           tipo_registro: o.es_subproducto ? 'subproducto' : 'final', subprocesos: procs,
           surtido: !!ex.surtido, lote_mezcla: ex.surtido ? (ex.lote_mezcla || null) : null,
           producto_surtido: ex.surtido ? (autoSurtido(o.producto, ex.lote_mezcla) || prepProductoSurtido || null) : null,
@@ -925,6 +986,9 @@ export default function OrdenesProduccion() {
         obs_result: prepObs || '', foto_url, fecha_envio: new Date().toISOString(),
         destajo: prepDestajo.filter(d => d.nombre?.trim() || d.cantidad || d.tarifa),
       } })
+      // Al cerrar ya se descuenta el saldo (más abajo): se limpia la RESERVA para no restarlo doble
+      // si la orden volviera a proceso. Escritura aparte y tolerante (columna v83 opcional).
+      if (!r.queued) { try { await supabase.from('production_orders').update({ saldos_reservados: null }).eq('id', o.id) } catch { /* columna opcional */ } }
       // (8) Si se empacó surtido con otro(s) lote(s), marca también ESA orden como empacada surtida
       //     con este lote — aunque ya esté cerrada. Solo en línea.
       if (!r.queued && prepSurtido && prepLoteMezcla) {
@@ -2177,8 +2241,8 @@ export default function OrdenesProduccion() {
                   )}
                   {(() => {
                     const toks = String(prepLoteMezcla).split(/[,;]/).map(s => s.trim()).filter(Boolean)
-                    const selSaldos = saldosMezcla.filter(s => (s.peso > 0) && toks.includes(String(s.lote || '').trim()))
-                    const maxSurt = selSaldos.length ? Math.min(...selSaldos.map(s => parseFloat(s.peso) || 0)) : undefined
+                    const selSaldos = saldosMezcla.filter(s => (dispSaldo(s, ordenPrep?.id) > 0) && toks.includes(String(s.lote || '').trim()))
+                    const maxSurt = selSaldos.length ? Math.min(...selSaldos.map(s => dispSaldo(s, ordenPrep?.id))) : undefined
                     const excede = maxSurt !== undefined && (parseFloat(prepSurtidoCantidad) || 0) > maxSurt
                     return <>
                       <label className="form-label" style={{ marginTop: 8 }}>Cantidad empacada surtida (unidades/cajas) *
@@ -2228,13 +2292,15 @@ export default function OrdenesProduccion() {
 
               {/* ♻ Empacar saldo de mezcla en proceso (sobrante de lotes anteriores) */}
               {(() => {
-                const saldos = saldosDeProducto(ordenPrep.producto, ordenPrep.origen_id)
+                const saldos = saldosDeProducto(ordenPrep.producto, ordenPrep.origen_id, ordenPrep.id)
                 if (!saldos.length && !prepLotesExtra.length) return null
                 const updExtra = (i, k, v) => setPrepLotesExtra(arr => arr.map((x, idx) => idx === i ? { ...x, [k]: v } : x))
+                const updExtra2 = (i, patch) => setPrepLotesExtra(arr => arr.map((x, idx) => idx === i ? { ...x, ...patch } : x))
                 return (
                   <div className="form-group" style={{ background: 'rgba(124,179,66,0.07)', borderRadius: 'var(--radio)', padding: 10 }}>
                     <label className="form-label"><Ico as={Recycle} size={14} />Empacar saldo de mezcla en proceso (lotes anteriores)</label>
-                    {saldos.length > 0 && (
+                    {/* Los botones de agregar solo cuando NO viene ya precargado (empaque de saldo) */}
+                    {!ordenPrep.empaque_saldo && saldos.length > 0 && (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
                         {saldos.map(s => (
                           <button key={s.id} type="button" className="btn btn-xs btn-secondary"
@@ -2245,34 +2311,47 @@ export default function OrdenesProduccion() {
                         ))}
                       </div>
                     )}
-                    {/* Lote nuevo extra (sin saldo, p.ej. parte que se empaca con otro lote) */}
-                    <button type="button" className="btn btn-xs btn-secondary" style={{ marginBottom: 8 }}
-                      onClick={() => setPrepLotesExtra(arr => [...arr, { lote: '', vence: prepVence || '', unidades: '', conforme: true, saldo_id: null, peso_consumido: '', surtido: false, lote_mezcla: '' }])}>+ Otro lote empacado</button>
+                    {!ordenPrep.empaque_saldo && (
+                      <button type="button" className="btn btn-xs btn-secondary" style={{ marginBottom: 8 }}
+                        onClick={() => setPrepLotesExtra(arr => [...arr, { lote: '', vence: prepVence || '', unidades: '', conforme: true, saldo_id: null, peso_consumido: '', surtido: false, lote_mezcla: '' }])}>+ Otro lote empacado</button>
+                    )}
                     {prepLotesExtra.map((ex, i) => {
-                      const saldo = ex.saldo_id ? saldos.find(s => s.id === ex.saldo_id) : null
+                      // Busca el saldo en TODOS (no solo disponibles) para que siempre muestre "gastado"
+                      const saldo = ex.saldo_id ? (saldosMezcla.find(s => s.id === ex.saldo_id) || saldos.find(s => s.id === ex.saldo_id)) : null
+                      const unidSaldo = saldo?.unidad || ex.unidad || 'g'
+                      // Disponible del saldo = total − reservado por OTRAS órdenes en proceso (no la actual).
+                      const dispo = saldo ? dispSaldo(saldo, ordenPrep.id) : 0
+                      // Factor para autollenar lo gastado a partir de las unidades empacadas:
+                      //  - saldo en subporciones → subporciones por unidad = pesoUnidad / pesoSubporción
+                      //  - saldo en gramos       → gramos de mezcla por unidad ≈ pesoUnidad de la ficha
+                      const puFicha = parseFloat(prepInfo?.pesoUnidad) || 0
+                      const mezclaPorUnid = parseFloat(prepInfo?.mezclaPorUnid) || puFicha
+                      const psubFicha = parseFloat(prepPesoSubp) || 0
+                      const factorGasto = unidSaldo === 'subporciones' ? (psubFicha > 0 ? puFicha / psubFicha : 0) : mezclaPorUnid
+                      const setUnidades = v => setPrepLotesExtra(arr => arr.map((x, idx) => idx === i
+                        ? { ...x, unidades: v, peso_consumido: (x.saldo_id != null && !x.pesoManual && factorGasto > 0 && v !== '') ? String(+((parseFloat(v) || 0) * factorGasto).toFixed(2)) : x.peso_consumido }
+                        : x))
                       return (
                         <div key={i} style={{ border: '1px dashed var(--crema-oscuro)', borderRadius: 6, padding: 8, marginBottom: 6 }}>
                           <div style={{ display: 'grid', gridTemplateColumns: '1.1fr 1fr 0.8fr auto', gap: 6, alignItems: 'end' }}>
                             <div><label style={{ fontSize: '0.68rem', color: 'var(--texto-suave)' }}>Lote empacado</label><input className="form-control" value={ex.lote} onChange={e => updExtra(i, 'lote', e.target.value)} placeholder="Lote" /></div>
                             <div><label style={{ fontSize: '0.68rem', color: 'var(--texto-suave)' }}>Vence</label><input type="date" className="form-control" value={ex.vence || ''} onChange={e => updExtra(i, 'vence', e.target.value)} /></div>
-                            <div><label style={{ fontSize: '0.68rem', color: 'var(--texto-suave)' }}>Unidades</label><input type="number" className="form-control" value={ex.unidades} onChange={e => updExtra(i, 'unidades', e.target.value)} min={0} /></div>
+                            <div><label style={{ fontSize: '0.68rem', color: 'var(--texto-suave)' }}>Unidades</label><input type="number" className="form-control" value={ex.unidades} onChange={e => setUnidades(e.target.value)} min={0} /></div>
                             <button type="button" className="btn btn-xs btn-danger" onClick={() => setPrepLotesExtra(arr => arr.filter((_, idx) => idx !== i))}>✕</button>
                           </div>
-                          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginTop: 6, alignItems: 'center' }}>
-                            {saldo && <div style={{ fontSize: '0.75rem' }}><label style={{ color: 'var(--texto-suave)' }}>Consumido del saldo ({saldo.unidad}, disp. {fCant(saldo.peso)}): </label>
-                              <input type="number" className="form-control" style={{ display: 'inline-block', width: 100 }} value={ex.peso_consumido} onChange={e => updExtra(i, 'peso_consumido', e.target.value)} min={0} max={saldo.peso} step="any" /></div>}
-                            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.8rem' }}>
-                              <input type="checkbox" checked={ex.conforme} onChange={e => updExtra(i, 'conforme', e.target.checked)} /> Conforme
-                            </label>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: '0.8rem' }}>
-                              <input type="checkbox" checked={ex.surtido} onChange={e => updExtra(i, 'surtido', e.target.checked)} /> Surtido
-                            </label>
-                            {ex.surtido && <input className="form-control" style={{ width: 180 }} value={ex.lote_mezcla} onChange={e => updExtra(i, 'lote_mezcla', e.target.value)} placeholder="Lotes mezclados" />}
-                          </div>
+                          {/* Gastado del saldo (en la unidad en que se guardó: gramos o subporciones) */}
+                          {ex.saldo_id != null && (
+                            <div style={{ fontSize: '0.75rem', marginTop: 6 }}>
+                              <label style={{ color: 'var(--texto-suave)' }}>Gastado del saldo ({unidSaldo === 'subporciones' ? 'subporciones' : unidSaldo}{saldo ? `, disp. ${fCant(dispo)}` : ''}): </label>
+                              <input type="number" className="form-control" style={{ display: 'inline-block', width: 110 }} value={ex.peso_consumido} onChange={e => updExtra2(i, { peso_consumido: e.target.value, pesoManual: true })} min={0} max={saldo ? dispo : undefined} step="any" />
+                              {factorGasto > 0 && !ex.pesoManual && ex.unidades !== '' && <span style={{ marginLeft: 6, color: 'var(--texto-suave)' }}>(auto)</span>}
+                              {(parseFloat(ex.peso_consumido) || 0) > dispo && <span style={{ marginLeft: 6, color: 'var(--rojo, #c0392b)' }}>⚠ supera lo disponible</span>}
+                            </div>
+                          )}
                         </div>
                       )
                     })}
-                    <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Cada lote empacado genera su propio registro de producción (con su conforme/no conforme). El saldo elegido se descuenta por el peso consumido.</small>
+                    <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>El saldo elegido se descuenta por lo gastado. Mientras esta orden esté abierta, ese consumo queda <strong>reservado</strong> (no disponible para otras órdenes). La conformidad se toma de "¿Producción conforme?" de arriba.</small>
                   </div>
                 )
               })()}
@@ -2281,22 +2360,22 @@ export default function OrdenesProduccion() {
               <div className="form-group" style={{ background: 'rgba(200,169,74,0.06)', borderRadius: 'var(--radio)', padding: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600, flexWrap: 'wrap' }}>
                   <span>¿Sobró producción / quedó sin empacar? *</span>
-                  <SiNo value={prepHaySobrante} onChange={setPrepHaySobrante} />
+                  <SiNo value={prepHaySobrante} onChange={v => { setPrepSobranteManual(true); setPrepHaySobrante(v) }} />
+                  {!prepSobranteManual && prepHaySobrante && <span style={{ fontWeight: 400, fontSize: '0.72rem', color: 'var(--texto-suave)' }}>(sugerido automáticamente — ajústalo si sobró más o menos)</span>}
                 </div>
                 {prepHaySobrante && (
                   <div style={{ marginTop: 10 }}>
                     <label className="form-label">Cantidad sin empacar *</label>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-                      <input type="number" className="form-control" style={{ maxWidth: 140 }} value={prepSobrantePeso} onChange={e => setPrepSobrantePeso(e.target.value)} min={0} max={prepPorciona ? (parseFloat(prepCantSubp) || undefined) : undefined} step="any" placeholder="Cantidad" />
-                      <select className="form-control" style={{ maxWidth: 140 }} value={prepSobranteUnidad} onChange={e => setPrepSobranteUnidad(e.target.value)}>
+                      <input type="number" className="form-control" style={{ maxWidth: 140 }} value={prepSobrantePeso} onChange={e => { setPrepSobranteManual(true); setPrepSobrantePeso(e.target.value) }} min={0} max={prepPorciona ? (parseFloat(prepCantSubp) || undefined) : undefined} step="any" placeholder="Cantidad" />
+                      <select className="form-control" style={{ maxWidth: 140 }} value={prepSobranteUnidad} onChange={e => { setPrepSobranteManual(true); setPrepSobranteUnidad(e.target.value) }}>
                         <option value="g">g</option>
                         <option value="Kg">Kg</option>
-                        {prepPorciona && <option value="porciones">porciones</option>}
                         {prepPorciona && <option value="subporciones">subporciones</option>}
                         <option value="unidades">unidades</option>
                       </select>
                       {prepPorciona && parseFloat(prepCantSubp) > 0 && (
-                        <button type="button" className="btn btn-xs btn-secondary" onClick={() => { setPrepSobrantePeso(String(prepCantSubp)); setPrepSobranteUnidad('subporciones') }}>Total ({fNum(parseFloat(prepCantSubp))})</button>
+                        <button type="button" className="btn btn-xs btn-secondary" onClick={() => { setPrepSobranteManual(true); setPrepSobrantePeso(String(prepCantSubp)); setPrepSobranteUnidad('subporciones') }}>Total ({fNum(parseFloat(prepCantSubp))})</button>
                       )}
                     </div>
                     <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
@@ -2503,6 +2582,32 @@ export default function OrdenesProduccion() {
                     )
                   })()}
 
+              {/* Rendimiento de los ingredientes vs la ficha (solo si ya hay unidades obtenidas) */}
+              {detalleFicha && detalleIngs.length > 0 && o.cantidad_result != null && (() => {
+                const totalG = detalleIngs.reduce((s, i) => s + (i.gramos || 0), 0)
+                const pu = detalleFicha.pu || 1000
+                const unidsObt = parseFloat(o.cantidad_result) || 0
+                const pesoFinalReal = (parseFloat(o.peso_final) || 0) > 0 ? parseFloat(o.peso_final) : unidsObt * pu
+                const rendReal = totalG > 0 ? (pesoFinalReal / totalG * 100) : 0
+                const factorFicha = (detalleFicha.rend / 100) * (1 - detalleFicha.desp / 100)
+                const unidsEsper = pu > 0 ? (totalG * factorFicha) / pu : 0
+                const cumpl = unidsEsper > 0 ? (unidsObt / unidsEsper * 100) : 0
+                const badge = cumpl >= 97 ? 'badge-verde' : cumpl >= 90 ? 'badge-dorado' : 'badge-rojo'
+                return (
+                  <>
+                    <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 12 }}><Ico as={Calculator} size={15} />Rendimiento de los ingredientes</div>
+                    <div className="table-wrap"><table><tbody>
+                      <tr><td>Mezcla usada (ingredientes)</td><td className="td-number">{fCant(totalG)} g</td></tr>
+                      <tr><td>Peso final producido</td><td className="td-number">{fCant(pesoFinalReal)} g {(parseFloat(o.peso_final) || 0) <= 0 && <small style={{ color: 'var(--texto-suave)' }}>(estimado)</small>}</td></tr>
+                      <tr style={{ fontWeight: 700, background: 'rgba(124,179,66,0.08)' }}><td>Rendimiento real (final ÷ mezcla)</td><td className="td-number">{rendReal.toFixed(1)}%</td></tr>
+                      <tr><td>Rendimiento de la ficha</td><td className="td-number">{fNum(detalleFicha.rend)}% <small style={{ color: 'var(--texto-suave)' }}>(desp. {fNum(detalleFicha.desp)}%)</small></td></tr>
+                      <tr><td>Unidades: obtenidas vs esperadas</td><td className="td-number"><strong>{fNum(unidsObt)}</strong> / {fNum(Math.round(unidsEsper))}</td></tr>
+                    </tbody></table></div>
+                    <div style={{ marginTop: 6 }}><span className={`badge ${badge}`}>Cumplimiento del rendimiento: {cumpl.toFixed(0)}%</span></div>
+                  </>
+                )
+              })()}
+
               {/* Costos del lote (solo admin) */}
               {esAdmin && (() => {
                 const prod = productos.find(p => String(p.id) === String(o.origen_id))
@@ -2575,12 +2680,14 @@ export default function OrdenesProduccion() {
                 : (
                   <div className="table-wrap">
                     <table>
-                      <thead><tr><th>Lote</th><th>Cantidad</th><th>Avance</th></tr></thead>
+                      <thead><tr><th>Lote</th><th>Producto</th><th className="td-number">Cantidad</th><th className="td-number">Subporciones</th><th>Avance</th></tr></thead>
                       <tbody>
                         {recs.map(r => (
                           <tr key={r.id}>
-                            <td>{r.lote || '—'}</td>
-                            <td className="td-number">{fNum(r.cantidad || 0)}</td>
+                            <td><strong>{r.lote || '—'}</strong></td>
+                            <td>{r.producto || '—'}{r.surtido && <div style={{ fontSize: '0.72rem', color: 'var(--tierra)', display: 'flex', alignItems: 'center', gap: 3 }}><Shuffle size={11} aria-hidden="true" /> {r.producto_surtido || 'Surtido'}{r.lote_mezcla ? ` · ${r.lote_mezcla}` : ''}</div>}</td>
+                            <td className="td-number">{fNum(r.cantidad || 0)} {r.empaque || ''}</td>
+                            <td className="td-number">{r.cant_subporciones != null ? `${fNum(r.cant_subporciones)}${r.peso_subporcion ? ` (${fNum(r.peso_subporcion)} g)` : ''}` : '—'}</td>
                             <td>{r.completado ? <span className="badge badge-verde">Completado</span> : <span className="badge badge-dorado">En proceso</span>}</td>
                           </tr>
                         ))}
