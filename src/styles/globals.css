@@ -29,6 +29,19 @@
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
 
+/* ==================== BARRAS DE SCROLL (toda la app) ====================
+   Reemplaza la barra genérica del sistema por una fina y discreta acorde a la marca.
+   Firefox usa scrollbar-width/-color; Chrome/Safari/Edge usan ::-webkit-scrollbar. */
+* { scrollbar-width: thin; scrollbar-color: rgba(45,90,61,0.35) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: rgba(45,90,61,0.28); border-radius: 8px;
+  border: 2px solid transparent; background-clip: padding-box;   /* deja aire alrededor: se ve más fina */
+}
+*::-webkit-scrollbar-thumb:hover { background: rgba(45,90,61,0.55); background-clip: padding-box; }
+*::-webkit-scrollbar-corner { background: transparent; }
+
 /* ==================== ACCESIBILIDAD: FOCO VISIBLE (WCAG 2.4.7) ====================
    Indicador de foco por teclado en TODOS los interactivos (botones, tabs, enlaces,
    resumen de acordeón, chips…). Solo aparece con navegación por teclado (:focus-visible),
@@ -122,6 +135,12 @@ body {
 .user-config-btn:hover { background: rgba(200,169,74,0.18); border-color: var(--dorado); }
 
 .sidebar-nav { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 8px 0; }
+/* Barra de scroll discreta acorde al menú (verde oscuro) en vez de la genérica del sistema */
+.sidebar-nav { scrollbar-width: thin; scrollbar-color: rgba(200,169,74,0.35) transparent; }
+.sidebar-nav::-webkit-scrollbar { width: 6px; }
+.sidebar-nav::-webkit-scrollbar-track { background: transparent; }
+.sidebar-nav::-webkit-scrollbar-thumb { background: rgba(200,169,74,0.30); border-radius: 6px; }
+.sidebar-nav::-webkit-scrollbar-thumb:hover { background: rgba(200,169,74,0.55); }
 .nav-section-title {
   padding: 14px 20px 6px;
   font-size: 0.65rem; font-weight: 600;
