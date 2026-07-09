@@ -806,7 +806,7 @@ export default function OrdenesProduccion() {
 
       <div class="seccion">DATOS DE LA ORDEN</div>
       <table class="campos">
-        <tr><td class="lbl">Orden de Producción N°</td><td>OP-${opNum(o.id)}</td><td class="lbl">Lote</td><td>${o.lote || ''}</td></tr>
+        <tr><td class="lbl">Orden de Producción N°</td><td>OP-${opNum(o.id)}</td><td class="lbl">Lote</td><td>${rotLote || ''}</td></tr>
         <tr><td class="lbl">Nombre comercial</td><td>${o.producto || ''}</td><td class="lbl">Presentación</td><td>${prepInfo?.pesoUnidad ? g(prepInfo.pesoUnidad) + ' gr' : ''}</td></tr>
         <tr><td class="lbl">Fecha de fabricación</td><td>${fabricacion}</td><td class="lbl">Fecha de vencimiento</td><td>${rotVence ? new Date(rotVence + 'T00:00:00').toLocaleDateString('es-CO') : ''}</td></tr>
         <tr><td class="lbl">Unidades a producir</td><td>${o.cantidad_plan || ''} ${o.unidad || ''}</td><td class="lbl">Operario</td><td>${o.operario || ''}</td></tr>
