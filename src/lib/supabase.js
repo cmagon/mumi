@@ -11,12 +11,18 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 // Instrumenta el query builder para que cualquier insert/update/upsert/delete marque
 // "guardando…" (SavingOverlay) mientras la operación está en curso, sin tener que
 // envolver manualmente cada guardado en las páginas. Las lecturas (select) no se marcan.
-function _trackWrite(builder) {
+// Escrituras "silenciosas": autoguardados de fondo que NO deben mostrar el overlay "Guardando…"
+// (para no interrumpir la escritura del usuario). Se activan con beginSilentWrites/endSilentWrites.
+let _silentDepth = 0
+export const beginSilentWrites = () => { _silentDepth++ }
+export const endSilentWrites = () => { _silentDepth = Math.max(0, _silentDepth - 1) }
+
+function _trackWrite(builder, silent) {
   if (!builder || typeof builder.then !== 'function') return builder
   const origThen = builder.then.bind(builder)
   let started = false, ended = false
-  const start = () => { if (!started) { started = true; setBusy(true) } }
-  const end = () => { if (started && !ended) { ended = true; setBusy(false) } }
+  const start = () => { if (!started) { started = true; if (!silent) setBusy(true) } }
+  const end = () => { if (started && !ended) { ended = true; if (!silent) setBusy(false) } }
   builder.then = (onF, onR) => {
     start()
     return origThen(
@@ -50,7 +56,7 @@ supabase.from = (table) => {
       // Modo desarrollador: vista de rol (solo lectura) o impersonación sin edición → bloquear.
       const motivo = motivoBloqueoEscritura(table)
       if (motivo) { try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('dev-bloqueo', { detail: motivo })) } catch { /* noop */ } return _bloqueado(motivo) }
-      return _trackWrite(orig(...args))
+      return _trackWrite(orig(...args), _silentDepth > 0)
     }
   }
   return qb

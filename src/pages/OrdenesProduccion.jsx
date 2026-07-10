@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase, uploadFile } from '../lib/supabase'
+import { supabase, uploadFile, beginSilentWrites, endSilentWrites } from '../lib/supabase'
 import { reservarPEPS, liberarReservaLotes, consumirReservaLotes, estadoLote } from '../lib/lotes'
 import { writeOrQueue } from '../lib/offlineQueue'
 import { getConfig } from '../lib/appConfig'
@@ -130,6 +130,10 @@ export default function OrdenesProduccion() {
   // Lotes empacados ADICIONALES (sobrantes/saldos de mezcla empacados aparte del lote principal).
   // Cada uno: { lote, vence, unidades, conforme, saldo_id, surtido, lote_mezcla }
   const [prepLotesExtra, setPrepLotesExtra] = useState([])
+  // Campos adicionales personalizados de la orden (MP vendibles: Productor, Finca, etc.)
+  const [prepCamposExtra, setPrepCamposExtra] = useState([])
+  const [prepEsMpVend, setPrepEsMpVend] = useState(false)
+  const [prepCamposOpen, setPrepCamposOpen] = useState(false)   // acordeón de campos adicionales (arriba)
   // Sobrante de mezcla que NO se empacó y queda como saldo en proceso (en peso)
   const [prepHaySobrante, setPrepHaySobrante] = useState(null)   // null = sin marcar (obligatorio)
   const [prepSobrantePeso, setPrepSobrantePeso] = useState('')
@@ -245,8 +249,8 @@ export default function OrdenesProduccion() {
     .filter(n => !isNaN(n))
     .reduce((mx, n) => Math.max(mx, n), 0)
   const siguienteLoteSugerido = String(maxSeqAnio + 1).padStart(2, '0') + anioYY
-  // Lote por FECHA (ddmmaaaa) para materias primas / subproductos internos
-  const loteFechaHoy = (() => { const d = new Date(), p2 = (n) => String(n).padStart(2, '0'); return p2(d.getDate()) + p2(d.getMonth() + 1) + d.getFullYear() })()
+  // Lote por FECHA (ddmmaa) para materias primas / subproductos internos
+  const loteFechaHoy = (() => { const d = new Date(), p2 = (n) => String(n).padStart(2, '0'); return p2(d.getDate()) + p2(d.getMonth() + 1) + String(d.getFullYear()).slice(2) })()
 
   // Numeración visible de órdenes: secuencial (1,2,3…) por orden de creación, con inicio configurable
   const ordenIdsSorted = useMemo(() => [...ordenes].map(o => o.id).sort((a, b) => a - b), [ordenes])
@@ -418,9 +422,11 @@ export default function OrdenesProduccion() {
     setPrepProcesos(Array.isArray(o.procesos_tiempos) ? o.procesos_tiempos : [])
     const cantidad = parseFloat(o.cantidad_plan) || 0
     const parse = (v) => { try { return Array.isArray(v) ? v : JSON.parse(v || '[]') } catch { return [] } }
+    setPrepEsMpVend(false)
     if (o.origen === 'producto' && o.origen_id) {
-      const { data: prod } = await supabase.from('products_costing').select('bache, peso_unidad, rendimiento, desperdicio, ingredientes, procesos, porciona, peso_subporcion, ficha_url, ficha_nombre').eq('id', o.origen_id).single()
+      const { data: prod } = await supabase.from('products_costing').select('bache, peso_unidad, rendimiento, desperdicio, ingredientes, procesos, porciona, peso_subporcion, ficha_url, ficha_nombre, tipo').eq('id', o.origen_id).single()
       if (prod) {
+        setPrepEsMpVend((prod.tipo || '') === 'mp')
         setPrepPorciona(!!prod.porciona)
         setPrepPesoSubp(o.peso_subporcion || prod.peso_subporcion || '')
         // Subprocesos = ÚNICAMENTE los de la mano de obra de la ficha; se conservan las horas ya guardadas (por nombre)
@@ -558,6 +564,7 @@ export default function OrdenesProduccion() {
     setPrepSobranteManual(false)
     setPrepSurtidoCantidad(o.surtido_cantidad != null ? String(o.surtido_cantidad) : '')
     setPrepSurtidoConsumos({})
+    setPrepCamposExtra(Array.isArray(o.campos_extra) ? o.campos_extra.map(c => ({ ...c, _id: Date.now() + Math.random() })) : [])
     await prepararDatos(o); setModalProceso(true)
   }
 
@@ -600,6 +607,8 @@ export default function OrdenesProduccion() {
   const guardarProcesoData = async (silent = true) => {
     if (!ordenPrep) return
     const { procs, inicioGlobal, finGlobal } = tiemposGlobal()
+    // El autoguardado de fondo (silent) NO muestra el overlay "Guardando…" para no interrumpir la escritura.
+    if (silent) beginSilentWrites()
     try {
       const r = await writeOrQueue({ table: 'production_orders', action: 'update', match: { id: ordenPrep.id }, payload: {
         lote: prepLote, vence: prepVence || null, fecha_inicio: prepFechaInicio || null,
@@ -621,10 +630,13 @@ export default function OrdenesProduccion() {
       try { await supabase.from('production_orders').update({ prep_sino: { conforme: prepConforme, surtido: prepSurtido, hay_sobrante: prepHaySobrante } }).eq('id', ordenPrep.id) } catch { /* columna opcional */ }
       // Reserva del saldo mientras la orden esté abierta (escritura aparte y tolerante si falta la columna v83).
       try { await supabase.from('production_orders').update({ saldos_reservados: calcSaldosConsumidos() }).eq('id', ordenPrep.id) } catch { /* columna opcional */ }
+      // Campos adicionales personalizados (MP vendibles) — escritura aparte y tolerante (columna v85 opcional).
+      try { await supabase.from('production_orders').update({ campos_extra: prepCamposExtra.filter(c => (c.nombre || '').trim()).map(c => ({ nombre: c.nombre, valor: c.valor || '' })) }).eq('id', ordenPrep.id) } catch { /* columna opcional */ }
       setAutoSavedAt(new Date().toLocaleTimeString('es-CO'))
       qc.invalidateQueries({ queryKey: ['production_orders'] })
       if (!silent) toast(r.queued ? 'Progreso guardado sin conexión — se sincronizará 📴' : 'Guardado ✓')
     } catch (e) { if (!silent) toast(e.message, 'error') }
+    finally { if (silent) endSilentWrites() }
   }
 
   // Autoguardado (debounce) de TODOS los campos del modal de proceso
@@ -633,7 +645,7 @@ export default function OrdenesProduccion() {
     const t = setTimeout(() => guardarProcesoData(true), 1200)
     return () => clearTimeout(t)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prepLote, prepVence, prepFechaInicio, prepModoAvanzado, prepHoraInicio, prepHoraFin, prepProcesos, prepUnidades, prepPesoFinal, prepPesoDesp, prepPesoSubp, prepCantSubp, prepObs, prepSurtido, prepLoteMezcla, prepProductoSurtido, prepSurtidoCantidad, prepHaySobrante, prepSobrantePeso, prepSobranteUnidad, prepResp, prepConforme, prepLotesExtra, prepDestajo, autoguardar, modalProceso])
+  }, [prepLote, prepVence, prepFechaInicio, prepModoAvanzado, prepHoraInicio, prepHoraFin, prepProcesos, prepUnidades, prepPesoFinal, prepPesoDesp, prepPesoSubp, prepCantSubp, prepObs, prepSurtido, prepLoteMezcla, prepProductoSurtido, prepSurtidoCantidad, prepHaySobrante, prepSobrantePeso, prepSobranteUnidad, prepResp, prepConforme, prepLotesExtra, prepDestajo, prepCamposExtra, autoguardar, modalProceso])
 
   // Auto-sugerir el SOBRANTE (lo producido que quedó SIN empacar), mientras el usuario no lo edite.
   //   Porcionado: subporciones producidas − (unidades empacadas × subporciones por unidad).
@@ -763,6 +775,14 @@ export default function OrdenesProduccion() {
           <tbody>${procRows.map(p => `<tr><td>${p.nombre || ''}</td><td>${fmtF(p.fecha)}</td><td>${p.inicio || ''}</td><td>${p.fin || ''}</td></tr>`).join('')}</tbody></table>` : '')
       : `<div class="seccion">TIEMPOS</div>
           <table class="campos"><tr><td class="lbl">Hora inicio</td><td>${prepHoraInicio || ''}</td><td class="lbl">Hora fin</td><td>${prepHoraFin || ''}</td></tr></table>`
+    // Campos adicionales personalizados (MP vendibles): Productor, Finca, etc. — 2 por fila para ahorrar espacio.
+    const camposEx = (prepCamposExtra || []).filter(c => (c.nombre || '').trim())
+    let camposExtraHtml = ''
+    if (camposEx.length) {
+      let celdas = ''
+      camposEx.forEach((c, idx) => { celdas += `<td class="lbl">${c.nombre}</td><td>${c.valor || ''}</td>${idx % 2 === 1 ? '</tr><tr>' : ''}` })
+      camposExtraHtml = `<div class="seccion">DATOS ADICIONALES</div><table class="campos"><tr>${celdas}</tr></table>`
+    }
     const archivoNombre = `OP-${opNum(o.id)} - ${(o.producto || 'PRODUCTO').toUpperCase()} - PTZ-OR-01`
     const w = window.open('', '_blank')
     w.document.write(`<html><head><title>${archivoNombre}</title><style>
@@ -770,7 +790,9 @@ export default function OrdenesProduccion() {
       * { box-sizing: border-box; }
       html,body { margin:0; }
       body { font-family: Arial, sans-serif; color:#222; font-size:11px; }
-      #content { padding-bottom:10px; }
+      /* Ancho útil real de una hoja carta (215.9mm − 2×10mm de margen). Así la medición en pantalla
+         coincide con la impresión y el auto-ajuste a una sola hoja es exacto. */
+      #content { width:196mm; margin:0 auto; padding-bottom:10px; }
       table { width:100%; border-collapse:collapse; }
       td,th { border:1px solid #555; padding:4px 8px; vertical-align:top; }
       th { background:#e9efe7; text-align:left; }
@@ -812,7 +834,7 @@ export default function OrdenesProduccion() {
         <tr><td class="lbl">Unidades a producir</td><td>${o.cantidad_plan || ''} ${o.unidad || ''}</td><td class="lbl">Operario</td><td>${o.operario || ''}</td></tr>
         <tr><td class="lbl">Unidades producidas</td><td style="height:22px"></td><td class="lbl">Cant. empaque utilizado</td><td></td></tr>
         ${prepPorciona ? `<tr><td class="lbl">Peso subporción</td><td>${prepPesoSubp ? g(prepPesoSubp) + ' g' : ''}</td><td class="lbl">Cant. subporciones</td><td>${prepCantSubp ? fNum(prepCantSubp) : ''}</td></tr>` : ''}
-        <tr><td class="lbl">¿Empacó surtido?</td><td>SI <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle"></span> &nbsp; NO <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle"></span> &nbsp; CANT: <span style="display:inline-block;min-width:60px;border-bottom:1px solid #555">&nbsp;</span></td><td class="lbl">¿Quedó sin empacar?</td><td>SI <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle"></span> &nbsp; NO <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle"></span> &nbsp; CANT: <span style="display:inline-block;min-width:60px;border-bottom:1px solid #555">&nbsp;</span></td></tr>
+        <tr><td class="lbl">¿Empacó surtido?</td><td>SI <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle;text-align:center;line-height:12px;font-size:10px">${prepSurtido === true ? 'X' : ''}</span> &nbsp; NO <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle;text-align:center;line-height:12px;font-size:10px">${prepSurtido === false ? 'X' : ''}</span> &nbsp; CANT: <span style="display:inline-block;min-width:60px;border-bottom:1px solid #555">${prepSurtido && prepSurtidoCantidad ? fNum(prepSurtidoCantidad) : '&nbsp;'}</span></td><td class="lbl">¿Quedó sin empacar?</td><td>SI <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle;text-align:center;line-height:12px;font-size:10px">${prepHaySobrante === true ? 'X' : ''}</span> &nbsp; NO <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle;text-align:center;line-height:12px;font-size:10px">${prepHaySobrante === false ? 'X' : ''}</span> &nbsp; CANT: <span style="display:inline-block;min-width:60px;border-bottom:1px solid #555">${prepHaySobrante && prepSobrantePeso ? fNum(prepSobrantePeso) + ' ' + (prepSobranteUnidad || '') : '&nbsp;'}</span></td></tr>
         <tr><td class="lbl">¿Producto conforme?</td><td colspan="3">SI <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle;text-align:center;line-height:12px;font-size:10px">${prepConforme === true ? 'X' : ''}</span> &nbsp; NO <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle;text-align:center;line-height:12px;font-size:10px">${prepConforme === false ? 'X' : ''}</span></td></tr>
       </table>
 
@@ -827,6 +849,8 @@ export default function OrdenesProduccion() {
 
       ${rotuladoHtml}
 
+      ${camposExtraHtml}
+
       <div class="seccion">OBSERVACIONES</div>
       <table class="campos"><tr><td id="obsbox" style="height:90px; vertical-align:top">${o.notas_orden || ''}</td></tr></table>
 
@@ -840,8 +864,8 @@ export default function OrdenesProduccion() {
       </div>
       <script>window.addEventListener('load',function(){setTimeout(function(){
         var c=document.getElementById('content');
-        // Alto util conservador de una hoja carta (cubre los margenes que el navegador agrega)
-        var availH=900;
+        // Alto util de una hoja carta (11in − 2×10mm de margen ≈ 979px @96dpi); dejamos margen de seguridad.
+        var availH=960;
         function alto(){ return Math.max(c.scrollHeight, c.offsetHeight, c.getBoundingClientRect().height); }
         var h=alto();
         // 1) Si sobra espacio: agranda Observaciones para llenar la hoja y bajar las firmas
@@ -1010,6 +1034,7 @@ export default function OrdenesProduccion() {
       // Al cerrar ya se descuenta el saldo (más abajo): se limpia la RESERVA para no restarlo doble
       // si la orden volviera a proceso. Escritura aparte y tolerante (columna v83 opcional).
       if (!r.queued) { try { await supabase.from('production_orders').update({ saldos_reservados: null }).eq('id', o.id) } catch { /* columna opcional */ } }
+      try { await supabase.from('production_orders').update({ campos_extra: prepCamposExtra.filter(c => (c.nombre || '').trim()).map(c => ({ nombre: c.nombre, valor: c.valor || '' })) }).eq('id', o.id) } catch { /* columna opcional */ }
       // (8) Si se empacó surtido con otro(s) lote(s), marca también ESA orden como empacada surtida
       //     con este lote — aunque ya esté cerrada. Solo en línea.
       if (!r.queued && prepSurtido && prepLoteMezcla) {
@@ -1958,7 +1983,7 @@ export default function OrdenesProduccion() {
         {/* El tipo (MP interna vs producto base) se determina automáticamente por el producto elegido; ya no hay check manual */}
         {form.es_mp && (
           <div className="form-group" style={{ background: 'rgba(124,179,66,0.10)', padding: 12, borderRadius: 'var(--radio)', fontSize: '0.85rem', color: 'var(--selva)' }}>
-            <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><FlaskConical size={14} aria-hidden="true" /> Materia prima vendible</strong> — al producirla suma al <strong>stock de Inventario MP</strong> ({mps.find(m => String(m.id) === String(form.mp_id))?.nombre || 'MP vinculada'}); el lote se asigna por <strong>fecha (ddmmaaaa)</strong> al diligenciar.
+            <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}><FlaskConical size={14} aria-hidden="true" /> Materia prima vendible</strong> — al producirla suma al <strong>stock de Inventario MP</strong> ({mps.find(m => String(m.id) === String(form.mp_id))?.nombre || 'MP vinculada'}); el lote se asigna por <strong>fecha (ddmmaa)</strong> al diligenciar.
             {!form.mp_id && <div style={{ color: 'var(--rojo)', marginTop: 4 }}>⚠ Esta ficha MP no está vinculada a una materia prima; vincúlala en la ficha.</div>}
           </div>
         )}
@@ -2110,7 +2135,32 @@ export default function OrdenesProduccion() {
         </>}>
         {ordenPrep && (
           <>
-            {/* Alistar ingredientes: acordeón con checklist LOCAL (no se guarda; solo ayuda al operario) */}
+            {/* Campos adicionales (MP vendibles): acordeón arriba, oculto por defecto. Salen en la impresión. */}
+            {prepEsMpVend && (
+              <details className="acordeon-item" open={prepCamposOpen} onToggle={e => setPrepCamposOpen(e.target.open)} style={{ marginBottom: 12, borderLeft: '4px solid var(--dorado)' }}>
+                <summary>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                    <FlaskConical size={16} aria-hidden="true" /> Campos adicionales {prepCamposExtra.filter(c => (c.nombre || '').trim()).length > 0 ? `(${prepCamposExtra.filter(c => (c.nombre || '').trim()).length})` : ''}
+                    <small style={{ fontWeight: 400, color: 'var(--texto-suave)' }}>— Productor, Finca, Variedad… (salen en la impresión)</small>
+                  </span>
+                </summary>
+                <div style={{ padding: '10px 4px' }}>
+                  {prepCamposExtra.length === 0
+                    ? <small style={{ color: 'var(--texto-suave)', fontSize: '0.75rem' }}>Agrega datos propios de esta MP vendible (ej. "Productor": Juan Pérez).</small>
+                    : prepCamposExtra.map((c, i) => (
+                      <div key={c._id || i} style={{ display: 'grid', gridTemplateColumns: '1fr 1.4fr auto', gap: 6, marginBottom: 6 }}>
+                        <input className="form-control" value={c.nombre || ''} onChange={e => setPrepCamposExtra(arr => arr.map((x, idx) => idx === i ? { ...x, nombre: e.target.value } : x))} placeholder="Campo (ej. Productor)" />
+                        <input className="form-control" value={c.valor || ''} onChange={e => setPrepCamposExtra(arr => arr.map((x, idx) => idx === i ? { ...x, valor: e.target.value } : x))} placeholder="Valor (ej. Finca La Esperanza)" />
+                        <button type="button" className="btn btn-xs btn-danger" onClick={() => setPrepCamposExtra(arr => arr.filter((_, idx) => idx !== i))}>✕</button>
+                      </div>
+                    ))}
+                  <button type="button" className="btn btn-xs btn-secondary" style={{ marginTop: 4 }} onClick={() => setPrepCamposExtra(a => [...a, { _id: Date.now() + Math.random(), nombre: '', valor: '' }])}><Ico as={Plus} size={13} /> Agregar campo</button>
+                </div>
+              </details>
+            )}
+            {/* Alistar ingredientes: acordeón con checklist LOCAL (no se guarda; solo ayuda al operario).
+                No aplica a MP vendibles (no llevan receta de ingredientes que alistar). */}
+            {!prepEsMpVend && (
             <details className="acordeon-item" style={{ marginBottom: 12, borderLeft: '4px solid var(--lima)' }}>
               <summary>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
@@ -2150,6 +2200,7 @@ export default function OrdenesProduccion() {
                     })()}
               </div>
             </details>
+            )}
 
             <div className="form-grid-2" style={{ background: 'rgba(124,179,66,0.06)', padding: 10, borderRadius: 'var(--radio)', marginBottom: 12 }}>
               <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de inicio de fabricación *</label>
@@ -2606,6 +2657,9 @@ export default function OrdenesProduccion() {
                 {o.hay_sobrante && (
                   <D et="Quedó sin empacar">{o.sobrante_peso != null ? `${fCant(o.sobrante_peso)} ${o.sobrante_unidad || ''}` : 'Sí'}</D>
                 )}
+                {Array.isArray(o.campos_extra) && o.campos_extra.filter(c => (c.nombre || '').trim()).map((c, i) => (
+                  <D key={i} et={c.nombre}>{c.valor || '—'}</D>
+                ))}
               </div>
               {/* Auditoría de creación — solo visible para administradores */}
               {esAdmin && (

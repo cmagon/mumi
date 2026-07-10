@@ -5,14 +5,12 @@ import { supabase, uploadFile } from '../lib/supabase'
 import Modal from './ui/Modal'
 import { User, Camera } from 'lucide-react'
 
-// "Mi perfil / Configuración" — el usuario edita sus datos básicos y su contraseña.
-// Los datos personales (teléfono, correo, dirección, nacimiento, foto) viven en la ficha de
-// EMPLEADO vinculada por nombre. Si el usuario no tiene ficha (p. ej. un admin), solo se
-// permite cambiar la contraseña.
-export default function ProfileModal({ open, onClose }) {
+// "Mi perfil" — CUALQUIER usuario edita sus datos básicos y/o su contraseña.
+// Los datos se guardan en su propio perfil (user_profiles).
+// modo: 'todo' (datos + contraseña) | 'datos' | 'password'
+export default function ProfileModal({ open, onClose, modo = 'todo' }) {
   const { profile, changePassword } = useAuth()
   const toast = useToast()
-  const [emp, setEmp] = useState(null)
   const [cargando, setCargando] = useState(false)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ telefono: '', correo: '', direccion: '', fecha_nacimiento: '', foto_url: '' })
@@ -21,12 +19,14 @@ export default function ProfileModal({ open, onClose }) {
   const [p1, setP1] = useState('')
   const [p2, setP2] = useState('')
 
+  const verDatos = modo === 'todo' || modo === 'datos'
+  const verPass = modo === 'todo' || modo === 'password'
+
   useEffect(() => {
-    if (!open || !profile?.nombre) return
+    if (!open || !profile?.id) return
     setCargando(true); setP1(''); setP2(''); setFotoFile(null)
-    supabase.from('employees').select('*').eq('nombre', profile.nombre).maybeSingle()
+    supabase.from('user_profiles').select('telefono, correo, direccion, fecha_nacimiento, foto_url').eq('id', profile.id).maybeSingle()
       .then(({ data }) => {
-        setEmp(data || null)
         setForm({
           telefono: data?.telefono || '', correo: data?.correo || '',
           direccion: data?.direccion || '', fecha_nacimiento: data?.fecha_nacimiento || '',
@@ -34,31 +34,31 @@ export default function ProfileModal({ open, onClose }) {
         })
         setFotoPrev(data?.foto_url || '')
       })
-      .catch(() => setEmp(null))
+      .catch(() => {})
       .finally(() => setCargando(false))
-  }, [open, profile?.nombre])
+  }, [open, profile?.id, modo])
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
   const guardar = async () => {
     setSaving(true)
     try {
-      // 1) Datos personales (solo si tiene ficha de empleado)
-      if (emp) {
+      // 1) Datos personales
+      if (verDatos) {
         let foto_url = form.foto_url
         if (fotoFile) {
           const ext = fotoFile.name.split('.').pop()
-          foto_url = await uploadFile('documentos', `empleados/foto_${emp.id}_${Date.now()}.${ext}`, fotoFile)
+          foto_url = await uploadFile('documentos', `usuarios/foto_${profile.id}_${Date.now()}.${ext}`, fotoFile)
         }
-        const { error } = await supabase.from('employees').update({
+        const { error } = await supabase.from('user_profiles').update({
           telefono: form.telefono || null, correo: form.correo || null,
           direccion: form.direccion || null, fecha_nacimiento: form.fecha_nacimiento || null,
           foto_url: foto_url || null,
-        }).eq('id', emp.id)
+        }).eq('id', profile.id)
         if (error) throw error
       }
       // 2) Contraseña (opcional)
-      if (p1 || p2) {
+      if (verPass && (p1 || p2)) {
         if (p1.length < 8) { toast('La contraseña debe tener al menos 8 caracteres', 'warning'); setSaving(false); return }
         if (p1 !== p2) { toast('Las contraseñas no coinciden', 'warning'); setSaving(false); return }
         await changePassword(p1)
@@ -72,9 +72,11 @@ export default function ProfileModal({ open, onClose }) {
 
   if (!open) return null
 
+  const titulo = modo === 'password' ? 'Cambiar contraseña' : modo === 'datos' ? 'Actualizar datos' : 'Mi perfil'
+
   return (
     <Modal open onClose={onClose} guard={false}
-      title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><User size={18} aria-hidden="true" /> Mi perfil</span>}
+      title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><User size={18} aria-hidden="true" /> {titulo}</span>}
       footer={<>
         <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
         <button className="btn btn-primary" onClick={guardar} disabled={saving || cargando}>{saving ? 'Guardando…' : 'Guardar'}</button>
@@ -86,7 +88,7 @@ export default function ProfileModal({ open, onClose }) {
 
       {cargando ? <p className="empty-table">Cargando…</p> : (
         <>
-          {emp ? (
+          {verDatos && (
             <>
               {/* Foto */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginBottom: 14 }}>
@@ -107,17 +109,18 @@ export default function ProfileModal({ open, onClose }) {
               </div>
               <div className="form-group"><label className="form-label">Dirección</label><input className="form-control" value={form.direccion} onChange={e => set('direccion', e.target.value)} /></div>
             </>
-          ) : (
-            <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>No tienes una ficha de empleado vinculada, así que aquí solo puedes cambiar tu contraseña.</div>
           )}
 
-          {/* Cambiar contraseña */}
-          <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 8 }}>Cambiar contraseña</div>
-          <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', marginTop: -8, marginBottom: 10 }}>Déjalo en blanco si no quieres cambiarla.</p>
-          <div className="form-grid-2">
-            <div className="form-group"><label className="form-label">Nueva contraseña</label><input type="password" className="form-control" value={p1} onChange={e => setP1(e.target.value)} autoComplete="new-password" /></div>
-            <div className="form-group"><label className="form-label">Repetir contraseña</label><input type="password" className="form-control" value={p2} onChange={e => setP2(e.target.value)} autoComplete="new-password" /></div>
-          </div>
+          {verPass && (
+            <>
+              <div className="card-title" style={{ fontSize: '0.95rem', marginTop: verDatos ? 8 : 0 }}>Cambiar contraseña</div>
+              <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', marginTop: -8, marginBottom: 10 }}>Déjalo en blanco si no quieres cambiarla.</p>
+              <div className="form-grid-2">
+                <div className="form-group"><label className="form-label">Nueva contraseña</label><input type="password" className="form-control" value={p1} onChange={e => setP1(e.target.value)} autoComplete="new-password" /></div>
+                <div className="form-group"><label className="form-label">Repetir contraseña</label><input type="password" className="form-control" value={p2} onChange={e => setP2(e.target.value)} autoComplete="new-password" /></div>
+              </div>
+            </>
+          )}
         </>
       )}
     </Modal>

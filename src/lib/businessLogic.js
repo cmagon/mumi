@@ -92,6 +92,7 @@ export const calcularCostosProducto = ({
   diasHabiles = 22,
   jornadaHoras = 8,
   improductividad = 0.15,
+  adicionales = [],   // costos extra personalizados: [{ descripcion, valor, base: 'unidad'|'bache'|'mes' }]
 }) => {
   const costoMin = getCostoMinuto(cifTotal, operariosActivos, diasHabiles, jornadaHoras, improductividad)
   const mermaFrac = merma / 100
@@ -123,8 +124,16 @@ export const calcularCostosProducto = ({
   // ===== Costo del producto (método del Excel) =====
   // El overhead (costos fijos + nómina) se reparte por TIEMPO: costo/minuto = CF ÷ minutos disponibles.
   // Costo unitario = (materias primas + empaque + minutos × costo/minuto) ÷ unidades por bache.
+  // Costos adicionales personalizados (depreciación, etc.), convertidos a POR UNIDAD según su base.
+  const adicUnit = (Array.isArray(adicionales) ? adicionales : []).reduce((s, a) => {
+    const v = parseFloat(a?.valor) || 0
+    if ((a?.base) === 'mes')   return s + (unidsMesTot > 0 ? v / unidsMesTot : 0)
+    if ((a?.base) === 'bache') return s + (unidsBache > 0 ? v / unidsBache : 0)
+    return s + v   // 'unidad' (por defecto): valor directo por unidad
+  }, 0)
+
   const cvu = mpUnit + empUnit                             // solo insumos (materiales), referencia
-  const costoTotalUnit = mpUnit + empUnit + moUnit         // costo unitario CON overhead por tiempo (= "CVu" del Excel)
+  const costoTotalUnit = mpUnit + empUnit + moUnit + adicUnit  // costo unitario CON overhead por tiempo + adicionales
   const costoFinal = costoTotalUnit
   const comUnit    = precioMayor * (comision / 100)        // comisión sobre la venta (informativa)
   // Ganancia por unidad = Precio − Costo unitario (igual que la hoja 05 del Excel)
@@ -143,7 +152,7 @@ export const calcularCostosProducto = ({
 
   return {
     totalMPBache, totalMOBache, totalEmpBache, totalMinutos,
-    mpUnit, moUnit, empUnit, cifUnit,
+    mpUnit, moUnit, empUnit, cifUnit, adicUnit,
     cvu, costoTotalUnit, comUnit, costoFinal,
     margenMayor, margenDetal, utilMayor, utilDetal, pe,
     unidsMesTot, pctCIF, costoMin,

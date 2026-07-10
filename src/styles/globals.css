@@ -238,6 +238,54 @@ body {
   color: var(--header-fg-strong, var(--crema)); font-size: 1.4rem; padding: 4px;
 }
 .mobile-brand { font-family: var(--fuente-titulos, 'Playfair Display'), serif; color: var(--header-fg, var(--dorado)); font-size: 1.2rem; }
+
+/* Chip de usuario minimalista en el header (arriba derecha, junto a notificaciones) */
+.user-chip {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: transparent; border: none; cursor: pointer;
+  padding: 3px 8px 3px 3px; border-radius: 999px; font: inherit;
+  color: var(--header-fg-strong, var(--crema)); transition: background 0.15s ease;
+}
+.user-chip:hover { background: rgba(127,127,127,0.16); }
+.user-chip-av {
+  position: relative; width: 30px; height: 30px; border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0;
+  background: linear-gradient(135deg, var(--dorado), var(--tierra));
+  color: var(--selva); font-weight: 700; font-size: 0.82rem;
+}
+.user-chip-dot { position: absolute; bottom: -1px; right: -1px; width: 9px; height: 9px; border-radius: 50%; background: var(--lima); border: 2px solid var(--selva); }
+.user-chip-name { font-size: 0.82rem; font-weight: 600; max-width: 150px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.user-chip-gear { opacity: 0.8; flex-shrink: 0; }
+.user-chip-chev { opacity: 0.85; flex-shrink: 0; transition: transform 0.18s ease; }
+@media (max-width: 640px) { .user-chip-name { display: none; } }
+
+/* Menú desplegable del usuario (Actualizar datos / Cambiar contraseña) */
+.user-menu-wrap { position: relative; }
+.user-menu-overlay { position: fixed; inset: 0; z-index: 250; }
+.user-menu {
+  position: absolute; right: 0; top: calc(100% + 8px); z-index: 260;
+  min-width: 210px; background: var(--blanco, #fff);
+  border: 1px solid var(--crema-oscuro); border-radius: 12px;
+  box-shadow: 0 12px 30px rgba(0,0,0,0.22); overflow: hidden;
+  animation: modalIn 0.16s ease;
+}
+.user-menu-head { padding: 12px 14px; border-bottom: 1px solid var(--crema-oscuro); background: rgba(45,90,61,0.05); }
+.user-menu-name { font-weight: 700; color: var(--selva); font-size: 0.92rem; line-height: 1.2; }
+.user-menu-role { font-size: 0.72rem; color: var(--texto-suave); text-transform: uppercase; letter-spacing: 0.4px; margin-top: 2px; }
+.user-menu-item {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 11px 14px; background: none; border: none; cursor: pointer;
+  font: inherit; font-size: 0.86rem; color: var(--texto); text-align: left;
+  transition: background 0.12s ease;
+}
+.user-menu-item:hover { background: rgba(45,90,61,0.08); color: var(--selva); }
+.user-menu-item + .user-menu-item { border-top: 1px solid var(--crema-oscuro); }
+.user-menu-item-danger { color: var(--rojo); }
+.user-menu-item-danger:hover { background: rgba(192,57,43,0.10); color: var(--rojo); }
+/* Submenú de Configuración (Usuarios / Roles) */
+.user-submenu { background: rgba(45,90,61,0.04); border-top: 1px solid var(--crema-oscuro); }
+.user-submenu .user-subitem { padding-left: 34px; font-size: 0.83rem; }
+.user-submenu .user-subitem + .user-subitem { border-top: 1px solid rgba(0,0,0,0.05); }
 .sidebar-overlay {
   display: none;
   position: fixed; inset: 0; z-index: 99;

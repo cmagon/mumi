@@ -17,7 +17,7 @@ import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import * as XLSX from 'xlsx'
 import Receta from './Receta'
 import { CATALOGO_PARAMS, PARAM_UNIDAD, PRESENTACIONES } from '../lib/calidad'
-import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Printer, Settings, ShoppingCart, Tag, Trash2, Undo2, X } from 'lucide-react'
+import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Printer, Settings, ShoppingCart, Tag, Trash2, Undo2, X, ChevronUp, ChevronDown, Plus } from 'lucide-react'
 import { descargarFichaExcel } from '../lib/fichaExcel'
 import { getConfig } from '../lib/appConfig'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
@@ -51,6 +51,11 @@ export default function Costos() {
   const [procesos, setProcesos]     = useState([])
   const [empaque, setEmpaque]       = useState([])
   const [calcResult, setCalcResult] = useState(null)
+  // Categorías adicionales (además de "Tipo"), sobre todo para MP vendibles que caben en varias.
+  const [categorias, setCategorias] = useState([])
+  // Costos adicionales personalizados (depreciación de máquinas, etc.) que suman al costo final.
+  const [adicionales, setAdicionales] = useState([])
+  const [adicOpen, setAdicOpen] = useState(false)
 
   // ---- Imagen del producto ----
   const [imgData, setImgData] = useState('')
@@ -233,6 +238,7 @@ export default function Costos() {
       ingredientes: ings, procesos: parse(p.procesos), empaque: parse(p.empaque),
       cifTotal, productosGuardados: otros, cifUnidadesFallback, operariosActivos,
       diasHabiles: op.dias, jornadaHoras: op.jornadaHoras, improductividad: op.improductividad,
+      adicionales: parse(p.costos_adicionales),
     })
   }
 
@@ -293,8 +299,9 @@ export default function Costos() {
       cifTotal, productosGuardados: portafolio,
       cifUnidadesFallback, operariosActivos,
       diasHabiles: op.dias, jornadaHoras: op.jornadaHoras, improductividad: op.improductividad,
+      adicionales,
     }))
-  }, [formProd, ingredientesEff, procesos, empaque, cifTotal, productos, editingId, cifUnidadesFallback, operariosActivos, op])
+  }, [formProd, ingredientesEff, procesos, empaque, cifTotal, productos, editingId, cifUnidadesFallback, operariosActivos, op, adicionales])
 
   useEffect(() => { recalcular() }, [recalcular])
 
@@ -321,6 +328,7 @@ export default function Costos() {
     setImgData(''); setRendimiento(62); setDesperdicio(2); setPesoUnidad(1000)
     setPorciona(false); setPesoSubporcion(''); setModoIng('gramos'); setPesoBacheTotal('')
     setBrix(75); setBrixAplica(false); setParamsCalidad([]); setCamposExtra([])
+    setCategorias([]); setAdicionales([]); setAdicOpen(false)
     setFichaFile(null); setFichaNombre(''); setFichaPath('')
     setEditingId(null); setSelFuente('')
   }
@@ -369,7 +377,7 @@ export default function Costos() {
       }
     }))
     setProcesos([]); setEmpaque([])   // el usuario agrega MO y empaque
-    setRendimiento(r.rendimiento || 62); setDesperdicio(r.desperdicio || 2); setPesoUnidad(r.peso_unidad || 1000)
+    setRendimiento(r.rendimiento || 62); setDesperdicio(r.desperdicio ?? 2); setPesoUnidad(r.peso_unidad || 1000)
     setBrix(r.brix || 75); setBrixAplica(!!r.brix_aplica)
     setImgData(r.imagen_url || '')
     setFichaNombre(r.ficha_nombre || ''); setFichaPath(r.ficha_url || ''); setFichaFile(null)
@@ -386,10 +394,14 @@ export default function Costos() {
     setSelFuente(`prod-${p.id}`)
     setFormProd({ nombre: p.nombre, tipo: p.tipo, bache: p.bache, baches_mes: p.baches_mes, merma: p.merma, comision: p.comision, precio_mayor: p.precio_mayor, precio_detal: p.precio_detal, presentacion: p.presentacion || 'Unidad', activo: p.activo !== false, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '', mp_id: p.mp_id || '' })
     setCamposExtra(parseJSON(p.campos_personalizados, []))
+    setCategorias(parseJSON(p.categorias, []))
+    const adic = parseJSON(p.costos_adicionales, [])
+    setAdicionales(adic.map(a => ({ ...a, _id: Date.now() + Math.random() })))
+    setAdicOpen(adic.length > 0)
     setIngredientes(parseJSON(p.ingredientes, []).map(i => ({ ...EMPTY_ING, _id: Date.now() + Math.random(), mpId: i.mpId||'', nombre: i.nombre||'', modo: i.mpId ? 'lista' : 'manual', precio: i.precio||'', precioOverride: !!i.precioOverride, presentacion: i.presentacion||1000, pct: i.pct||'', cantidad: i.cantidad||'', tipo: i.tipo||'normal', base: i.base||'' })))
     setProcesos(parseJSON(p.procesos, []).map(pr => ({ ...pr, _id: Date.now() + Math.random() })))
     setEmpaque(parseJSON(p.empaque, []).map(e => ({ ...e, _id: Date.now() + Math.random() })))
-    setRendimiento(p.rendimiento || 62); setDesperdicio(p.desperdicio || 2); setPesoUnidad(p.peso_unidad || 1000)
+    setRendimiento(p.rendimiento || 62); setDesperdicio(p.desperdicio ?? 2); setPesoUnidad(p.peso_unidad || 1000)
     setPorciona(!!p.porciona); setPesoSubporcion(p.peso_subporcion || '')
     setBrix(p.brix || 75); setBrixAplica(!!p.brix_aplica)
     setParamsCalidad(parseJSON(p.parametros_calidad, []))
@@ -465,7 +477,8 @@ export default function Costos() {
         util_detal: r.utilDetal || 0,
         pe: r.pe || 0,
         rendimiento: parseFloat(rendimiento) || 62,
-        desperdicio: parseFloat(desperdicio) || 2,
+        // Desperdicio permite 0 (sin desperdicio adicional): no usar "|| 2" que convertiría el 0 en 2.
+        desperdicio: isNaN(parseFloat(desperdicio)) ? 0 : parseFloat(desperdicio),
         peso_unidad: parseFloat(pesoUnidad) || 1000,
         porciona, peso_subporcion: porciona ? (parseFloat(pesoSubporcion) || 0) : null,
         brix: parseFloat(brix) || 75,
@@ -506,6 +519,15 @@ export default function Costos() {
         if (error) throw error
         datos._newId = ins?.id
       }
+
+      // Categorías múltiples + costos adicionales — escritura aparte y tolerante (columnas v84 opcionales).
+      try {
+        const idFicha = editingId || datos._newId
+        if (idFicha) await supabase.from('products_costing').update({
+          categorias: categorias.filter(Boolean),
+          costos_adicionales: adicionales.filter(a => a.descripcion?.trim() || a.valor).map(a => ({ descripcion: a.descripcion || '', valor: parseFloat(a.valor) || 0, base: a.base || 'unidad' })),
+        }).eq('id', idFicha)
+      } catch { /* columnas opcionales: no bloquea el guardado */ }
 
       // Sincroniza el catálogo de PRODUCTO TERMINADO (base) con la ficha (no toca el stock existente).
       // Si la ficha se renombró, se actualiza por product_id (no crea duplicado).
@@ -1074,6 +1096,21 @@ export default function Costos() {
                     {opcionesTipo.map(t => <option key={t} value={t}>{tipoLabel(t)}</option>)}
                   </select>
                 </div>
+                {/* Categorías adicionales — sobre todo para MP vendibles que caben en varias categorías */}
+                {formProd.tipo === 'mp' && (
+                  <div className="form-group" style={{ gridColumn:'1 / -1' }}>
+                    <label className="form-label">Categorías adicionales <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(la MP vendible puede pertenecer a varias)</small></label>
+                    <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                      {opcionesTipo.filter(t => t !== formProd.tipo).map(t => { const on = categorias.includes(t); return (
+                        <button type="button" key={t} className={`btn btn-xs ${on ? 'btn-primary' : 'btn-secondary'}`}
+                          onClick={() => setCategorias(cs => on ? cs.filter(x => x !== t) : [...cs, t])}>
+                          {on ? '✓ ' : '+ '}{tipoLabel(t)}
+                        </button>
+                      ) })}
+                    </div>
+                    {categorias.length > 0 && <small style={{ display:'block', marginTop:4, color:'var(--selva)' }}>Categorías: {[formProd.tipo, ...categorias].map(tipoLabel).join(', ')}</small>}
+                  </div>
+                )}
                 <div className="form-group">
                   <label className="form-label">Presentación <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(elige o escribe una)</small></label>
                   <input className="form-control" list="dl-presentaciones" value={formProd.presentacion || ''} onChange={e => setFormProd(f=>({...f,presentacion:e.target.value}))} placeholder="Ej: Caja, Unidad, Kilo..." />
@@ -1270,8 +1307,8 @@ export default function Costos() {
           <div className="card">
             <div className="card-title"><Ico as={Settings} size={14} />Parámetros de Producción <small style={{ fontWeight:400, fontSize:'0.78rem', color:'var(--texto-suave)' }}>— rendimiento, desperdicio y peso por unidad determinan cuántas unidades salen del bache</small></div>
             <div className="form-grid">
-              <div className="form-group"><label className="form-label">Rendimiento esperado (%)</label><input type="number" className="form-control" value={rendimiento} onChange={e => setRendimiento(e.target.value)} min={1} max={100} step={0.1} /></div>
-              <div className="form-group"><label className="form-label">% Desperdicio</label><input type="number" className="form-control" value={desperdicio} onChange={e => setDesperdicio(e.target.value)} min={0} max={50} step={0.1} /></div>
+              <div className="form-group"><label className="form-label">Rendimiento esperado (%)</label><input type="number" className="form-control" value={rendimiento} onChange={e => setRendimiento(e.target.value)} min={1} max={100} step={0.1} /><small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>% de la mezcla que se convierte en producto (ej. por evaporación/cocción).</small></div>
+              <div className="form-group"><label className="form-label">% Desperdicio</label><input type="number" className="form-control" value={desperdicio} onChange={e => setDesperdicio(e.target.value)} min={0} max={50} step={0.1} /><small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Desperdicio <strong>adicional</strong> que se pierde <strong>después</strong> del rendimiento (no es la diferencia de 100 − rendimiento; se descuenta sobre lo ya rendido).</small></div>
               <div className="form-group"><label className="form-label">Peso por {presLabel} (g)</label><input type="number" className="form-control" value={pesoUnidad} onChange={e => setPesoUnidad(e.target.value)} min={1} /></div>
               <div className="form-group">
                 <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:'0.85rem', cursor:'pointer', fontWeight:600, color:'var(--selva)', minHeight:'1.2rem' }}>
@@ -1422,6 +1459,29 @@ export default function Costos() {
             <div style={{ display:'flex', justifyContent:'flex-end', marginTop:8 }}><strong>Total Empaque: {fCOP(calcResult?.totalEmpBache||0)}</strong></div>
           </div>
 
+          {/* ── Costos adicionales personalizados (depreciación, etc.) — colapsable ── */}
+          <div className="card">
+            <div className="card-title" style={{ cursor:'pointer' }} onClick={() => setAdicOpen(o => !o)}>
+              <Ico as={DollarSign} size={14} />Costos Adicionales {adicionales.length > 0 ? `(${adicionales.length})` : ''}
+              <button type="button" className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={(e) => { e.stopPropagation(); setAdicOpen(o => !o) }}><Ico as={adicOpen ? ChevronUp : ChevronDown} size={14} />{adicOpen ? 'Ocultar' : 'Mostrar'}</button>
+            </div>
+            {adicOpen && (
+              <div>
+                <small style={{ color:'var(--texto-suave)', display:'block', marginBottom:8 }}>Costos extra personalizados (depreciación de máquinas, arriendo específico, etc.). Suman al <strong>costo final por unidad</strong> según su base.</small>
+                {adicionales.map((a, i) => (
+                  <div key={a._id || i} style={{ display:'grid', gridTemplateColumns:'1.4fr 0.9fr 0.9fr auto', gap:6, alignItems:'end', marginBottom:6 }}>
+                    <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Descripción</label><input className="form-control" value={a.descripcion || ''} onChange={e => setAdicionales(arr => arr.map((x,idx) => idx===i ? { ...x, descripcion:e.target.value } : x))} placeholder="Ej. Depreciación horno" /></div>
+                    <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Valor (COP)</label><input type="number" className="form-control" value={a.valor ?? ''} onChange={e => setAdicionales(arr => arr.map((x,idx) => idx===i ? { ...x, valor:e.target.value } : x))} min={0} step="any" /></div>
+                    <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Base</label><select className="form-control" value={a.base || 'unidad'} onChange={e => setAdicionales(arr => arr.map((x,idx) => idx===i ? { ...x, base:e.target.value } : x))}><option value="unidad">por unidad</option><option value="bache">por bache</option><option value="mes">por mes</option></select></div>
+                    <button type="button" className="btn btn-xs btn-danger" onClick={() => setAdicionales(arr => arr.filter((_,idx) => idx!==i))}>✕</button>
+                  </div>
+                ))}
+                <button type="button" className="btn btn-sm btn-secondary" onClick={() => setAdicionales(arr => [...arr, { _id: Date.now()+Math.random(), descripcion:'', valor:'', base:'unidad' }])}><Ico as={Plus} size={13} /> Agregar costo</button>
+                <small style={{ display:'block', marginTop:8, color:'var(--texto-suave)', fontSize:'0.72rem' }}>Base: <strong>por unidad</strong> suma directo; <strong>por bache</strong> se divide entre las unidades del bache; <strong>por mes</strong> se divide entre las unidades del mes.</small>
+              </div>
+            )}
+          </div>
+
           {/* ── Ficha técnica (instrucciones paso a paso) ── */}
           <div className="card">
             <div className="card-title"><Ico as={FileText} size={14} />Ficha Técnica — Instrucciones de Elaboración</div>
@@ -1502,6 +1562,7 @@ export default function Costos() {
                 <div className="row"><span>Costo MP por unidad</span><span>{fCOP(calcResult.mpUnit)}</span></div>
                 <div className="row"><span>Costo empaque por unidad</span><span>{fCOP(calcResult.empUnit)}</span></div>
                 <div className="row"><span>+ Mano de obra/overhead por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>({calcResult.totalMinutos} min × {fCOP(calcResult.costoMin)}/min ÷ unidades)</small></span><span style={{color:'var(--dorado)'}}>{fCOP(calcResult.moUnit)}</span></div>
+                {(calcResult.adicUnit || 0) > 0 && <div className="row"><span>+ Costos adicionales por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>(depreciación, otros)</small></span><span style={{color:'var(--dorado)'}}>{fCOP(calcResult.adicUnit)}</span></div>}
                 <div className="row" style={{ borderTop:'1px dashed rgba(245,240,232,0.2)', paddingTop:6, marginTop:4 }}><span>Costo por bache <small style={{opacity:0.6,fontSize:'0.72rem'}}>(MP {fCOP(calcResult.totalMPBache||0)} + MO {fCOP(calcResult.totalMOBache||0)})</small></span><span style={{color:'var(--lima)'}}>{fCOP((calcResult.totalMPBache||0)+(calcResult.totalMOBache||0))}</span></div>
                 <div className="total">
                   <div className="row"><span><strong>Costo TOTAL por unidad</strong></span><span><strong>{fCOP(calcResult.costoTotalUnit)}</strong></span></div>

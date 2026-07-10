@@ -90,9 +90,14 @@ function ProtectedLayout() {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100vh', background: 'var(--crema)' }}>
-        <div style={{ fontFamily: "'Playfair Display', serif", color: 'var(--selva)', fontSize: '1.4rem' }}>
-          🌿 Cargando...
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 26, height: '100vh', background: 'var(--crema)' }}>
+        <div style={{
+          width: 84, height: 84, borderRadius: '50%',
+          border: '7px solid rgba(45,90,61,0.15)', borderTopColor: 'var(--selva)',
+          animation: 'spin 0.9s linear infinite',
+        }} />
+        <div style={{ fontFamily: "var(--fuente-titulos, 'Playfair Display'), serif", color: 'var(--selva)', fontSize: '2rem', fontWeight: 700, letterSpacing: 1 }}>
+          Cargando…
         </div>
       </div>
     )
@@ -109,7 +114,7 @@ function ProtectedLayout() {
         puedeFichar={esDevPreview ? (rolEfectivo !== 'admin') : !!empVinculado}
         onRegistrarAsistencia={() => { setSidebarOpen(false); if (esDevPreview && !empVinculado) return; setAsistModo('login') }}
       />
-      <MobileHeader onMenuClick={() => setSidebarOpen(true)} />
+      <MobileHeader onMenuClick={() => setSidebarOpen(true)} onLogout={pedirCierre} />
       <main className="main-content">
         <DevModeBanner />
         <Outlet />

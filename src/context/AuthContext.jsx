@@ -57,6 +57,8 @@ export function AuthProvider({ children }) {
         .eq('id', uid)
         .single()
       if (error) throw error
+      // Seguridad: si el usuario quedó INACTIVO, se cierra la sesión (no puede seguir en el sistema).
+      if (data && data.estado && data.estado !== 'activo') { cerrarSesionAuto(); return null }
       if (data) { setProfile(data); localStorage.setItem(PROFILE_KEY, JSON.stringify(data)) }
       return data
     } catch {
@@ -122,6 +124,15 @@ export function AuthProvider({ children }) {
     const email = loginAEmail(login)
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw error
+    // Seguridad: un usuario INACTIVO no puede ingresar (se corta la sesión y se avisa)
+    try {
+      const { data: perfil } = await supabase.from('user_profiles').select('estado').eq('id', data.user.id).single()
+      if (perfil && perfil.estado && perfil.estado !== 'activo') {
+        await supabase.auth.signOut()
+        setUser(null); setProfile(null); clearLoginAt(); localStorage.removeItem(PROFILE_KEY)
+        throw new Error('Tu usuario está inactivo. Contacta al administrador.')
+      }
+    } catch (e) { if (e.message?.includes('inactivo')) throw e /* si no se pudo verificar, no bloquea el login */ }
     setLoginAt(Date.now())   // marca de inicio para el cierre automático a las 48h
     // Actualizar último acceso
     if (data.user) {

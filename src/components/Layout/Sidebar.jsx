@@ -1,15 +1,13 @@
 import { useState, useEffect } from 'react'
-import { NavLink, useNavigate } from 'react-router-dom'
+import { NavLink } from 'react-router-dom'
 import {
   LayoutDashboard, Calculator, Package, Tags, ClipboardList, Factory, Users, Handshake,
   Camera, FolderOpen, NotebookText, AlertTriangle, GraduationCap, Settings,
-  Clock, Leaf, LogOut, User, KeyRound, Recycle,
+  Clock, Leaf, KeyRound, Recycle,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
-import { getRolLabel } from '../../lib/businessLogic'
 import { puedeVer, RUTA_MODULO } from '../../lib/permisos'
 import { getConfig, loadConfig } from '../../lib/appConfig'
-import ProfileModal from '../ProfileModal'
 import DevUserSwitch from '../DevUserSwitch'
 
 const NAV_ITEMS = [
@@ -36,19 +34,10 @@ const NAV_ITEMS = [
   { to: '/usuarios',   icon: KeyRound, label: 'Usuarios & Permisos', adminOnly: true },
 ]
 
-export default function Sidebar({ open, onClose, onLogout, puedeFichar, onRegistrarAsistencia }) {
-  const { profile, signOut, rolEfectivo, esDevPreview } = useAuth()
-  const navigate = useNavigate()
-  const [perfilModal, setPerfilModal] = useState(false)
+export default function Sidebar({ open, onClose, puedeFichar, onRegistrarAsistencia }) {
+  const { rolEfectivo } = useAuth()
   const [cfg, setCfg] = useState(getConfig())
   useEffect(() => { loadConfig().then(setCfg).catch(() => {}) }, [])
-
-  // Si el layout maneja el cierre (modal de asistencia), lo delegamos; si no, cerramos directo
-  const handleLogout = async () => {
-    if (onLogout) { onLogout(); return }
-    await signOut()
-    navigate('/login')
-  }
 
   return (
     <>
@@ -71,19 +60,6 @@ export default function Sidebar({ open, onClose, onLogout, puedeFichar, onRegist
               : <Leaf size={22} aria-hidden="true" />}
             <span>{cfg.empresa || 'Mumi Amazonia'}</span>
           </NavLink>
-          <div className="brand-tagline">{cfg.eslogan || 'Gestión Empresarial'}</div>
-        </div>
-
-        <div className="sidebar-user">
-          <div className="user-avatar"><User size={20} aria-hidden="true" /></div>
-          <div className="user-meta">
-            <div className="user-greeting">Hola,</div>
-            <div className="user-name">{profile?.nombre || '—'}</div>
-            <div className="user-role">{getRolLabel(rolEfectivo)}{esDevPreview && <span style={{ marginLeft: 6, fontSize: '0.62rem', background: 'var(--dorado)', color: '#fff', padding: '1px 5px', borderRadius: 6 }}>vista de rol</span>}</div>
-            <button className="user-config-btn" onClick={() => { setPerfilModal(true); onClose?.() }}>
-              <User size={13} aria-hidden="true" /> Mi perfil
-            </button>
-          </div>
         </div>
 
         <nav className="sidebar-nav">
@@ -117,14 +93,7 @@ export default function Sidebar({ open, onClose, onLogout, puedeFichar, onRegist
           {/* Modo desarrollador: en móvil va aquí (en escritorio está en el encabezado) */}
           <div className="solo-movil"><DevUserSwitch variant="menu" /></div>
         </nav>
-
-        <div className="sidebar-footer">
-          <button className="btn-logout" onClick={handleLogout} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
-            <LogOut size={16} aria-hidden="true" /> Cerrar Sesión
-          </button>
-        </div>
       </aside>
-      <ProfileModal open={perfilModal} onClose={() => setPerfilModal(false)} />
     </>
   )
 }
