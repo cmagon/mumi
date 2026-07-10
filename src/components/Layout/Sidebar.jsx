@@ -1,15 +1,16 @@
 import { useState, useEffect } from 'react'
-import { NavLink } from 'react-router-dom'
+import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Calculator, Package, Tags, ClipboardList, Factory, Users, Handshake,
-  Camera, FolderOpen, NotebookText, AlertTriangle, GraduationCap, Settings,
-  Clock, Leaf, KeyRound, Recycle,
+  Camera, FolderOpen, NotebookText, AlertTriangle, GraduationCap,
+  Clock, Leaf, Recycle, ChevronDown,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { puedeVer, RUTA_MODULO } from '../../lib/permisos'
 import { getConfig, loadConfig } from '../../lib/appConfig'
 import DevUserSwitch from '../DevUserSwitch'
 
+// (Configuración y Usuarios & Permisos ya no van aquí: se acceden desde el menú del usuario en el header)
 const NAV_ITEMS = [
   { section: 'Principal' },
   { to: '/dashboard',  icon: LayoutDashboard, label: 'Tablero Principal' },
@@ -30,14 +31,36 @@ const NAV_ITEMS = [
   { to: '/registros',  icon: NotebookText, label: 'Libros de Registro' },
   { to: '/calidad',    icon: AlertTriangle, label: 'No Conformidades' },
   { to: '/capacitacion', icon: GraduationCap, label: 'Capacitación' },
-  { to: '/configuracion', icon: Settings, label: 'Configuración', adminOnly: true },
-  { to: '/usuarios',   icon: KeyRound, label: 'Usuarios & Permisos', adminOnly: true },
 ]
 
 export default function Sidebar({ open, onClose, puedeFichar, onRegistrarAsistencia }) {
   const { rolEfectivo } = useAuth()
+  const location = useLocation()
   const [cfg, setCfg] = useState(getConfig())
+  const [secAbierta, setSecAbierta] = useState({})   // { [seccion]: bool } — overrides del usuario
   useEffect(() => { loadConfig().then(setCfg).catch(() => {}) }, [])
+
+  // Agrupa los ítems por sección, filtrando por permiso
+  const grupos = []
+  let actual = null
+  NAV_ITEMS.forEach(item => {
+    if (item.section) { actual = { section: item.section, items: [] }; grupos.push(actual); return }
+    if (!puedeVer(rolEfectivo, RUTA_MODULO[item.to])) return
+    if (actual) actual.items.push(item)
+  })
+  const visibles = grupos.filter(g => g.items.length)
+
+  const renderItem = (item) => (
+    <NavLink
+      key={item.to}
+      to={item.to}
+      className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+      onClick={onClose}
+    >
+      <span className="nav-icon"><item.icon size={18} aria-hidden="true" /></span>
+      {item.label}
+    </NavLink>
+  )
 
   return (
     <>
@@ -69,27 +92,35 @@ export default function Sidebar({ open, onClose, puedeFichar, onRegistrarAsisten
               Registrar asistencia
             </button>
           )}
-          {(() => {
-            const out = []
-            let seccionPend = null
-            NAV_ITEMS.forEach((item, i) => {
-              if (item.section) { seccionPend = item.section; return }
-              if (!puedeVer(rolEfectivo, RUTA_MODULO[item.to])) return
-              if (seccionPend) { out.push(<div key={`s${i}`} className="nav-section-title">{seccionPend}</div>); seccionPend = null }
-              out.push(
-                <NavLink
-                  key={item.to}
-                  to={item.to}
-                  className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
-                  onClick={onClose}
-                >
-                  <span className="nav-icon"><item.icon size={18} aria-hidden="true" /></span>
-                  {item.label}
-                </NavLink>
+
+          {visibles.map(g => {
+            // Solo la sección "Registros" se agrupa en acordeón (+/−); el resto va plano
+            if (g.section !== 'Registros') {
+              return (
+                <div key={g.section}>
+                  <div className="nav-section-title">{g.section}</div>
+                  {g.items.map(renderItem)}
+                </div>
               )
-            })
-            return out
-          })()}
+            }
+            const activa = g.items.some(it => it.to === location.pathname)
+            const abierto = secAbierta[g.section] ?? activa
+            return (
+              <div key={g.section}>
+                <button
+                  type="button"
+                  className="nav-section-toggle"
+                  aria-expanded={abierto}
+                  onClick={() => setSecAbierta(s => ({ ...s, [g.section]: !(s[g.section] ?? activa) }))}
+                >
+                  {g.section}
+                  <ChevronDown size={15} aria-hidden="true" style={{ transition: 'transform 0.18s ease', transform: abierto ? 'rotate(180deg)' : 'none' }} />
+                </button>
+                {abierto && g.items.map(renderItem)}
+              </div>
+            )
+          })}
+
           {/* Modo desarrollador: en móvil va aquí (en escritorio está en el encabezado) */}
           <div className="solo-movil"><DevUserSwitch variant="menu" /></div>
         </nav>

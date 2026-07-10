@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Leaf, Menu, Settings, User, ShieldCheck, LogOut, ChevronDown, ChevronRight, Users, KeyRound } from 'lucide-react'
+import { Leaf, Menu, Settings, User, ShieldCheck, LogOut, ChevronDown, Users } from 'lucide-react'
 import NotificationBell from '../NotificationBell'
 import DevUserSwitch from '../DevUserSwitch'
 import ProfileModal from '../ProfileModal'
@@ -14,13 +14,12 @@ export default function MobileHeader({ onMenuClick, onLogout }) {
   const { profile, rolEfectivo, esDevPreview } = useAuth()
   const navigate = useNavigate()
   const [menu, setMenu] = useState(false)
-  const [confOpen, setConfOpen] = useState(false)
   const [perfil, setPerfil] = useState(null)   // null | 'datos' | 'password'
   useEffect(() => { loadConfig().then(setCfg).catch(() => {}) }, [])
 
   const puedeConfig = puedeVer(rolEfectivo, 'configuracion')
   const puedeUsuarios = puedeVer(rolEfectivo, 'usuarios')
-  const cerrar = () => { setMenu(false); setConfOpen(false) }
+  const cerrar = () => setMenu(false)
   const ir = (ruta) => { cerrar(); navigate(ruta) }
 
   const nombre = profile?.nombre || '—'
@@ -71,21 +70,16 @@ export default function MobileHeader({ onMenuClick, onLogout }) {
                   <ShieldCheck size={15} aria-hidden="true" /> Seguridad
                 </button>
 
-                {/* Configuración (admin): submenú con Usuarios y Roles */}
-                {(puedeConfig || puedeUsuarios) && (
-                  <>
-                    <button className="user-menu-item" role="menuitem" aria-expanded={confOpen} onClick={() => setConfOpen(o => !o)}>
-                      <Settings size={15} aria-hidden="true" /> Configuración
-                      <ChevronRight size={15} aria-hidden="true" style={{ marginLeft: 'auto', transition: 'transform 0.18s ease', transform: confOpen ? 'rotate(90deg)' : 'none' }} />
-                    </button>
-                    {confOpen && (
-                      <div className="user-submenu">
-                        {puedeConfig && <button className="user-menu-item user-subitem" role="menuitem" onClick={() => ir('/configuracion')}><Settings size={14} aria-hidden="true" /> Ajustes del sistema</button>}
-                        {puedeUsuarios && <button className="user-menu-item user-subitem" role="menuitem" onClick={() => ir('/usuarios')}><Users size={14} aria-hidden="true" /> Usuarios</button>}
-                        {puedeUsuarios && <button className="user-menu-item user-subitem" role="menuitem" onClick={() => ir('/usuarios')}><KeyRound size={14} aria-hidden="true" /> Roles y permisos</button>}
-                      </div>
-                    )}
-                  </>
+                {/* Admin: acceso directo a Configuración y Usuarios (Usuarios ya incluye roles y permisos) */}
+                {puedeConfig && (
+                  <button className="user-menu-item" role="menuitem" onClick={() => ir('/configuracion')}>
+                    <Settings size={15} aria-hidden="true" /> Configuración
+                  </button>
+                )}
+                {puedeUsuarios && (
+                  <button className="user-menu-item" role="menuitem" onClick={() => ir('/usuarios')}>
+                    <Users size={15} aria-hidden="true" /> Usuarios
+                  </button>
                 )}
 
                 <button className="user-menu-item user-menu-item-danger" role="menuitem" onClick={() => { cerrar(); onLogout?.() }}>

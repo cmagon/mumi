@@ -147,6 +147,17 @@ body {
   letter-spacing: 2px; text-transform: uppercase;
   color: var(--nav-fg-faint, rgba(245,240,232,0.35));
 }
+/* Encabezado de sección colapsable (acordeón con +/−) */
+.nav-section-toggle {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  width: calc(100% - 24px); margin: 6px 12px 2px; padding: 9px 10px;
+  background: rgba(255,255,255,0.06); border: 1px solid rgba(200,169,74,0.22);
+  border-radius: 8px; cursor: pointer;
+  font: inherit; font-size: 0.72rem; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase;
+  color: var(--header-fg-strong, var(--crema)); transition: var(--transicion);
+}
+.nav-section-toggle:hover { background: rgba(200,169,74,0.16); border-color: var(--dorado); }
+.nav-section-toggle svg { flex-shrink: 0; color: var(--header-fg, var(--dorado)); }
 .nav-item {
   display: flex; align-items: center; gap: 12px;
   margin: 2px 12px;
