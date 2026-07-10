@@ -27,8 +27,8 @@ export default function MobileHeader({ onMenuClick, onLogout }) {
 
   return (
     <div className="mobile-header">
-      <button className="hamburger" onClick={onMenuClick} aria-label="Abrir menú" style={{ display: 'inline-flex', alignItems: 'center' }}><Menu size={24} /></button>
-      <Link to="/dashboard" className="mobile-brand" title="Ir al Tablero Principal" aria-label="Ir al Tablero Principal" style={{ display: 'flex', alignItems: 'center', gap: 6, textDecoration: 'none' }}>
+      <button className="hamburger" onClick={onMenuClick} aria-label="Abrir menú"><Menu size={24} /></button>
+      <Link to="/dashboard" className="mobile-brand" title="Ir al Tablero Principal" aria-label="Ir al Tablero Principal" style={{ textDecoration: 'none' }}>
         {cfg.logo_url
           ? <img src={cfg.logo_url} alt="logo" style={{ maxWidth: 26, maxHeight: 26, objectFit: 'contain' }} />
           : <Leaf size={20} aria-hidden="true" />}

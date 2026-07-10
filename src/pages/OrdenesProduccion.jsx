@@ -2211,10 +2211,12 @@ export default function OrdenesProduccion() {
               </div>
               {(() => { const loteSug = ordenPrep?.es_subproducto ? loteFechaHoy : siguienteLoteSugerido; return (
               <div className="form-group" style={{ margin: 0 }}><label className="form-label">Lote *</label><input className="form-control" value={prepLote} onChange={e => setPrepLote(e.target.value)} placeholder={`Sugerido: ${loteSug}`} />
+                {/* La sugerencia SOLO aparece si el lote está vacío. Si ya se puso un lote, no se sugiere
+                    (evita confusión cuando hay varias órdenes en proceso). */}
                 <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 3 }}>
-                  {prepLote.trim() === loteSug
-                    ? <span style={{ color: 'var(--selva)' }}>✓ Usando el lote sugerido ({loteSug})</span>
-                    : <button type="button" className="btn btn-xs btn-secondary" onClick={() => setPrepLote(loteSug)}>Usar sugerido: {loteSug}</button>}
+                  {prepLote.trim() === ''
+                    ? <button type="button" className="btn btn-xs btn-secondary" onClick={() => setPrepLote(loteSug)}>Usar sugerido: {loteSug}</button>
+                    : <span style={{ color: 'var(--selva)' }}>✓ Lote: {prepLote.trim()}</span>}
                 </small>
               </div>
               )})()}

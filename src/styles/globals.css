@@ -247,8 +247,9 @@ body {
 .hamburger {
   background: none; border: none; cursor: pointer;
   color: var(--header-fg-strong, var(--crema)); font-size: 1.4rem; padding: 4px;
+  display: inline-flex; align-items: center;
 }
-.mobile-brand { font-family: var(--fuente-titulos, 'Playfair Display'), serif; color: var(--header-fg, var(--dorado)); font-size: 1.2rem; }
+.mobile-brand { font-family: var(--fuente-titulos, 'Playfair Display'), serif; color: var(--header-fg, var(--dorado)); font-size: 1.2rem; display: flex; align-items: center; gap: 6px; }
 
 /* Chip de usuario minimalista en el header (arriba derecha, junto a notificaciones) */
 .user-chip {
