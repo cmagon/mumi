@@ -11,6 +11,7 @@ import { notificar } from '../lib/notificaciones'
 import { getConfig } from '../lib/appConfig'
 import { setBusy } from '../lib/busy'
 import { descargarPlantillaProduccion, leerPlantillaProduccion, exportarRegistrosExcelPTZ, exportarRegistrosPDFPTZ } from '../lib/plantillaProduccion'
+import { startDownload, updateDownload, endDownload, isDownloadCanceled } from '../lib/downloadProgress'
 import Modal from '../components/ui/Modal'
 import TimeField from '../components/ui/TimeField'
 import { useReorder } from '../hooks/useReorder'
@@ -86,6 +87,7 @@ export default function Produccion() {
   const [importFilas, setImportFilas] = useState([])       // filas editables leídas del Excel
   const [importAvisos, setImportAvisos] = useState([])     // filas omitidas al leer
   const [menuDesc, setMenuDesc] = useState(false)          // desplegable "Descargar registros"
+  const [periodoDesc, setPeriodoDesc] = useState('total')  // rango de fechas para descargar
   const [ordenLink, setOrdenLink] = useState(null)   // id de orden si se llega desde "Registrar producción"
   const [subprocs, setSubprocs] = useState([])       // tiempos por proceso/subproceso (unificado con órdenes)
   const ordProc = useReorder(setSubprocs)
@@ -461,17 +463,37 @@ export default function Produccion() {
   }
 
   // ===== Descargar registros en el formato original PTZ-RG-03 (Excel o PDF) =====
+  // Filtra los registros por el rango seleccionado (mensual / trimestral / semestral / anual / total).
+  const PERIODOS = { mes: 1, trimestre: 3, semestre: 6, anio: 12 }
+  const registrosDelPeriodo = () => {
+    if (periodoDesc === 'total') return filtrados
+    const meses = PERIODOS[periodoDesc] || 0
+    const desde = new Date(); desde.setMonth(desde.getMonth() - meses)
+    const ymdDesde = `${desde.getFullYear()}-${String(desde.getMonth() + 1).padStart(2, '0')}-${String(desde.getDate()).padStart(2, '0')}`
+    return filtrados.filter(r => String(r.fecha || '') >= ymdDesde)
+  }
   const descargarExcelPTZ = async () => {
     setMenuDesc(false); setBusy(true)
-    try { await exportarRegistrosExcelPTZ(filtrados, { templateUrl: ptzUrl }) }
+    try { await exportarRegistrosExcelPTZ(registrosDelPeriodo(), { templateUrl: ptzUrl }) }
     catch (e) { toast('No se pudo generar el Excel: ' + (e.message || e), 'error') }
     finally { setBusy(false) }
   }
-  const descargarPdfPTZ = () => {
+  const descargarPdfPTZ = async () => {
     setMenuDesc(false)
     const cfg = getConfig()
-    try { exportarRegistrosPDFPTZ(filtrados, { empresa: cfg.empresa, logoUrl: cfg.logo_url }) }
+    const lista = registrosDelPeriodo()
+    if (!lista.length) { toast('No hay registros en el periodo seleccionado', 'warning'); return }
+    startDownload('Descargando registros', 0)
+    try {
+      const r = await exportarRegistrosPDFPTZ(lista, {
+        empresa: cfg.empresa, logoUrl: cfg.logo_url, templateUrl: ptzUrl,
+        onProgress: (cur, tot) => updateDownload(cur, tot),
+        shouldCancel: () => isDownloadCanceled(),
+      })
+      if (r?.canceled) toast('Descarga cancelada', 'warning')
+    }
     catch (e) { toast(e.message || 'No se pudo generar el PDF', 'error') }
+    finally { endDownload() }
   }
 
   // Filtros
@@ -584,10 +606,20 @@ export default function Produccion() {
       <div className="page-header">
         <h1 className="page-title">Registro de Producción</h1>
         <div className="page-actions">
-          {puedeAnalisis && <div style={{ position: 'relative', display: 'inline-block' }} onMouseLeave={() => setMenuDesc(false)}>
+          {puedeAnalisis && <div style={{ position: 'relative', display: 'inline-block' }}>
             <button className="btn btn-secondary btn-sm" onClick={() => setMenuDesc(v => !v)}><Ico as={Download} size={14} />Descargar registros ▾</button>
             {menuDesc && (
-              <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 30, background: 'var(--blanco, #fff)', border: '1px solid var(--crema-oscuro)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.15)', minWidth: 210, overflow: 'hidden' }}>
+              <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 30, background: 'var(--blanco, #fff)', border: '1px solid var(--crema-oscuro)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.15)', minWidth: 230, overflow: 'hidden' }}>
+                <div style={{ padding: '9px 12px', borderBottom: '1px solid var(--crema-oscuro)' }}>
+                  <label style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', display: 'block', marginBottom: 4 }}>Rango de fechas</label>
+                  <select className="form-control" style={{ width: '100%' }} value={periodoDesc} onChange={e => setPeriodoDesc(e.target.value)}>
+                    <option value="mes">Último mes</option>
+                    <option value="trimestre">Último trimestre (3 meses)</option>
+                    <option value="semestre">Últimos 6 meses</option>
+                    <option value="anio">Último año</option>
+                    <option value="total">Total (todos)</option>
+                  </select>
+                </div>
                 <button className="btn btn-menu" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 12px', background: 'none', border: 'none', cursor: 'pointer' }} onClick={descargarExcelPTZ}>📊 Excel — formato PTZ-RG-03</button>
                 <button className="btn btn-menu" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 12px', background: 'none', border: 'none', borderTop: '1px solid var(--crema-oscuro)', cursor: 'pointer' }} onClick={descargarPdfPTZ}>📄 PDF — formato PTZ-RG-03</button>
               </div>

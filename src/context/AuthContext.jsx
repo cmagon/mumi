@@ -10,8 +10,8 @@ const AuthContext = createContext(null)
 const loginAEmail = (login) =>
   `${String(login || '').toLowerCase().trim().replace(/\s+/g, '').replace(/[^a-z0-9._-]/g, '')}@mumi.internal`
 
-// La sesión se cierra automáticamente a las 48 horas del inicio de sesión
-const SESION_MAX_MS = 48 * 60 * 60 * 1000
+// La sesión se cierra automáticamente a los 7 días del inicio de sesión
+const SESION_MAX_MS = 7 * 24 * 60 * 60 * 1000
 const LOGIN_KEY = 'mumi_login_at'
 const PROFILE_KEY = 'mumi_profile'   // último perfil conocido (para ver datos offline)
 const PERMS_KEY = 'mumi_perms'       // últimos permisos/labels conocidos (offline)

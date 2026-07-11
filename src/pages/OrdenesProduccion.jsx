@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, uploadFile, beginSilentWrites, endSilentWrites } from '../lib/supabase'
+import { startDownload, updateDownload, endDownload, isDownloadCanceled } from '../lib/downloadProgress'
 import { reservarPEPS, liberarReservaLotes, consumirReservaLotes, estadoLote } from '../lib/lotes'
 import { writeOrQueue } from '../lib/offlineQueue'
 import { getConfig } from '../lib/appConfig'
@@ -172,7 +173,6 @@ export default function OrdenesProduccion() {
   }
   const [ordenStartNum, setOrdenStartNum] = useState(() => parseInt(localStorage.getItem('mumi_orden_start')) || 1)
   const [modalEjec, setModalEjec]   = useState(false)
-  const [modalPrep, setModalPrep]   = useState(false)
   const [ordenPrep, setOrdenPrep]   = useState(null)
   const [prepIngs, setPrepIngs]     = useState([])
   const [prepInfo, setPrepInfo]     = useState(null)
@@ -537,8 +537,6 @@ export default function OrdenesProduccion() {
     })
   }
 
-  // Abre el modal de Ingredientes (cálculo + impresión)
-  const openPreparar = async (o) => { await prepararDatos(o); setModalPrep(true) }
   // Abre el modal de Iniciar proceso (fecha de inicio + tiempos por subproceso, con autoguardado)
   const openProceso = async (o) => {
     setAutoSavedAt('')
@@ -680,6 +678,21 @@ export default function OrdenesProduccion() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [modalProceso, prepSobranteManual, prepSurtido, prepPorciona, prepUnidades, prepCantSubp, prepPesoFinal, prepPesoSubp, prepInfo, prepLotesExtra, saldosMezcla])
 
+  // Empaque que se descontará (bolsas/cajas) — se calcula en vivo mientras el modal está abierto,
+  // para verlo en el diligenciamiento y llevarlo a la impresión.
+  useEffect(() => {
+    if (!modalProceso || !ordenPrep) { return }
+    let cancel = false
+    const t = setTimeout(() => {
+      const uni = parseFloat(prepUnidades) || 0
+      const extrasU = ordenPrep.empaque_saldo ? 0 : prepLotesExtra.filter(e => (parseFloat(e.unidades) || 0) > 0).reduce((s, e) => s + (parseFloat(e.unidades) || 0), 0)
+      prepararEmpaque(ordenPrep, { unidadesEmpacadas: uni + extrasU, subpTotal: parseFloat(prepCantSubp) || 0, surtidoUnid: parseFloat(prepSurtidoCantidad) || 0, esPorcionado: prepPorciona, esSurtido: !!prepSurtido })
+        .then(r => { if (!cancel) setEmpaquePrevio(r) }).catch(() => {})
+    }, 400)
+    return () => { cancel = true; clearTimeout(t) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [modalProceso, prepUnidades, prepCantSubp, prepSurtidoCantidad, prepPorciona, prepSurtido, prepLotesExtra, ordenPrep])
+
   // Registra la orden en el libro "Orden de Producción" (PTZ-OR-01) con la evidencia firmada.
   const registrarOrdenEnLibro = async (o, file, firma) => {
     const { data: plant } = await supabase.from('registro_plantillas').select('*').or('codigo.eq.PTZ-OR-01,nombre.ilike.%orden de produc%').limit(1).maybeSingle()
@@ -722,12 +735,147 @@ export default function OrdenesProduccion() {
     } catch (e) { toast(e.message, 'error') } finally { setSavingEvid(false) }
   }
 
-  const imprimirOrden = () => {
-    const o = ordenPrep; if (!o) return
+  // Ajusta el documento a UNA sola hoja carta desde el componente (no depende de un script dentro del
+  // iframe, que en Edge a veces no corre). Comprime la tipografía (paddings en em bajan en proporción)
+  // hasta que el contenido quepa, manteniendo el ancho completo (sin zoom → sin márgenes anchos).
+  const ajustarAUnaHoja = (win) => {
+    try {
+      const doc = win.document
+      const c = doc.getElementById('content'); if (!c) return
+      const availH = 965           // alto objetivo: llena la hoja carta (imprimible ≈ 990px) sin pasarse
+      const MIN_FONT = 10          // en órdenes largas no baja de 10px
+      const MAX_FONT = 16          // en órdenes cortas/medianas agranda hasta 16px para llenar la hoja
+      const TOL = 18
+      const alto = () => Math.max(c.scrollHeight, c.offsetHeight, doc.body.scrollHeight, doc.documentElement.scrollHeight, c.getBoundingClientRect().height)
+      // Ajuste BIDIRECCIONAL: agranda si sobra espacio, reduce si falta — hasta llenar la hoja.
+      let tries = 0
+      while (tries < 80) {
+        const cur = parseFloat(win.getComputedStyle(doc.body).fontSize) || 11
+        const a = alto()
+        if (a > availH && cur > MIN_FONT) { doc.body.style.fontSize = Math.max(MIN_FONT, cur * Math.min(availH / a, 0.97)) + 'px' }
+        else if (a < availH - TOL && cur < MAX_FONT) { doc.body.style.fontSize = Math.min(MAX_FONT, cur * Math.max(availH / a, 1.03)) + 'px' }
+        else break
+        tries++
+      }
+      // Relleno fino del remanente con la casilla de Observaciones (baja las firmas al pie).
+      const h = alto()
+      if (h < availH) { const box = doc.getElementById('obsbox'); const extra = availH - h - 8; if (box && extra > 0) box.style.height = (box.offsetHeight + extra) + 'px' }
+    } catch { /* noop */ }
+  }
+
+  // Imprime un documento HTML SIN abrir pestaña: iframe oculto → ajuste a una hoja → diálogo del navegador.
+  const printViaIframe = (html) => {
+    const iframe = document.createElement('iframe')
+    Object.assign(iframe.style, { position: 'fixed', left: '-10000px', top: '0', width: '216mm', height: '279mm', border: '0' })
+    document.body.appendChild(iframe)
+    let limpiado = false
+    const limpiar = () => { if (limpiado) return; limpiado = true; setTimeout(() => { try { document.body.removeChild(iframe) } catch { /* ya removido */ } }, 800) }
+    const doc = iframe.contentWindow.document
+    doc.open(); doc.write(html); doc.close()
+    try { iframe.contentWindow.onafterprint = limpiar } catch { /* noop */ }
+    // Ajusta, espera el reflow y luego imprime (si no, el navegador imprime con la tipografía sin reducir).
+    setTimeout(() => {
+      ajustarAUnaHoja(iframe.contentWindow)
+      setTimeout(() => { try { iframe.contentWindow.focus(); iframe.contentWindow.print() } catch { /* noop */ } }, 200)
+    }, 350)
+    setTimeout(limpiar, 60000)
+  }
+
+  // Genera y DESCARGA el PDF directamente (sin diálogo del navegador): renderiza el HTML en un iframe
+  // oculto (a 196mm = ancho útil de una hoja carta), lo captura con html2canvas y lo arma con jsPDF.
+  // Renderiza el HTML en un iframe oculto, lo ajusta a una hoja y lo captura como canvas.
+  const renderContentCanvas = async (html) => {
+    const { default: html2canvas } = await import('html2canvas')
+    const iframe = document.createElement('iframe')
+    Object.assign(iframe.style, { position: 'fixed', left: '-10000px', top: '0', width: '210mm', height: '297mm', border: '0', background: '#fff' })
+    document.body.appendChild(iframe)
+    try {
+      const doc = iframe.contentWindow.document
+      doc.open(); doc.write(html); doc.close()
+      await new Promise(r => setTimeout(r, 500))
+      // Ajuste suave (con piso de fuente) — el escalado final a la hoja lo hace jsPDF, así no queda ilegible.
+      ajustarAUnaHoja(iframe.contentWindow)
+      await new Promise(r => setTimeout(r, 150))
+      const content = doc.getElementById('content') || doc.body
+      return await html2canvas(content, { scale: 2, backgroundColor: '#ffffff', useCORS: true, windowWidth: content.scrollWidth })
+    } finally { try { document.body.removeChild(iframe) } catch { /* noop */ } }
+  }
+
+  // IMPRIME el documento como imagen ajustada (una sola hoja, texto legible por el piso de 7px).
+  // La imagen se muestra a ANCHO COMPLETO (no se vuelve a encoger), así se ve al mismo tamaño ajustado.
+  const imprimirImagen = async (html) => {
+    const canvas = await renderContentCanvas(html)
+    const dataURL = canvas.toDataURL('image/jpeg', 0.95)
+    const imgHtml = `<html><head><style>
+      @page{size:letter;margin:8mm}
+      html,body{margin:0;padding:0}
+      img{width:100%;max-height:262mm;object-fit:contain;display:block;margin:0 auto}
+    </style></head><body><img src="${dataURL}"/></body></html>`
+    printViaIframe(imgHtml)
+  }
+
+  // DESCARGA el PDF (imagen escalada a UNA hoja carta).
+  const descargarComoPDF = async (html, nombre) => {
+    const canvas = await renderContentCanvas(html)
+    const jspdfMod = await import('jspdf')
+    const jsPDF = jspdfMod.jsPDF || jspdfMod.default
+    const pdf = new jsPDF({ unit: 'mm', format: 'letter', orientation: 'portrait' })
+    const pageW = pdf.internal.pageSize.getWidth(), pageH = pdf.internal.pageSize.getHeight()
+    const margin = 8, availW = pageW - 2 * margin, availH = pageH - 2 * margin
+    let w = availW, h = canvas.height * (w / canvas.width)
+    if (h > availH) { h = availH; w = canvas.width * (h / canvas.height) }
+    pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', (pageW - w) / 2, margin, w, h)
+    pdf.save(`${nombre}.pdf`)
+  }
+
+
+  // mode: 'print' | 'pdf' | 'html'. ordenArg: si se pasa, imprime esa orden GUARDADA (cerrada) en vez de la del modal.
+  const imprimirOrden = async (mode = 'print', ordenArg = null) => {
+    const esPdf = mode === 'pdf'
+    const live = !ordenArg
+    const o = ordenArg || ordenPrep; if (!o) return
     const g = (n) => (n || 0).toLocaleString('es-CO', { maximumFractionDigits: 1 })
-    const filas = prepIngs.map(i => `<tr><td>${i.nombre}</td><td class="r">${g(i.gramos)} g</td></tr>`).join('')
-    const totalG = prepIngs.reduce((s, i) => s + (i.gramos || 0), 0)
-    const d = prepDatos
+    // Valores: si es la orden viva del modal, del estado prep*; si es guardada, de los campos de la orden.
+    const ps = (o.prep_sino && typeof o.prep_sino === 'object') ? o.prep_sino : {}
+    const tri = (x) => (x === true || x === false) ? x : null
+    const vLote = live ? prepLote : (o.lote || '')
+    const vVence = live ? prepVence : (o.vence || '')
+    const vFechaIni = live ? prepFechaInicio : (o.fecha_inicio || '')
+    const vUnidades = live ? prepUnidades : (o.cantidad_result != null ? String(o.cantidad_result) : '')
+    const vModoAvanzado = live ? prepModoAvanzado : !!o.modo_avanzado
+    const vProcesos = live ? prepProcesos : (Array.isArray(o.procesos_tiempos) ? o.procesos_tiempos : [])
+    const vHoraInicio = live ? prepHoraInicio : (o.inicio || '')
+    const vHoraFin = live ? prepHoraFin : (o.fin || '')
+    const vPorciona = live ? prepPorciona : (o.peso_subporcion != null || o.cant_subporciones != null)
+    const vPesoSubp = live ? prepPesoSubp : (o.peso_subporcion || '')
+    const vCantSubp = live ? prepCantSubp : (o.cant_subporciones || '')
+    const vConforme = live ? prepConforme : tri(ps.conforme)
+    const vSurtido = live ? prepSurtido : tri(ps.surtido ?? o.surtido)
+    const vSurtidoCant = live ? prepSurtidoCantidad : (o.surtido_cantidad != null ? String(o.surtido_cantidad) : '')
+    const vHaySobrante = live ? prepHaySobrante : tri(o.hay_sobrante)
+    const vSobrantePeso = live ? prepSobrantePeso : (o.sobrante_peso != null ? String(o.sobrante_peso) : '')
+    const vSobranteUnidad = live ? prepSobranteUnidad : (o.sobrante_unidad || 'g')
+    const vLoteMezcla = live ? prepLoteMezcla : (o.lote_mezcla || '')
+    const vCamposExtra = live ? prepCamposExtra : (Array.isArray(o.campos_extra) ? o.campos_extra : [])
+    // Ingredientes / peso unidad / datos previstos: del estado si es viva; de la ficha si es guardada.
+    let ings = prepIngs, pesoUnidad = prepInfo?.pesoUnidad, d = prepDatos
+    if (!live) {
+      try { const r = await calcIngredientesOrden(o); ings = r.ings || []; pesoUnidad = r.ficha?.pu } catch { ings = []; pesoUnidad = null }
+      d = null
+    }
+    // Empaque que se usa (bolsas/cajas) según lo empacado — se calcula al vuelo para la impresión.
+    let empaqueTxt = ''
+    try {
+      const uni = parseFloat(vUnidades) || 0
+      const extrasU = (live && !o.empaque_saldo) ? prepLotesExtra.filter(e => (parseFloat(e.unidades) || 0) > 0).reduce((s, e) => s + (parseFloat(e.unidades) || 0), 0) : 0
+      const { plan } = await prepararEmpaque(o, { unidadesEmpacadas: uni + extrasU, subpTotal: parseFloat(vCantSubp) || 0, surtidoUnid: parseFloat(vSurtidoCant) || 0, esPorcionado: vPorciona, esSurtido: !!vSurtido })
+      empaqueTxt = (plan || []).filter(p => (p.qty || 0) > 0).map(p => `${fNum(p.qty)} ${p.mp?.nombre || p.tipo}`).join(' · ')
+    } catch { /* si no se puede calcular, se deja vacío */ }
+    const unidProducidas = vUnidades !== '' ? `${fNum(parseFloat(vUnidades) || 0)} ${o.unidad || ''}` : ''
+    // Marca SI/NO compacta (casilla pequeña con X según el valor tri-estado)
+    const chk = (v) => `SI <span class="bx">${v === true ? 'X' : ''}</span> NO <span class="bx">${v === false ? 'X' : ''}</span>`
+    const filas = ings.map(i => `<tr><td>${i.nombre}</td><td class="r">${g(i.gramos)} g</td></tr>`).join('')
+    const totalG = ings.reduce((s, i) => s + (i.gramos || 0), 0)
     const datosHtml = d ? `
       <div class="datos">
         <span>Mezcla total: <b>${g(d.totalMezcla)} g</b></span>
@@ -738,15 +886,15 @@ export default function OrdenesProduccion() {
       </div>` : ''
     const fecha = new Date().toLocaleDateString('es-CO')
     const emision = o.created_at ? new Date(o.created_at).toLocaleDateString('es-CO') : fecha
-    const fabIni = prepFechaInicio || o.fecha_inicio || ''
+    const fabIni = vFechaIni || ''
     const fabricacion = fabIni ? new Date(fabIni + 'T00:00:00').toLocaleDateString('es-CO') : ''
     const cfg = getConfig()
     // Rótulo del producto final (incluye el caso de empaque surtido / combinado con otro lote)
     const ddmmaa = (s) => { if (!s) return 'ddmmaa'; const [y, m, dd] = s.split('-'); return `${dd}${m}${y.slice(2)}` }
-    const rotLote = prepLote || o.lote || ''
-    const rotVence = prepVence || o.vence || ''
-    const esSurtido = prepSurtido || o.surtido
-    const loteMezcla = prepLoteMezcla || o.lote_mezcla || ''
+    const rotLote = vLote || ''
+    const rotVence = vVence || ''
+    const esSurtido = vSurtido || o.surtido
+    const loteMezcla = vLoteMezcla || ''
     const rotuladoHtml = `
       <div class="seccion">ROTULADO DEL PRODUCTO FINAL</div>
       <table class="campos">
@@ -766,17 +914,17 @@ export default function OrdenesProduccion() {
         <tr><td>Desperdicio</td><td class="r"><b>${g(d.pesoDesp)} g</b></td><td>Unidades estimadas</td><td class="r"><b>${(d.unidades||0).toFixed(1)}</b></td></tr>
         <tr><td>Costo MP</td><td class="r"><b>$ ${Math.round(d.totalCostoMP||0).toLocaleString('es-CO')}</b></td><td>Peso obtenido</td><td class="r" style="min-width:60px"></td></tr>
       </tbody></table>` : ''
-    const procRows = (prepProcesos || []).filter(p => p.nombre?.trim() || p.inicio || p.fin)
+    const procRows = (vProcesos || []).filter(p => p.nombre?.trim() || p.inicio || p.fin)
     const fmtF = (f) => f ? new Date(f + 'T00:00:00').toLocaleDateString('es-CO') : ''
     // Modo básico: solo hora inicio/fin. Modo avanzado: tabla de procesos con fecha y horas.
-    const filasProc = prepModoAvanzado
+    const filasProc = vModoAvanzado
       ? (procRows.length ? `<div class="seccion">TIEMPOS POR PROCESO / SUBPROCESO</div>
           <table class="ingr"><thead><tr><th>Proceso / Subproceso</th><th>Fecha</th><th>Hora inicio</th><th>Hora fin</th></tr></thead>
           <tbody>${procRows.map(p => `<tr><td>${p.nombre || ''}</td><td>${fmtF(p.fecha)}</td><td>${p.inicio || ''}</td><td>${p.fin || ''}</td></tr>`).join('')}</tbody></table>` : '')
       : `<div class="seccion">TIEMPOS</div>
-          <table class="campos"><tr><td class="lbl">Hora inicio</td><td>${prepHoraInicio || ''}</td><td class="lbl">Hora fin</td><td>${prepHoraFin || ''}</td></tr></table>`
+          <table class="campos"><tr><td class="lbl" style="width:22%">Hora inicio</td><td style="width:28%">${vHoraInicio || ''}</td><td class="lbl" style="width:22%">Hora fin</td><td style="width:28%">${vHoraFin || ''}</td></tr></table>`
     // Campos adicionales personalizados (MP vendibles): Productor, Finca, etc. — 2 por fila para ahorrar espacio.
-    const camposEx = (prepCamposExtra || []).filter(c => (c.nombre || '').trim())
+    const camposEx = (vCamposExtra || []).filter(c => (c.nombre || '').trim())
     let camposExtraHtml = ''
     if (camposEx.length) {
       let celdas = ''
@@ -784,8 +932,7 @@ export default function OrdenesProduccion() {
       camposExtraHtml = `<div class="seccion">DATOS ADICIONALES</div><table class="campos"><tr>${celdas}</tr></table>`
     }
     const archivoNombre = `OP-${opNum(o.id)} - ${(o.producto || 'PRODUCTO').toUpperCase()} - PTZ-OR-01`
-    const w = window.open('', '_blank')
-    w.document.write(`<html><head><title>${archivoNombre}</title><style>
+    const html = `<html><head><title>${archivoNombre}</title><style>
       @page { size: letter; margin: 10mm; }
       * { box-sizing: border-box; }
       html,body { margin:0; }
@@ -794,21 +941,25 @@ export default function OrdenesProduccion() {
          coincide con la impresión y el auto-ajuste a una sola hoja es exacto. */
       #content { width:196mm; margin:0 auto; padding-bottom:10px; }
       table { width:100%; border-collapse:collapse; }
-      td,th { border:1px solid #555; padding:4px 8px; vertical-align:top; }
+      /* Paddings en em: al reducir la tipografía para ajustar a una hoja, TODO se comprime en
+         proporción (sin usar zoom, que dejaría márgenes anchos). El ancho se mantiene 100%. */
+      td,th { border:1px solid #555; padding:0.32em 0.65em; vertical-align:top; }
       th { background:#e9efe7; text-align:left; }
       .r { text-align:right; }
+      /* Casilla SI/NO compacta */
+      .bx { display:inline-block; width:1em; height:1em; border:1px solid #555; text-align:center; line-height:1em; font-size:0.9em; vertical-align:middle; margin:0 0.15em; }
       /* Encabezado tipo formato controlado */
-      .hdr td { padding:4px 8px; }
-      .hdr .logo { width:26%; text-align:center; font-weight:bold; color:#2d5a3d; font-size:13px; }
-      .hdr .titulo { text-align:center; font-weight:bold; font-size:14px; }
-      .hdr .codbox td { border:1px solid #555; font-size:10px; }
-      .seccion { background:#2d5a3d; color:#fff; font-weight:bold; padding:3px 8px; margin-top:10px; font-size:11px; }
+      .hdr td { padding:0.32em 0.65em; }
+      .hdr .logo { width:26%; text-align:center; font-weight:bold; color:#2d5a3d; font-size:1.2em; }
+      .hdr .titulo { text-align:center; vertical-align:middle; font-weight:bold; font-size:1.55em; line-height:1.15; }
+      .hdr .codbox td { border:1px solid #555; font-size:0.9em; }
+      .seccion { background:#2d5a3d; color:#fff; font-weight:bold; padding:0.28em 0.65em; margin-top:0.7em; font-size:1em; }
       .campos td { border:1px solid #555; }
       .lbl { background:#f3f6f1; font-weight:bold; width:18%; }
       .prev td { border:1px solid #555; }
-      .firmas { margin-top:0; padding-top:26px; }
-      .firmas td { border:none; text-align:center; padding-top:28px; }
-      .firmas .linea { border-top:1px solid #555; padding-top:3px; }
+      .firmas { margin-top:0; padding-top:1.6em; }
+      .firmas td { border:none; text-align:center; padding-top:2.2em; }
+      .firmas .linea { border-top:1px solid #555; padding-top:0.3em; }
       tbody tr:nth-child(even) td { background:#fafafa; }
       .ingr tbody tr:nth-child(even) td { background:#fafafa; }
     </style></head><body><div id="content">
@@ -817,7 +968,7 @@ export default function OrdenesProduccion() {
       <table class="hdr">
         <tr>
           <td class="logo" rowspan="3">${cfg.logo_url ? `<img src="${cfg.logo_url}" style="max-width:90px;max-height:54px;object-fit:contain" />` : '🌿'}<div>${cfg.empresa || ''}</div></td>
-          <td class="titulo" rowspan="3">ORDEN DE PRODUCCIÓN${o.es_prueba ? '<div style="color:#c0392b;font-size:11px;font-weight:bold">★ PRUEBA ★</div>' : ''}</td>
+          <td class="titulo" rowspan="3">ORDEN DE PRODUCCIÓN N° OP-${opNum(o.id)}${o.es_prueba ? '<div style="color:#c0392b;font-size:0.7em;font-weight:bold">★ PRUEBA ★</div>' : ''}</td>
           <td>Código: <b>PTZ-OR-01</b></td>
         </tr>
         <tr><td>Versión: <b>1</b></td></tr>
@@ -828,19 +979,19 @@ export default function OrdenesProduccion() {
 
       <div class="seccion">DATOS DE LA ORDEN</div>
       <table class="campos">
-        <tr><td class="lbl">Orden de Producción N°</td><td>OP-${opNum(o.id)}</td><td class="lbl">Lote</td><td>${rotLote || ''}</td></tr>
-        <tr><td class="lbl">Nombre comercial</td><td>${o.producto || ''}</td><td class="lbl">Presentación</td><td>${prepInfo?.pesoUnidad ? g(prepInfo.pesoUnidad) + ' gr' : ''}</td></tr>
+        <tr><td class="lbl">Nombre comercial</td><td colspan="3" style="font-size:1.35em;font-weight:bold;background:#fff7e6;color:#2d5a3d">${o.producto || ''}</td></tr>
+        <tr><td class="lbl">Lote</td><td>${rotLote || ''}</td><td class="lbl">Presentación</td><td>${pesoUnidad ? g(pesoUnidad) + ' gr' : ''}</td></tr>
         <tr><td class="lbl">Fecha de fabricación</td><td>${fabricacion}</td><td class="lbl">Fecha de vencimiento</td><td>${rotVence ? new Date(rotVence + 'T00:00:00').toLocaleDateString('es-CO') : ''}</td></tr>
         <tr><td class="lbl">Unidades a producir</td><td>${o.cantidad_plan || ''} ${o.unidad || ''}</td><td class="lbl">Operario</td><td>${o.operario || ''}</td></tr>
-        <tr><td class="lbl">Unidades producidas</td><td style="height:22px"></td><td class="lbl">Cant. empaque utilizado</td><td></td></tr>
-        ${prepPorciona ? `<tr><td class="lbl">Peso subporción</td><td>${prepPesoSubp ? g(prepPesoSubp) + ' g' : ''}</td><td class="lbl">Cant. subporciones</td><td>${prepCantSubp ? fNum(prepCantSubp) : ''}</td></tr>` : ''}
-        <tr><td class="lbl">¿Empacó surtido?</td><td>SI <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle;text-align:center;line-height:12px;font-size:10px">${prepSurtido === true ? 'X' : ''}</span> &nbsp; NO <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle;text-align:center;line-height:12px;font-size:10px">${prepSurtido === false ? 'X' : ''}</span> &nbsp; CANT: <span style="display:inline-block;min-width:60px;border-bottom:1px solid #555">${prepSurtido && prepSurtidoCantidad ? fNum(prepSurtidoCantidad) : '&nbsp;'}</span></td><td class="lbl">¿Quedó sin empacar?</td><td>SI <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle;text-align:center;line-height:12px;font-size:10px">${prepHaySobrante === true ? 'X' : ''}</span> &nbsp; NO <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle;text-align:center;line-height:12px;font-size:10px">${prepHaySobrante === false ? 'X' : ''}</span> &nbsp; CANT: <span style="display:inline-block;min-width:60px;border-bottom:1px solid #555">${prepHaySobrante && prepSobrantePeso ? fNum(prepSobrantePeso) + ' ' + (prepSobranteUnidad || '') : '&nbsp;'}</span></td></tr>
-        <tr><td class="lbl">¿Producto conforme?</td><td colspan="3">SI <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle;text-align:center;line-height:12px;font-size:10px">${prepConforme === true ? 'X' : ''}</span> &nbsp; NO <span style="display:inline-block;width:12px;height:12px;border:1px solid #555;vertical-align:middle;text-align:center;line-height:12px;font-size:10px">${prepConforme === false ? 'X' : ''}</span></td></tr>
+        <tr><td class="lbl">Unidades producidas</td><td>${unidProducidas}</td><td class="lbl">Cant. empaque utilizado</td><td>${empaqueTxt}</td></tr>
+        ${vPorciona ? `<tr><td class="lbl">Peso subporción</td><td>${vPesoSubp ? g(vPesoSubp) + ' g' : ''}</td><td class="lbl">Cant. subporciones</td><td>${vCantSubp ? fNum(vCantSubp) : ''}</td></tr>` : ''}
+        <tr><td class="lbl">¿Producto conforme?</td><td style="width:20%">${chk(vConforme)}</td><td class="lbl">¿Empacó surtido?</td><td>${chk(vSurtido)}${vSurtido && vSurtidoCant ? ` · CANT: <b>${fNum(vSurtidoCant)}</b>` : ''}</td></tr>
+        <tr><td class="lbl">¿Quedó sin empacar?</td><td colspan="3">${chk(vHaySobrante)}${vHaySobrante && vSobrantePeso ? ` · CANT: <b>${fNum(vSobrantePeso)} ${vSobranteUnidad || ''}</b>` : ''}</td></tr>
       </table>
 
       <div class="seccion">LISTA DE INGREDIENTES</div>
       <table class="ingr"><thead><tr><th>Ingrediente</th><th class="r">Porcentaje</th><th class="r">Cantidad (gr)</th><th>Lote MP</th></tr></thead>
-        <tbody>${filas ? prepIngs.map(i => `<tr><td>${i.nombre}</td><td class="r">${totalG > 0 ? (i.gramos / totalG * 100).toFixed(1) : '0'}%</td><td class="r">${g(i.gramos)}</td><td></td></tr>`).join('') + `<tr><td><b>TOTAL</b></td><td class="r"><b>100%</b></td><td class="r"><b>${g(totalG)}</b></td><td></td></tr>` : '<tr><td colspan="4">Sin receta vinculada</td></tr>'}</tbody>
+        <tbody>${filas ? ings.map(i => `<tr><td>${i.nombre}</td><td class="r">${totalG > 0 ? (i.gramos / totalG * 100).toFixed(1) : '0'}%</td><td class="r">${g(i.gramos)}</td><td></td></tr>`).join('') + `<tr><td><b>TOTAL</b></td><td class="r"><b>100%</b></td><td class="r"><b>${g(totalG)}</b></td><td></td></tr>` : '<tr><td colspan="4">Sin receta vinculada</td></tr>'}</tbody>
       </table>
 
       ${d ? `<div class="seccion">DATOS PREVISTOS</div>${filasPrev}` : ''}
@@ -852,7 +1003,7 @@ export default function OrdenesProduccion() {
       ${camposExtraHtml}
 
       <div class="seccion">OBSERVACIONES</div>
-      <table class="campos"><tr><td id="obsbox" style="height:90px; vertical-align:top">${o.notas_orden || ''}</td></tr></table>
+      <table class="campos"><tr><td id="obsbox" style="height:5em; vertical-align:top">${o.notas_orden || ''}</td></tr></table>
 
       <table class="firmas">
         <tr>
@@ -862,26 +1013,44 @@ export default function OrdenesProduccion() {
       </table>
 
       </div>
-      <script>window.addEventListener('load',function(){setTimeout(function(){
-        var c=document.getElementById('content');
-        // Alto util de una hoja carta (11in − 2×10mm de margen ≈ 979px @96dpi); dejamos margen de seguridad.
-        var availH=960;
-        function alto(){ return Math.max(c.scrollHeight, c.offsetHeight, c.getBoundingClientRect().height); }
-        var h=alto();
-        // 1) Si sobra espacio: agranda Observaciones para llenar la hoja y bajar las firmas
-        if(h<availH){
-          var box=document.getElementById('obsbox');
-          var extra=availH-h-10;
-          if(box && extra>0){ box.style.height=(box.offsetHeight + extra)+'px'; }
+      </body></html>`
+    if (mode === 'html') return { html, archivoNombre }
+    try {
+      if (esPdf) await descargarComoPDF(html, archivoNombre)
+      else await imprimirImagen(html)
+    } catch (e) { toast('No se pudo generar el documento: ' + e.message, 'error') }
+  }
+
+  // Descarga UN PDF con VARIAS órdenes (cada una en su propia hoja, mismo formato).
+  const descargarOrdenesPDF = async (lista) => {
+    if (!lista || !lista.length) { toast('No hay órdenes para descargar', 'warning'); return }
+    // Orden ascendente: de la #1 hasta la actual (por numeración de orden).
+    const ordenadas = [...lista].sort((a, b) => opNum(a.id) - opNum(b.id))
+    // Progreso en widget fijo (no bloquea la vista, sigue en 2º plano aunque cambie de módulo).
+    startDownload('Descargando registros', ordenadas.length)
+    try {
+      const jspdfMod = await import('jspdf')
+      const jsPDF = jspdfMod.jsPDF || jspdfMod.default
+      const pdf = new jsPDF({ unit: 'mm', format: 'letter', orientation: 'portrait' })
+      const pageW = pdf.internal.pageSize.getWidth(), pageH = pdf.internal.pageSize.getHeight()
+      const margin = 8, availW = pageW - 2 * margin, availH = pageH - 2 * margin
+      let primera = true, hechas = 0, cancelado = false
+      for (const o of ordenadas) {
+        if (isDownloadCanceled()) { cancelado = true; break }
+        const res = await imprimirOrden('html', o)
+        if (res) {
+          const canvas = await renderContentCanvas(res.html)
+          let w = availW, h = canvas.height * (w / canvas.width)
+          if (h > availH) { h = availH; w = canvas.width * (h / canvas.height) }
+          if (!primera) pdf.addPage()
+          primera = false
+          pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', (pageW - w) / 2, margin, w, h)
         }
-        // 2) Ajuste final garantizado: si por lo que sea quedo mas alto, reduce para que SIEMPRE
-        //    entre en una sola hoja (la firma nunca pasa a la 2a pagina).
-        var hf=alto();
-        if(hf>availH){ document.body.style.zoom=availH/hf; }
-        window.focus();window.print();
-      },200)})</script>
-      </body></html>`)
-    w.document.close()
+        updateDownload(++hechas)
+      }
+      if (cancelado) { toast('Descarga cancelada', 'warning'); return }
+      pdf.save(`Ordenes de Produccion - ${new Date().toLocaleDateString('es-CO')}.pdf`)
+    } catch (e) { toast('No se pudo generar el PDF: ' + e.message, 'error') } finally { endDownload() }
   }
 
   // Ir al módulo de Producción a registrar los lotes (precargado desde la orden)
@@ -1686,7 +1855,7 @@ export default function OrdenesProduccion() {
         <div className="page-actions">
           {esAdmin && pendientesAprob > 0 && <span className="badge badge-dorado" style={{ alignSelf: 'center' }}>{pendientesAprob} por aprobar</span>}
           {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalAudit(true)}><Ico as={ScrollText} size={14} />Registro de creación</button>}
-          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={reiniciarNumeracion}><Ico as={Hash} size={14} />Numeración</button>}
+          <button className="btn btn-secondary btn-sm" title="Descargar un PDF con todas las órdenes visibles (cada una en su hoja)" onClick={() => descargarOrdenesPDF(visibles)}><Ico as={Download} size={14} />Descargar órdenes</button>
           {(esAdmin || esOperario) && <button className="btn btn-primary btn-sm" onClick={() => { setEditOrdenId(null); setForm({ ...EMPTY_ORDEN, operario: esOperario ? (profile?.nombre || '') : '' }); setProdReceta(null); setIngIdx(''); setIngDisp(''); setEmpacarSaldo(null); setSaldoSelId(''); setSaldoCant(''); setModalNueva(true) }}><Ico as={Plus} size={14} />Nueva Orden</button>}
         </div>
       </div>
@@ -1754,12 +1923,14 @@ export default function OrdenesProduccion() {
                       <td className="celda-acciones" onClick={e => e.stopPropagation()}>
                         <div className="ordenes-acciones" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           <button className="btn btn-xs btn-secondary" title="Ver detalles" onClick={() => setOrdenDetalle(o)}><Eye size={13} aria-hidden="true" />Detalles</button>
+                          {/* Imprimir la orden ya cerrada/enviada (mismo formato) — solo ícono */}
+                          {(o.estado === 'ejecutada' || o.estado === 'aprobada') && <button className="btn btn-xs btn-secondary" title="Imprimir orden" onClick={() => imprimirOrden('print', o)}><Printer size={13} aria-hidden="true" /></button>}
                           {/* Quien ejecuta la orden: el operario dueño */}
                           {esMia && o.estado === 'pendiente' && <button className="btn btn-xs btn-primary" onClick={() => tomarOrden.mutate(o)}><Ico as={Play} size={13} />Tomar</button>}
-                          {esMia && (o.estado === 'en_proceso' || o.estado === 'rechazada') && <>
-                            <button className="btn btn-xs btn-secondary" onClick={() => openPreparar(o)}><Ico as={Calculator} size={13} />Ingredientes</button>
+                          {/* Los ingredientes se ven en "Detalles" y en el modal de proceso, por eso ya no hay botón aparte */}
+                          {esMia && (o.estado === 'en_proceso' || o.estado === 'rechazada') && (
                             <button className="btn btn-xs btn-primary" onClick={() => openProceso(o)}><Ico as={Play} size={13} />Iniciar proceso</button>
-                          </>}
+                          )}
                           {/* (El botón "Imprimir" se quitó de aquí: los ingredientes se ven en Detalles y en el modal de proceso) */}
                           {/* El admin puede diligenciar el proceso de órdenes de OTROS (en las suyas ya tiene "Iniciar proceso") */}
                           {esAdmin && !esMia && (o.estado === 'pendiente' || o.estado === 'en_proceso' || o.estado === 'rechazada') && (
@@ -2074,63 +2245,14 @@ export default function OrdenesProduccion() {
         </div>
       </Modal>
 
-      <Modal open={modalPrep} onClose={() => setModalPrep(false)} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Calculator size={18} aria-hidden="true" /> Ingredientes — {ordenPrep?.producto || ''}</span>} size="modal-lg"
-        footer={<>
-          <button className="btn btn-secondary" onClick={() => setModalPrep(false)}>Cerrar</button>
-          {prepFicha && <button className="btn btn-secondary" onClick={() => descargarFicha(prepFicha.url, prepFicha.nombre)}><Ico as={Download} size={14} />Ficha técnica</button>}
-          {ordenPrep?.operario === profile?.nombre && <button className="btn btn-primary" onClick={() => { setModalPrep(false); openProceso(ordenPrep) }}><Ico as={Play} size={14} />Iniciar proceso</button>}
-        </>}
-      >
-        {ordenPrep && (
-          <>
-            <div className="alert alert-info" style={{ fontSize: '0.85rem' }}>
-              Cantidad solicitada en la orden: <strong>{fNum(ordenPrep.cantidad_plan)} {ordenPrep.unidad}</strong>.
-              Estos son los ingredientes a utilizar (precargados). Imprime la orden y usa <strong>▶ Iniciar proceso</strong> para registrar tiempos y luego producción.
-            </div>
-            {prepInfo?.baches != null && (
-              <p style={{ fontSize: '0.82rem', color: 'var(--texto-suave)' }}>Equivale a <strong>{prepInfo.baches.toFixed(2)}</strong> bache(s) de {fNum(prepInfo.bache)} unidades.</p>
-            )}
-
-            {/* Datos previstos */}
-            {prepDatos && (
-              <div style={{ background: 'var(--selva)', color: 'var(--crema)', borderRadius: 'var(--radio)', padding: 14, marginBottom: 14 }}>
-                <div style={{ fontFamily: "'Playfair Display', serif", color: 'var(--dorado)', marginBottom: 10 }}><Ico as={Package} size={15} />Datos Previstos</div>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, fontSize: '0.85rem' }}>
-                  <div><div style={{ opacity: 0.6, fontSize: '0.72rem' }}>Mezcla total</div><strong>{fNum(prepDatos.totalMezcla)} g</strong></div>
-                  <div><div style={{ opacity: 0.6, fontSize: '0.72rem' }}>Peso esperado</div><strong>{fNum(prepDatos.pesoEsperado)} g</strong></div>
-                  <div><div style={{ opacity: 0.6, fontSize: '0.72rem' }}>Desperdicio ({prepDatos.desp}%)</div><strong>{fNum(prepDatos.pesoDesp)} g</strong></div>
-                  <div><div style={{ opacity: 0.6, fontSize: '0.72rem' }}>Unidades estimadas</div><strong style={{ fontSize: '1.2rem', color: 'var(--dorado)' }}>{prepDatos.unidades.toFixed(1)}</strong></div>
-                  <div><div style={{ opacity: 0.6, fontSize: '0.72rem' }}>Costo MP total</div><strong>{fCOP(prepDatos.totalCostoMP)}</strong></div>
-                  <div><div style={{ opacity: 0.6, fontSize: '0.72rem' }}>Costo MP / unidad</div><strong>{fCOP(prepDatos.costoMPunidad)}</strong></div>
-                </div>
-              </div>
-            )}
-
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Ingrediente</th><th className="td-number">Cantidad a usar</th></tr></thead>
-                <tbody>
-                  {prepIngs.length === 0
-                    ? <tr><td colSpan={2} className="empty-table">Sin receta vinculada a esta orden (o aún cargando).</td></tr>
-                    : prepIngs.map((i, k) => <tr key={k}><td>{i.nombre}</td><td className="td-number">{(i.gramos || 0).toLocaleString('es-CO', { maximumFractionDigits: 1 })} g</td></tr>)}
-                </tbody>
-              </table>
-            </div>
-            <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', marginTop: 10 }}>
-              Cuando registres y completes los lotes en Producción, vuelve aquí y usa <strong>✅ Enviar y cerrar</strong> en la fila de la orden.
-            </p>
-          </>
-        )}
-      </Modal>
-
       {/* Modal Iniciar proceso — fecha de inicio + tiempos por subproceso (autoguardado) */}
       <Modal open={modalProceso} onClose={() => setModalProceso(false)} guard={false}
         title={<span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', width: '100%' }}><Play size={18} aria-hidden="true" /> Proceso — {ordenPrep?.producto || ''}
-          <button type="button" className="btn btn-dorado btn-sm" style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }} title="Imprimir orden" onClick={imprimirOrden}><Printer size={16} aria-hidden="true" /> Imprimir</button></span>}
+          <button type="button" className="btn btn-dorado btn-sm" style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }} title="Imprimir orden" onClick={() => imprimirOrden()}><Printer size={16} aria-hidden="true" /> Imprimir</button></span>}
         size="modal-lg"
         footer={<>
           <button className="btn btn-secondary" onClick={async () => { await guardarProcesoData(false); setModalProceso(false) }}><Ico as={Save} size={14} />Guardar</button>
-          <button className="btn btn-secondary" onClick={imprimirOrden}><Ico as={Download} size={14} />Descargar PDF</button>
+          <button className="btn btn-secondary" onClick={() => imprimirOrden('pdf')}><Ico as={Download} size={14} />Descargar PDF</button>
           <button className="btn btn-success" onClick={abrirConfirmEnvio}><Ico as={Send} size={14} />Enviar</button>
         </>}>
         {ordenPrep && (
@@ -2280,6 +2402,17 @@ export default function OrdenesProduccion() {
                   }} min={0} /></div>
                 </>}
               </div>
+              {/* Empaque que se descontará (bolsas/cajas) según lo empacado — informativo, sale en la impresión */}
+              {empaquePrevio && empaquePrevio.plan.length > 0 && (
+                <div className="form-group" style={{ background: 'rgba(124,179,66,0.07)', borderRadius: 'var(--radio)', padding: 10 }}>
+                  <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Ico as={Package} size={14} /> Empaque utilizado <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(calculado según lo empacado — se descuenta al enviar)</small></label>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                    {empaquePrevio.plan.filter(p => (p.qty || 0) > 0).map((p, i) => (
+                      <span key={i} className={`badge ${p.tipo === 'bolsa' ? 'badge-azul' : p.tipo === 'caja' ? 'badge-dorado' : 'badge-gris'}`}>{fNum(p.qty)} × {p.mp?.nombre || p.tipo}</span>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="form-group" style={{ marginTop: 8 }}><label className="form-label">Observaciones</label><textarea className="form-control" rows={2} value={prepObs} onChange={e => setPrepObs(e.target.value)} /></div>
               <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 8, alignItems: 'center' }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>

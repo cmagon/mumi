@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Leaf, Menu, Settings, User, ShieldCheck, LogOut, ChevronDown, Users } from 'lucide-react'
+import { Leaf, Menu, Settings, User, ShieldCheck, LogOut, ChevronDown, Users, RefreshCw } from 'lucide-react'
+import { del } from 'idb-keyval'
 import NotificationBell from '../NotificationBell'
 import DevUserSwitch from '../DevUserSwitch'
 import ProfileModal from '../ProfileModal'
@@ -8,6 +9,20 @@ import { useAuth } from '../../context/AuthContext'
 import { getRolLabel } from '../../lib/businessLogic'
 import { puedeVer } from '../../lib/permisos'
 import { getConfig, loadConfig } from '../../lib/appConfig'
+
+// Recarga "en frío": limpia el caché de datos (react-query persistido) y el del service worker,
+// actualiza el SW y vuelve a cargar. Equivale a un Ctrl+Shift+R, útil en la app instalada (PWA)
+// donde no existe el botón de recargar del navegador.
+async function recargarApp() {
+  try { await del('mumi-query-cache') } catch { /* noop */ }
+  try {
+    if ('caches' in window) { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))) }
+  } catch { /* noop */ }
+  try {
+    if ('serviceWorker' in navigator) { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map(r => r.update())) }
+  } catch { /* noop */ }
+  window.location.reload()
+}
 
 export default function MobileHeader({ onMenuClick, onLogout }) {
   const [cfg, setCfg] = useState(getConfig())
@@ -82,6 +97,9 @@ export default function MobileHeader({ onMenuClick, onLogout }) {
                   </button>
                 )}
 
+                <button className="user-menu-item" role="menuitem" onClick={() => { cerrar(); recargarApp() }}>
+                  <RefreshCw size={15} aria-hidden="true" /> Recargar aplicación
+                </button>
                 <button className="user-menu-item user-menu-item-danger" role="menuitem" onClick={() => { cerrar(); onLogout?.() }}>
                   <LogOut size={15} aria-hidden="true" /> Cerrar sesión
                 </button>

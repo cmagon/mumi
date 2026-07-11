@@ -10,6 +10,7 @@ import MobileHeader from './components/Layout/MobileHeader'
 import AttendanceModal from './components/AttendanceModal'
 import ConnStatus from './components/ConnStatus'
 import SavingOverlay from './components/ui/SavingOverlay'
+import DownloadProgress from './components/ui/DownloadProgress'
 import DevModeBanner from './components/DevModeBanner'
 import Login from './pages/Login'
 import Compartido from './pages/Compartido'
@@ -122,6 +123,7 @@ function ProtectedLayout() {
       <div id="toast-container" role="status" aria-live="polite" aria-atomic="false" />
       <ConnStatus />
       <SavingOverlay />
+      <DownloadProgress />
       {asistModo && empVinculado && (
         <AttendanceModal
           emp={empVinculado}

@@ -164,7 +164,9 @@ const aFila = (r) => {
 }
 
 export async function exportarRegistrosExcelPTZ(registros = [], { templateUrl = '' } = {}) {
-  const filas = registros.map(aFila)
+  // Orden por fecha, del más antiguo al más nuevo (igual que el PDF).
+  const ordenados = [...registros].sort((a, b) => String(a.fecha || '').localeCompare(String(b.fecha || '')))
+  const filas = ordenados.map(aFila)
   const wb = new ExcelJS.Workbook()
   const res = await fetch(templateUrl || PTZ_URL)
   if (!res.ok) throw new Error('No se encontró la plantilla original PTZ-RG-03.')
@@ -198,58 +200,121 @@ export async function exportarRegistrosExcelPTZ(registros = [], { templateUrl = 
   setTimeout(() => URL.revokeObjectURL(a.href), 2000)
 }
 
-// PDF: mismo formato PTZ-RG-03, renderizado como HTML e impreso a PDF por el navegador.
-export function exportarRegistrosPDFPTZ(registros = [], { empresa = 'Mumi Amazonia', logoUrl = '' } = {}) {
-  const filas = registros.map(aFila)
+// Lee la FECHA del FORMATO (no la fecha actual) desde la plantilla original PTZ-RG-03.
+// Está en la zona del encabezado (junto a CÓDIGO/VERSIÓN). Si no se puede leer, usa la del formato original.
+async function leerFechaFormatoPTZ(url) {
+  try {
+    const res = await fetch(url || PTZ_URL)
+    if (!res.ok) return '2024-06-15'
+    const wb = XLSX.read(await res.arrayBuffer(), { type: 'array' })
+    const sh = wb.Sheets[wb.SheetNames[0]]
+    const m = XLSX.utils.sheet_to_json(sh, { header: 1, defval: '', blankrows: true, raw: true })
+    for (let i = 0; i < 8; i++) {
+      const row = m[i] || []
+      for (let c = 0; c < row.length; c++) {
+        if (norm(row[c]) === 'FECHA') {
+          for (let k = c + 1; k < row.length; k++) {
+            const v = row[k]
+            if (typeof v === 'number' && v > 30000) { const y = toYMD(v); if (y) return y }
+          }
+        }
+      }
+    }
+  } catch { /* usa respaldo */ }
+  return '2024-06-15'
+}
+
+// Renderiza un HTML (con #page) en un iframe oculto tamaño carta horizontal y lo captura como canvas.
+async function htmlACanvasPTZ(html) {
+  const html2canvas = (await import('html2canvas')).default
+  const iframe = document.createElement('iframe')
+  Object.assign(iframe.style, { position: 'fixed', left: '-10000px', top: '0', width: '290mm', height: '215mm', border: '0', background: '#fff' })
+  document.body.appendChild(iframe)
+  try {
+    const doc = iframe.contentWindow.document
+    doc.open(); doc.write(html); doc.close()
+    await new Promise(r => setTimeout(r, 350))
+    const el = doc.getElementById('page') || doc.body
+    return await html2canvas(el, { scale: 2, backgroundColor: '#ffffff', useCORS: true, windowWidth: el.scrollWidth })
+  } finally { try { document.body.removeChild(iframe) } catch { /* noop */ } }
+}
+
+// PDF: mismo formato PTZ-RG-03. Descarga DIRECTA (sin pestaña), multipágina, con el encabezado
+// (logo/código/versión/fecha DEL FORMATO) repetido en cada hoja y su número de página. Orden por fecha ASC.
+export async function exportarRegistrosPDFPTZ(registros = [], { empresa = 'Mumi Amazonia', logoUrl = '', templateUrl = '', onProgress = null, shouldCancel = null } = {}) {
+  const ordenados = [...registros].sort((a, b) => String(a.fecha || '').localeCompare(String(b.fecha || '')))
+  const filas = ordenados.map(aFila)
+  const fechaFormato = fmtDMY(await leerFechaFormatoPTZ(templateUrl))
   const esc = (s) => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
-  const filasHtml = filas.map(f => `<tr>
-    <td>${esc(f.fecha)}</td><td>${esc(f.lote)}</td><td>${esc(f.vence)}</td><td class="l">${esc(f.producto)}</td>
-    <td>${esc(f.unidades)}</td><td>${esc(f.cajas)}</td><td>${esc(f.inicio)}</td><td>${esc(f.fin)}</td>
-    <td>${esc(f.labor)}</td><td>${esc(f.responsable)}</td><td class="l">${esc(f.obs)}</td></tr>`).join('')
-  // completar hasta 20 filas vacías para conservar el aspecto del formato
-  const vacias = Math.max(0, 20 - filas.length)
-  const filasVacias = Array.from({ length: vacias }).map(() => '<tr>' + '<td></td>'.repeat(11) + '</tr>').join('')
-  const html = `<!doctype html><html><head><meta charset="utf-8"><title>PTZ-RG-03 Registro Control Producción Diaria</title>
-  <style>
-    @page { size: landscape; margin: 10mm; }
-    body { font-family: Arial, sans-serif; color:#222; }
-    .head { display:flex; border:1px solid #333; }
-    .head .logo { width:90px; border-right:1px solid #333; display:flex; align-items:center; justify-content:center; padding:4px; }
-    .head .logo img { max-width:82px; max-height:60px; }
-    .head .titulo { flex:1; display:flex; align-items:center; justify-content:center; text-align:center; font-weight:bold; font-size:15px; }
-    .head .meta { width:170px; border-left:1px solid #333; font-size:10px; }
-    .head .meta div { display:flex; border-bottom:1px solid #333; }
-    .head .meta div:last-child { border-bottom:none; }
-    .head .meta b { width:52%; padding:2px 4px; border-right:1px solid #333; background:#f3f0e8; }
-    .head .meta span { padding:2px 4px; }
-    table { width:100%; border-collapse:collapse; margin-top:6px; font-size:9px; }
-    th, td { border:1px solid #333; padding:3px 4px; text-align:center; }
-    th { background:#e9e4d6; }
-    td.l, th.l { text-align:left; }
-  </style></head><body>
+  const ROWS = 22
+  const paginas = []
+  const nPags = Math.max(1, Math.ceil(filas.length / ROWS))
+  for (let i = 0; i < nPags; i++) paginas.push(filas.slice(i * ROWS, (i + 1) * ROWS))
+
+  const encabezado = (pag, total) => `
     <div class="head">
       <div class="logo">${logoUrl ? `<img src="${esc(logoUrl)}">` : ''}</div>
       <div class="titulo">${esc(empresa.toUpperCase())}<br>CONTROL DE PRODUCCIÓN DIARIA</div>
       <div class="meta">
         <div><b>CÓDIGO</b><span>PTZ-RG-03</span></div>
         <div><b>VERSIÓN</b><span>1</span></div>
-        <div><b>PÁGINA</b><span>1</span></div>
-        <div><b>FECHA</b><span>${esc(fmtDMY(new Date().toISOString().slice(0, 10)))}</span></div>
+        <div><b>PÁGINA</b><span>${pag} de ${total}</span></div>
+        <div><b>FECHA</b><span>${esc(fechaFormato)}</span></div>
       </div>
-    </div>
-    <table>
-      <thead><tr>
-        <th>FECHA</th><th>LOTE</th><th>FECHA DE VENCIMIENTO</th><th class="l">PRODUCTO</th>
-        <th>UNIDAD</th><th>CAJAS</th><th>HORA INICIO</th><th>HORA FINAL</th>
-        <th>LABOR</th><th>RESPONSABLE</th><th class="l">OBSERVACIONES</th>
-      </tr></thead>
-      <tbody>${filasHtml}${filasVacias}</tbody>
-    </table>
-  </body></html>`
-  const w = window.open('', '_blank')
-  if (!w) throw new Error('El navegador bloqueó la ventana emergente. Permite las ventanas emergentes para descargar el PDF.')
-  w.document.write(html)
-  w.document.close()
-  w.focus()
-  setTimeout(() => { w.print() }, 400)
+    </div>`
+  const filaHtml = (f) => `<tr>
+    <td>${esc(f.fecha)}</td><td>${esc(f.lote)}</td><td>${esc(f.vence)}</td><td class="l">${esc(f.producto)}</td>
+    <td>${esc(f.unidades)}</td><td>${esc(f.cajas)}</td><td>${esc(f.inicio)}</td><td>${esc(f.fin)}</td>
+    <td>${esc(f.labor)}</td><td>${esc(f.responsable)}</td><td class="l">${esc(f.obs)}</td></tr>`
+  const docPagina = (pag, total, rows) => {
+    const vacias = Math.max(0, ROWS - rows.length)
+    const filasVacias = Array.from({ length: vacias }).map(() => '<tr>' + '<td></td>'.repeat(11) + '</tr>').join('')
+    return `<!doctype html><html><head><meta charset="utf-8"><style>
+      * { box-sizing:border-box; }
+      html,body { margin:0; }
+      #page { width:277mm; margin:0 auto; font-family: Arial, sans-serif; color:#222; padding:2mm; }
+      .head { display:flex; border:1px solid #333; }
+      .head .logo { width:100px; border-right:1px solid #333; display:flex; align-items:center; justify-content:center; padding:4px; }
+      .head .logo img { max-width:92px; max-height:64px; }
+      .head .titulo { flex:1; display:flex; align-items:center; justify-content:center; text-align:center; font-weight:bold; font-size:16px; }
+      .head .meta { width:190px; border-left:1px solid #333; font-size:11px; }
+      .head .meta div { display:flex; border-bottom:1px solid #333; }
+      .head .meta div:last-child { border-bottom:none; }
+      .head .meta b { width:50%; padding:2px 5px; border-right:1px solid #333; background:#f3f0e8; }
+      .head .meta span { padding:2px 5px; }
+      table { width:100%; border-collapse:collapse; margin-top:6px; font-size:10px; }
+      th, td { border:1px solid #333; padding:4px 5px; text-align:center; }
+      th { background:#e9e4d6; }
+      td.l, th.l { text-align:left; }
+    </style></head><body><div id="page">
+      ${encabezado(pag, total)}
+      <table>
+        <thead><tr>
+          <th>FECHA</th><th>LOTE</th><th>FECHA DE VENCIMIENTO</th><th class="l">PRODUCTO</th>
+          <th>UNIDAD</th><th>CAJAS</th><th>HORA INICIO</th><th>HORA FINAL</th>
+          <th>LABOR</th><th>RESPONSABLE</th><th class="l">OBSERVACIONES</th>
+        </tr></thead>
+        <tbody>${rows.map(filaHtml).join('')}${filasVacias}</tbody>
+      </table>
+    </div></body></html>`
+  }
+
+  const jspdfMod = await import('jspdf')
+  const jsPDF = jspdfMod.jsPDF || jspdfMod.default
+  const pdf = new jsPDF({ unit: 'mm', format: 'letter', orientation: 'landscape' })
+  const pageW = pdf.internal.pageSize.getWidth(), pageH = pdf.internal.pageSize.getHeight()
+  const margin = 6, availW = pageW - 2 * margin, availH = pageH - 2 * margin
+  if (onProgress) onProgress(0, nPags)
+  for (let p = 0; p < nPags; p++) {
+    if (shouldCancel && shouldCancel()) return { canceled: true }
+    const canvas = await htmlACanvasPTZ(docPagina(p + 1, nPags, paginas[p]))
+    let w = availW, h = canvas.height * (w / canvas.width)
+    if (h > availH) { h = availH; w = canvas.width * (h / canvas.height) }
+    if (p > 0) pdf.addPage()
+    pdf.addImage(canvas.toDataURL('image/jpeg', 0.92), 'JPEG', (pageW - w) / 2, margin, w, h)
+    if (onProgress) onProgress(p + 1, nPags)
+  }
+  if (shouldCancel && shouldCancel()) return { canceled: true }
+  pdf.save('PTZ-RG-03 REGISTRO CONTROL PRODUCCIÓN DIARIA.pdf')
+  return { canceled: false }
 }
