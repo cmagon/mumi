@@ -46,7 +46,12 @@ const ESTADO_LABEL = {
   ejecutada:  { txt: 'Enviada a aprobación', badge: 'badge-dorado' },
   aprobada:   { txt: 'Aprobada',   badge: 'badge-verde' },
   rechazada:  { txt: 'Rechazada',  badge: 'badge-rojo' },
+  cancelada:  { txt: 'Cerrada sin ejecutar', badge: 'badge-gris' },
 }
+// Días desde la creación de la orden a partir de los cuales se puede CERRAR sin ejecutarla
+// (para órdenes atascadas: pendientes o en proceso que quedaron abiertas mucho tiempo).
+const DIAS_CIERRE_SIN_EJECUTAR = 20
+const diasAbierta = (o) => o?.created_at ? Math.floor((Date.now() - new Date(o.created_at).getTime()) / 86400000) : 0
 
 const EMPTY_ORDEN = {
   producto: '', origen: 'producto', origen_id: '', es_subproducto: false, es_mp: false, mp_id: '',
@@ -175,6 +180,7 @@ export default function OrdenesProduccion() {
   const [modalEjec, setModalEjec]   = useState(false)
   const [ordenPrep, setOrdenPrep]   = useState(null)
   const [prepIngs, setPrepIngs]     = useState([])
+  const [prepTraza, setPrepTraza]   = useState([])   // trazabilidad de lotes de MP de la orden abierta
   const [prepInfo, setPrepInfo]     = useState(null)
   const [prepDatos, setPrepDatos]   = useState(null)   // datos previstos (mezcla, unidades, costos)
   const [prepFicha, setPrepFicha]   = useState(null)   // { url, nombre } ficha técnica
@@ -231,8 +237,28 @@ export default function OrdenesProduccion() {
     .map(s => ({ ...s, peso: dispSaldo(s, exceptId), pesoTotal: Number(s.peso) || 0 }))
     .filter(s => s.peso > 0 || (ordenPrep && prepLotesExtra.some(e => e.saldo_id === s.id)))
 
+  // Devuelve el/los lote(s) de MP usados por un ingrediente, cruzando por mp_id (o nombre) contra la trazabilidad.
+  const loteDeTraza = (traza, ing) => {
+    const key = String(ing?.nombre || '').trim().toLowerCase()
+    const t = (traza || []).find(x => (ing?.mpId != null && String(x.mp_id) === String(ing.mpId)) || String(x.nombre || '').trim().toLowerCase() === key)
+    return t && Array.isArray(t.lotes) ? t.lotes.map(l => l.lote).filter(Boolean).join(' · ') : ''
+  }
   const lotesDeMP = (mpId) => lotesMP.filter(l => String(l.mp_id) === String(mpId))
     .sort((a, b) => ((a.vencimiento || '9999-99-99') < (b.vencimiento || '9999-99-99') ? -1 : a.vencimiento === b.vencimiento ? ((a.fecha_entrada || '') < (b.fecha_entrada || '') ? -1 : 1) : 1))
+  // Formatea una cantidad de MP a una unidad legible. OJO: el stock/lotes se guardan en la UNIDAD de la MP
+  // (Kg si la MP es Kg, gramos si es Gramo, etc.). Se normaliza a gramos/ml y se muestra:
+  //   peso → gramos si <1 Kg, Kg (con decimales) si ≥1 Kg;  volumen → ml/L igual;  conteo → unidades.
+  const fMP = (val, unidad) => {
+    const v = Math.max(0, Number(val) || 0)
+    const u = String(unidad || '').trim().toLowerCase()
+    const fKg = (g) => g >= 1000 ? `${(g / 1000).toLocaleString('es-CO', { maximumFractionDigits: 2 })} Kg` : `${Math.round(g).toLocaleString('es-CO')} g`
+    const fL = (ml) => ml >= 1000 ? `${(ml / 1000).toLocaleString('es-CO', { maximumFractionDigits: 2 })} L` : `${Math.round(ml).toLocaleString('es-CO')} ml`
+    if (u === 'kg' || u.startsWith('kilo')) return fKg(v * 1000)   // guardado en Kg
+    if (u.startsWith('g')) return fKg(v)                            // guardado en gramos
+    if (u === 'l' || u.startsWith('litro')) return fL(v * 1000)     // guardado en litros
+    if (u.startsWith('m')) return fL(v)                             // guardado en mililitros
+    return `${fNum(v)} und`
+  }
   const fmtVence = (v) => v ? new Date(v + 'T00:00:00').toLocaleDateString('es-CO') : '—'
 
   // Estructura del lote: NN+AA (consecutivo del año + año a 2 dígitos). Ej: 0126 = lote 01 de 2026.
@@ -331,7 +357,7 @@ export default function OrdenesProduccion() {
   })
   const { data: mps = [] } = useQuery({
     queryKey: ['raw_materials'],
-    queryFn: async () => { const { data } = await supabase.from('raw_materials').select('id, nombre').order('nombre'); return data || [] },
+    queryFn: async () => { const { data } = await supabase.from('raw_materials').select('id, nombre, unidad, stock').order('nombre'); return data || [] },
   })
   // Registros de producción vinculados a órdenes (para habilitar "Enviar y cerrar")
   const { data: prodRecords = [] } = useQuery({
@@ -452,7 +478,7 @@ export default function OrdenesProduccion() {
         const ings = ingsRaw.map(i => {
           const gramos = (parseFloat(i.cantidad) || 0) * baches
           const costo = ((parseFloat(i.precio) || 0) / (parseFloat(i.presentacion) || 1000)) * gramos
-          return { nombre: i.nombre, gramos, costo }
+          return { nombre: i.nombre, mpId: i.mpId || null, gramos, costo }
         })
         setPrepIngs(ings)
         // mezclaPorUnid = gramos de MEZCLA que consume cada unidad final (= totalMezclaBache/unidsBacheNet).
@@ -498,7 +524,7 @@ export default function OrdenesProduccion() {
       const unidsBacheNet = pu > 0 ? (totalMezclaBache * (rend / 100) * (1 - desp / 100)) / pu : (parseFloat(prod.bache) || 0)
       const bachesPlan = parseFloat(o.baches_plan) || 0
       const baches = bachesPlan > 0 ? bachesPlan : snapBaches(unidsBacheNet > 0 ? cantidad / unidsBacheNet : ((parseFloat(prod.bache) || 0) > 0 ? cantidad / parseFloat(prod.bache) : 0))
-      return { ings: ingsRaw.map(i => ({ nombre: i.nombre, gramos: (parseFloat(i.cantidad) || 0) * baches })), ficha: { rend, desp, pu } }
+      return { ings: ingsRaw.map(i => ({ nombre: i.nombre, mpId: i.mpId || null, gramos: (parseFloat(i.cantidad) || 0) * baches })), ficha: { rend, desp, pu } }
     } else if (o.origen === 'receta' && o.origen_id) {
       const { data: rec } = await supabase.from('recipes').select('ingredientes, rendimiento, desperdicio, peso_unidad').eq('id', o.origen_id).single()
       if (!rec) return { ings: [], ficha: null }
@@ -510,6 +536,16 @@ export default function OrdenesProduccion() {
     }
     return { ings: [], ficha: null }
   }
+
+  // Trazabilidad de lotes de MP de la orden abierta (fresca de la BD, por si ordenPrep está desactualizada)
+  useEffect(() => {
+    if (!modalProceso || !ordenPrep?.id) { setPrepTraza([]); return }
+    let cancel = false
+    supabase.from('production_orders').select('lotes_mp, lotes_reservados').eq('id', ordenPrep.id).single()
+      .then(({ data }) => { if (!cancel) setPrepTraza((Array.isArray(data?.lotes_mp) && data.lotes_mp) || (Array.isArray(data?.lotes_reservados) && data.lotes_reservados) || []) })
+      .catch(() => {})
+    return () => { cancel = true }
+  }, [modalProceso, ordenPrep?.id])
 
   // Carga los ingredientes cada vez que se abre el modal de Detalles
   useEffect(() => {
@@ -549,7 +585,8 @@ export default function OrdenesProduccion() {
     // Empaque de saldo: las unidades obtenidas de la producción SON las unidades empacadas del saldo.
     setPrepUnidades(o.empaque_saldo ? String(o.cantidad_result || o.cantidad_plan || '') : (o.cantidad_result || '')); setPrepPesoFinal(o.peso_final || ''); setPrepPesoDesp(o.peso_desperdicio || '')
     setPrepObs(o.obs_result || ''); setPrepResp(o.operario || profile?.nombre || ''); setPrepConforme(triState(ps.conforme))
-    setPrepSurtido(triState(ps.surtido ?? o.surtido)); setPrepLoteMezcla(o.lote_mezcla || ''); setPrepProductoSurtido(o.producto_surtido || '')
+    // Surtido y sobrante SIEMPRE arrancan sin marcar (el usuario debe elegir); solo se restauran si ya se respondieron en el borrador.
+    setPrepSurtido(triState(ps.surtido)); setPrepLoteMezcla(o.lote_mezcla || ''); setPrepProductoSurtido(o.producto_surtido || '')
     setPrepPorciona(false); setPrepCantSubp(o.cant_subporciones || '')
     setPrepFotoFile(null); setPrepFotoPrev(o.foto_url || '')
     if (packInfo) {
@@ -575,7 +612,9 @@ export default function OrdenesProduccion() {
         if (error) throw error
         try { await reservarMP(o) } catch (e) { console.warn('No se pudo reservar MP:', e) }
         qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
-        o = { ...o, estado: 'en_proceso' }
+        // Trae la orden FRESCA (con lotes_reservados ya escrito por reservarMP) — si se usa la copia
+        // local vieja, al cerrar la orden consumirMP no encuentra nada que pasar a lotes_mp.
+        try { const { data: fresh } = await supabase.from('production_orders').select('*').eq('id', o.id).single(); if (fresh) o = fresh } catch { o = { ...o, estado: 'en_proceso' } }
       }
     } catch (e) { toast(e.message, 'error'); return }
     await openProceso(o)
@@ -645,38 +684,38 @@ export default function OrdenesProduccion() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [prepLote, prepVence, prepFechaInicio, prepModoAvanzado, prepHoraInicio, prepHoraFin, prepProcesos, prepUnidades, prepPesoFinal, prepPesoDesp, prepPesoSubp, prepCantSubp, prepObs, prepSurtido, prepLoteMezcla, prepProductoSurtido, prepSurtidoCantidad, prepHaySobrante, prepSobrantePeso, prepSobranteUnidad, prepResp, prepConforme, prepLotesExtra, prepDestajo, prepCamposExtra, autoguardar, modalProceso])
 
-  // Auto-sugerir el SOBRANTE (lo producido que quedó SIN empacar), mientras el usuario no lo edite.
-  //   Porcionado: subporciones producidas − (unidades empacadas × subporciones por unidad).
-  //   No porcionado: peso final (g) − (unidades empacadas × gramos de mezcla por unidad).
-  // El usuario puede sobrescribir (marca prepSobranteManual) para poner más o menos.
+  // Prellena la CANTIDAD del sobrante (solo como ayuda) — NUNCA marca el SÍ/NO, eso es siempre manual.
+  // Solo actúa si el usuario ya marcó "¿Sobró? = SÍ" y no ha editado la cantidad a mano.
   useEffect(() => {
     if (!modalProceso || prepSobranteManual || prepSurtido) return
+    if (prepHaySobrante !== true) return   // no auto-marca; solo sugiere el valor cuando el usuario eligió SÍ
     const pu = parseFloat(prepInfo?.pesoUnidad) || 0
     const mezclaPorUnid = parseFloat(prepInfo?.mezclaPorUnid) || pu
     const packed = parseFloat(prepUnidades) || 0
     const producedSub = parseFloat(prepCantSubp) || 0
     let leftover = 0, unidad = 'g'
     if (ordenPrep?.empaque_saldo) {
-      // Empaque de saldo: el remanente NO va aquí (se muestra arriba, en la fila del saldo, y se queda en su
-      // propio lote). Para no confundir, "¿Sobró?" se deja en NO automáticamente.
-      setPrepHaySobrante(false); setPrepSobrantePeso('')
-      return
+      let u = 'g'
+      leftover = prepLotesExtra.reduce((acc, ex) => {
+        if (ex.saldo_id == null) return acc
+        const s = saldosMezcla.find(x => String(x.id) === String(ex.saldo_id)); if (!s) return acc
+        u = s.unidad || 'g'
+        return acc + (dispSaldo(s, ordenPrep.id) - (parseFloat(ex.peso_consumido) || 0))
+      }, 0)
+      unidad = u
     } else if (prepPorciona && producedSub > 0) {
-      // Producción porcionada con subporciones: el sobrante va en subporciones.
       const psub = parseFloat(prepPesoSubp) || 0
       const subPorUnid = psub > 0 ? pu / psub : 1
       leftover = producedSub - packed * subPorUnid
       unidad = 'subporciones'
     } else {
-      // Sin subporciones: el sobrante es mezcla en GRAMOS (peso final − lo empacado).
       leftover = (parseFloat(prepPesoFinal) || 0) - packed * mezclaPorUnid
       unidad = 'g'
     }
     leftover = Math.round(leftover * 100) / 100
-    if (leftover >= 1) { setPrepHaySobrante(true); setPrepSobrantePeso(String(leftover)); setPrepSobranteUnidad(unidad) }
-    else { setPrepHaySobrante(false); setPrepSobrantePeso('') }
+    if (leftover >= 1) { setPrepSobrantePeso(String(leftover)); setPrepSobranteUnidad(unidad) }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [modalProceso, prepSobranteManual, prepSurtido, prepPorciona, prepUnidades, prepCantSubp, prepPesoFinal, prepPesoSubp, prepInfo, prepLotesExtra, saldosMezcla])
+  }, [modalProceso, prepSobranteManual, prepSurtido, prepHaySobrante, prepPorciona, prepUnidades, prepCantSubp, prepPesoFinal, prepPesoSubp, prepInfo, prepLotesExtra, saldosMezcla])
 
   // Empaque que se descontará (bolsas/cajas) — se calcula en vivo mientras el modal está abierto,
   // para verlo en el diligenciamiento y llevarlo a la impresión.
@@ -874,6 +913,10 @@ export default function OrdenesProduccion() {
     const unidProducidas = vUnidades !== '' ? `${fNum(parseFloat(vUnidades) || 0)} ${o.unidad || ''}` : ''
     // Marca SI/NO compacta (casilla pequeña con X según el valor tri-estado)
     const chk = (v) => `SI <span class="bx">${v === true ? 'X' : ''}</span> NO <span class="bx">${v === false ? 'X' : ''}</span>`
+    // Trazabilidad de lotes de MP usados por ingrediente (para la columna "Lote MP" de la impresión).
+    let traza = (live && prepTraza.length) ? prepTraza : (Array.isArray(o.lotes_mp) ? o.lotes_mp : (Array.isArray(o.lotes_reservados) ? o.lotes_reservados : []))
+    if (!traza.length) { try { const { data } = await supabase.from('production_orders').select('lotes_mp, lotes_reservados').eq('id', o.id).single(); traza = (Array.isArray(data?.lotes_mp) && data.lotes_mp) || (Array.isArray(data?.lotes_reservados) && data.lotes_reservados) || [] } catch { /* sin traza */ } }
+    const loteIng = (ing) => loteDeTraza(traza, ing)
     const filas = ings.map(i => `<tr><td>${i.nombre}</td><td class="r">${g(i.gramos)} g</td></tr>`).join('')
     const totalG = ings.reduce((s, i) => s + (i.gramos || 0), 0)
     const datosHtml = d ? `
@@ -939,7 +982,8 @@ export default function OrdenesProduccion() {
       body { font-family: Arial, sans-serif; color:#222; font-size:11px; }
       /* Ancho útil real de una hoja carta (215.9mm − 2×10mm de margen). Así la medición en pantalla
          coincide con la impresión y el auto-ajuste a una sola hoja es exacto. */
-      #content { width:196mm; margin:0 auto; padding-bottom:10px; }
+      #content { width:196mm; margin:0 auto; padding-bottom:10px; position:relative; }
+      .marca-agua { position:absolute; top:45%; left:50%; transform:translate(-50%,-50%) rotate(-32deg); font-size:64px; font-weight:900; color:rgba(192,57,43,0.28); letter-spacing:4px; white-space:nowrap; z-index:999; pointer-events:none; }
       table { width:100%; border-collapse:collapse; }
       /* Paddings en em: al reducir la tipografía para ajustar a una hoja, TODO se comprime en
          proporción (sin usar zoom, que dejaría márgenes anchos). El ancho se mantiene 100%. */
@@ -963,6 +1007,7 @@ export default function OrdenesProduccion() {
       tbody tr:nth-child(even) td { background:#fafafa; }
       .ingr tbody tr:nth-child(even) td { background:#fafafa; }
     </style></head><body><div id="content">
+      ${o.estado === 'cancelada' ? '<div class="marca-agua">NO EJECUTADA</div>' : ''}
 
       <!-- Encabezado del formato -->
       <table class="hdr">
@@ -991,7 +1036,7 @@ export default function OrdenesProduccion() {
 
       <div class="seccion">LISTA DE INGREDIENTES</div>
       <table class="ingr"><thead><tr><th>Ingrediente</th><th class="r">Porcentaje</th><th class="r">Cantidad (gr)</th><th>Lote MP</th></tr></thead>
-        <tbody>${filas ? ings.map(i => `<tr><td>${i.nombre}</td><td class="r">${totalG > 0 ? (i.gramos / totalG * 100).toFixed(1) : '0'}%</td><td class="r">${g(i.gramos)}</td><td></td></tr>`).join('') + `<tr><td><b>TOTAL</b></td><td class="r"><b>100%</b></td><td class="r"><b>${g(totalG)}</b></td><td></td></tr>` : '<tr><td colspan="4">Sin receta vinculada</td></tr>'}</tbody>
+        <tbody>${filas ? ings.map(i => `<tr><td>${i.nombre}</td><td class="r">${totalG > 0 ? (i.gramos / totalG * 100).toFixed(1) : '0'}%</td><td class="r">${g(i.gramos)}</td><td>${loteIng(i)}</td></tr>`).join('') + `<tr><td><b>TOTAL</b></td><td class="r"><b>100%</b></td><td class="r"><b>${g(totalG)}</b></td><td></td></tr>` : '<tr><td colspan="4">Sin receta vinculada</td></tr>'}</tbody>
       </table>
 
       ${d ? `<div class="seccion">DATOS PREVISTOS</div>${filasPrev}` : ''}
@@ -1466,8 +1511,24 @@ export default function OrdenesProduccion() {
     onError: (e) => toast(e.message, 'error'),
   })
 
+  // Cierra una orden ATASCADA (pendiente o en proceso, sin ejecutar) que lleva mucho tiempo abierta.
+  // A diferencia de "Eliminar", conserva el registro (queda como "Cerrada sin ejecutar") y libera la MP reservada.
+  const cerrarSinEjecutar = useMutation({
+    mutationFn: async (o) => {
+      if (o.estado === 'en_proceso') { try { await liberarMP(o) } catch (e) { console.warn('No se pudo liberar MP:', e) } }
+      const { error } = await supabase.from('production_orders').update({ estado: 'cancelada' }).eq('id', o.id)
+      if (error) throw error
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
+      toast('Orden cerrada sin ejecutar — MP reservada devuelta al inventario ✓')
+    },
+    onError: (e) => toast(e.message, 'error'),
+  })
+
   const eliminarOrden = useMutation({
     mutationFn: async (o) => {
+      if (typeof o === 'object' && o.estado === 'cancelada') throw new Error('Esta orden ya está cerrada ("Cerrada sin ejecutar") y no se puede eliminar.')
       const id = typeof o === 'object' ? o.id : o
       // Devuelve al inventario la MP reservada que no se consumió (orden no ejecutada)
       if (typeof o === 'object') { try { await liberarMP(o) } catch (e) { console.warn('No se pudo liberar MP:', e) } }
@@ -1536,6 +1597,14 @@ export default function OrdenesProduccion() {
     return out
   }
 
+  // Reconciliación manual: para órdenes que quedaron EN PROCESO sin reserva de MP (ej. por el bug
+  // histórico de reservarPEPS), permite reservarla ahora sin tener que devolver/recrear la orden.
+  const reservarMPManual = useMutation({
+    mutationFn: async (o) => { await reservarMP(o) },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] }); toast('MP reservada ✓') },
+    onError: (e) => toast('No se pudo reservar: ' + e.message, 'error'),
+  })
+
   // 1) RESERVAR la MP cuando la orden INICIA producción (sale de "disponible" → "reservado")
   const reservarMP = async (o) => {
     if (o.empaque_saldo) return   // empaque de saldo: no consume MP (ya está producido)
@@ -1547,11 +1616,16 @@ export default function OrdenesProduccion() {
     const preferidos = (o.lotes_preferidos && typeof o.lotes_preferidos === 'object') ? o.lotes_preferidos : {}
     const reservas = []
     for (const it of items) {
-      let lotes = []
-      if (!it.esEmp && !sinLote) { const r = await reservarPEPS({ mp_id: it.mpId, cantidad: it.consumo, preferLoteId: preferidos[it.mpId] || preferidos[String(it.mpId)] || null }); lotes = r.reservados }
+      let lotes = [], faltanteLotes = 0
+      if (!it.esEmp && !sinLote) {
+        const r = await reservarPEPS({ mp_id: it.mpId, cantidad: it.consumo, preferLoteId: preferidos[it.mpId] || preferidos[String(it.mpId)] || null })
+        lotes = r.reservados; faltanteLotes = r.faltante || 0
+      }
       // El stock (disponible) baja al reservar (con o sin lote)
       await supabase.from('raw_materials').update({ stock: it.stock - it.consumo }).eq('id', it.mpId)
-      reservas.push({ mp_id: it.mpId, nombre: it.nombre, unidad: it.unidad, consumo: it.consumo, lotes, sin_lote: sinLote })
+      // Si los lotes no cubrieron todo el consumo (sin lotes cargados, o insuficientes), se registra
+      // explícitamente cuánto salió del stock GENERAL sin trazabilidad de lote — para no perderlo en silencio.
+      reservas.push({ mp_id: it.mpId, nombre: it.nombre, unidad: it.unidad, consumo: it.consumo, lotes, sin_lote: sinLote, ...(faltanteLotes > 0 ? { sin_lote_cantidad: faltanteLotes } : {}) })
     }
     await supabase.from('production_orders').update({ lotes_reservados: reservas }).eq('id', o.id)
   }
@@ -1924,7 +1998,7 @@ export default function OrdenesProduccion() {
                         <div className="ordenes-acciones" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           <button className="btn btn-xs btn-secondary" title="Ver detalles" onClick={() => setOrdenDetalle(o)}><Eye size={13} aria-hidden="true" />Detalles</button>
                           {/* Imprimir la orden ya cerrada/enviada (mismo formato) — solo ícono */}
-                          {(o.estado === 'ejecutada' || o.estado === 'aprobada') && <button className="btn btn-xs btn-secondary" title="Imprimir orden" onClick={() => imprimirOrden('print', o)}><Printer size={13} aria-hidden="true" /></button>}
+                          {(o.estado === 'ejecutada' || o.estado === 'aprobada' || o.estado === 'cancelada') && <button className="btn btn-xs btn-secondary" title="Imprimir orden" onClick={() => imprimirOrden('print', o)}><Printer size={13} aria-hidden="true" /></button>}
                           {/* Quien ejecuta la orden: el operario dueño */}
                           {esMia && o.estado === 'pendiente' && <button className="btn btn-xs btn-primary" onClick={() => tomarOrden.mutate(o)}><Ico as={Play} size={13} />Tomar</button>}
                           {/* Los ingredientes se ven en "Detalles" y en el modal de proceso, por eso ya no hay botón aparte */}
@@ -1953,7 +2027,15 @@ export default function OrdenesProduccion() {
                           {esAdmin && (o.estado === 'ejecutada' || o.estado === 'aprobada') && (
                             <button className="btn btn-xs btn-secondary" title="Devolver orden: elimina el registro, devuelve el stock terminado y vuelve a 'en proceso' para reeditarla" disabled={devolverOrden.isPending} onClick={() => confirmar(`¿Devolver la orden #${opNum(o.id)}?\n\nSe ELIMINA su registro de producción, se DEVUELVE el stock que sumó al producto terminado y vuelve a "en proceso" para reeditarla.`).then(ok => ok && devolverOrden.mutate(o))}><Ico as={Undo2} size={13} />Devolver</button>
                           )}
-                          {esAdmin && o.estado !== 'ejecutada' && o.estado !== 'aprobada' && <button className="btn btn-xs btn-danger" title="Eliminar orden (solo admin)" onClick={() => confirmarEliminarOrden(o)}><Trash2 size={13} aria-hidden="true" />Eliminar</button>}
+                          {/* Cierre por antigüedad: orden atascada (pendiente/en proceso) sin ejecutar hace tiempo */}
+                          {esAdmin && (o.estado === 'pendiente' || o.estado === 'en_proceso') && diasAbierta(o) >= DIAS_CIERRE_SIN_EJECUTAR && (
+                            <button className="btn btn-xs btn-danger" disabled={cerrarSinEjecutar.isPending} title={`Lleva ${diasAbierta(o)} días abierta sin ejecutarse`} onClick={() => confirmar(`¿Cerrar la orden #${opNum(o.id)} SIN EJECUTAR?\n\nLleva ${diasAbierta(o)} días abierta. Se libera la MP reservada (si aplica) y la orden queda marcada como "Cerrada sin ejecutar" (no se elimina).`).then(ok => ok && cerrarSinEjecutar.mutate(o))}><Ico as={X} size={13} />Cerrar sin ejecutar</button>
+                          )}
+                          {/* Reconciliación: orden EN PROCESO sin reserva de MP registrada (ej. quedó así por un bug ya corregido) */}
+                          {esAdmin && o.estado === 'en_proceso' && o.origen === 'producto' && o.origen_id && !o.empaque_saldo && !(Array.isArray(o.lotes_reservados) && o.lotes_reservados.length) && (
+                            <button className="btn btn-xs btn-secondary" title="Esta orden está en proceso pero no tiene la MP reservada — resérvala ahora" disabled={reservarMPManual.isPending} onClick={() => reservarMPManual.mutate(o)}><Ico as={Package} size={13} />Reservar MP</button>
+                          )}
+                          {esAdmin && o.estado !== 'ejecutada' && o.estado !== 'aprobada' && o.estado !== 'cancelada' && <button className="btn btn-xs btn-danger" title="Eliminar orden (solo admin)" onClick={() => confirmarEliminarOrden(o)}><Trash2 size={13} aria-hidden="true" />Eliminar</button>}
                           {(o.estado === 'aprobada' || (esAdmin && o.estado !== 'ejecutada')) && o.foto_url && <button className="btn btn-xs btn-secondary" title="Ver/registrar foto" onClick={() => openEjecutar(o)}><Camera size={13} aria-hidden="true" />Foto</button>}
                         </div>
                       </td>
@@ -2108,17 +2190,27 @@ export default function OrdenesProduccion() {
               ? <div style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>El consumo se registrará como <strong>salida sin lote</strong>; los lotes no se modifican.</div>
               : prodReceta.ings.filter(i => i.mpId).map((ing, k) => {
               const lts = lotesDeMP(ing.mpId)
+              const mpRow = mps.find(m => String(m.id) === String(ing.mpId))
+              const mpUnidad = mpRow?.unidad || ''
+              // Stock REAL de la MP (fuente de verdad en Inventario), independiente de si tiene lotes cargados.
+              const stockReal = Number(mpRow?.stock) || 0
               const elegido = form.lotes_elegidos?.[ing.mpId] || form.lotes_elegidos?.[String(ing.mpId)] || ''
               const descLote = (l) => {
                 const est = estadoLote(l.vencimiento)
                 const etq = est === 'vencido' ? ' ⛔ Vencido' : est === 'por_vencer' ? ' ⚠ Por vencer' : ''
-                return `Lote ${l.lote || '(s/n)'} · ${fNum(l.cantidad_actual)} disp. · Vence ${fmtVence(l.vencimiento)}${etq}`
+                // Disponible EXACTO: cantidad_actual YA excluye lo reservado (al reservar se mueve a cantidad_reservada).
+                const disp = Number(l.cantidad_actual) || 0
+                return `Lote ${l.lote || '(s/n)'} · ${fMP(disp, mpUnidad)} disp. · Vence ${fmtVence(l.vencimiento)}${etq}`
               }
               return (
                 <div key={k} style={{ marginBottom: 8 }}>
                   <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--selva)' }}>{ing.nombre}</div>
                   {lts.length === 0
-                    ? <div style={{ fontSize: '0.78rem', color: 'var(--rojo)' }}>⚠ Sin lotes en stock</div>
+                    ? (stockReal > 0
+                        // Hay stock real, pero sin lotes PEPS cargados (se entró directo en la MP, no por "Entrada").
+                        // No es un error de falta de stock: se consumirá del stock general, sin trazabilidad por lote.
+                        ? <div style={{ fontSize: '0.78rem', color: 'var(--tierra)' }}>ℹ Sin lotes registrados — hay <strong>{fMP(stockReal, mpUnidad)}</strong> en stock general (sin trazabilidad por lote); se descontará del stock total.</div>
+                        : <div style={{ fontSize: '0.78rem', color: 'var(--rojo)' }}>⚠ Sin stock disponible</div>)
                     : lts.length === 1
                       ? (() => {
                           const l = lts[0], est = estadoLote(l.vencimiento)
@@ -2298,10 +2390,11 @@ export default function OrdenesProduccion() {
                       return (
                         <div className="table-wrap">
                           <table>
-                            <thead><tr><th style={{ width: 40 }}>✓</th><th>Ingrediente</th><th className="td-number">Cantidad a usar</th></tr></thead>
+                            <thead><tr><th style={{ width: 40 }}>✓</th><th>Ingrediente</th><th className="td-number">Cantidad a usar</th><th>Lote MP</th></tr></thead>
                             <tbody>
                               {prepIngs.map((i, k) => {
                                 const ok = !!alistado[k]
+                                const loteMp = loteDeTraza(prepTraza, i)
                                 return (
                                   <tr key={k} style={{ background: ok ? 'rgba(124,179,66,0.16)' : 'transparent', transition: 'background 0.2s ease' }}>
                                     <td data-label="✓" style={{ textAlign: 'center' }}>
@@ -2310,10 +2403,11 @@ export default function OrdenesProduccion() {
                                     </td>
                                     <td style={{ fontWeight: ok ? 600 : 400, color: ok ? 'var(--selva)' : 'inherit' }}>{i.nombre}</td>
                                     <td className="td-number">{fCant(i.gramos)} g</td>
+                                    <td style={{ fontSize: '0.82rem', color: loteMp ? 'var(--selva)' : 'var(--texto-suave)' }}>{loteMp || '—'}</td>
                                   </tr>
                                 )
                               })}
-                              <tr style={{ fontWeight: 700, background: 'rgba(124,179,66,0.08)' }}><td></td><td>TOTAL</td><td className="td-number">{fCant(totalG)} g</td></tr>
+                              <tr style={{ fontWeight: 700, background: 'rgba(124,179,66,0.08)' }}><td></td><td>TOTAL</td><td className="td-number">{fCant(totalG)} g</td><td></td></tr>
                             </tbody>
                           </table>
                           <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Marca cada ingrediente a medida que lo pesas. Es solo una ayuda visual (no se guarda).</small>
@@ -2809,37 +2903,6 @@ export default function OrdenesProduccion() {
               {o.estado === 'aprobada' && <p style={{ fontSize: '0.85rem', color: 'var(--selva)' }}><strong>Aprobada por:</strong> {o.aprobado_por} · {o.fecha_aprob ? fFecha(o.fecha_aprob.split('T')[0]) : ''}</p>}
               {o.foto_url && <div style={{ marginTop: 8 }}><img src={o.foto_url} alt="resultado" style={{ maxWidth: '100%', maxHeight: 240, borderRadius: 4 }} /></div>}
 
-              {/* Ingredientes de la orden (misma info que la vista de impresión) */}
-              <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 12 }}><Ico as={FlaskConical} size={15} />Ingredientes</div>
-              {detalleIngs.length === 0
-                ? <p className="empty-table">Sin receta vinculada a esta orden (o aún cargando).</p>
-                : (() => {
-                    const totalG = detalleIngs.reduce((s, i) => s + (i.gramos || 0), 0)
-                    // Lote(s) de MP realmente consumidos (trazabilidad PEPS), por nombre de ingrediente
-                    const lotesPorIng = {}
-                    ;(Array.isArray(o.lotes_mp) ? o.lotes_mp : []).forEach(t => {
-                      const txt = (t.lotes || []).map(l => `${l.lote || 's/lote'}${l.vencimiento ? ' (vence ' + fFecha(l.vencimiento) + ')' : ''}`).join(' · ')
-                      if (t.nombre) lotesPorIng[String(t.nombre).trim().toLowerCase()] = txt
-                    })
-                    return (
-                      <div className="table-wrap">
-                        <table>
-                          <thead><tr><th>Ingrediente</th><th className="td-number">%</th><th className="td-number">Cantidad a usar</th><th>Lote MP</th></tr></thead>
-                          <tbody>
-                            {detalleIngs.map((i, k) => (
-                              <tr key={k}>
-                                <td>{i.nombre}</td>
-                                <td className="td-number">{totalG > 0 ? (i.gramos / totalG * 100).toFixed(1) : '0'}%</td>
-                                <td className="td-number">{fCant(i.gramos)} g</td>
-                                <td style={{ fontSize: '0.8rem', color: 'var(--texto-suave)' }}>{lotesPorIng[String(i.nombre).trim().toLowerCase()] || '—'}</td>
-                              </tr>
-                            ))}
-                            <tr style={{ fontWeight: 700, background: 'rgba(124,179,66,0.08)' }}><td>TOTAL</td><td className="td-number">100%</td><td className="td-number">{fCant(totalG)} g</td><td></td></tr>
-                          </tbody>
-                        </table>
-                      </div>
-                    )
-                  })()}
 
               {/* Rendimiento de los ingredientes vs la ficha (solo si ya hay unidades obtenidas) */}
               {detalleFicha && detalleIngs.length > 0 && o.cantidad_result != null && (() => {
@@ -2909,21 +2972,36 @@ export default function OrdenesProduccion() {
               })()}
 
               {/* Trazabilidad lote-a-lote: lotes de MP consumidos */}
-              {Array.isArray(o.lotes_mp) && o.lotes_mp.length > 0 && (
+              {(() => {
+                const trz = (Array.isArray(o.lotes_mp) && o.lotes_mp.length) ? o.lotes_mp : (Array.isArray(o.lotes_reservados) ? o.lotes_reservados : [])
+                // Cantidades guardadas en la unidad de PRECIO de la MP (Kg/Litro) o ya en base (Gramo/Mililitro/Unidad).
+                // Se muestran SIEMPRE en la unidad base (gramos/ml) para pesos y volúmenes; "Unidad" queda como conteo.
+                const aBase = (v, u) => {
+                  const n = Number(v) || 0
+                  const un = String(u || '').toLowerCase()
+                  if (un.startsWith('kg') || un.startsWith('kilo')) return `${fCant(n * 1000)} g`
+                  if (un.startsWith('g')) return `${fCant(n)} g`
+                  if (un.startsWith('litro') || un === 'l') return `${fCant(n * 1000)} ml`
+                  if (un.startsWith('mililitro') || un === 'ml') return `${fCant(n)} ml`
+                  return `${fNum(n)} ${u || ''}`
+                }
+                return trz.length > 0 && (
                 <>
-                  <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 12 }}><Ico as={Link2} size={15} />Trazabilidad — Lotes de MP consumidos</div>
+                  <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 12 }}><Ico as={Link2} size={15} />Materia Prima — Trazabilidad de lotes (PEPS) {(Array.isArray(o.lotes_mp) && o.lotes_mp.length) ? 'consumidos' : 'reservados'}</div>
                   <div className="table-wrap">
                     <table>
                       <thead><tr><th>Materia prima</th><th className="td-number">Consumo</th><th>Lotes usados (PEPS)</th></tr></thead>
                       <tbody>
-                        {o.lotes_mp.map((t, i) => (
+                        {trz.map((t, i) => (
                           <tr key={i}>
                             <td>{t.nombre}</td>
-                            <td className="td-number">{fNum(t.consumo)} {t.unidad}</td>
+                            <td className="td-number">{aBase(t.consumo, t.unidad)}</td>
                             <td style={{ fontSize: '0.8rem' }}>
                               {(t.lotes || []).length
-                                ? t.lotes.map((l, k) => `${l.lote || 's/lote'}${l.vencimiento ? ' (vence ' + fFecha(l.vencimiento) + ')' : ''}: ${fNum(l.cantidad)}`).join(' · ')
-                                : '—'}
+                                ? t.lotes.map((l, k) => `${l.lote || 's/lote'}${l.vencimiento ? ' (vence ' + fFecha(l.vencimiento) + ')' : ''}: ${aBase(l.cantidad, t.unidad)}`).join(' · ')
+                                : (t.sin_lote_cantidad > 0 || t.sin_lote) ? '' : '—'}
+                              {t.sin_lote_cantidad > 0 && <span style={{ color: 'var(--tierra)' }}>{(t.lotes || []).length ? ' · ' : ''}⚠ {aBase(t.sin_lote_cantidad, t.unidad)} sin lote (stock general)</span>}
+                              {t.sin_lote && !t.sin_lote_cantidad && <span style={{ color: 'var(--texto-suave)' }}>Sin lote (forzado)</span>}
                             </td>
                           </tr>
                         ))}
@@ -2931,7 +3009,7 @@ export default function OrdenesProduccion() {
                     </table>
                   </div>
                 </>
-              )}
+              ) })()}
 
               <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 12 }}><Ico as={ReceiptText} size={15} />Lotes de producción vinculados ({recs.length})</div>
               {recs.length === 0

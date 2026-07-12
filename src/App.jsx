@@ -118,7 +118,7 @@ function ProtectedLayout() {
       <MobileHeader onMenuClick={() => setSidebarOpen(true)} onLogout={pedirCierre} />
       <main className="main-content">
         <DevModeBanner />
-        <Outlet />
+        <ErrorBoundary><Outlet /></ErrorBoundary>
       </main>
       <div id="toast-container" role="status" aria-live="polite" aria-atomic="false" />
       <ConnStatus />

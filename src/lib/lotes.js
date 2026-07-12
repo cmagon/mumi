@@ -44,6 +44,7 @@ export async function reservarPEPS({ mp_id, cantidad, preferLoteId = null }) {
     lotes = [...pref, ...resto]
   }
   const reservados = []
+  let restante = cantidad
   for (const l of lotes) {
     if (restante <= 0) break
     const toma = Math.min(l.cantidad_actual, restante)
