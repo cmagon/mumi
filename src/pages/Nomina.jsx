@@ -34,6 +34,8 @@ export default function Nomina() {
   const [nomEmpId, setNomEmpId] = useState('')
   const [nomUnidades, setNomUnidades] = useState('')   // unidades producidas (para destajo por producción)
   const [nomPeriodo, setNomPeriodo] = useState('mensual')
+  const [nomDescManual, setNomDescManual] = useState('')     // valor de descuento manual (ej. préstamo, daño, anticipo)
+  const [nomRazonDesc, setNomRazonDesc] = useState('')       // razón/motivo del descuento manual
   const [nomMes, setNomMes] = useState(new Date().getMonth() + 1)
   const [nomAño, setNomAño] = useState(new Date().getFullYear())
   // Rango de fechas a liquidar (por defecto, el mes actual)
@@ -86,7 +88,7 @@ export default function Nomina() {
       })
       if (error) throw error
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['payroll_records'] }); toast('Liquidación guardada ✓') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['payroll_records'] }); toast('Liquidación guardada ✓'); setNomDescManual(''); setNomRazonDesc('') },
     onError: (e) => toast(e.message, 'error'),
   })
 
@@ -316,13 +318,27 @@ export default function Nomina() {
   const nomEmpleado = empleados.find(e => e.id === parseInt(nomEmpId))
   const asistEmp = nomEmpleado ? asistencia.filter(a => a.emp_id === nomEmpleado.id) : []
   const rangoValido = nomDesde && nomHasta && nomDesde <= nomHasta
-  const nomResultado = (nomEmpleado && rangoValido)
+  const nomResultadoBase = (nomEmpleado && rangoValido)
     ? calcularNomina(nomEmpleado, asistEmp, nomPeriodo, parseInt(nomMes), nomAño, params, { desde: nomDesde, hasta: nomHasta }, parseFloat(nomUnidades) || 0)
+    : null
+  // Descuento manual (préstamo, daño, anticipo, etc.) — se resta del neto final, con su razón registrada.
+  const nomDescManualNum = Math.max(0, parseFloat(nomDescManual) || 0)
+  const nomResultado = nomResultadoBase
+    ? { ...nomResultadoBase, descuentoManual: nomDescManualNum, razonDescuentoManual: nomRazonDesc, neto: Math.max(0, nomResultadoBase.neto - nomDescManualNum) }
     : null
   // ¿Existe un registro guardado cuyo rango se solape con el seleccionado para este empleado?
   const liquidacionExistente = nomEmpleado && rangoValido
     ? registrosNomina.find(r => r.emp_id === nomEmpleado.id && r.fecha_desde && r.fecha_hasta && r.fecha_desde <= nomHasta && r.fecha_hasta >= nomDesde)
     : null
+
+  // "Período" SÍ afecta el cálculo: para nómina fija y CPS determina si se paga el salario COMPLETO
+  // (mensual) o la MITAD (quincenal) — independiente de cuántos días abarque el rango Desde/Hasta,
+  // que solo se usa para traer la asistencia (horas, días trabajados, inasistencias) de ese lapso.
+  // Si el rango no coincide con el período elegido, el pago puede quedar mal proporcionado — se avisa.
+  const diasSpan = rangoValido ? Math.round((new Date(nomHasta + 'T12:00:00') - new Date(nomDesde + 'T12:00:00')) / 86400000) + 1 : 0
+  const spanDesajustado = rangoValido && nomEmpleado && nomEmpleado.tipo_pago !== 'horas' && nomEmpleado.tipo_pago !== 'destajo'
+    ? (nomPeriodo === 'quincenal' ? (diasSpan < 12 || diasSpan > 18) : (diasSpan < 26 || diasSpan > 32))
+    : false
 
   const exportarExcel = () => {
     const ws = XLSX.utils.aoa_to_sheet([
@@ -365,7 +381,7 @@ export default function Nomina() {
           <div className="form-grid">
             <div className="form-group">
               <label className="form-label">Empleado</label>
-              <select className="form-control" value={nomEmpId} onChange={e => setNomEmpId(e.target.value)}>
+              <select className="form-control" value={nomEmpId} onChange={e => { setNomEmpId(e.target.value); setNomDescManual(''); setNomRazonDesc('') }}>
                 <option value="">Seleccionar...</option>
                 {empsActivos.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
               </select>
@@ -392,7 +408,26 @@ export default function Nomina() {
                 <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>× tarifa {fCOP(parseFloat(nomEmpleado.tarifa_destajo) || 0)}/unidad</small>
               </div>
             )}
+            <div className="form-group">
+              <label className="form-label">Descuento manual (opcional)</label>
+              <MoneyInput value={nomDescManual} onChange={setNomDescManual} placeholder="Ej: 50000" />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Razón del descuento</label>
+              <input type="text" className="form-control" value={nomRazonDesc} onChange={e => setNomRazonDesc(e.target.value)}
+                placeholder="Ej: anticipo de quincena" disabled={nomDescManualNum <= 0} />
+            </div>
           </div>
+          {nomDescManualNum > 0 && !nomRazonDesc.trim() && (
+            <div className="alert alert-warning" style={{ fontSize: '0.82rem' }}>Indica la razón del descuento manual antes de guardar la liquidación.</div>
+          )}
+          {spanDesajustado && (
+            <div className="alert alert-warning" style={{ fontSize: '0.82rem' }}>
+              ⚠ El rango <strong>{fFecha(nomDesde)} → {fFecha(nomHasta)}</strong> abarca {diasSpan} días, pero elegiste período <strong>{nomPeriodo}</strong>
+              ({nomPeriodo === 'quincenal' ? '≈15' : '≈30'} días esperados). El período define si se paga el salario completo o la mitad —
+              el rango de fechas solo trae la asistencia de ese lapso. Verifica que ambos coincidan o el pago quedará mal proporcionado.
+            </div>
+          )}
 
           {!rangoValido && nomEmpId && (
             <div className="alert alert-warning" style={{ fontSize: '0.85rem' }}>Selecciona un rango de fechas válido (Desde ≤ Hasta).</div>
@@ -434,6 +469,7 @@ export default function Nomina() {
                   {nomResultado.esCPS && nomResultado.retencion > 0 && <tr style={{ color: 'var(--rojo)' }}><td>(-) Retención en la fuente</td><td className="td-number">{fCOP(nomResultado.retencion)}</td></tr>}
                   {nomResultado.descuentoDias > 0 && <tr style={{ color: 'var(--rojo)' }}><td>(-) Días no laborados ({nomResultado.diasNoLaborados} × {fCOP(nomResultado.salario/30)})</td><td className="td-number">{fCOP(nomResultado.descuentoDias)}</td></tr>}
                   {nomResultado.descuentoHoras > 0 && <tr style={{ color: 'var(--rojo)' }}><td>(-) Horas faltantes ({nomResultado.horasFaltantes.toFixed(1)} h)</td><td className="td-number">{fCOP(nomResultado.descuentoHoras)}</td></tr>}
+                  {nomResultado.descuentoManual > 0 && <tr style={{ color: 'var(--rojo)' }}><td>(-) Descuento manual{nomResultado.razonDescuentoManual ? ` — ${nomResultado.razonDescuentoManual}` : ''}</td><td className="td-number">{fCOP(nomResultado.descuentoManual)}</td></tr>}
                   <tr style={{ fontWeight: 700, borderTop: '2px solid var(--crema-oscuro)', background: 'rgba(124,179,66,0.12)' }}>
                     <td><Ico as={DollarSign} size={14} />{nomResultado.esCPS ? 'NETO A PAGAR (honorarios)' : 'TOTAL A PAGAR'}<div style={{ fontWeight: 400, fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Lo que recibe el empleado</div></td>
                     <td className="td-number" style={{ color: 'var(--selva)', fontSize: '1.05rem' }}>{fCOP(nomResultado.neto)}</td>
@@ -497,7 +533,7 @@ export default function Nomina() {
 
           {nomResultado && !liquidacionExistente && (
             <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button className="btn btn-primary" disabled={guardarLiquidacion.isPending}
+              <button className="btn btn-primary" disabled={guardarLiquidacion.isPending || (nomDescManualNum > 0 && !nomRazonDesc.trim())}
                 onClick={() => guardarLiquidacion.mutate({ emp: nomEmpleado, periodo: nomPeriodo, desde: nomDesde, hasta: nomHasta, mes: parseInt(nomMes), anio: nomAño, resultado: nomResultado })}>
                 {guardarLiquidacion.isPending ? 'Guardando...' : '💾 Guardar registro'}
               </button>
@@ -511,17 +547,41 @@ export default function Nomina() {
               <div className="card-title" style={{ fontSize: '0.95rem' }}><Ico as={FolderOpen} size={14} />Registros guardados</div>
               <div className="table-wrap">
                 <table>
-                  <thead><tr><th>Empleado</th><th>Período</th><th>Tipo</th><th>Neto</th><th>Guardado</th></tr></thead>
+                  <thead><tr><th>Empleado</th><th>Período</th><th>Tipo</th><th>Horas pagadas</th><th>Devengado</th><th>Descuentos</th><th>Neto</th><th>Guardado</th></tr></thead>
                   <tbody>
-                    {registrosNomina.slice(0, 30).map(r => (
+                    {registrosNomina.slice(0, 30).map(r => {
+                      const res = r.resultado || {}
+                      // Devengado = lo que generó antes de descuentos (salario/destajo/honorarios + auxilio de transporte)
+                      const devengado = (parseFloat(res.salBase) || 0) + (parseFloat(res.auxTransp) || 0)
+                      const descItems = [
+                        res.descuentoDias > 0 && { txt: `Días no laborados (${res.diasNoLaborados})`, val: res.descuentoDias },
+                        res.descuentoHoras > 0 && { txt: `Horas faltantes (${(res.horasFaltantes || 0).toFixed(1)} h)`, val: res.descuentoHoras },
+                        res.descuentoManual > 0 && { txt: res.razonDescuentoManual ? `Manual — ${res.razonDescuentoManual}` : 'Manual', val: res.descuentoManual },
+                      ].filter(Boolean)
+                      const totalDesc = descItems.reduce((s, d) => s + (d.val || 0), 0)
+                      return (
                       <tr key={r.id}>
                         <td>{r.empleado}</td>
                         <td>{r.fecha_desde && r.fecha_hasta ? `${fFecha(r.fecha_desde)} → ${fFecha(r.fecha_hasta)}` : `${MESES_LABELS[r.mes]} ${r.anio}`} · {r.periodo}</td>
                         <td>{getTipoPagoLabel(r.tipo)}</td>
-                        <td className="td-number">{fCOP(r.resultado?.neto)}</td>
+                        <td className="td-number">
+                          {res.horas != null ? `${fmtHoras(res.horas)} h` : '—'}
+                          {res.diasTrab != null && <div style={{ fontSize: '0.68rem', color: 'var(--texto-suave)' }}>{res.diasTrab} días</div>}
+                        </td>
+                        <td className="td-number">{fCOP(devengado)}</td>
+                        <td className="td-number">
+                          {totalDesc > 0
+                            ? <>
+                                <div style={{ color: 'var(--rojo)' }}>{fCOP(totalDesc)}</div>
+                                {descItems.map((d, i) => <div key={i} style={{ fontSize: '0.68rem', color: 'var(--texto-suave)' }}>· {d.txt}: {fCOP(d.val)}</div>)}
+                              </>
+                            : '—'}
+                        </td>
+                        <td className="td-number" style={{ fontWeight: 700 }}>{fCOP(res.neto)}</td>
                         <td style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>{r.created_at ? new Date(r.created_at).toLocaleDateString('es-CO') : ''} {r.creado_por}</td>
                       </tr>
-                    ))}
+                      )
+                    })}
                   </tbody>
                 </table>
               </div>
@@ -659,14 +719,23 @@ export default function Nomina() {
                       <tbody>
                         {filas.map(reg => {
                           const ausencia = !reg.entrada   // fila sin entrada = ausencia marcada
-                          const regTs = reg.entrada_ts || reg.salida_ts || reg.editado_ts
+                          const fmtTs = (ts) => ts ? new Date(ts).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : null
+                          const tsEntrada = fmtTs(reg.entrada_ts)
+                          const tsSalida = fmtTs(reg.salida_ts)
                           return (
                           <tr key={reg.id}>
                             <td>{fFecha(reg.fecha)}</td>
                             <td>{reg.entrada || '—'}</td>
                             <td>{reg.salida || '—'}</td>
                             <td className="td-number">{fmtHoras(calcHoras(reg.entrada, reg.salida))} h</td>
-                            {esAdmin && <td style={{ fontSize: '0.75rem', color: 'var(--texto-suave)', whiteSpace: 'nowrap' }}>{regTs ? new Date(regTs).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : '—'}{reg.editado_por ? <div style={{ fontSize: '0.68rem' }}>✎ {reg.editado_por}</div> : null}</td>}
+                            {esAdmin && <td style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', whiteSpace: 'nowrap' }}>
+                              {/* Auditoría: hora/fecha EXACTA en que quedó registrado cada evento (no la hora fichada por el
+                                  usuario, sino el timestamp real del servidor al guardar) */}
+                              {tsEntrada && <div>🟢 Llegada: {tsEntrada}</div>}
+                              {tsSalida && <div>🔴 Salida: {tsSalida}</div>}
+                              {!tsEntrada && !tsSalida && '—'}
+                              {reg.editado_por ? <div style={{ fontSize: '0.68rem' }}>✎ {reg.editado_por}</div> : null}
+                            </td>}
                             <td>
                               {ausencia && esAdmin
                                 ? <select className="form-control" style={{ padding: '4px 6px', fontSize: '0.8rem' }} value={reg.estado_dia || 'injustificada'} onChange={e => setEstadoDia(reg, e.target.value)}>

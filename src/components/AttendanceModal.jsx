@@ -10,7 +10,9 @@ import Modal from './ui/Modal'
 import TimeField from './ui/TimeField'
 import { LogIn, LogOut, CalendarDays } from 'lucide-react'
 
-const hoyStr = () => new Date().toISOString().split('T')[0]
+// Fecha LOCAL de hoy (no UTC): con toISOString() un fichaje nocturno en Colombia (UTC-5) entre
+// las 19:00 y 23:59 hora local ya cae en el día siguiente en UTC, adelantando la fecha registrada.
+const hoyStr = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}` }
 const horaAhora = () => new Date().toTimeString().slice(0, 5)   // HH:MM
 
 // Modal de fichaje de asistencia.
@@ -70,6 +72,11 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
   const registrarLlegada = useMutation({
     mutationFn: async () => {
       if (abiertaDia) throw new Error('Ya hay una llegada sin salida en esta fecha')
+      // Revalida contra la BD (no solo el estado en memoria) justo antes de insertar, para reducir
+      // la ventana de doble-clic/doble-pestaña que crearía dos llegadas abiertas el mismo día.
+      const { data: chequeo } = await supabase.from('attendance').select('id')
+        .eq('emp_id', objetivo.id).eq('fecha', fecha).is('salida', null).limit(1)
+      if (chequeo && chequeo.length) throw new Error('Ya hay una llegada sin salida en esta fecha')
       return writeOrQueue({
         table: 'attendance', action: 'insert',
         payload: { emp_id: objetivo.id, fecha, entrada: hora, entrada_ts: new Date().toISOString(), ...(esOtro ? { editado_por: profile?.nombre || '' } : {}) },

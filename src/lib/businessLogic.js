@@ -277,7 +277,10 @@ export const calcHoras = (entrada, salida) => {
   if (!entrada || !salida) return 0
   const [eh, em] = entrada.split(':').map(Number)
   const [sh, sm] = salida.split(':').map(Number)
-  const mins = (sh * 60 + sm) - (eh * 60 + em)
+  let mins = (sh * 60 + sm) - (eh * 60 + em)
+  // Turno nocturno que cruza medianoche (ej. entra 22:00, sale 02:00): la salida es "al día
+  // siguiente", no se puede tratar como negativo/0 — se asume que cruzó un solo día.
+  if (mins < 0) mins += 24 * 60
   return Math.max(0, mins / 60)
 }
 
