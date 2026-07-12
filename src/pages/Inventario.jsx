@@ -150,11 +150,29 @@ export default function Inventario() {
       }
       // Asegurar que la categoría exista en la tabla (no debe bloquear el guardado de la MP)
       if (payload.categoria) { try { await supabase.from('mp_categories').upsert({ nombre: payload.categoria }, { onConflict: 'nombre' }) } catch { /* ignora si la tabla/política no está */ } }
-      if (editMPId) { const { error } = await supabase.from('raw_materials').update(payload).eq('id', editMPId); if (error) throw error }
+      if (editMPId) {
+        const { error } = await supabase.from('raw_materials').update(payload).eq('id', editMPId); if (error) throw error
+        // Si cambió la unidad de medida, los lotes PEPS ya guardados quedan expresados en el factor
+        // VIEJO (p.ej. Gramo→Kg cambia el factor de 1 a 1000) — hay que reescalarlos, si no la
+        // trazabilidad de lotes queda hasta 1000x errónea frente al nuevo stock.
+        const mpVieja = mps.find(m => m.id === editMPId)
+        if (mpVieja && mpVieja.unidad !== datos.unidad) {
+          const facVieja = factorU(mpVieja.unidad)
+          const ratio = facVieja / fac
+          const { data: lotesActuales } = await supabase.from('raw_material_lots').select('id, cantidad_actual, cantidad_inicial, cantidad_reservada').eq('mp_id', editMPId)
+          for (const l of (lotesActuales || [])) {
+            await supabase.from('raw_material_lots').update({
+              cantidad_actual: (l.cantidad_actual || 0) * ratio,
+              cantidad_inicial: (l.cantidad_inicial || 0) * ratio,
+              cantidad_reservada: (l.cantidad_reservada || 0) * ratio,
+            }).eq('id', l.id)
+          }
+        }
+      }
       else { const { error } = await supabase.from('raw_materials').insert(payload); if (error) throw error }
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['mp_categories'] })
+      qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['mp_categories'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
       setModalMP(false); setFormMP(EMPTY_MP); setEditMPId(null); toast('Materia prima guardada ✓')
     },
     onError: (e) => toast(e.message, 'error'),
@@ -169,6 +187,37 @@ export default function Inventario() {
     onError: (e) => toast(e.message, 'error'),
   })
 
+  // Verifica ANTES de guardar si una salida/ajuste negativo va a exceder lo disponible en lotes
+  // PEPS (sin bloquear, solo para avisar — el stock general sigue siendo la fuente de verdad).
+  // Devuelve el faltante en unidad BASE, o 0 si alcanza.
+  const chequearFaltanteLotes = async () => {
+    const mpId = parseInt(formMov.mp_id)
+    const mp = mps.find(m => m.id === mpId)
+    if (!mp || esEmpaque(mp.categoria)) return 0
+    const cantidad = (parseFloat(formMov.cantidad) || 0) / factorU(mp.unidad)
+    if (!(formMov.tipo === 'salida' || (formMov.tipo === 'ajuste' && cantidad < 0))) return 0
+    const aDescontar = formMov.tipo === 'salida' ? cantidad : Math.abs(cantidad)
+    let disponible = 0
+    if (formMov.lote_id) {
+      const { data } = await supabase.from('raw_material_lots').select('cantidad_actual').eq('id', formMov.lote_id).single()
+      disponible = data?.cantidad_actual || 0
+    } else {
+      const { data } = await supabase.from('raw_material_lots').select('cantidad_actual').eq('mp_id', mpId).gt('cantidad_actual', 0)
+      disponible = (data || []).reduce((s, l) => s + (l.cantidad_actual || 0), 0)
+    }
+    const faltante = aDescontar - disponible
+    return faltante > 0 ? faltante * factorU(mp.unidad) : 0   // a unidad BASE para mostrar al usuario
+  }
+  const guardarMovimiento = async () => {
+    const faltante = await chequearFaltanteLotes()
+    if (faltante > 0) {
+      const mp = mps.find(m => m.id === parseInt(formMov.mp_id))
+      const ok = await confirmar(`⚠ No hay suficiente cantidad registrada en lotes PEPS: faltan ${fBase(faltante / factorU(mp?.unidad), mp?.unidad)} sin trazabilidad de lote.\n\nSe descontará igual del stock general, pero esa parte quedará "sin lote" (sin fecha de vencimiento asociada). ¿Continuar de todas formas?`)
+      if (!ok) return
+    }
+    saveMov.mutate()
+  }
+
   // ---- Movimiento ----
   const saveMov = useMutation({
     mutationFn: async () => {
@@ -180,7 +229,9 @@ export default function Inventario() {
       if (!cantidad) throw new Error('Ingresa una cantidad')
       const extra = { ...(formMov.extra || {}) }
       // PEPS: entrada crea lote; salida consume del lote más antiguo/próximo a vencer
-      if (formMov.tipo === 'entrada' && !esEmpaque(mp?.categoria)) {
+      if ((formMov.tipo === 'entrada' || (formMov.tipo === 'ajuste' && cantidad > 0)) && !esEmpaque(mp?.categoria)) {
+        // Ajuste positivo también crea lote — si no, ese sobrante queda contabilizado en el stock
+        // general pero invisible/sin respaldo en la trazabilidad PEPS para siempre.
         await crearLoteEntrada({
           mp_id: mpId, lote: formMov.lote, vencimiento: formMov.vencimiento, fecha: formMov.fecha,
           cantidad, costo_unitario: formMov.costo !== '' ? parseFloat(formMov.costo) || 0 : (mp?.precio || 0),
@@ -210,19 +261,25 @@ export default function Inventario() {
       })
       if (movErr) throw movErr
       if (mp) {
-        let newStock = mp.stock || 0
-        if (formMov.tipo === 'entrada') newStock += cantidad
-        else if (formMov.tipo === 'salida') newStock = newStock - cantidad   // permite negativo
-        else newStock += cantidad
-        // Si es entrada, también actualiza lote/venc y el COSTO del MP (último ingreso)
-        const upd = { stock: newStock }
+        // Ajuste atómico en BD (evita condición de carrera con otro movimiento/reserva simultánea)
+        const delta = formMov.tipo === 'salida' ? -cantidad : cantidad   // "salida" permite negativo si excede
+        await supabase.rpc('ajustar_stock_mp', { p_mp_id: mpId, p_delta: delta })
+        // Si es entrada, también actualiza lote/venc y el COSTO del MP como PROMEDIO PONDERADO
+        // (no se reemplaza por el costo del último ingreso; se pondera con el stock que ya había,
+        // así la valorización no se distorsiona si el nuevo lote entra a un costo distinto).
+        const upd = {}
         if (formMov.tipo === 'entrada') {
           if (formMov.lote) upd.lote = formMov.lote
           if (formMov.vencimiento) upd.vencimiento = formMov.vencimiento
-          // El costo ingresado actualiza el precio de la MP (por su unidad)
-          if (formMov.costo !== '' && formMov.costo != null) upd.precio = parseFloat(formMov.costo) || 0
+          if (formMov.costo !== '' && formMov.costo != null) {
+            const costoNuevo = parseFloat(formMov.costo) || 0
+            const stockPrevio = Math.max(0, mp.stock || 0)
+            upd.precio = (stockPrevio + cantidad) > 0
+              ? (stockPrevio * (mp.precio || 0) + cantidad * costoNuevo) / (stockPrevio + cantidad)
+              : costoNuevo
+          }
         }
-        await supabase.from('raw_materials').update(upd).eq('id', mpId)
+        if (Object.keys(upd).length) await supabase.from('raw_materials').update(upd).eq('id', mpId)
       }
     },
     onSuccess: () => {
@@ -493,7 +550,7 @@ export default function Inventario() {
         footer={
           <>
             <button className="btn btn-secondary" onClick={() => setModalMov(false)}>Cancelar</button>
-            <button className="btn btn-primary" onClick={() => saveMov.mutate()} disabled={saveMov.isPending}>Guardar</button>
+            <button className="btn btn-primary" onClick={guardarMovimiento} disabled={saveMov.isPending}>Guardar</button>
           </>
         }
       >

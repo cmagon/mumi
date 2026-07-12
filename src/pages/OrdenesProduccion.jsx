@@ -3,7 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, uploadFile, beginSilentWrites, endSilentWrites } from '../lib/supabase'
 import { startDownload, updateDownload, endDownload, isDownloadCanceled } from '../lib/downloadProgress'
-import { reservarPEPS, liberarReservaLotes, consumirReservaLotes, estadoLote } from '../lib/lotes'
+import { reservarPEPS, liberarReservaLotes, consumirReservaLotes, estadoLote, crearLoteEntrada } from '../lib/lotes'
 import { writeOrQueue } from '../lib/offlineQueue'
 import { getConfig } from '../lib/appConfig'
 import { useReorder } from '../hooks/useReorder'
@@ -16,7 +16,7 @@ import { useConfirm, usePrompt } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
 import { notificar } from '../lib/notificaciones'
 import {
-  Recycle, ClipboardList, DollarSign, Link2, ReceiptText, Factory, Pencil, Printer,
+  Recycle, ClipboardList, DollarSign, Link2, ReceiptText, Factory, Pencil, Printer, Share2,
   Undo2, Trash2, Camera, Check, X, Play, Download, Send, Package, Shuffle, Plus, Save,
   Eye, Calculator, FlaskConical, Hash, Clock, CheckCircle2, ScrollText, Image as ImageIcon,
   AlertTriangle,
@@ -92,6 +92,14 @@ export default function OrdenesProduccion() {
   const navigate = useNavigate()
   const location = useLocation()
   const qc = useQueryClient()
+  // ¿Móvil/tablet? → se muestra el botón "Compartir" (imprimir suele hacerse por apps de terceros)
+  const [esMovil, setEsMovil] = useState(() => typeof window !== 'undefined' && window.matchMedia('(pointer: coarse), (max-width: 1024px)').matches)
+  useEffect(() => {
+    const mq = window.matchMedia('(pointer: coarse), (max-width: 1024px)')
+    const on = () => setEsMovil(mq.matches)
+    if (mq.addEventListener) { mq.addEventListener('change', on); return () => mq.removeEventListener('change', on) }
+    mq.addListener(on); return () => mq.removeListener(on)
+  }, [])
   const { profile } = useAuth()
   const esAdmin = profile?.rol === 'admin'
   const esOperario = profile?.rol === 'operario'
@@ -853,8 +861,8 @@ export default function OrdenesProduccion() {
     printViaIframe(imgHtml)
   }
 
-  // DESCARGA el PDF (imagen escalada a UNA hoja carta).
-  const descargarComoPDF = async (html, nombre) => {
+  // Construye el PDF (imagen escalada a UNA hoja carta) y devuelve la instancia jsPDF.
+  const construirPDF = async (html) => {
     const canvas = await renderContentCanvas(html)
     const jspdfMod = await import('jspdf')
     const jsPDF = jspdfMod.jsPDF || jspdfMod.default
@@ -864,7 +872,32 @@ export default function OrdenesProduccion() {
     let w = availW, h = canvas.height * (w / canvas.width)
     if (h > availH) { h = availH; w = canvas.width * (h / canvas.height) }
     pdf.addImage(canvas.toDataURL('image/jpeg', 0.95), 'JPEG', (pageW - w) / 2, margin, w, h)
-    pdf.save(`${nombre}.pdf`)
+    return pdf
+  }
+
+  // DESCARGA el PDF (imagen escalada a UNA hoja carta).
+  const descargarComoPDF = async (html, nombre) => { (await construirPDF(html)).save(`${nombre}.pdf`) }
+
+  // COMPARTE el PDF por el menú nativo del dispositivo (WhatsApp, correo, otra impresora/app, etc.).
+  // Útil en móvil/tablet, donde imprimir suele hacerse vía apps de terceros. Si el dispositivo no
+  // soporta compartir archivos, cae a descargar el PDF.
+  const compartirComoPDF = async (html, nombre) => {
+    const pdf = await construirPDF(html)
+    const file = new File([pdf.output('blob')], `${nombre}.pdf`, { type: 'application/pdf' })
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      try { await navigator.share({ files: [file], title: nombre }) }
+      catch (e) { if (e.name !== 'AbortError') throw e }
+    } else {
+      pdf.save(`${nombre}.pdf`)
+      toast('Tu dispositivo no permite compartir archivos; se descargó el PDF.', 'info')
+    }
+  }
+
+  // Genera el PDF de una orden y lo comparte (para el botón "Compartir" en móvil/tablet)
+  const compartirOrden = async (o) => {
+    try { setBusy(true); const { html, archivoNombre } = await imprimirOrden('html', o); await compartirComoPDF(html, archivoNombre) }
+    catch (e) { toast('No se pudo compartir: ' + (e.message || e), 'error') }
+    finally { setBusy(false) }
   }
 
 
@@ -1621,8 +1654,9 @@ export default function OrdenesProduccion() {
         const r = await reservarPEPS({ mp_id: it.mpId, cantidad: it.consumo, preferLoteId: preferidos[it.mpId] || preferidos[String(it.mpId)] || null })
         lotes = r.reservados; faltanteLotes = r.faltante || 0
       }
-      // El stock (disponible) baja al reservar (con o sin lote)
-      await supabase.from('raw_materials').update({ stock: it.stock - it.consumo }).eq('id', it.mpId)
+      // El stock (disponible) baja al reservar (con o sin lote). Ajuste atómico en BD (evita
+      // condición de carrera con otro movimiento de inventario simultáneo).
+      await supabase.rpc('ajustar_stock_mp', { p_mp_id: it.mpId, p_delta: -it.consumo })
       // Si los lotes no cubrieron todo el consumo (sin lotes cargados, o insuficientes), se registra
       // explícitamente cuánto salió del stock GENERAL sin trazabilidad de lote — para no perderlo en silencio.
       reservas.push({ mp_id: it.mpId, nombre: it.nombre, unidad: it.unidad, consumo: it.consumo, lotes, sin_lote: sinLote, ...(faltanteLotes > 0 ? { sin_lote_cantidad: faltanteLotes } : {}) })
@@ -1636,8 +1670,7 @@ export default function OrdenesProduccion() {
     if (!reservas) return
     for (const it of reservas) {
       await liberarReservaLotes(it.lotes || [])
-      const { data: mpRow } = await supabase.from('raw_materials').select('stock').eq('id', it.mp_id).single()
-      await supabase.from('raw_materials').update({ stock: (mpRow?.stock || 0) + (it.consumo || 0) }).eq('id', it.mp_id)
+      await supabase.rpc('ajustar_stock_mp', { p_mp_id: it.mp_id, p_delta: it.consumo || 0 })
     }
     await supabase.from('production_orders').update({ lotes_reservados: null }).eq('id', o.id)
   }
@@ -1705,7 +1738,7 @@ export default function OrdenesProduccion() {
     if (!plan || !plan.length) return
     const hoy = o.fecha_prod || new Date().toISOString().split('T')[0]
     for (const p of plan) {
-      await supabase.from('raw_materials').update({ stock: (Number(p.mp.stock) || 0) - p.qty }).eq('id', p.mp.id)
+      await supabase.rpc('ajustar_stock_mp', { p_mp_id: p.mp.id, p_delta: -p.qty })
       await supabase.from('inventory_movements').insert({
         mp_id: p.mp.id, tipo: 'salida', cantidad: p.qty, fecha: hoy,
         responsable: o.operario || '', obs: `Empaque (${p.tipo}) orden #${opNum(o.id)} (${o.producto})`,
@@ -1750,15 +1783,46 @@ export default function OrdenesProduccion() {
       // El consumo de MP ya ocurrió al ENVIAR la orden (reserva → consumido). Aquí solo se aprueba.
 
       if (o.es_subproducto && o.mp_id) {
+        // Costo real de producción de este lote (misma fórmula que "Costos del lote" en Detalles):
+        // MP+empaque de la ficha + mano de obra/CIF + destajo del día, prorrateado por unidad obtenida.
+        // Esto alimenta AUTOMÁTICAMENTE el costo de la MP interna en el inventario — antes quedaba
+        // en el precio que se hubiera cargado manualmente en la ficha de la MP, sin actualizarse solo.
+        const prodFicha = productos.find(p => String(p.id) === String(o.origen_id))
+        const obtenidas = parseFloat(o.cantidad_result) || 0
+        const planificadas = parseFloat(o.cantidad_plan) || 0
+        const destOrden = Array.isArray(o.destajo) ? o.destajo.reduce((s, d) => s + (parseFloat(d.cantidad) || 0) * (parseFloat(d.tarifa) || 0), 0) : 0
+        const totalU = prodFicha ? (parseFloat(prodFicha.costo_final) || 0) : 0
+        const costoLote = totalU * (planificadas > 0 ? planificadas : obtenidas) + destOrden
+        const costoUnitReal = obtenidas > 0 ? costoLote / obtenidas : totalU
+
         // 2a. Subproducto → entrada de inventario MP
         await supabase.from('inventory_movements').insert({
           mp_id: o.mp_id, tipo: 'entrada', cantidad: o.cantidad_result || 0, fecha: o.fecha_prod || new Date().toISOString().split('T')[0],
           responsable: o.operario, obs: `Orden de producción #${opNum(o.id)} (subproducto)`, lote: o.lote || '', vencimiento: o.vence || null,
+          extra: { costo_unitario_real: costoUnitReal },
         })
-        // actualizar stock leyendo valor actual
-        const { data: mpRow } = await supabase.from('raw_materials').select('stock').eq('id', o.mp_id).single()
+        // Crea el lote PEPS correspondiente (si no, esta cantidad queda sin trazabilidad y descuadra
+        // permanentemente el stock general frente a la suma de lotes)
+        if ((o.cantidad_result || 0) > 0) {
+          try {
+            await crearLoteEntrada({
+              mp_id: o.mp_id, lote: o.lote || '', vencimiento: o.vence || null, fecha: o.fecha_prod || new Date().toISOString().split('T')[0],
+              cantidad: o.cantidad_result || 0, costo_unitario: costoUnitReal, creado_por: o.operario || '',
+            })
+          } catch (e) { console.warn('No se pudo crear lote del subproducto:', e) }
+        }
+        // Ajuste atómico de stock en BD (evita condición de carrera) + costo PROMEDIO PONDERADO
+        // (no se reemplaza el precio por el del último lote; se pondera con el stock remanente,
+        // igual que se corrigió para las entradas manuales de MP).
+        const { data: mpRow } = await supabase.from('raw_materials').select('stock, precio').eq('id', o.mp_id).single()
+        const stockPrevio = Math.max(0, Number(mpRow?.stock) || 0)
+        const precioPrevio = Number(mpRow?.precio) || 0
         const nuevo = (mpRow?.stock || 0) + (o.cantidad_result || 0)
-        const upd = { stock: nuevo }
+        const precioPonderado = (stockPrevio + obtenidas) > 0
+          ? (stockPrevio * precioPrevio + obtenidas * costoUnitReal) / (stockPrevio + obtenidas)
+          : costoUnitReal
+        await supabase.rpc('ajustar_stock_mp', { p_mp_id: o.mp_id, p_delta: o.cantidad_result || 0 })
+        const upd = { precio: precioPonderado }
         if (o.lote) upd.lote = o.lote
         if (o.vence) upd.vencimiento = o.vence
         await supabase.from('raw_materials').update(upd).eq('id', o.mp_id)
@@ -1998,7 +2062,15 @@ export default function OrdenesProduccion() {
                         <div className="ordenes-acciones" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           <button className="btn btn-xs btn-secondary" title="Ver detalles" onClick={() => setOrdenDetalle(o)}><Eye size={13} aria-hidden="true" />Detalles</button>
                           {/* Imprimir la orden ya cerrada/enviada (mismo formato) — solo ícono */}
-                          {(o.estado === 'ejecutada' || o.estado === 'aprobada' || o.estado === 'cancelada') && <button className="btn btn-xs btn-secondary" title="Imprimir orden" onClick={() => imprimirOrden('print', o)}><Printer size={13} aria-hidden="true" /></button>}
+                          {(o.estado === 'ejecutada' || o.estado === 'aprobada' || o.estado === 'cancelada') && <>
+                            <button className="btn btn-xs btn-secondary" title="Imprimir orden" onClick={() => imprimirOrden('print', o)}><Printer size={13} aria-hidden="true" /></button>
+                            {esMovil && <button className="btn btn-xs btn-secondary" title="Compartir orden (PDF)" aria-label="Compartir orden (PDF)" onClick={() => compartirOrden(o)}><Share2 size={13} aria-hidden="true" /></button>}
+                          </>}
+                          {/* Imprimir / compartir órdenes ABIERTAS que no son propias (incluidos operarios) */}
+                          {!esMia && (o.estado === 'pendiente' || o.estado === 'en_proceso') && <>
+                            <button className="btn btn-xs btn-secondary" title="Imprimir orden" onClick={() => imprimirOrden('print', o)}><Printer size={13} aria-hidden="true" />Imprimir</button>
+                            {esMovil && <button className="btn btn-xs btn-secondary" title="Compartir orden (PDF)" aria-label="Compartir orden (PDF)" onClick={() => compartirOrden(o)}><Share2 size={13} aria-hidden="true" /></button>}
+                          </>}
                           {/* Quien ejecuta la orden: el operario dueño */}
                           {esMia && o.estado === 'pendiente' && <button className="btn btn-xs btn-primary" onClick={() => tomarOrden.mutate(o)}><Ico as={Play} size={13} />Tomar</button>}
                           {/* Los ingredientes se ven en "Detalles" y en el modal de proceso, por eso ya no hay botón aparte */}
