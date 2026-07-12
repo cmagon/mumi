@@ -2068,7 +2068,7 @@ export default function OrdenesProduccion() {
                           </>}
                           {/* Imprimir / compartir órdenes ABIERTAS que no son propias (incluidos operarios) */}
                           {!esMia && (o.estado === 'pendiente' || o.estado === 'en_proceso') && <>
-                            <button className="btn btn-xs btn-secondary" title="Imprimir orden" onClick={() => imprimirOrden('print', o)}><Printer size={13} aria-hidden="true" />Imprimir</button>
+                            <button className="btn btn-xs btn-secondary" title="Imprimir orden" aria-label="Imprimir orden" onClick={() => imprimirOrden('print', o)}><Printer size={13} aria-hidden="true" /></button>
                             {esMovil && <button className="btn btn-xs btn-secondary" title="Compartir orden (PDF)" aria-label="Compartir orden (PDF)" onClick={() => compartirOrden(o)}><Share2 size={13} aria-hidden="true" /></button>}
                           </>}
                           {/* Quien ejecuta la orden: el operario dueño */}
