@@ -25,7 +25,8 @@ const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline',
 const EMPTY_PROD = {
   nombre: '', tipo: 'galleta', bache: 70, baches_mes: 3,
   merma: 0, comision: 3, precio_mayor: 10000, precio_detal: 15000,
-  presentacion: 'Unidad', activo: true, sku: '', alegra_item_id: '', mp_id: '',
+  presentacion: 'Unidad', activo: true, mp_id: '',
+  vida_util_valor: '', vida_util_unidad: 'meses',
 }
 const EMPTY_ING = { mpId: '', nombre: '', modo: 'lista', precio: '', presentacion: 1000, pct: '', cantidad: '', tipo: 'normal', base: '' }
 
@@ -351,7 +352,7 @@ export default function Costos() {
     // 1º intenta con el ancla de la receta; si no hay, usa los % como gramos (lote de referencia).
     const gramosPorNombre = {}
     if (r.ancla && (parseFloat(r.cantidad_ancla)||0) > 0) {
-      const calcIngs = ings.map(i => ({ nombre: i.nombre, pct: parseFloat(i.pct)||0, precio: parseFloat(i.precio)||0, tipo: i.tipo||'normal', base: i.base||'total' }))
+      const calcIngs = ings.map(i => ({ nombre: i.nombre, pct: parseFloat(i.pct)||0, precio: parseFloat(i.precio)||0, presentacion: parseFloat(i.presentacion)||1000, tipo: i.tipo||'normal', base: i.base||'total' }))
       const res = calcularReceta({ ingredientes: calcIngs, ancla: r.ancla, cantidadAncla: parseFloat(r.cantidad_ancla)||0, rendimiento: r.rendimiento, desperdicio: r.desperdicio, pesoUnidad: r.peso_unidad })
       if (res) res.calculados.forEach(c => { gramosPorNombre[c.nombre] = c.cantidad })
     }
@@ -392,7 +393,7 @@ export default function Costos() {
     if (!p) return
     setEditingId(p.id)
     setSelFuente(`prod-${p.id}`)
-    setFormProd({ nombre: p.nombre, tipo: p.tipo, bache: p.bache, baches_mes: p.baches_mes, merma: p.merma, comision: p.comision, precio_mayor: p.precio_mayor, precio_detal: p.precio_detal, presentacion: p.presentacion || 'Unidad', activo: p.activo !== false, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '', mp_id: p.mp_id || '' })
+    setFormProd({ nombre: p.nombre, tipo: p.tipo, bache: p.bache, baches_mes: p.baches_mes, merma: p.merma, comision: p.comision, precio_mayor: p.precio_mayor, precio_detal: p.precio_detal, presentacion: p.presentacion || 'Unidad', activo: p.activo !== false, mp_id: p.mp_id || '', vida_util_valor: p.vida_util_valor || '', vida_util_unidad: p.vida_util_unidad || 'meses' })
     setCamposExtra(parseJSON(p.campos_personalizados, []))
     setCategorias(parseJSON(p.categorias, []))
     const adic = parseJSON(p.costos_adicionales, [])
@@ -467,6 +468,8 @@ export default function Costos() {
         comision: parseFloat(formProd.comision) || 3,
         precio_mayor: parseFloat(formProd.precio_mayor) || 0,
         precio_detal: parseFloat(formProd.precio_detal) || 0,
+        vida_util_valor: parseFloat(formProd.vida_util_valor) || null,
+        vida_util_unidad: formProd.vida_util_valor ? (formProd.vida_util_unidad || 'meses') : null,
         ingredientes: JSON.stringify(ingredientesConPct),
         procesos: JSON.stringify(procesos),
         empaque: JSON.stringify(empaque),
@@ -529,32 +532,27 @@ export default function Costos() {
         }).eq('id', idFicha)
       } catch { /* columnas opcionales: no bloquea el guardado */ }
 
-      // Sincroniza el catálogo de PRODUCTO TERMINADO (base) con la ficha (no toca el stock existente).
-      // Si la ficha se renombró, se actualiza por product_id (no crea duplicado).
-      if ((formProd.tipo || '') !== 'subproducto' && formProd.nombre.trim()) {
+      // Actualiza el costo/precio/nombre en el catálogo de PRODUCTO TERMINADO SOLO SI ya fue
+      // agregado allí manualmente (botón "Agregar producto" en Inventario de Producto Terminado).
+      // La ficha NUNCA crea el producto terminado ni toca su SKU o su enlace con Alegra:
+      // eso se configura exclusivamente en Inventario de Producto Terminado, porque el producto
+      // que realmente se vende (ej. un surtido armado) puede ser distinto de esta ficha base.
+      if ((formProd.tipo || '') !== 'subproducto' && editingId) {
         try {
-          const pid = editingId || datos._newId || null
-          const campos = {
-            nombre: formProd.nombre.trim(), sku: formProd.sku || null, alegra_item_id: formProd.alegra_item_id || null,
-            tipo: 'base', costo_unitario: Math.round(r.costoFinal || 0),
-            precio_mayor: parseFloat(formProd.precio_mayor) || 0, precio_detal: parseFloat(formProd.precio_detal) || 0, imagen_url: imagenUrl || null,
-            activo: formProd.activo !== false,
+          const { data: ya } = await supabase.from('finished_products').select('id, alegra_item_id').eq('product_id', editingId).maybeSingle()
+          if (ya) {
+            await supabase.from('finished_products').update({
+              nombre: formProd.nombre.trim(),
+              costo_unitario: Math.round(r.costoFinal || 0),
+              precio_mayor: parseFloat(formProd.precio_mayor) || 0,
+              precio_detal: parseFloat(formProd.precio_detal) || 0,
+              imagen_url: imagenUrl || null,
+              activo: formProd.activo !== false,
+            }).eq('id', ya.id)
+            // Si ese terminado está enlazado a Alegra, empuja costo/precio/nombre automáticamente
+            if (ya.alegra_item_id) { try { await supabase.functions.invoke('alegra-push-stock', { body: { finished_id: ya.id } }) } catch (e) { console.warn('No se pudo sincronizar con Alegra:', e) } }
           }
-          let ftId = null
-          if (pid) {
-            const { data: ya } = await supabase.from('finished_products').select('id').eq('product_id', pid).maybeSingle()
-            if (ya) { await supabase.from('finished_products').update(campos).eq('id', ya.id); ftId = ya.id }
-          }
-          if (!ftId) {
-            const { data: up } = await supabase.from('finished_products').upsert({ ...campos, product_id: pid }, { onConflict: 'nombre' }).select('id').maybeSingle()
-            ftId = up?.id || null
-          }
-          // Si ese terminado está enlazado a Alegra, empuja costo/precio/nombre automáticamente
-          if (ftId) {
-            const { data: ft } = await supabase.from('finished_products').select('alegra_item_id').eq('id', ftId).maybeSingle()
-            if (ft?.alegra_item_id) { try { await supabase.functions.invoke('alegra-push-stock', { body: { finished_id: ftId } }) } catch (e) { console.warn('No se pudo sincronizar con Alegra:', e) } }
-          }
-        } catch (e) { console.warn('No se pudo sincronizar el catálogo de terminados:', e) }
+        } catch (e) { console.warn('No se pudo actualizar el catálogo de terminados:', e) }
       }
 
       // Replicar el nuevo costo de MP al inventario y a TODAS las recetas que usan ese ingrediente
@@ -589,6 +587,7 @@ export default function Costos() {
             ingredientes: nuevosIngs, procesos: parseJSON(p.procesos, []), empaque: parseJSON(p.empaque, []),
             cifTotal, productosGuardados: otros, cifUnidadesFallback, operariosActivos,
             diasHabiles: op.dias, jornadaHoras: op.jornadaHoras, improductividad: op.improductividad,
+            adicionales: parseJSON(p.costos_adicionales, []),
           })
           await supabase.from('products_costing').update({
             ingredientes: JSON.stringify(nuevosIngs),
@@ -661,11 +660,13 @@ export default function Costos() {
 
   // Recalcular y persistir el CIF/costo de TODAS las fichas según el portafolio actual
   const recalcularTodos = useMutation({
+    meta: { label: 'Recalculando costos de todas las fichas…' },
     mutationFn: async () => {
       for (const p of productos) {
         const rc = recomputeProducto(p)
         const { error } = await supabase.from('products_costing').update({
           costo_final: rc.costoFinal || 0,
+          costo_variable: rc.cvu || 0,
           cif_unit: rc.cifUnit || 0,
           util_mayor: rc.utilMayor || 0,
           util_detal: rc.utilDetal || 0,
@@ -689,7 +690,9 @@ export default function Costos() {
       const { error } = await supabase.from('products_costing').insert({
         ...resto,
         nombre: `${p.nombre} (copia)`,
-        sku: null, stock_terminado: 0,   // el SKU es único por producto; el stock no se copia
+        // SKU y el ID de ítem en Alegra son únicos por producto: si se copian, la ficha duplicada
+        // empujaría stock/costo al MISMO ítem de Alegra que el original al sincronizar.
+        sku: null, alegra_item_id: null, stock_terminado: 0,
         fecha_creado: new Date().toISOString().split('T')[0],
       })
       if (error) throw error
@@ -712,6 +715,7 @@ export default function Costos() {
 
   // Empuja el stock terminado de todos los productos enlazados hacia Alegra
   const sincronizarAlegra = useMutation({
+    meta: { label: 'Sincronizando stock con Alegra…' },
     mutationFn: async () => {
       const { data, error } = await supabase.functions.invoke('alegra-push-stock', { body: { all: true } })
       if (error) throw error
@@ -814,6 +818,7 @@ export default function Costos() {
       nombre: i.nombre,
       pct: i.tipo === 'relativo' ? (parseFloat(i.pct)||0) : (i.pctReceta||0),
       precio: parseFloat(i.precio)||0,
+      presentacion: parseFloat(i.presentacion)||1000,
       tipo: i.tipo || 'normal',
       base: i.tipo === 'relativo' ? (i.base||'total') : 'total',
     }))
@@ -837,8 +842,10 @@ export default function Costos() {
   const exportarFichaExcel = async (p) => {
     try {
       const cfg = getConfig()
+      // _adicUnidad: costos adicionales por unidad (depreciación, etc.) — el overhead/CIF ya va
+      // incluido en "Mano de obra por unidad" (costo/minuto), así que NO se debe volver a sumar aquí.
       await descargarFichaExcel(
-        { ...p, _costoMinuto: costoMin, _cifUnidad: parseFloat(p.cif_unit) || 0 },
+        { ...p, _costoMinuto: costoMin, _adicUnidad: recomputeProducto(p).adicUnit || 0 },
         { empresa: cfg.empresa || 'Mumi Amazonia', logoUrl: cfg.logo_url || '', cifItems }
       )
       toast('Excel exportado ✓')
@@ -1060,8 +1067,9 @@ export default function Costos() {
           )}
 
           {/* ── Imagen + Info básica del producto ── */}
-          <div className="card">
-            <div className="card-title"><Ico as={FileText} size={14} />Información del Producto</div>
+          <details className="card" open>
+            <summary className="card-title"><Ico as={FileText} size={14} />Información básica<span className="card-hint">{formProd.nombre || 'nombre, tipo, SKU, vida útil...'}</span></summary>
+            <div className="card-acc-body">
             <div className="grid-resp" style={{ gridTemplateColumns:'80px 1fr', gap:20, alignItems:'start' }}>
               {/* Imagen */}
               <div>
@@ -1116,19 +1124,25 @@ export default function Costos() {
                   <input className="form-control" list="dl-presentaciones" value={formProd.presentacion || ''} onChange={e => setFormProd(f=>({...f,presentacion:e.target.value}))} placeholder="Ej: Caja, Unidad, Kilo..." />
                   <datalist id="dl-presentaciones">{PRESENTACIONES.map(p => <option key={p} value={p} />)}</datalist>
                 </div>
-                <div className="form-group">
-                  <label className="form-label">SKU / Referencia <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(igual que en Alegra)</small></label>
-                  <input className="form-control" value={formProd.sku || ''} onChange={e => setFormProd(f=>({...f,sku:e.target.value}))} placeholder="Ej: INF-001" />
-                  <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Puente con Alegra: debe coincidir con la "referencia" del ítem para descontar stock al facturar.</small>
-                </div>
-                <div className="form-group">
-                  <label className="form-label">ID ítem en Alegra <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(opcional)</small></label>
-                  <input className="form-control" value={formProd.alegra_item_id || ''} onChange={e => setFormProd(f=>({...f,alegra_item_id:e.target.value}))} placeholder="Ej: 45" />
-                  <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Permite que la app empuje el stock a Alegra al producir. Lo ves en la URL/API del ítem en Alegra.</small>
-                </div>
                 <div className="form-group"><label className="form-label">{presLabel}s por bache</label><input type="number" className="form-control" value={formProd.bache} onChange={e => setFormProd(f=>({...f,bache:e.target.value}))} min={1} /></div>
                 <div className="form-group"><label className="form-label">Baches por mes</label><input type="number" className="form-control" value={formProd.baches_mes} onChange={e => setFormProd(f=>({...f,baches_mes:e.target.value}))} min={1} /></div>
                 <div className="form-group"><label className="form-label">% Comisión</label><input type="number" className="form-control" value={formProd.comision} onChange={e => setFormProd(f=>({...f,comision:e.target.value}))} min={0} max={100} step={0.5} /></div>
+                <div className="form-group" style={{ gridColumn: '1 / -1', border:'1.5px solid var(--dorado)', borderRadius:'var(--radio)', padding:'12px 14px', background:'rgba(200,169,74,0.06)', display:'flex', gap:12, alignItems:'flex-start' }}>
+                  <span style={{ fontSize:'1.3rem', lineHeight:1 }} aria-hidden="true">⏳</span>
+                  <div style={{ flex:1 }}>
+                    <label className="form-label" style={{ color:'var(--selva)' }}>Vida útil del producto <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(opcional)</small></label>
+                    <div style={{ display:'flex', gap:8, alignItems:'center' }}>
+                      <input type="number" className="form-control" style={{ maxWidth:120 }} value={formProd.vida_util_valor} onChange={e => setFormProd(f=>({...f,vida_util_valor:e.target.value}))} min={0} placeholder="Ej: 6" />
+                      <select className="form-control" style={{ maxWidth:140 }} value={formProd.vida_util_unidad} onChange={e => setFormProd(f=>({...f,vida_util_unidad:e.target.value}))}>
+                        <option value="dias">Días</option>
+                        <option value="meses">Meses</option>
+                      </select>
+                    </div>
+                    <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>
+                      Si la defines aquí, al registrar la producción en Órdenes de Producción la fecha de vencimiento se precargará automáticamente sumando este tiempo a la fecha de fabricación.
+                    </small>
+                  </div>
+                </div>
               </div>
             </div>
 
@@ -1148,17 +1162,20 @@ export default function Costos() {
                   </div>
                 ))}
             </div>
-          </div>
+            </div>
+          </details>
 
           {/* ── Ingredientes (integrado con toggle lista/manual de Calculadora de Receta) ── */}
-          <div className="card">
-            <div className="card-title">
+          <details className="card" open={!!editingId || ingredientes.length > 0}>
+            <summary className="card-title">
               🌿 Materias Primas e Insumos
-              <div style={{ marginLeft:'auto', display:'flex', gap:6 }}>
+              <span className="card-hint">{ingredientes.length} ingrediente{ingredientes.length === 1 ? '' : 's'}</span>
+              <div onClick={e => e.stopPropagation()} style={{ marginLeft:8, display:'flex', gap:6 }}>
                 <button className="btn btn-sm btn-secondary" onClick={addIngrediente}>+ Normal</button>
                 <button className="btn btn-sm btn-dorado" onClick={addIngredienteRelativo}>+ Relativo a...</button>
               </div>
-            </div>
+            </summary>
+            <div className="card-acc-body">
             {/* Modo de ingreso: gramos/bache o porcentaje */}
             <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10, flexWrap:'wrap' }}>
               <span style={{ fontSize:'0.8rem', color:'var(--texto-suave)' }}>Ingresar por:</span>
@@ -1301,11 +1318,13 @@ export default function Costos() {
               </small>
               <strong>Total MP: {fCOP(calcResult?.totalMPBache||0)}</strong>
             </div>
-          </div>
+            </div>
+          </details>
 
           {/* ── Parámetros de producción ── */}
-          <div className="card">
-            <div className="card-title"><Ico as={Settings} size={14} />Parámetros de Producción <small style={{ fontWeight:400, fontSize:'0.78rem', color:'var(--texto-suave)' }}>— rendimiento, desperdicio y peso por unidad determinan cuántas unidades salen del bache</small></div>
+          <details className="card">
+            <summary className="card-title"><Ico as={Settings} size={14} />Parámetros de Producción <span className="card-hint">rendimiento, desperdicio, calidad</span></summary>
+            <div className="card-acc-body">
             <div className="form-grid">
               <div className="form-group"><label className="form-label">Rendimiento esperado (%)</label><input type="number" className="form-control" value={rendimiento} onChange={e => setRendimiento(e.target.value)} min={1} max={100} step={0.1} /><small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>% de la mezcla que se convierte en producto (ej. por evaporación/cocción).</small></div>
               <div className="form-group"><label className="form-label">% Desperdicio</label><input type="number" className="form-control" value={desperdicio} onChange={e => setDesperdicio(e.target.value)} min={0} max={50} step={0.1} /><small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Desperdicio <strong>adicional</strong> que se pierde <strong>después</strong> del rendimiento (no es la diferencia de 100 − rendimiento; se descuenta sobre lo ya rendido).</small></div>
@@ -1363,11 +1382,13 @@ export default function Costos() {
                 ↑ Usar como "Unidades por bache" ({unidadesDesdeReceta > 0 ? Math.round(unidadesDesdeReceta) : 0})
               </button>
             </div>
-          </div>
+            </div>
+          </details>
 
           {/* ── Mano de obra ── */}
-          <div className="card">
-            <div className="card-title"><Ico as={Clock} size={14} />Mano de Obra (por proceso)<button className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={addProceso}>+ Agregar proceso</button></div>
+          <details className="card" open={procesos.length > 0}>
+            <summary className="card-title"><Ico as={Clock} size={14} />Mano de Obra (por proceso)<span className="card-hint">{procesos.length} proceso{procesos.length === 1 ? '' : 's'}</span><div onClick={e => e.stopPropagation()} style={{ marginLeft:8 }}><button className="btn btn-sm btn-secondary" onClick={addProceso}>+ Agregar proceso</button></div></summary>
+            <div className="card-acc-body">
             <div style={{ overflowX:'auto' }}>
               <div className="ed-wrap" style={{ minWidth:500 }}>
                 <div className="ed-head" style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr 44px', gap:8, paddingBottom:8, fontSize:'0.72rem', fontWeight:700, color:'var(--texto-suave)', textTransform:'uppercase' }}>
@@ -1392,11 +1413,13 @@ export default function Costos() {
               </div>
             </div>
             <div style={{ display:'flex', justifyContent:'flex-end', marginTop:8 }}><strong>Total MO: {fCOP(calcResult?.totalMOBache||0)}</strong></div>
-          </div>
+            </div>
+          </details>
 
           {/* ── Empaque ── */}
-          <div className="card">
-            <div className="card-title"><Ico as={Package} size={14} />Empaque & Envase<button className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={addEmpaque}>+ Agregar</button></div>
+          <details className="card" open={empaque.length > 0}>
+            <summary className="card-title"><Ico as={Package} size={14} />Empaque & Envase<span className="card-hint">{empaque.length} ítem{empaque.length === 1 ? '' : 's'}</span><div onClick={e => e.stopPropagation()} style={{ marginLeft:8 }}><button className="btn btn-sm btn-secondary" onClick={addEmpaque}>+ Agregar</button></div></summary>
+            <div className="card-acc-body">
             <div style={{ overflowX:'auto' }}>
               <div className="ed-wrap" style={{ minWidth:720 }}>
                 <div className="ed-head" style={{ display:'grid', gridTemplateColumns:'2.2fr 1fr 1fr 1fr 1fr 44px', gap:8, paddingBottom:6, fontSize:'0.72rem', fontWeight:700, color:'var(--texto-suave)', textTransform:'uppercase' }}>
@@ -1457,7 +1480,8 @@ export default function Costos() {
               </div>
             </div>
             <div style={{ display:'flex', justifyContent:'flex-end', marginTop:8 }}><strong>Total Empaque: {fCOP(calcResult?.totalEmpBache||0)}</strong></div>
-          </div>
+            </div>
+          </details>
 
           {/* ── Costos adicionales personalizados (depreciación, etc.) — colapsable ── */}
           <div className="card">
@@ -1483,8 +1507,9 @@ export default function Costos() {
           </div>
 
           {/* ── Ficha técnica (instrucciones paso a paso) ── */}
-          <div className="card">
-            <div className="card-title"><Ico as={FileText} size={14} />Ficha Técnica — Instrucciones de Elaboración</div>
+          <details className="card" open={!!fichaNombre}>
+            <summary className="card-title"><Ico as={FileText} size={14} />Ficha Técnica — Instrucciones de Elaboración<span className="card-hint">{fichaNombre || 'opcional'}</span></summary>
+            <div className="card-acc-body">
             {fichaNombre && (
               <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12, padding:'8px 12px', background:'rgba(124,179,66,0.08)', borderRadius:'var(--radio)', border:'1px solid rgba(124,179,66,0.2)' }}>
                 <span style={{ flex:1, fontSize:'0.88rem', color:'var(--selva-claro)' }}><Ico as={FileText} size={14} /><strong>{fichaNombre}</strong></span>
@@ -1497,7 +1522,8 @@ export default function Costos() {
               📎 {fichaNombre ? 'Reemplazar PDF/Word' : 'Subir PDF o Word'}
               <input type="file" accept=".pdf,.doc,.docx" onChange={e => { const f=e.target.files[0]; if(f){setFichaFile(f);setFichaNombre(f.name)} }} style={{ display:'none' }} />
             </label>
-          </div>
+            </div>
+          </details>
 
           {/* ── Precios y Resumen ── */}
           <div className="grid-resp" style={{ gridTemplateColumns:'1fr 1fr', gap:20 }}>
@@ -1570,8 +1596,8 @@ export default function Costos() {
                   <div className="row ganancia"><span>Ganancia detal</span><span>{fCOP(calcResult.utilDetal)} ({parseFloat(formProd.precio_detal)>0?(calcResult.utilDetal/parseFloat(formProd.precio_detal)*100).toFixed(1)+'%':'-'})</span></div>
                 </div>
                 <div style={{ marginTop:10, paddingTop:8, borderTop:'1px dashed rgba(245,240,232,0.2)', fontSize:'0.78rem', opacity:0.75 }}>
-                  <div className="row"><span>Punto de equilibrio</span><span>{calcResult.pe>0?fNum(calcResult.pe)+' unid/mes':'—'}</span></div>
-                  <div className="row"><span>Costo fijo por minuto</span><span>{fCOP(calcResult.costoMin)}/min</span></div>
+                  <div className="row"><span style={{ cursor:'help' }} title="Unidades que habría que vender al mes para cubrir todo el CIF (arriendo, servicios, nómina...), si este fuera el único producto de la empresa.">Punto de equilibrio ⓘ</span><span>{calcResult.pe>0?fNum(calcResult.pe)+' unid/mes':'—'}</span></div>
+                  <div className="row"><span style={{ cursor:'help' }} title="CIF total del mes (arriendo, servicios, nómina...) dividido entre los minutos productivos disponibles. Así se reparte el overhead SEGÚN EL TIEMPO que usa cada producto, no por unidades.">Costo fijo por minuto ⓘ</span><span>{fCOP(calcResult.costoMin)}/min</span></div>
                 </div>
               </>)}
             </div>
@@ -1588,8 +1614,9 @@ export default function Costos() {
 
           {/* ── Histórico de cambios de costos/cantidades ── */}
           {editingId && (
-            <div className="card" style={{ marginTop: 16 }}>
-              <div className="card-title"><Ico as={Clock} size={14} />Histórico de cambios (cantidades/costos de ingredientes)</div>
+            <details className="card" style={{ marginTop: 16 }}>
+              <summary className="card-title"><Ico as={Clock} size={14} />Histórico de cambios<span className="card-hint">{costHistory.length} registro{costHistory.length === 1 ? '' : 's'}</span></summary>
+              <div className="card-acc-body">
               {costHistory.length === 0
                 ? <p style={{ color:'var(--texto-suave)', fontSize:'0.85rem' }}>Aún no hay cambios registrados. Cada vez que modifiques cantidades o costos y guardes, se registra aquí con su fecha.</p>
                 : <div className="table-wrap">
@@ -1619,7 +1646,8 @@ export default function Costos() {
                       </tbody>
                     </table>
                   </div>}
-            </div>
+              </div>
+            </details>
           )}
 
           {/* ── Modal: Gestionar tipos de producto (admin) ── */}

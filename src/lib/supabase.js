@@ -17,12 +17,16 @@ let _silentDepth = 0
 export const beginSilentWrites = () => { _silentDepth++ }
 export const endSilentWrites = () => { _silentDepth = Math.max(0, _silentDepth - 1) }
 
-function _trackWrite(builder, silent) {
+// Etiqueta legible según el tipo de escritura, para que el overlay diga lo correcto
+// ("Eliminando…" en vez de "Guardando…" cuando se borra, etc.)
+const _labelDeMetodo = (m) => (m === 'delete' ? 'Eliminando…' : 'Guardando…')
+
+function _trackWrite(builder, silent, label) {
   if (!builder || typeof builder.then !== 'function') return builder
   const origThen = builder.then.bind(builder)
   let started = false, ended = false
-  const start = () => { if (!started) { started = true; if (!silent) setBusy(true) } }
-  const end = () => { if (started && !ended) { ended = true; if (!silent) setBusy(false) } }
+  const start = () => { if (!started) { started = true; if (!silent) setBusy(true, label) } }
+  const end = () => { if (started && !ended) { ended = true; if (!silent) setBusy(false, label) } }
   builder.then = (onF, onR) => {
     start()
     return origThen(
@@ -56,7 +60,7 @@ supabase.from = (table) => {
       // Modo desarrollador: vista de rol (solo lectura) o impersonación sin edición → bloquear.
       const motivo = motivoBloqueoEscritura(table)
       if (motivo) { try { if (typeof window !== 'undefined') window.dispatchEvent(new CustomEvent('dev-bloqueo', { detail: motivo })) } catch { /* noop */ } return _bloqueado(motivo) }
-      return _trackWrite(orig(...args), _silentDepth > 0)
+      return _trackWrite(orig(...args), _silentDepth > 0, _labelDeMetodo(m))
     }
   }
   return qb

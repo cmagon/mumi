@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { fNum, fFecha, componerSurtido } from '../lib/businessLogic'
@@ -11,14 +11,13 @@ import Cargando from '../components/ui/Cargando'
 import { UNIDADES_ALEGRA, UNSPSC_ALIMENTOS } from '../lib/alegraCatalogos'
 import {
   Settings, Plug, DollarSign, ClipboardList, Shuffle, Plus, Tags, Scale, ScrollText,
-  Pencil, X, RefreshCw, Check, AlertTriangle, FlaskConical, Unplug, RotateCw, BarChart3, TrendingUp, Package,
+  Pencil, X, RefreshCw, Check, AlertTriangle, FlaskConical, Unplug, BarChart3, TrendingUp, Package,
   ArrowUpFromLine, ArrowDownToLine,
 } from 'lucide-react'
-import { del } from 'idb-keyval'
 
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
-const EMPTY_PROD = { nombre: '', sku: '', alegra_item_id: '', tipo: 'base', stock_min: '', costo_unitario: '', precio_mayor: '', precio_detal: '', imagen_url: '', activo: true, unidad_medida: 'unit', codigo_unspsc: '', categoria_alegra_id: '', categoria_alegra_nombre: '', surtido_a: '', surtido_b: '' }
+const EMPTY_PROD = { nombre: '', sku: '', alegra_item_id: '', tipo: 'base', stock_min: '', costo_unitario: '', precio_mayor: '', precio_detal: '', activo: true, unidad_medida: 'unit', codigo_unspsc: '', categoria_alegra_id: '', categoria_alegra_nombre: '', surtido_a: '', surtido_b: '', product_id: null, mp_id: null, _stock_inicial: 0 }
 const EMPTY_AJUSTE = { tipo: 'entrada', cantidad: '', lote: '', motivo: '' }
 
 export default function ProductosTerminados() {
@@ -30,6 +29,29 @@ export default function ProductosTerminados() {
   const [buscar, setBuscar] = useState('')
   const [modalProd, setModalProd] = useState(false)
   const [pForm, setPForm] = useState(EMPTY_PROD)
+  // Menú desplegable de acciones de Alegra (Configurar / Enlazar masivo / Enviar / Traer)
+  const [menuAlegraOpen, setMenuAlegraOpen] = useState(false)
+  const menuAlegraRef = useRef(null)
+  useEffect(() => {
+    if (!menuAlegraOpen) return
+    const onClick = (e) => { if (menuAlegraRef.current && !menuAlegraRef.current.contains(e.target)) setMenuAlegraOpen(false) }
+    document.addEventListener('mousedown', onClick)
+    return () => document.removeEventListener('mousedown', onClick)
+  }, [menuAlegraOpen])
+  // Desplegable de sugerencias UNSPSC propio de la app (no datalist del navegador)
+  const [unspscAbierto, setUnspscAbierto] = useState(false)
+  const unspscSugeridos = useMemo(() => {
+    const q = String(pForm.codigo_unspsc || '').trim().toLowerCase()
+    const vistos = new Set()
+    const matches = (u) => !q || u.codigo.includes(q) || u.desc.toLowerCase().includes(q) || (u.grupo || '').toLowerCase().includes(q) || (u.alias || []).some(a => a.toLowerCase().includes(q))
+    const out = []
+    for (const u of UNSPSC_ALIMENTOS) {
+      if (vistos.has(u.codigo)) continue
+      if (matches(u)) { out.push(u); vistos.add(u.codigo) }
+      if (out.length >= 10) break
+    }
+    return out
+  }, [pForm.codigo_unspsc])
   const [pEditId, setPEditId] = useState(null)
   const [modalAjuste, setModalAjuste] = useState(null)   // producto al que se ajusta
   const [aForm, setAForm] = useState(EMPTY_AJUSTE)
@@ -83,6 +105,26 @@ export default function ProductosTerminados() {
     queryFn: async () => { const { data } = await supabase.functions.invoke('alegra-categories', { body: {} }); return data?.items || [] },
     enabled: esAdmin, retry: false, staleTime: 5 * 60 * 1000,
   })
+  const [nuevaCatOpen, setNuevaCatOpen] = useState(false)
+  const [nuevaCatNombre, setNuevaCatNombre] = useState('')
+  const crearCategoria = useMutation({
+    meta: { label: 'Creando categoría en Alegra…' },
+    mutationFn: async (nombre) => {
+      const n = String(nombre || '').trim()
+      if (!n) throw new Error('Escribe el nombre de la categoría')
+      const { data, error } = await supabase.functions.invoke('alegra-create-category', { body: { name: n } })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      return data
+    },
+    onSuccess: (data) => {
+      qc.invalidateQueries({ queryKey: ['alegra_categories'] })
+      setPForm(f => ({ ...f, categoria_alegra_id: data.id, categoria_alegra_nombre: data.name }))
+      setNuevaCatOpen(false)
+      toast(`Categoría "${data.name}" creada en Alegra ✓`)
+    },
+    onError: (e) => toast('No se pudo crear la categoría: ' + e.message, 'error'),
+  })
   // Stock que tiene Alegra (para comparar y verificar sincronía). NO bloquea la tabla si Alegra falla.
   const { data: alegraStock = {}, isFetching: cargandoAlegraStock } = useQuery({
     queryKey: ['alegra_items_stock'],
@@ -105,8 +147,6 @@ export default function ProductosTerminados() {
   const [yaCargo, setYaCargo] = useState(false)
   useEffect(() => { if (okProds && okFichas && !fetchingProds && !fetchingFichas) setYaCargo(true) }, [okProds, okFichas, fetchingProds, fetchingFichas])
   const cargandoProds = !yaCargo
-  // Recargar purgando la caché persistida (IndexedDB) y volviendo a pedir todo desde la app
-  const recargarPurgando = async () => { try { await del('mumi-query-cache') } catch { /* ignore */ } window.location.reload() }
   // Materias primas marcadas como vendibles (para crearlas como producto terminado)
   const { data: mpsVendibles = [] } = useQuery({
     queryKey: ['mps_vendibles'],
@@ -123,37 +163,27 @@ export default function ProductosTerminados() {
   // Fichas ACTIVAS (vendibles) que aún no están en el catálogo de terminados
   const fichasDisponibles = fichas.filter(f => (f.tipo || '') !== 'subproducto' && f.activo !== false &&
     !productos.some(p => p.product_id === f.id || (p.nombre || '').toLowerCase() === (f.nombre || '').toLowerCase()))
-  const crearDesdeFicha = useMutation({
-    mutationFn: async (f) => {
-      const { error } = await supabase.from('finished_products').insert({
-        nombre: f.nombre, tipo: 'base', product_id: f.id,
-        costo_unitario: Math.round(Number(f.costo_final) || 0),
-        precio_mayor: Math.round(Number(f.precio_mayor) || 0), precio_detal: Math.round(Number(f.precio_detal) || 0),
-        imagen_url: f.imagen_url || null, stock: 0, activo: true,
-      })
-      if (error) throw error
-      return f.nombre
-    },
-    onSuccess: (nombre) => { qc.invalidateQueries({ queryKey: ['finished_products'] }); toast(`"${nombre}" agregado como producto terminado ✓`) },
-    onError: (e) => toast(e.message, 'error'),
-  })
-  const crearDesdeMp = useMutation({
-    mutationFn: async (m) => {
-      const f = fichaMpDe(m.id)   // ficha de MP con costos ya asignados
-      if (!f) throw new Error('Esta MP aún no tiene ficha de costos creada. Créala primero en Fichas de Productos.')
-      const { error } = await supabase.from('finished_products').insert({
-        nombre: f.nombre || m.nombre, tipo: 'mp', mp_id: m.id, product_id: f.id,
-        costo_unitario: Math.round(Number(f.costo_final) || Number(m.precio) || 0),
-        precio_mayor: Math.round(Number(f.precio_mayor) || Number(m.precio_venta) || 0),
-        precio_detal: Math.round(Number(f.precio_detal) || 0),
-        stock: Number(m.stock) || 0, activo: true,
-      })
-      if (error) throw error
-      return m.nombre
-    },
-    onSuccess: (nombre) => { qc.invalidateQueries({ queryKey: ['finished_products'] }); toast(`"${nombre}" agregado como producto terminado ✓`) },
-    onError: (e) => toast(e.message, 'error'),
-  })
+  // "Agregar" NO inserta directo: precarga el modal de edición con los datos de la ficha/MP
+  // (costo, precios) para que el usuario termine de definir SKU, stock mínimo, categoría,
+  // código UNSPSC, etc. ANTES de crear el producto terminado.
+  const prepararDesdeFicha = (f) => {
+    setPForm({ ...EMPTY_PROD, nombre: f.nombre, tipo: 'base', product_id: f.id,
+      costo_unitario: Math.round(Number(f.costo_final) || 0),
+      precio_mayor: Math.round(Number(f.precio_mayor) || 0), precio_detal: Math.round(Number(f.precio_detal) || 0),
+    })
+    setPEditId(null); setModalFicha(false); setModalProd(true)
+  }
+  const prepararDesdeMp = (m) => {
+    const f = fichaMpDe(m.id)   // ficha de MP con costos ya asignados
+    if (!f) { toast('Esta MP aún no tiene ficha de costos creada. Créala primero en Fichas de Productos.', 'error'); return }
+    setPForm({ ...EMPTY_PROD, nombre: f.nombre || m.nombre, tipo: 'mp', mp_id: m.id, product_id: f.id,
+      costo_unitario: Math.round(Number(f.costo_final) || Number(m.precio) || 0),
+      precio_mayor: Math.round(Number(f.precio_mayor) || Number(m.precio_venta) || 0),
+      precio_detal: Math.round(Number(f.precio_detal) || 0),
+      _stock_inicial: Number(m.stock) || 0,
+    })
+    setPEditId(null); setModalMp(false); setModalProd(true)
+  }
 
   const costoFicha = (p) => {
     const f = fichas.find(x => x.id === p.product_id) || fichas.find(x => x.nombre === p.nombre)
@@ -165,21 +195,6 @@ export default function ProductosTerminados() {
     return productos.filter(p => !q || (p.nombre || '').toLowerCase().includes(q) || (p.sku || '').toLowerCase().includes(q))
   }, [productos, buscar])
 
-  const [subiendoImg, setSubiendoImg] = useState(false)
-  const subirImagen = async (file) => {
-    if (!file) return
-    setSubiendoImg(true)
-    try {
-      const ext = file.name.split('.').pop()
-      const path = `terminados/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`
-      const { error } = await supabase.storage.from('product-images').upload(path, file, { upsert: true })
-      if (error) throw error
-      const { data } = supabase.storage.from('product-images').getPublicUrl(path)
-      setPForm(f => ({ ...f, imagen_url: data.publicUrl }))
-      toast('Imagen cargada ✓')
-    } catch (e) { toast('No se pudo subir la imagen: ' + e.message, 'error') }
-    finally { setSubiendoImg(false) }
-  }
 
   // Promedio de costo/precios de dos fichas (para surtidos)
   const promedioFichas = (aId, bId) => {
@@ -201,14 +216,60 @@ export default function ProductosTerminados() {
 
   const saveProd = useMutation({
     mutationFn: async () => {
-      if (!pForm.nombre.trim()) throw new Error('Indica el nombre del producto terminado')
-      const payload = { nombre: pForm.nombre.trim(), sku: pForm.sku || null, alegra_item_id: pForm.alegra_item_id || null, tipo: pForm.tipo, stock_min: parseFloat(pForm.stock_min) || 0, costo_unitario: parseFloat(pForm.costo_unitario) || 0, precio_mayor: parseFloat(pForm.precio_mayor) || 0, precio_detal: parseFloat(pForm.precio_detal) || 0, imagen_url: pForm.imagen_url || null, activo: pForm.activo, unidad_medida: pForm.unidad_medida || 'unit', codigo_unspsc: pForm.codigo_unspsc || null, categoria_alegra_id: pForm.categoria_alegra_id || null, categoria_alegra_nombre: pForm.categoria_alegra_nombre || null, surtido_a: pForm.surtido_a ? Number(pForm.surtido_a) : null, surtido_b: pForm.surtido_b ? Number(pForm.surtido_b) : null }
-      if (pEditId) { const { error } = await supabase.from('finished_products').update(payload).eq('id', pEditId); if (error) throw error }
-      else { const { error } = await supabase.from('finished_products').insert(payload); if (error) throw error }
+      if (!pForm.nombre.trim()) throw new Error('Indica el nombre comercial del producto')
+      if (pForm.stock_min === '' || pForm.stock_min == null) throw new Error('Define el stock mínimo (usa 0 si no quieres alerta de stock bajo)')
+      if (alegraCategorias.length > 0 && !pForm.categoria_alegra_id) throw new Error('Elige una categoría de Alegra')
+      const payload = { nombre: pForm.nombre.trim(), sku: pForm.sku || null, alegra_item_id: pForm.alegra_item_id || null, tipo: pForm.tipo, stock_min: parseFloat(pForm.stock_min) || 0, costo_unitario: parseFloat(pForm.costo_unitario) || 0, precio_mayor: parseFloat(pForm.precio_mayor) || 0, precio_detal: parseFloat(pForm.precio_detal) || 0, activo: pForm.activo, unidad_medida: pForm.unidad_medida || 'unit', codigo_unspsc: pForm.codigo_unspsc || null, categoria_alegra_id: pForm.categoria_alegra_id || null, categoria_alegra_nombre: pForm.categoria_alegra_nombre || null, surtido_a: pForm.surtido_a ? Number(pForm.surtido_a) : null, surtido_b: pForm.surtido_b ? Number(pForm.surtido_b) : null }
+      if (pEditId) {
+        const { error } = await supabase.from('finished_products').update(payload).eq('id', pEditId); if (error) throw error
+        return { id: pEditId, esNuevo: false }
+      } else {
+        // product_id/mp_id (enlace con la ficha o la MP) solo se fija AL CREAR; nunca se toca al editar.
+        const { data, error } = await supabase.from('finished_products').insert({ ...payload, product_id: pForm.product_id || null, mp_id: pForm.mp_id || null, stock: pForm._stock_inicial || 0 }).select('id').single()
+        if (error) throw error
+        return { id: data.id, esNuevo: true }
+      }
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['finished_products'] }); setModalProd(false); setPForm(EMPTY_PROD); setPEditId(null); toast('Producto terminado guardado ✓') },
+    onSuccess: async ({ id, esNuevo }) => {
+      qc.invalidateQueries({ queryKey: ['finished_products'] })
+      const nombre = pForm.nombre.trim()
+      // Si el usuario pidió "crear en Alegra al guardar" (no había match ni enlace previo), se crea ahora con el id ya persistido.
+      if (esNuevo && crearAlGuardar && !pForm.alegra_item_id) {
+        crearEnAlegra.mutate({ id, nombre })
+      }
+      setModalProd(false); setPForm(EMPTY_PROD); setPEditId(null); setCrearAlGuardar(false); setAlegraVerif({ estado: 'idle', match: null })
+      toast('Producto terminado guardado ✓')
+    },
     onError: (e) => toast(e.message, 'error'),
   })
+
+  // Verificación en Alegra DENTRO del modal: busca por SKU/nombre antes de decidir crear o enlazar.
+  const [alegraVerif, setAlegraVerif] = useState({ estado: 'idle', match: null })   // idle | buscando | coincidencia | sin_match
+  const [crearAlGuardar, setCrearAlGuardar] = useState(false)
+  const verificarEnAlegra = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke('alegra-items', { body: {} })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      const items = data?.items || []
+      const porRef = pForm.sku ? items.filter(it => norm(it.reference) === norm(pForm.sku)) : []
+      const porNom = items.filter(it => norm(it.name) === norm(pForm.nombre))
+      const candidatos = porRef.length ? porRef : porNom
+      const match = candidatos.find(it => !it.esServicio) || candidatos[0] || null
+      return match
+    },
+    meta: { label: 'Buscando en Alegra…' },
+    onMutate: () => setAlegraVerif({ estado: 'buscando', match: null }),
+    onSuccess: (match) => setAlegraVerif({ estado: match ? 'coincidencia' : 'sin_match', match }),
+    onError: (e) => { setAlegraVerif({ estado: 'idle', match: null }); toast('No se pudo verificar en Alegra: ' + e.message, 'error') },
+  })
+  const enlazarDesdeModal = (match) => {
+    setPForm(f => ({ ...f, alegra_item_id: String(match.id), sku: f.sku || match.reference || f.sku }))
+    setAlegraVerif({ estado: 'idle', match: null })
+    toast(`Se enlazará con "${match.name}" al guardar`, 'success')
+  }
+  // Cada vez que se abre el modal (nuevo o editar), reinicia el estado de verificación de Alegra
+  useEffect(() => { if (modalProd) { setAlegraVerif({ estado: 'idle', match: null }); setCrearAlGuardar(false) } }, [modalProd])
 
   const delProd = useMutation({
     mutationFn: async (id) => {
@@ -241,6 +302,7 @@ export default function ProductosTerminados() {
       await pushAlegra(p.id)
       return nuevo
     },
+    meta: { label: 'Guardando ajuste de stock…' },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['finished_products'] }); qc.invalidateQueries({ queryKey: ['finished_movements'] }); setModalAjuste(null); setAForm(EMPTY_AJUSTE); toast('Stock ajustado y sincronizado con Alegra ✓') },
     onError: (e) => toast(e.message, 'error'),
   })
@@ -252,30 +314,57 @@ export default function ProductosTerminados() {
       if (data?.error) throw new Error(data.error)
       return p.nombre
     },
+    meta: { label: 'Creando en Alegra…' },
     onSuccess: (nombre) => { qc.invalidateQueries({ queryKey: ['finished_products'] }); toast(`"${nombre}" creado en Alegra como inventariable ✓`) },
     onError: (e) => toast('Crear en Alegra: ' + e.message, 'error'),
   })
 
+  // Botón de la lista: primero VERIFICA si ya existe en Alegra (por SKU/nombre) — si hay
+  // coincidencia, ofrece enlazar; solo si no encuentra nada, ofrece crear uno nuevo. Evita duplicados.
+  // IMPORTANTE: la decisión del usuario (enlazar/crear/cancelar) se resuelve en un modal APARTE,
+  // nunca dentro del onSuccess de una mutación — si se espera ahí una respuesta del usuario, la
+  // mutación queda "pendiente" y el overlay global "Guardando…" tapa el diálogo de confirmación
+  // (z-index más alto), dejándolo inaccesible y con apariencia de que "se quedó pegado".
+  const [verifAlegra, setVerifAlegra] = useState(null)   // { p, match, buscando }
+  const verificarEnAlegraFila = async (p) => {
+    setVerifAlegra({ p, match: null, buscando: true })
+    try {
+      const { data, error } = await supabase.functions.invoke('alegra-items', { body: {} })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      const items = data?.items || []
+      const porRef = p.sku ? items.filter(it => norm(it.reference) === norm(p.sku)) : []
+      const porNom = items.filter(it => norm(it.name) === norm(p.nombre))
+      const candidatos = porRef.length ? porRef : porNom
+      const match = candidatos.find(it => !it.esServicio) || candidatos[0] || null
+      setVerifAlegra({ p, match, buscando: false })
+    } catch (e) {
+      setVerifAlegra(null)
+      toast('No se pudo verificar en Alegra: ' + e.message, 'error')
+    }
+  }
+  const enlazarDesdeVerificacion = useMutation({
+    mutationFn: async ({ p, match }) => {
+      const upd = { alegra_item_id: String(match.id) }
+      if (!p.sku && match.reference) upd.sku = match.reference
+      const { error } = await supabase.from('finished_products').update(upd).eq('id', p.id)
+      if (error) throw error
+      return { p, match }
+    },
+    meta: { label: 'Enlazando con Alegra…' },
+    onSuccess: ({ p, match }) => { qc.invalidateQueries({ queryKey: ['finished_products'] }); setVerifAlegra(null); toast(`"${p.nombre}" enlazado con "${match.name}" ✓`) },
+    onError: (e) => toast(e.message, 'error'),
+  })
+
   const desenlazar = useMutation({
+    meta: { label: 'Desenlazando de Alegra…' },
     mutationFn: async (p) => { const { error } = await supabase.from('finished_products').update({ alegra_item_id: null }).eq('id', p.id); if (error) throw error; return p.nombre },
     onSuccess: (nombre) => { qc.invalidateQueries({ queryKey: ['finished_products'] }); toast(`"${nombre}" desenlazado de Alegra ✓`) },
     onError: (e) => toast(e.message, 'error'),
   })
 
-  const enviarImagen = useMutation({
-    mutationFn: async (p) => {
-      if (!p.alegra_item_id) throw new Error('Enlázalo primero con un ítem de Alegra')
-      const { data, error } = await supabase.functions.invoke('alegra-push-image', { body: { finished_id: p.id } })
-      if (error) throw error
-      if (data?.error) throw new Error(data.error)
-      if (!data?.ok) throw new Error('Alegra respondió ' + (data?.status || '') + ': ' + (data?.alegra || '').slice(0, 200))
-      return p.nombre
-    },
-    onSuccess: (nombre) => toast(`Imagen enviada a Alegra para "${nombre}" ✓`),
-    onError: (e) => toast('Imagen: ' + e.message, 'error'),
-  })
-
   const sincronizarUno = useMutation({
+    meta: { label: 'Sincronizando con Alegra…' },
     mutationFn: async (p) => {
       if (!p.alegra_item_id) throw new Error('Asigna primero el ID del ítem en Alegra')
       const { data, error } = await supabase.functions.invoke('alegra-push-stock', { body: { finished_id: p.id } })
@@ -296,6 +385,7 @@ export default function ProductosTerminados() {
 
   // Actualiza el costo unitario de los terminados BASE desde el costo de su ficha
   const actualizarCostos = useMutation({
+    meta: { label: 'Actualizando costos desde fichas…' },
     mutationFn: async () => {
       let n = 0
       for (const p of productos) {
@@ -313,6 +403,7 @@ export default function ProductosTerminados() {
   })
 
   const sincronizarTodo = useMutation({
+    meta: { label: 'Enviando stock a Alegra…' },
     mutationFn: async () => { const { data, error } = await supabase.functions.invoke('alegra-push-stock', { body: { all: true } }); if (error) throw error; return data },
     onSuccess: (data) => { const ok = (data?.resultados || []).filter(r => r.estado === 'ok').length; toast(`Stock sincronizado con Alegra: ${ok} producto(s) ✓`) },
     onError: (e) => toast('No se pudo sincronizar: ' + e.message, 'error'),
@@ -320,6 +411,7 @@ export default function ProductosTerminados() {
 
   // Trae DESDE Alegra: remisiones (reservan) y facturas (descuentan stock / liberan reserva).
   const traerDesdeAlegra = useMutation({
+    meta: { label: 'Trayendo ventas de Alegra…' },
     mutationFn: async () => { const { data, error } = await supabase.functions.invoke('alegra-sync-stock', { body: {} }); if (error) throw error; if (data?.error) throw new Error(data.error); return data },
     onSuccess: (data) => {
       qc.invalidateQueries({ queryKey: ['finished_products'] }); qc.invalidateQueries({ queryKey: ['finished_movements'] })
@@ -355,6 +447,7 @@ export default function ProductosTerminados() {
   }, [baseProds, selGen, productos, fichas])
 
   const generarSurtidos = useMutation({
+    meta: { label: 'Generando surtidos…' },
     mutationFn: async () => {
       if (!previewGen.length) throw new Error('No hay combinaciones para aplicar')
       let creados = 0, actualizados = 0
@@ -467,14 +560,30 @@ export default function ProductosTerminados() {
       <div className="page-header">
         <h1 className="page-title">Producto Terminado</h1>
         <div className="page-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn btn-secondary btn-sm" onClick={recargarPurgando} title="Recargar datos limpiando la caché"><Ico as={RotateCw} size={14} />Recargar</button>
           {/* El resto de acciones se ocultan mientras se cargan los datos reales (evita botones erróneos) */}
           {!cargandoProds && <>
-          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={abrirConfig}><Ico as={Settings} size={14} />Configurar Alegra</button>}
-          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={abrirEnlace}><Ico as={Plug} size={14} />Enlazar con Alegra</button>}
+          {esAdmin && (
+            <div ref={menuAlegraRef} style={{ position: 'relative' }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => setMenuAlegraOpen(o => !o)}><Ico as={Plug} size={14} />Alegra ▾</button>
+              {menuAlegraOpen && (
+                <div style={{ position: 'absolute', top: '100%', left: 0, marginTop: 4, background: 'var(--blanco)', border: '1px solid var(--crema-oscuro)', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,0.14)', zIndex: 30, minWidth: 240, padding: 6 }}>
+                  {[
+                    { ico: Settings, label: 'Configurar Alegra', on: () => abrirConfig() },
+                    { ico: Plug, label: 'Enlazar con Alegra (masivo)', on: () => abrirEnlace() },
+                    { ico: ArrowUpFromLine, label: sincronizarTodo.isPending ? 'Enviando...' : 'Enviar stock a Alegra', on: () => sincronizarTodo.mutate(), disabled: sincronizarTodo.isPending },
+                    { ico: ArrowDownToLine, label: traerDesdeAlegra.isPending ? 'Trayendo...' : 'Traer ventas de Alegra', on: () => traerDesdeAlegra.mutate(), disabled: traerDesdeAlegra.isPending },
+                  ].map((it, i) => (
+                    <button key={i} disabled={it.disabled} onClick={() => { it.on(); setMenuAlegraOpen(false) }}
+                      style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '8px 10px', border: 'none', background: 'transparent', cursor: it.disabled ? 'default' : 'pointer', fontSize: '0.84rem', borderRadius: 6, color: 'var(--texto)' }}
+                      onMouseEnter={e => !it.disabled && (e.currentTarget.style.background = 'var(--crema)')} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                      <Ico as={it.ico} size={14} />{it.label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
           <button className="btn btn-secondary btn-sm" onClick={() => actualizarCostos.mutate()} disabled={actualizarCostos.isPending}>{actualizarCostos.isPending ? 'Actualizando...' : <><Ico as={DollarSign} size={14} />Actualizar costos desde fichas</>}</button>
-          {esAdmin && <button className="btn btn-secondary btn-sm" title="Envía el stock de la app hacia Alegra" onClick={() => sincronizarTodo.mutate()} disabled={sincronizarTodo.isPending}>{sincronizarTodo.isPending ? 'Enviando...' : <><Ico as={ArrowUpFromLine} size={14} />Enviar stock a Alegra</>}</button>}
-          {esAdmin && <button className="btn btn-secondary btn-sm" title="Trae remisiones (reservan) y facturas (descuentan) desde Alegra" onClick={() => traerDesdeAlegra.mutate()} disabled={traerDesdeAlegra.isPending}>{traerDesdeAlegra.isPending ? 'Trayendo...' : <><Ico as={ArrowDownToLine} size={14} />Traer ventas de Alegra</>}</button>}
           {fichasDisponibles.length > 0 && <button className="btn btn-secondary btn-sm" onClick={() => setModalFicha(true)}><Ico as={ClipboardList} size={14} />Agregar producto ({fichasDisponibles.length})</button>}
           {mpsDisponibles.length > 0 && <button className="btn btn-secondary btn-sm" onClick={() => setModalMp(true)}><Ico as={FlaskConical} size={14} />Agregar MP vendible ({mpsDisponibles.length})</button>}
           <button className="btn btn-secondary btn-sm" onClick={() => { setSelGen(baseProds.map(p => p.id)); setModalGen(true) }}><Ico as={Shuffle} size={14} />Generar surtidos</button>
@@ -538,9 +647,9 @@ export default function ProductosTerminados() {
                           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                             <button className="btn btn-xs btn-primary" title="Ajustar stock" onClick={() => { setModalAjuste(p); setAForm(EMPTY_AJUSTE) }}><Scale size={13} aria-hidden="true" /></button>
                             <button className="btn btn-xs btn-secondary" title="Kardex (movimientos)" onClick={() => setKardexDe(p)}><ScrollText size={13} aria-hidden="true" /></button>
-                            {!p.alegra_item_id && esAdmin && <button className="btn btn-xs btn-dorado" title="Crear en Alegra (inventariable, con todos sus datos). Solo si NO existe ya allá." disabled={crearEnAlegra.isPending} onClick={() => confirmar(`¿Crear "${p.nombre}" en Alegra como producto inventariable?\n\nSolo hazlo si NO existe ya en Alegra (para no duplicar).`).then(ok => ok && crearEnAlegra.mutate(p))}><Plus size={13} aria-hidden="true" /> Crear en Alegra</button>}
+                            {!p.alegra_item_id && esAdmin && <button className="btn btn-xs btn-dorado" title="Busca si ya existe en Alegra por SKU/nombre; si no existe, permite crearlo" disabled={verifAlegra?.buscando} onClick={() => verificarEnAlegraFila(p)}><Ico as={Plug} size={13} />{verifAlegra?.p?.id === p.id && verifAlegra.buscando ? 'Verificando...' : 'Verificar / Crear en Alegra'}</button>}
                             <button className="btn btn-xs btn-secondary" title={p.alegra_item_id ? 'Sincronizar stock y costo con Alegra' : 'Falta el ID del ítem en Alegra'} disabled={!p.alegra_item_id || sincronizarUno.isPending} onClick={() => sincronizarUno.mutate(p)}><RefreshCw size={13} aria-hidden="true" /></button>
-                            <button className="btn btn-xs btn-secondary" onClick={() => { setPForm({ nombre: p.nombre, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '', tipo: p.tipo || 'base', stock_min: p.stock_min || '', costo_unitario: p.costo_unitario || '', precio_mayor: p.precio_mayor || '', precio_detal: p.precio_detal || '', imagen_url: p.imagen_url || '', activo: p.activo !== false, unidad_medida: p.unidad_medida || 'unit', codigo_unspsc: p.codigo_unspsc || '', categoria_alegra_id: p.categoria_alegra_id || '', categoria_alegra_nombre: p.categoria_alegra_nombre || '', surtido_a: p.surtido_a || '', surtido_b: p.surtido_b || '' }); setPEditId(p.id); setModalProd(true) }} title="Editar"><Pencil size={13} aria-hidden="true" /></button>
+                            <button className="btn btn-xs btn-secondary" onClick={() => { setPForm({ nombre: p.nombre, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '', tipo: p.tipo || 'base', stock_min: p.stock_min || '', costo_unitario: p.costo_unitario || '', precio_mayor: p.precio_mayor || '', precio_detal: p.precio_detal || '', activo: p.activo !== false, unidad_medida: p.unidad_medida || 'unit', codigo_unspsc: p.codigo_unspsc || '', categoria_alegra_id: p.categoria_alegra_id || '', categoria_alegra_nombre: p.categoria_alegra_nombre || '', surtido_a: p.surtido_a || '', surtido_b: p.surtido_b || '' }); setPEditId(p.id); setModalProd(true) }} title="Editar"><Pencil size={13} aria-hidden="true" /></button>
                             {esAdmin && (p.alegra_item_id
                               ? <button className="btn btn-xs btn-danger" disabled title="Está enlazado a Alegra. Desenlázalo primero para poder eliminarlo." style={{ opacity: 0.5 }}><X size={13} aria-hidden="true" /></button>
                               : <button className="btn btn-xs btn-danger" title="Quitar del catálogo" onClick={() => confirmar(`¿Quitar "${p.nombre}" SOLO del catálogo de Producto Terminado?\n\nEsto NO elimina la ficha de producto ni su costo. Podrás recrearlo desde la ficha cuando quieras.`).then(ok => ok && delProd.mutate(p.id))}><X size={13} aria-hidden="true" /></button>)}
@@ -556,6 +665,15 @@ export default function ProductosTerminados() {
       </div>
       )}
 
+      {tab === 'analisis' && cargandoVentas && (
+        <div className="card" style={{ display: 'flex', alignItems: 'center', gap: 14, background: 'rgba(124,179,66,0.08)', border: '1px solid rgba(124,179,66,0.3)' }}>
+          <div style={{ width: 28, height: 28, flexShrink: 0, border: '3px solid var(--crema-oscuro)', borderTopColor: 'var(--selva)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+          <div>
+            <strong style={{ color: 'var(--selva)' }}>Cargando historial de ventas de Alegra…</strong>
+            <div style={{ fontSize: '0.82rem', color: 'var(--texto-suave)' }}>Puede tardar unos segundos la primera vez (trae facturas y remisiones de todos los años). Quedará en caché por 30 minutos.</div>
+          </div>
+        </div>
+      )}
       {tab === 'analisis' && (() => {
         const MESES = ['Ene', 'Feb', 'Mar', 'Abr', 'May', 'Jun', 'Jul', 'Ago', 'Sep', 'Oct', 'Nov', 'Dic']
         const nombreFP = Object.fromEntries(productos.map(p => [p.id, p.nombre]))
@@ -730,10 +848,49 @@ export default function ProductosTerminados() {
           <button className="btn btn-primary" onClick={() => saveProd.mutate()} disabled={saveProd.isPending}>Guardar</button>
         </>}>
         <div className="form-grid">
-          <div className="form-group" style={{ gridColumn: '1 / -1' }}><label className="form-label">Nombre</label><input className="form-control" value={pForm.nombre} onChange={e => setPForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Ej: Bocadillo Mumi Surt. Seje - Araza" /></div>
+          <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+            <label className="form-label">Nombre comercial</label>
+            <input className="form-control" value={pForm.nombre} onChange={e => setPForm(f => ({ ...f, nombre: e.target.value }))} placeholder="Ej: Bocadillo Mumi Surt. Seje - Araza x 250g" />
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
+              Cómo nombrarlo: <strong>Producto + Marca + Presentación + Cantidad</strong> (ej. "Bocadillo Mumi Surtido Seje-Arazá x 250g").
+            </small>
+          </div>
           <div className="form-group"><label className="form-label">Tipo</label><select className="form-control" value={pForm.tipo} onChange={e => setPForm(f => ({ ...f, tipo: e.target.value }))}><option value="base">Base</option><option value="surtido">Surtido</option></select></div>
           <div className="form-group"><label className="form-label">SKU / Referencia (Alegra)</label><input className="form-control" value={pForm.sku} onChange={e => setPForm(f => ({ ...f, sku: e.target.value }))} /></div>
-          <div className="form-group"><label className="form-label">ID ítem en Alegra</label><input className="form-control" value={pForm.alegra_item_id} onChange={e => setPForm(f => ({ ...f, alegra_item_id: e.target.value }))} /></div>
+          <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+            <label className="form-label">Enlace con Alegra</label>
+            {pForm.alegra_item_id ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                <span className="form-control" style={{ background: 'var(--crema)', flex: '1 1 200px' }}>ID: {pForm.alegra_item_id}</span>
+                {esAdmin && <button type="button" className="btn btn-xs btn-secondary" onClick={() => setPForm(f => ({ ...f, alegra_item_id: '' }))}>Quitar enlace</button>}
+              </div>
+            ) : (
+              <div>
+                {esAdmin && alegraVerif.estado !== 'coincidencia' && alegraVerif.estado !== 'sin_match' && (
+                  <button type="button" className="btn btn-sm btn-secondary" disabled={verificarEnAlegra.isPending || !pForm.nombre.trim()} onClick={() => verificarEnAlegra.mutate()}>
+                    <Ico as={Plug} size={14} />{verificarEnAlegra.isPending ? 'Buscando en Alegra...' : 'Verificar si ya existe en Alegra'}
+                  </button>
+                )}
+                {alegraVerif.estado === 'coincidencia' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', background: 'rgba(124,179,66,0.08)', border: '1px solid rgba(124,179,66,0.3)', borderRadius: 8, padding: '8px 10px' }}>
+                    <span style={{ fontSize: '0.85rem' }}>Ya existe en Alegra: <strong>{alegraVerif.match.name}</strong>{alegraVerif.match.reference ? ` (ref: ${alegraVerif.match.reference})` : ''}</span>
+                    <button type="button" className="btn btn-xs btn-primary" onClick={() => enlazarDesdeModal(alegraVerif.match)}>Enlazar con este</button>
+                    <button type="button" className="btn btn-xs btn-secondary" onClick={() => setAlegraVerif({ estado: 'idle', match: null })}>No es este</button>
+                  </div>
+                )}
+                {alegraVerif.estado === 'sin_match' && (
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', background: 'var(--crema)', borderRadius: 8, padding: '8px 10px' }}>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--texto-suave)' }}>No se encontró en Alegra un ítem con este nombre/SKU.</span>
+                    <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer' }}>
+                      <input type="checkbox" checked={crearAlGuardar} onChange={e => setCrearAlGuardar(e.target.checked)} />
+                      Crear en Alegra al guardar
+                    </label>
+                  </div>
+                )}
+                {!esAdmin && <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Solo un admin puede verificar/crear/enlazar con Alegra.</small>}
+              </div>
+            )}
+          </div>
           <div className="form-group"><label className="form-label">Stock mínimo (alerta)</label><input type="number" className="form-control" value={pForm.stock_min} onChange={e => setPForm(f => ({ ...f, stock_min: e.target.value }))} min={0} /></div>
           {pForm.tipo === 'surtido' && (
             <div className="form-group" style={{ gridColumn: '1 / -1', background: 'rgba(124,179,66,0.07)', borderRadius: 6, padding: 10 }}>
@@ -769,32 +926,46 @@ export default function ProductosTerminados() {
             </select>
           </div>
           <div className="form-group">
-            <label className="form-label">Categoría (Alegra)</label>
+            <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
+              Categoría (Alegra)
+              {esAdmin && !nuevaCatOpen && <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => { setNuevaCatNombre(''); setNuevaCatOpen(true) }}>+ Nueva</button>}
+            </label>
             <select className="form-control" value={pForm.categoria_alegra_id} onChange={e => { const id = e.target.value; const c = alegraCategorias.find(x => x.id === id); setPForm(f => ({ ...f, categoria_alegra_id: id, categoria_alegra_nombre: c?.name || '' })) }}>
               <option value="">— Sin categoría —</option>
               {alegraCategorias.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
             </select>
+            {nuevaCatOpen && (
+              <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                <input className="form-control" placeholder="Ej: Pulpas y frutas procesadas" value={nuevaCatNombre} onChange={e => setNuevaCatNombre(e.target.value)} />
+                <button type="button" className="btn btn-xs btn-primary" disabled={crearCategoria.isPending} onClick={() => crearCategoria.mutate(nuevaCatNombre)}>Crear</button>
+                <button type="button" className="btn btn-xs btn-secondary" onClick={() => setNuevaCatOpen(false)}>✕</button>
+              </div>
+            )}
             {alegraCategorias.length === 0 && <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Configura Alegra para cargar las categorías (Dulces, Galletas, Infusiones...).</small>}
           </div>
-          <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-            <label className="form-label">Código del producto/servicio (UNSPSC — clasificador DIAN) *</label>
-            <input className="form-control" list="dl-unspsc" value={pForm.codigo_unspsc} onChange={e => setPForm(f => ({ ...f, codigo_unspsc: e.target.value }))} placeholder="Elige del catálogo o escribe el código (ej: 50181900)" />
-            <datalist id="dl-unspsc">{UNSPSC_ALIMENTOS.map(u => <option key={u.codigo} value={u.codigo}>{u.codigo} — {u.desc}{u.grupo ? ` · ${u.grupo}` : ''}</option>)}</datalist>
-            <small style={{ color: pForm.codigo_unspsc ? 'var(--texto-suave)' : 'var(--rojo)', fontSize: '0.72rem' }}>
-              {(UNSPSC_ALIMENTOS.find(u => u.codigo === pForm.codigo_unspsc)?.desc)
-                || (pForm.codigo_unspsc ? 'Código personalizado.' : '⚠ Obligatorio para facturar. Estos códigos son UNSPSC reales (válidos para la DIAN); al sincronizar se envían a Alegra.')}
+          <div className="form-group" style={{ gridColumn: '1 / -1', position: 'relative' }}>
+            <label className="form-label">Código del producto/servicio (UNSPSC — clasificador DIAN)</label>
+            <input className="form-control" autoComplete="off" value={pForm.codigo_unspsc}
+              onChange={e => setPForm(f => ({ ...f, codigo_unspsc: e.target.value }))}
+              onFocus={() => setUnspscAbierto(true)}
+              onBlur={() => setTimeout(() => setUnspscAbierto(false), 150)}
+              placeholder="Opcional: escribe para buscar (ej: pulpa, galleta, infusión...)" />
+            {unspscAbierto && unspscSugeridos.length > 0 && (
+              <div style={{ position: 'absolute', zIndex: 20, left: 0, right: 0, top: '100%', marginTop: 4, background: 'var(--blanco)', border: '1px solid var(--crema-oscuro)', borderRadius: 8, boxShadow: '0 6px 20px rgba(0,0,0,0.12)', maxHeight: 220, overflowY: 'auto' }}>
+                {unspscSugeridos.map((u, i) => (
+                  <div key={u.codigo + i} onMouseDown={() => { setPForm(f => ({ ...f, codigo_unspsc: u.codigo })); setUnspscAbierto(false) }}
+                    style={{ padding: '8px 12px', cursor: 'pointer', fontSize: '0.82rem', borderBottom: i < unspscSugeridos.length - 1 ? '1px solid var(--crema)' : 'none' }}
+                    onMouseEnter={e => e.currentTarget.style.background = 'var(--crema)'} onMouseLeave={e => e.currentTarget.style.background = 'transparent'}>
+                    <strong style={{ color: 'var(--selva)' }}>{u.codigo}</strong> — {u.desc}
+                    <small style={{ display: 'block', color: 'var(--texto-suave)' }}>{u.grupo}</small>
+                  </div>
+                ))}
+              </div>
+            )}
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
+              {UNSPSC_ALIMENTOS.find(u => u.codigo === pForm.codigo_unspsc)?.desc
+                || (pForm.codigo_unspsc ? 'Código escrito manualmente (no está en el catálogo de la app).' : 'Opcional: solo se necesita para facturar electrónicamente.')}
             </small>
-          </div>
-          <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-            <label className="form-label">Imagen del producto</label>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              {pForm.imagen_url
-                ? <img src={pForm.imagen_url} alt="" style={{ width: 56, height: 56, objectFit: 'cover', borderRadius: 6 }} />
-                : <div style={{ width: 56, height: 56, borderRadius: 6, background: 'var(--crema)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--texto-suave)' }}>🖼</div>}
-              <input type="file" accept="image/*" onChange={e => subirImagen(e.target.files?.[0])} disabled={subiendoImg} />
-              {pForm.imagen_url && <button type="button" className="btn btn-xs btn-secondary" onClick={() => setPForm(f => ({ ...f, imagen_url: '' }))}>Quitar</button>}
-            </div>
-            {subiendoImg && <small style={{ color: 'var(--texto-suave)' }}>Subiendo…</small>}
           </div>
           <div className="form-group">
             <label className="form-label">Costo unitario {pForm.tipo === 'base' ? '(desde la ficha)' : pForm.tipo === 'surtido' ? '(promedio de las fichas)' : ''}</label>
@@ -935,7 +1106,7 @@ export default function ProductosTerminados() {
                       <td><strong>{f.nombre}</strong></td>
                       <td className="td-number">$ {Number(f.costo_final || 0).toLocaleString('es-CO')}</td>
                       <td className="td-number">$ {Number(f.precio_mayor || 0).toLocaleString('es-CO')}</td>
-                      <td><button className="btn btn-xs btn-primary" disabled={crearDesdeFicha.isPending} onClick={() => crearDesdeFicha.mutate(f)}>+ Agregar</button></td>
+                      <td><button className="btn btn-xs btn-primary" onClick={() => prepararDesdeFicha(f)}>Configurar y agregar</button></td>
                     </tr>
                   ))}
             </tbody>
@@ -959,12 +1130,39 @@ export default function ProductosTerminados() {
                       <td className="td-number">$ {Number(m.precio || 0).toLocaleString('es-CO')}</td>
                       <td className="td-number">$ {Number(m.precio_venta || 0).toLocaleString('es-CO')}</td>
                       <td className="td-number">{fNum(m.stock)} {m.unidad}</td>
-                      <td><button className="btn btn-xs btn-primary" disabled={crearDesdeMp.isPending} onClick={() => crearDesdeMp.mutate(m)}>+ Agregar</button></td>
+                      <td><button className="btn btn-xs btn-primary" onClick={() => prepararDesdeMp(m)}>Configurar y agregar</button></td>
                     </tr>
                   ))}
             </tbody>
           </table>
         </div>
+      </Modal>
+
+      {/* Modal: resultado de "Verificar / Crear en Alegra" (evita duplicados en Alegra) */}
+      <Modal open={!!verifAlegra} onClose={() => setVerifAlegra(null)} guard={false}
+        title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Plug size={18} aria-hidden="true" /> Verificación en Alegra</span>}
+        footer={<button className="btn btn-secondary" onClick={() => setVerifAlegra(null)}>Cerrar</button>}>
+        {verifAlegra?.buscando && <p style={{ fontSize: '0.88rem' }}>Buscando "{verifAlegra.p.nombre}" en Alegra…</p>}
+        {verifAlegra && !verifAlegra.buscando && verifAlegra.match && (
+          <div>
+            <p style={{ fontSize: '0.88rem' }}>Ya existe en Alegra: <strong>{verifAlegra.match.name}</strong>{verifAlegra.match.reference ? ` (ref: ${verifAlegra.match.reference})` : ''}.</p>
+            <p style={{ fontSize: '0.88rem' }}>¿Enlazar <strong>"{verifAlegra.p.nombre}"</strong> con este ítem?</p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => setVerifAlegra(null)}>No es este</button>
+              <button className="btn btn-primary btn-sm" disabled={enlazarDesdeVerificacion.isPending} onClick={() => enlazarDesdeVerificacion.mutate(verifAlegra)}>{enlazarDesdeVerificacion.isPending ? 'Enlazando...' : 'Enlazar'}</button>
+            </div>
+          </div>
+        )}
+        {verifAlegra && !verifAlegra.buscando && !verifAlegra.match && (
+          <div>
+            <p style={{ fontSize: '0.88rem' }}>No se encontró ningún ítem con este nombre/SKU en Alegra.</p>
+            <p style={{ fontSize: '0.88rem' }}>¿Crear <strong>"{verifAlegra.p.nombre}"</strong> en Alegra como producto inventariable nuevo?</p>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button className="btn btn-secondary btn-sm" onClick={() => setVerifAlegra(null)}>Cancelar</button>
+              <button className="btn btn-dorado btn-sm" disabled={crearEnAlegra.isPending} onClick={() => { crearEnAlegra.mutate(verifAlegra.p); setVerifAlegra(null) }}>{crearEnAlegra.isPending ? 'Creando...' : 'Crear en Alegra'}</button>
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Modal generar surtidos */}

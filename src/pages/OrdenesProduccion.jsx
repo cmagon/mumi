@@ -67,6 +67,13 @@ const fechaLocalISO = (d = new Date()) => { const p = (n) => String(n).padStart(
 const desdeHoyMeses = (meses) => { const d = new Date(); d.setMonth(d.getMonth() + meses); return fechaLocalISO(d) }
 // Vencimiento = fecha base (fabricación) + N meses. Si no hay base, usa hoy.
 const desdeFechaMeses = (base, meses) => { const d = base ? new Date(base + 'T00:00:00') : new Date(); d.setMonth(d.getMonth() + meses); return fechaLocalISO(d) }
+// Vencimiento a partir de la "vida útil" configurada en la ficha del producto (días o meses)
+const desdeFechaVidaUtil = (base, valor, unidad) => {
+  const d = base ? new Date(base + 'T00:00:00') : new Date()
+  if (unidad === 'dias') d.setDate(d.getDate() + valor)
+  else d.setMonth(d.getMonth() + valor)
+  return fechaLocalISO(d)
+}
 const horaAhora = () => new Date().toTimeString().slice(0, 5)
 const hoyISO = () => fechaLocalISO()
 const labelMeses = (m) => m % 12 === 0 ? `${m / 12} año${m / 12 > 1 ? 's' : ''}` : `${m} mes${m > 1 ? 'es' : ''}`
@@ -117,6 +124,8 @@ export default function OrdenesProduccion() {
   const [prepLote, setPrepLote] = useState('')
   const [prepVence, setPrepVence] = useState('')
   const [prepFechaInicio, setPrepFechaInicio] = useState('')
+  // Vida útil configurada en la ficha del producto de la orden en curso (para precargar/sugerir el vencimiento)
+  const [prepVidaUtil, setPrepVidaUtil] = useState(null)   // { valor, unidad } | null
   const [prepProcesos, setPrepProcesos] = useState([{ nombre: '', inicio: '', fin: '' }])
   const ordProc = useReorder(setPrepProcesos)
   // Modo de tiempos: básico (solo hora inicio/fin) o avanzado (todos los procesos)
@@ -450,6 +459,7 @@ export default function OrdenesProduccion() {
     // en el modal de proceso solo se SUGIERE (placeholder + botón "Usar sugerido").
     setPrepLote(o.lote || ''); setPrepVence(o.vence || '')
     setPrepFechaInicio(o.fecha_inicio || '')
+    setPrepVidaUtil(null)
     setPrepModoAvanzado(!!o.modo_avanzado); setPrepHoraInicio(o.inicio || ''); setPrepHoraFin(o.fin || '')
     setPrepDestajo(Array.isArray(o.destajo) ? o.destajo : [])
     // Para recetas (sin ficha) se usan los tiempos guardados; para productos se arman desde la ficha más abajo
@@ -458,9 +468,10 @@ export default function OrdenesProduccion() {
     const parse = (v) => { try { return Array.isArray(v) ? v : JSON.parse(v || '[]') } catch { return [] } }
     setPrepEsMpVend(false)
     if (o.origen === 'producto' && o.origen_id) {
-      const { data: prod } = await supabase.from('products_costing').select('bache, peso_unidad, rendimiento, desperdicio, ingredientes, procesos, porciona, peso_subporcion, ficha_url, ficha_nombre, tipo').eq('id', o.origen_id).single()
+      const { data: prod } = await supabase.from('products_costing').select('bache, peso_unidad, rendimiento, desperdicio, ingredientes, procesos, porciona, peso_subporcion, ficha_url, ficha_nombre, tipo, vida_util_valor, vida_util_unidad').eq('id', o.origen_id).single()
       if (prod) {
         setPrepEsMpVend((prod.tipo || '') === 'mp')
+        if (prod.vida_util_valor) setPrepVidaUtil({ valor: parseFloat(prod.vida_util_valor), unidad: prod.vida_util_unidad || 'meses' })
         setPrepPorciona(!!prod.porciona)
         setPrepPesoSubp(o.peso_subporcion || prod.peso_subporcion || '')
         // Subprocesos = ÚNICAMENTE los de la mano de obra de la ficha; se conservan las horas ya guardadas (por nombre)
@@ -566,6 +577,15 @@ export default function OrdenesProduccion() {
 
   // Al abrir el modal de proceso, carga el checklist de "alistar ingredientes" guardado en la orden
   useEffect(() => { if (modalProceso) setAlistado((ordenPrep?.alistado && typeof ordenPrep.alistado === 'object') ? ordenPrep.alistado : {}) }, [modalProceso, ordenPrep?.id])
+
+  // Precarga la fecha de vencimiento con la "vida útil" configurada en la ficha del producto,
+  // apenas se llena la fecha de fabricación (solo si el usuario aún no la ha escrito).
+  useEffect(() => {
+    if (!prepFechaInicio || prepVence || !prepVidaUtil?.valor) return
+    setPrepVence(desdeFechaVidaUtil(prepFechaInicio, prepVidaUtil.valor, prepVidaUtil.unidad))
+    toast(`Vencimiento precargado: este producto tiene ${prepVidaUtil.valor} ${prepVidaUtil.unidad === 'dias' ? 'día(s)' : 'mes(es)'} de vida útil configurada en su ficha.`)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [prepFechaInicio, prepVidaUtil])
 
   // Marca/desmarca un ingrediente como alistado y lo GUARDA en la orden (soporta offline)
   const toggleAlistado = (k, val) => {
@@ -1491,6 +1511,7 @@ export default function OrdenesProduccion() {
   // Devolver orden (admin): elimina el registro de producción, DEVUELVE el stock terminado que sumó
   // y regresa la orden a 'en_proceso' para reeditarla.
   const devolverOrden = useMutation({
+    meta: { label: 'Revirtiendo orden y devolviendo stock…' },
     mutationFn: async (o) => {
       // 1) Devolver el stock terminado sumado por esta orden (entradas de producción)
       const { data: movs } = await supabase.from('finished_movements').select('finished_id, cantidad, tipo').eq('ref', String(o.id)).eq('origen', 'produccion')
@@ -1773,6 +1794,7 @@ export default function OrdenesProduccion() {
 
   // ---- Aprobar / Rechazar (admin) ----
   const aprobar = useMutation({
+    meta: { label: 'Aprobando orden y sincronizando inventario…' },
     mutationFn: async (o) => {
       // 1. Marcar aprobada
       const { error } = await supabase.from('production_orders').update({
@@ -2508,7 +2530,10 @@ export default function OrdenesProduccion() {
                 </small>
               </div>
               )})()}
-              <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de vencimiento *</label><input type="date" className="form-control" value={prepVence} onChange={e => setPrepVence(e.target.value)} disabled={!prepFechaInicio} />{prepFechaInicio ? <QuickVence opts={venceOpts} onEdit={editarVenceOpts} onPick={setPrepVence} base={prepFechaInicio} disabled={!!prepVence} /> : <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Llena primero la fecha de fabricación.</small>}</div>
+              <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de vencimiento *</label><input type="date" className="form-control" value={prepVence} onChange={e => setPrepVence(e.target.value)} disabled={!prepFechaInicio} />
+                {prepVidaUtil?.valor && <small style={{ display: 'block', color: 'var(--selva)', fontSize: '0.72rem', marginTop: 2 }}>ℹ Según su ficha, este producto tiene {prepVidaUtil.valor} {prepVidaUtil.unidad === 'dias' ? 'día(s)' : 'mes(es)'} de vida útil.</small>}
+                {prepFechaInicio ? <QuickVence opts={venceOpts} onEdit={editarVenceOpts} onPick={setPrepVence} base={prepFechaInicio} disabled={!!prepVence} /> : <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Llena primero la fecha de fabricación.</small>}
+              </div>
             </div>
 
             <div style={{ background: 'rgba(0,0,0,0.02)', padding: 10, borderRadius: 'var(--radio)', marginBottom: 12 }}>

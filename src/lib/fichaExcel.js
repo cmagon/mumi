@@ -146,9 +146,11 @@ export async function descargarFichaExcel(ficha, { empresa = 'Mumi Amazonia', lo
   ]
   const resIni = r
   for (const [k, v, fmt] of resumen) { ws.getCell(r, 1).value = k; ws.getCell(r, 1).border = borde; const c = ws.getCell(r, 5); c.value = v; c.numFmt = fmt; c.border = borde; c.alignment = { horizontal: 'right' }; ws.getCell(r, 1).fill = undefined; r++ }
-  // CIF por unidad (editable; pre-cargado con lo que falte para igualar el costo_final guardado)
-  ws.getCell(r, 1).value = 'CIF / otros por unidad'; ws.getCell(r, 1).border = borde
-  ws.getCell(r, 5).value = num(ficha._cifUnidad); ws.getCell(r, 5).numFmt = money; ws.getCell(r, 5).border = borde; ws.getCell(r, 5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: CREMA } }
+  // Costos adicionales por unidad (depreciación, etc. — editable; el CIF/overhead YA está incluido
+  // arriba en "Mano de obra por unidad" vía el costo/minuto, que reparte todo el CIF por tiempo.
+  // Sumar además el CIF-por-unidad (método de absorción por unidades) aquí duplicaría el overhead.)
+  ws.getCell(r, 1).value = 'Costos adicionales por unidad'; ws.getCell(r, 1).border = borde
+  ws.getCell(r, 5).value = num(ficha._adicUnidad); ws.getCell(r, 5).numFmt = money; ws.getCell(r, 5).border = borde; ws.getCell(r, 5).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: CREMA } }
   const cellCif = `E${r}`; r++
   ws.getCell(r, 1).value = 'COSTO TOTAL POR UNIDAD'; ws.getCell(r, 1).font = { bold: true, size: 12, color: { argb: 'FFFFFFFF' } }
   ws.getCell(r, 5).value = { formula: `SUM(E${resIni}:E${r - 1})` }

@@ -798,6 +798,20 @@ html { -webkit-text-size-adjust: 100%; }
 .acordeon-fila .et { color: var(--texto-suave); font-weight: 600; text-transform: uppercase; font-size: 0.68rem; letter-spacing: 0.4px; }
 .acordeon-acciones { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 
+/* ===== SECCIONES PLEGABLES DE LA FICHA DE PRODUCTO (details/summary sobre .card) ===== */
+details.card { padding: 0; }
+details.card > .card-title { cursor: pointer; user-select: none; list-style: none; margin-bottom: 0; padding: 20px 24px; border-bottom: none; }
+details.card > .card-title::-webkit-details-marker { display: none; }
+details.card > .card-title::after { content: '\25BE'; color: var(--texto-suave); transition: transform 0.2s; margin-left: 8px; }
+details.card[open] > .card-title { border-bottom: 1px solid var(--crema-oscuro); }
+details.card[open] > .card-title::after { transform: rotate(180deg); }
+details.card > .card-title .card-hint { margin-left: auto; font-weight: 400; font-size: 0.78rem; color: var(--texto-suave); font-family: 'Source Sans 3', sans-serif; }
+details.card > .card-acc-body { padding: 20px 24px; }
+@media (max-width: 640px) {
+  details.card > .card-title { padding: 16px; }
+  details.card > .card-acc-body { padding: 16px; }
+}
+
 /* ===== TABLAS COMO TARJETAS EN MÃ“VIL =====
    Cada fila se convierte en una tarjeta y cada celda muestra su encabezado
    (vÃ­a data-label, que aÃ±ade automÃ¡ticamente el hook useResponsiveTableLabels). */
@@ -893,14 +907,14 @@ html { -webkit-text-size-adjust: 100%; }
 @media (max-width: 1024px) {
   /* Columnas que se ocultan en la tarjeta móvil (dejamos #, fecha, producto, lote, estado, acciones) */
   .movil-hide { display: none !important; }
-  /* Botones de acción: grandes, a lo ancho y centrados (icono + texto) */
-  .ordenes-acciones { flex-direction: column !important; gap: 8px !important; width: 100%; align-items: stretch !important; }
+  /* Botones de acción: compactos y en fila que envuelve (no ocupan todo el ancho) */
+  .ordenes-acciones { flex-direction: row; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
   .ordenes-acciones > button {
-    width: 100%; justify-content: center;
-    min-height: 44px; font-size: 0.9rem; padding: 10px 14px;
+    width: auto; flex: 0 0 auto;
+    padding: 6px 10px; font-size: 0.78rem; min-height: 0;
   }
-  .ordenes-acciones > button svg { width: 17px; height: 17px; }
-  /* La celda de acciones ocupa todo el ancho de la tarjeta */
+  .ordenes-acciones > button svg { width: 14px; height: 14px; }
+  /* La celda de acciones ocupa todo el ancho de la tarjeta (los botones se alinean a la derecha) */
   .table-wrap td.celda-acciones { display: block; }
   .table-wrap td.celda-acciones::before { display: none; }
 }

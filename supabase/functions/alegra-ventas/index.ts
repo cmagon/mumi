@@ -22,6 +22,47 @@ async function getCreds(supabase: any) {
   return { email: (data?.email || Deno.env.get('ALEGRA_EMAIL') || '').trim(), token: (data?.token || Deno.env.get('ALEGRA_TOKEN') || '').trim() }
 }
 
+const PAGE = 30, MAX_PAGES = 250   // tope de seguridad (~7500 documentos)
+const BATCH = 6   // páginas pedidas EN PARALELO por tanda, en vez de una por una
+
+// Trae TODAS las páginas de un recurso paginado de Alegra, pidiendo varias páginas a la vez
+// (en tandas de BATCH) en lugar de esperar cada una secuencialmente — reduce mucho el tiempo
+// total quen no depende de la latencia de red por-página × número de páginas.
+// `onPageError` decide si un error en la página 0 debe abortar todo (ej. credenciales inválidas).
+async function traerTodasLasPaginas(endpoint: string, authHeader: string, onFirstPageError?: (status: number, texto: string) => void): Promise<any[]> {
+  const todos: any[] = []
+  let pagina = 0
+  while (pagina < MAX_PAGES) {
+    const tanda = Array.from({ length: BATCH }, (_, i) => pagina + i).filter(p => p < MAX_PAGES)
+    const resultados = await Promise.all(tanda.map(async (p) => {
+      try {
+        const res = await fetch(`${ALEGRA_BASE}/${endpoint}?limit=${PAGE}&start=${p * PAGE}&order_direction=DESC&order_field=date`, { headers: { 'Authorization': authHeader } })
+        if (!res.ok) return { p, ok: false, status: res.status, texto: await res.text() }
+        let arr: any[]
+        try { arr = JSON.parse(await res.text()) } catch { arr = [] }
+        return { p, ok: true, arr: Array.isArray(arr) ? arr : [] }
+      } catch {
+        return { p, ok: false, status: 0, texto: '' }
+      }
+    }))
+    // Mantiene el orden por página (aunque no es crítico para la agregación) y detecta dónde parar.
+    resultados.sort((a, b) => a.p - b.p)
+    let detener = false
+    for (const r of resultados) {
+      if (!r.ok) {
+        if (r.p === 0 && onFirstPageError) onFirstPageError(r.status, r.texto)
+        detener = true; break
+      }
+      if (!r.arr.length) { detener = true; break }
+      todos.push(...r.arr)
+      if (r.arr.length < PAGE) detener = true   // última página real
+    }
+    if (detener) break
+    pagina += BATCH
+  }
+  return todos
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   const guard = await requireUser(req); if (guard.resp) return guard.resp
@@ -32,7 +73,6 @@ Deno.serve(async (req) => {
   try {
     const ventas: Record<string, Record<string, number>> = {}
     let facturas = 0, remisiones = 0
-    const PAGE = 30, MAX_PAGES = 250   // tope de seguridad (~7500 documentos)
     // Ids de remisiones que YA se facturaron: no se cuentan otra vez desde /remissions.
     const remisionesFacturadas = new Set<string>()
 
@@ -56,46 +96,34 @@ Deno.serve(async (req) => {
       return out
     }
 
-    // ===== 1) FACTURAS =====
-    for (let p = 0; p < MAX_PAGES; p++) {
-      const res = await fetch(`${ALEGRA_BASE}/invoices?limit=${PAGE}&start=${p * PAGE}&order_direction=DESC&order_field=date`, { headers: { 'Authorization': authHeader } })
-      if (!res.ok) { if (p === 0) return json({ error: `Alegra ${res.status}: ${(await res.text()).slice(0, 160)}` }); break }
-      let arr: any[]
-      try { arr = JSON.parse(await res.text()) } catch { arr = [] }
-      if (!Array.isArray(arr) || !arr.length) break
-      for (const inv of arr) {
-        const status = String(inv?.status || '').toLowerCase()
-        if (/void|cancel|anul/.test(status)) continue   // ignora anuladas
-        for (const rid of idsRemisionDe(inv)) remisionesFacturadas.add(rid)
-        const fecha = String(inv?.date || inv?.datetime || '').slice(0, 7)   // YYYY-MM
-        if (!/^\d{4}-\d{2}$/.test(fecha)) continue
-        acumItems(inv?.items, fecha)
-        facturas++
-      }
-      if (arr.length < PAGE) break
+    // ===== 1) FACTURAS (paginación en paralelo) =====
+    let errorPrimeraPagina: { status: number, texto: string } | null = null
+    const invoicesArr = await traerTodasLasPaginas('invoices', authHeader, (status, texto) => { errorPrimeraPagina = { status, texto } })
+    if (errorPrimeraPagina) return json({ error: `Alegra ${errorPrimeraPagina.status}: ${errorPrimeraPagina.texto.slice(0, 160)}` })
+    for (const inv of invoicesArr) {
+      const status = String(inv?.status || '').toLowerCase()
+      if (/void|cancel|anul/.test(status)) continue   // ignora anuladas
+      for (const rid of idsRemisionDe(inv)) remisionesFacturadas.add(rid)
+      const fecha = String(inv?.date || inv?.datetime || '').slice(0, 7)   // YYYY-MM
+      if (!/^\d{4}-\d{2}$/.test(fecha)) continue
+      acumItems(inv?.items, fecha)
+      facturas++
     }
 
     // ===== 2) REMISIONES (producto ya salió del stock y está reservado = casi vendido) =====
     // Se cuentan SOLO las que aún no tienen factura (evita doble conteo al facturar la remisión).
-    for (let p = 0; p < MAX_PAGES; p++) {
-      let res: Response
-      try { res = await fetch(`${ALEGRA_BASE}/remissions?limit=${PAGE}&start=${p * PAGE}&order_direction=DESC&order_field=date`, { headers: { 'Authorization': authHeader } }) } catch { break }
-      if (!res.ok) break   // si la cuenta no tiene remisiones habilitadas, se ignora sin romper
-      let arr: any[]
-      try { arr = JSON.parse(await res.text()) } catch { arr = [] }
-      if (!Array.isArray(arr) || !arr.length) break
-      for (const rem of arr) {
-        const status = String(rem?.status || '').toLowerCase()
-        if (/void|cancel|anul/.test(status)) continue
-        const rid = String(rem?.id ?? '').trim()
-        if (rid && remisionesFacturadas.has(rid)) continue        // ya se facturó → no duplicar
-        if (rem?.invoiceId || rem?.invoice?.id || (rem?.invoices?.length)) continue  // remisión ya facturada
-        const fecha = String(rem?.date || rem?.datetime || '').slice(0, 7)
-        if (!/^\d{4}-\d{2}$/.test(fecha)) continue
-        acumItems(rem?.items, fecha)
-        remisiones++
-      }
-      if (arr.length < PAGE) break
+    // Requiere que la fase 1 (facturas) haya terminado, para saber qué remisiones ya se facturaron.
+    const remissionsArr = await traerTodasLasPaginas('remissions', authHeader)
+    for (const rem of remissionsArr) {
+      const status = String(rem?.status || '').toLowerCase()
+      if (/void|cancel|anul/.test(status)) continue
+      const rid = String(rem?.id ?? '').trim()
+      if (rid && remisionesFacturadas.has(rid)) continue        // ya se facturó → no duplicar
+      if (rem?.invoiceId || rem?.invoice?.id || (rem?.invoices?.length)) continue  // remisión ya facturada
+      const fecha = String(rem?.date || rem?.datetime || '').slice(0, 7)
+      if (!/^\d{4}-\d{2}$/.test(fecha)) continue
+      acumItems(rem?.items, fecha)
+      remisiones++
     }
 
     return json({ ok: true, ventas, facturas, remisiones })

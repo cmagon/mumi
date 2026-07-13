@@ -487,7 +487,9 @@ export const calcularReceta = ({ ingredientes = [], ancla, cantidadAncla = 0, re
     } else {
       cantidad = totalMezcla * (r.pct / 100)
     }
-    const costoTotal = (r.precio / 1000) * cantidad
+    // El precio se expresa por cada "presentacion" gramos (1000 = $/Kg; 1 = $/g, ej. MP compradas por gramo).
+    // Antes se asumía siempre /1000, lo que multiplicaba por 1000 el costo de insumos priced por gramo.
+    const costoTotal = (r.precio / (r.presentacion || 1000)) * cantidad
     return { ...r, cantidad, costoTotal }
   })
 
