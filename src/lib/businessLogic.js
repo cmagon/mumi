@@ -135,12 +135,16 @@ export const calcularCostosProducto = ({
   const cvu = mpUnit + empUnit                             // solo insumos (materiales), referencia
   const costoTotalUnit = mpUnit + empUnit + moUnit + adicUnit  // costo unitario CON overhead por tiempo + adicionales
   const costoFinal = costoTotalUnit
-  const comUnit    = precioMayor * (comision / 100)        // comisión sobre la venta (informativa)
   // Ganancia por unidad = Precio − Costo unitario (igual que la hoja 05 del Excel)
   const utilMayor  = precioMayor - costoTotalUnit
   const utilDetal  = precioDetal - costoTotalUnit
   const margenMayor = utilMayor
   const margenDetal = utilDetal
+  // % Comisión = porcentaje del PRECIO DE VENTA POR MAYOR (venta bruta) que se paga al
+  // vendedor/distribuidor por cada unidad vendida — igual que la hoja "07. Comision Ventas"
+  // del Excel de costeo (Comisión = Venta Bruta × %). Sale de tu ganancia; no cambia el precio.
+  const comUnit = precioMayor * ((comision || 0) / 100)       // comisión en pesos por unidad
+  const utilMayorNeto = utilMayor - comUnit                    // lo que realmente te queda después de pagar la comisión
   // Punto de equilibrio del producto (si fuera único)
   const pe = utilMayor > 0 ? cifTotal / utilMayor : 0
 
@@ -153,7 +157,7 @@ export const calcularCostosProducto = ({
   return {
     totalMPBache, totalMOBache, totalEmpBache, totalMinutos,
     mpUnit, moUnit, empUnit, cifUnit, adicUnit,
-    cvu, costoTotalUnit, comUnit, costoFinal,
+    cvu, costoTotalUnit, comUnit, costoFinal, utilMayorNeto,
     margenMayor, margenDetal, utilMayor, utilDetal, pe,
     unidsMesTot, pctCIF, costoMin,
   }

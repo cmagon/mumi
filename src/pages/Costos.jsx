@@ -1126,23 +1126,18 @@ export default function Costos() {
                 </div>
                 <div className="form-group"><label className="form-label">{presLabel}s por bache</label><input type="number" className="form-control" value={formProd.bache} onChange={e => setFormProd(f=>({...f,bache:e.target.value}))} min={1} /></div>
                 <div className="form-group"><label className="form-label">Baches por mes</label><input type="number" className="form-control" value={formProd.baches_mes} onChange={e => setFormProd(f=>({...f,baches_mes:e.target.value}))} min={1} /></div>
-                <div className="form-group"><label className="form-label">% Comisión</label><input type="number" className="form-control" value={formProd.comision} onChange={e => setFormProd(f=>({...f,comision:e.target.value}))} min={0} max={100} step={0.5} /></div>
-                <div className="form-group" style={{ gridColumn: '1 / -1', border:'1.5px solid var(--dorado)', borderRadius:'var(--radio)', padding:'12px 14px', background:'rgba(200,169,74,0.06)', display:'flex', gap:12, alignItems:'flex-start' }}>
-                  <span style={{ fontSize:'1.3rem', lineHeight:1 }} aria-hidden="true">⏳</span>
-                  <div style={{ flex:1 }}>
-                    <label className="form-label" style={{ color:'var(--selva)' }}>Vida útil del producto <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(opcional)</small></label>
-                    <div style={{ display:'flex', gap:8, alignItems:'center' }}>
-                      <input type="number" className="form-control" style={{ maxWidth:120 }} value={formProd.vida_util_valor} onChange={e => setFormProd(f=>({...f,vida_util_valor:e.target.value}))} min={0} placeholder="Ej: 6" />
-                      <select className="form-control" style={{ maxWidth:140 }} value={formProd.vida_util_unidad} onChange={e => setFormProd(f=>({...f,vida_util_unidad:e.target.value}))}>
-                        <option value="dias">Días</option>
-                        <option value="meses">Meses</option>
-                      </select>
-                    </div>
-                    <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>
-                      Si la defines aquí, al registrar la producción en Órdenes de Producción la fecha de vencimiento se precargará automáticamente sumando este tiempo a la fecha de fabricación.
-                    </small>
+                <div className="form-group">
+                  <label className="form-label">Vida útil <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(opcional)</small></label>
+                  <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+                    <input type="number" className="form-control" value={formProd.vida_util_valor} onChange={e => setFormProd(f=>({...f,vida_util_valor:e.target.value}))} min={0} placeholder="Ej: 6" style={{ flex:1 }} />
+                    <select className="form-control" value={formProd.vida_util_unidad} onChange={e => setFormProd(f=>({...f,vida_util_unidad:e.target.value}))} style={{ flex:1 }}>
+                      <option value="dias">Días</option>
+                      <option value="meses">Meses</option>
+                    </select>
                   </div>
+                  <small style={{ color:'var(--texto-suave)', fontSize:'0.68rem' }}>Precarga el vencimiento al producir.</small>
                 </div>
+                <div className="form-group"><label className="form-label">% Comisión</label><input type="number" className="form-control" value={formProd.comision} onChange={e => setFormProd(f=>({...f,comision:e.target.value}))} min={0} max={100} step={0.5} /></div>
               </div>
             </div>
 
@@ -1529,7 +1524,16 @@ export default function Costos() {
           <div className="grid-resp" style={{ gridTemplateColumns:'1fr 1fr', gap:20 }}>
             <div className="card">
               <div className="card-title"><Ico as={DollarSign} size={14} />Precios de Venta</div>
-              <div className="form-group"><label className="form-label">Precio a distribuidor (mayor)</label><MoneyInput value={formProd.precio_mayor} onChange={v => setFormProd(f=>({...f,precio_mayor:v}))} /></div>
+              <div className="form-group"><label className="form-label">Precio de venta por mayor <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(tu precio de lista)</small></label><MoneyInput value={formProd.precio_mayor} onChange={v => setFormProd(f=>({...f,precio_mayor:v}))} /></div>
+              {calcResult && (parseFloat(formProd.comision) || 0) > 0 && (
+                <div style={{ background:'rgba(124,179,66,0.08)', border:'1px solid rgba(124,179,66,0.25)', borderRadius:'var(--radio)', padding:'10px 12px', marginBottom:14 }}>
+                  <div style={{ fontSize:'0.76rem', color:'var(--texto-suave)' }}>💼 Precio especial para el distribuidor <small>(precio por mayor − {formProd.comision}% de comisión)</small></div>
+                  <div style={{ fontWeight:700, color:'var(--selva)', fontSize:'1.05rem' }}>{fCOP((parseFloat(formProd.precio_mayor)||0) - calcResult.comUnit)}</div>
+                  <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>
+                    La comisión representa <strong>{fCOP(calcResult.comUnit)}/u</strong> que le cedes al distribuidor. Tu ganancia pasa de {fCOP(calcResult.utilMayor)}/u a <strong>{fCOP(calcResult.utilMayorNeto)}/u</strong>.
+                  </small>
+                </div>
+              )}
               <div className="form-group"><label className="form-label">Precio al público (detal)</label><MoneyInput value={formProd.precio_detal} onChange={v => setFormProd(f=>({...f,precio_detal:v}))} /></div>
               {calcResult && (
                 <div style={{ fontSize:'0.82rem', color:'var(--texto-suave)', marginTop:4 }}>
