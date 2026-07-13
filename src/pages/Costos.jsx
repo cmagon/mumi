@@ -1597,6 +1597,10 @@ export default function Costos() {
                 <div className="total">
                   <div className="row"><span><strong>Costo TOTAL por unidad</strong></span><span><strong>{fCOP(calcResult.costoTotalUnit)}</strong></span></div>
                   <div className="row ganancia"><span>Ganancia mayor <small style={{opacity:0.6,fontSize:'0.72rem'}}>(precio − costo)</small></span><span>{fCOP(calcResult.utilMayor)} ({parseFloat(formProd.precio_mayor)>0?(calcResult.utilMayor/parseFloat(formProd.precio_mayor)*100).toFixed(1)+'%':'-'})</span></div>
+                  {(calcResult.comUnit || 0) > 0 && <>
+                    <div className="row"><span>− Comisión distribuidor <small style={{opacity:0.6,fontSize:'0.72rem'}}>({formProd.comision}% del precio mayor)</small></span><span style={{color:'var(--dorado)'}}>{fCOP(calcResult.comUnit)}</span></div>
+                    <div className="row ganancia"><span>Ganancia mayor neta <small style={{opacity:0.6,fontSize:'0.72rem'}}>(tras comisión)</small></span><span>{fCOP(calcResult.utilMayorNeto)} ({parseFloat(formProd.precio_mayor)>0?(calcResult.utilMayorNeto/parseFloat(formProd.precio_mayor)*100).toFixed(1)+'%':'-'})</span></div>
+                  </>}
                   <div className="row ganancia"><span>Ganancia detal</span><span>{fCOP(calcResult.utilDetal)} ({parseFloat(formProd.precio_detal)>0?(calcResult.utilDetal/parseFloat(formProd.precio_detal)*100).toFixed(1)+'%':'-'})</span></div>
                 </div>
                 <div style={{ marginTop:10, paddingTop:8, borderTop:'1px dashed rgba(245,240,232,0.2)', fontSize:'0.78rem', opacity:0.75 }}>
