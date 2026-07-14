@@ -102,6 +102,23 @@ export default function ProductosTerminados() {
     } catch (e) { toast('No se pudo subir: ' + e.message, 'error') }
     finally { setSubiendoGal(false) }
   }
+  // Experimental: intenta enviar la imagen principal al ítem de Alegra (3 métodos; su API
+  // pública no lo documenta — la función reporta si alguno fue aceptado).
+  const probarImgAlegra = useMutation({
+    meta: { label: 'Enviando imagen a Alegra…' },
+    mutationFn: async (p) => {
+      const { data, error } = await supabase.functions.invoke('alegra-push-image', { body: { finished_id: p.id } })
+      if (error) throw error
+      if (data?.error && !data?.intentos) throw new Error(data.error)
+      return data
+    },
+    onSuccess: (data) => {
+      if (data?.ok) toast(`✓ Alegra aceptó la imagen (método: ${data.metodo})`, 'success')
+      else toast('Alegra no aceptó la imagen por ninguno de los 3 métodos probados — su API pública no soporta imágenes de ítems.', 'warning')
+      console.log('Intentos de envío de imagen a Alegra:', data?.intentos)
+    },
+    onError: (e) => toast('No se pudo intentar: ' + e.message, 'error'),
+  })
   const guardarGaleria = useMutation({
     mutationFn: async () => {
       const { error } = await supabase.from('finished_products').update({ imagen_url: galeriaImgs[0] || null }).eq('id', galeriaDe.id)
@@ -346,12 +363,17 @@ export default function ProductosTerminados() {
   // Verificación en Alegra DENTRO del modal: busca por SKU/nombre antes de decidir crear o enlazar.
   const [alegraVerif, setAlegraVerif] = useState({ estado: 'idle', match: null })   // idle | buscando | coincidencia | sin_match
   const [crearAlGuardar, setCrearAlGuardar] = useState(false)
+  // Ids de Alegra que YA están enlazados a algún producto de la app: se excluyen de las
+  // búsquedas para no ofrecer enlazar dos productos al mismo ítem (causa de confusiones).
+  const idsAlegraEnlazados = () => new Set(productos.filter(p => p.alegra_item_id).map(p => String(p.alegra_item_id)))
   const verificarEnAlegra = useMutation({
     mutationFn: async () => {
       const { data, error } = await supabase.functions.invoke('alegra-items', { body: {} })
       if (error) throw error
       if (data?.error) throw new Error(data.error)
-      const items = data?.items || []
+      const enlazados = idsAlegraEnlazados()
+      if (pEditId && pForm.alegra_item_id) enlazados.delete(String(pForm.alegra_item_id))   // el propio no cuenta
+      const items = (data?.items || []).filter(it => !enlazados.has(String(it.id)))
       // 1) Coincidencia EXACTA por SKU/referencia o por nombre completo
       const porRef = pForm.sku ? items.filter(it => norm(it.reference) === norm(pForm.sku)) : []
       const porNom = items.filter(it => norm(it.name) === norm(pForm.nombre))
@@ -445,7 +467,8 @@ export default function ProductosTerminados() {
       const { data, error } = await supabase.functions.invoke('alegra-items', { body: {} })
       if (error) throw error
       if (data?.error) throw new Error(data.error)
-      const items = data?.items || []
+      const enlazados = idsAlegraEnlazados()
+      const items = (data?.items || []).filter(it => !enlazados.has(String(it.id)))
       const porRef = p.sku ? items.filter(it => norm(it.reference) === norm(p.sku)) : []
       const porNom = items.filter(it => norm(it.name) === norm(p.nombre))
       const candidatos = porRef.length ? porRef : porNom
@@ -1259,7 +1282,8 @@ export default function ProductosTerminados() {
                               <td>
                                 <select className="form-control" value={sel} onChange={e => setEnlaces(m => ({ ...m, [p.id]: e.target.value }))} style={{ borderColor: yaUsado(sel) ? 'var(--rojo)' : undefined }}>
                                   <option value="">— Sin enlazar —</option>
-                                  {alegraItems.filter(it => it.id === sel || !(ocultarFact && it.esServicio)).map(it => <option key={it.id} value={it.id}>{it.esServicio ? '🧾 ' : '📦 '}{it.name}{it.reference ? ` · ${it.reference}` : ''}{it.esServicio ? ' · solo facturación' : ` · stock ${it.available ?? 0}`}</option>)}
+                                  {/* Oculta los ítems ya asignados a OTRO producto (en la BD o elegidos en este modal) para evitar enlaces duplicados */}
+                                  {alegraItems.filter(it => it.id === sel || (!(ocultarFact && it.esServicio) && !yaUsado(it.id))).map(it => <option key={it.id} value={it.id}>{it.esServicio ? '🧾 ' : '📦 '}{it.name}{it.reference ? ` · ${it.reference}` : ''}{it.esServicio ? ' · solo facturación' : ` · stock ${it.available ?? 0}`}</option>)}
                                 </select>
                                 {yaUsado(sel) && <small style={{ color: 'var(--rojo)', fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: 3 }}><AlertTriangle size={11} aria-hidden="true" /> ese ítem ya está asignado a otro producto</small>}
                                 {sel && alegraItems.find(it => it.id === sel)?.esServicio && <small style={{ color: 'var(--tierra)', fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: 3 }}><AlertTriangle size={11} aria-hidden="true" /> es un ítem de solo facturación — el stock no se sincronizará.</small>}
@@ -1365,11 +1389,18 @@ export default function ProductosTerminados() {
       <Modal open={!!galeriaDe} onClose={() => setGaleriaDe(null)} guard={false}
         title={`📷 Imágenes — ${galeriaDe?.nombre || ''}`}
         footer={<>
+          {galeriaDe?.alegra_item_id && galeriaImgs.length > 0 && (
+            <button className="btn btn-dorado" style={{ marginRight: 'auto' }} disabled={probarImgAlegra.isPending}
+              title="Experimental: intenta enviar la imagen principal al ítem de Alegra por 3 métodos distintos"
+              onClick={() => probarImgAlegra.mutate(galeriaDe)}>
+              {probarImgAlegra.isPending ? 'Intentando...' : '⚗ Intentar enviar a Alegra'}
+            </button>
+          )}
           <button className="btn btn-secondary" onClick={() => setGaleriaDe(null)}>Cancelar</button>
           <button className="btn btn-primary" disabled={guardarGaleria.isPending || subiendoGal} onClick={() => guardarGaleria.mutate()}>{guardarGaleria.isPending ? 'Guardando...' : 'Guardar imágenes'}</button>
         </>}>
         <div className="alert alert-info" style={{ fontSize: '0.8rem' }}>
-          La <strong>primera</strong> imagen es la principal. Estas imágenes quedan guardadas con el producto para catálogos y futuras integraciones con otros servicios (Alegra no acepta imágenes por API).
+          La <strong>primera</strong> imagen es la principal. Estas imágenes quedan guardadas con el producto para catálogos y futuras integraciones con otros servicios.
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
           {galeriaImgs.map((url, i) => (

@@ -1,9 +1,13 @@
-// Edge Function (EXPERIMENTAL): envía la imagen del producto (de la ficha) al ítem de Alegra.
-// La imagen vive en products_costing.imagen_url (URL pública de Storage); solo los productos base
-// tienen imagen. Devuelve la respuesta cruda de Alegra para poder ajustar el formato si hace falta.
+// Edge Function (EXPERIMENTAL): intenta enviar la imagen principal del producto al ítem de Alegra.
+// La API pública de Alegra NO documenta soporte de imágenes para ítems, así que esta función
+// prueba VARIOS métodos en orden y reporta cuál (si alguno) fue aceptado:
+//   1. PUT /items/{id} con { image: { name, data(base64) } }
+//   2. PUT /items/{id} con { images: [{ name, data }] }
+//   3. POST /items/{id}/attachment con multipart/form-data (como facturas/contactos)
 //
 // Despliegue:  supabase functions deploy alegra-push-image
 // Cuerpo:      { finished_id: "uuid" }
+// Respuesta:   { ok, metodo, intentos: [...] }
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { requireUser } from '../_shared/auth.ts'
@@ -51,20 +55,55 @@ Deno.serve(async (req) => {
     if (!url) return json({ error: 'No hay imagen para este producto' }, 400)
 
     const imgRes = await fetch(url)
-    if (!imgRes.ok) return json({ error: 'No se pudo descargar la imagen de la app' }, 400)
+    if (!imgRes.ok) return json({ error: `No se pudo descargar la imagen de la app (HTTP ${imgRes.status}). Si el bucket es privado, corre la migración v93 para hacerlo público.` }, 400)
+    const buf = await imgRes.arrayBuffer()
     const ct = imgRes.headers.get('content-type') || 'image/jpeg'
     const ext = ct.includes('png') ? 'png' : ct.includes('webp') ? 'webp' : 'jpg'
-    const base64 = b64(await imgRes.arrayBuffer())
+    const base64 = b64(buf)
     const nombreArchivo = `${(fp.nombre || 'producto').replace(/[^a-z0-9]/gi, '_')}.${ext}`
+    const itemId = String(fp.alegra_item_id)
+    const intentos: any[] = []
 
-    // Alegra: imagen como objeto { name, data } con base64 puro
-    const res = await fetch(`${ALEGRA_BASE}/items/${fp.alegra_item_id}`, {
-      method: 'PUT',
-      headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ image: { name: nombreArchivo, data: base64 } }),
-    })
-    const txt = await res.text()
-    return json({ ok: res.ok, status: res.status, alegra: txt.slice(0, 1500) })
+    // ── Método 1: PUT con { image: { name, data } } ──
+    try {
+      const r1 = await fetch(`${ALEGRA_BASE}/items/${itemId}`, {
+        method: 'PUT', headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: { name: nombreArchivo, data: base64 } }),
+      })
+      const t1 = await r1.text()
+      // Verifica que Alegra realmente haya guardado la imagen (no solo respondido 200 ignorándola)
+      let confirmada = false
+      if (r1.ok) { try { const it = JSON.parse(t1); confirmada = !!(it?.image || it?.images?.length) } catch { /* */ } }
+      intentos.push({ metodo: 'PUT image{name,data}', status: r1.status, confirmada, detalle: t1.slice(0, 300) })
+      if (r1.ok && confirmada) return json({ ok: true, metodo: 'PUT image{name,data}', intentos })
+    } catch (e) { intentos.push({ metodo: 'PUT image{name,data}', error: String(e) }) }
+
+    // ── Método 2: PUT con { images: [{ name, data }] } ──
+    try {
+      const r2 = await fetch(`${ALEGRA_BASE}/items/${itemId}`, {
+        method: 'PUT', headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ images: [{ name: nombreArchivo, data: base64 }] }),
+      })
+      const t2 = await r2.text()
+      let confirmada = false
+      if (r2.ok) { try { const it = JSON.parse(t2); confirmada = !!(it?.image || it?.images?.length) } catch { /* */ } }
+      intentos.push({ metodo: 'PUT images[]', status: r2.status, confirmada, detalle: t2.slice(0, 300) })
+      if (r2.ok && confirmada) return json({ ok: true, metodo: 'PUT images[]', intentos })
+    } catch (e) { intentos.push({ metodo: 'PUT images[]', error: String(e) }) }
+
+    // ── Método 3: POST /items/{id}/attachment con multipart (como facturas/contactos) ──
+    try {
+      const fd = new FormData()
+      fd.append('attachment', new Blob([buf], { type: ct }), nombreArchivo)
+      const r3 = await fetch(`${ALEGRA_BASE}/items/${itemId}/attachment`, {
+        method: 'POST', headers: { 'Authorization': authHeader }, body: fd,
+      })
+      const t3 = await r3.text()
+      intentos.push({ metodo: 'POST attachment multipart', status: r3.status, confirmada: r3.ok, detalle: t3.slice(0, 300) })
+      if (r3.ok) return json({ ok: true, metodo: 'POST attachment multipart', intentos })
+    } catch (e) { intentos.push({ metodo: 'POST attachment multipart', error: String(e) }) }
+
+    return json({ ok: false, error: 'Alegra no aceptó la imagen por ninguno de los 3 métodos (su API pública no soporta imágenes de ítems). Detalle en "intentos".', intentos })
   } catch (e) {
     return json({ error: String((e as Error)?.message || e) }, 500)
   }

@@ -35,33 +35,49 @@ Deno.serve(async (req) => {
   const authHeader = 'Basic ' + btoa(`${email}:${token}`)
 
   try {
-    const items: any[] = []
-    const limit = 30
-    for (let start = 0; start < 600; start += limit) {
-      const res = await fetch(`${ALEGRA_BASE}/items?limit=${limit}&start=${start}&order_direction=ASC&order_field=name`, {
-        headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
-      })
-      const txt = await res.text()
-      if (!res.ok) return json({ error: `Alegra ${res.status}: ${txt}` }, res.status)
-      let pagina: any[]
-      try { pagina = JSON.parse(txt) } catch { pagina = [] }
-      if (!Array.isArray(pagina) || pagina.length === 0) break
-      for (const it of pagina) {
-        // Omite los ítems inactivos en Alegra
-        if (String(it.status || '').toLowerCase() === 'inactive') continue
-        items.push({
-          id: String(it.id),
-          name: it.name || '',
-          reference: it.reference || it.code || '',
-          price: Array.isArray(it.price) ? (it.price[0]?.price ?? 0) : (it.price ?? 0),
-          available: it.inventory?.availableQuantity ?? null,
-          // Señales para distinguir producto (con inventario) de "solo facturación" (servicio)
-          inventoriable: it.inventory != null && it.inventory?.availableQuantity != null,
-          type: it.type || '',
-          esServicio: String(it.type || '').toLowerCase() === 'service',
+    // Paginación EN PARALELO (tandas de 6 páginas) y tope amplio: antes el tope era 600 ítems
+    // en serie — si la cuenta tenía más, los últimos nunca aparecían en la app.
+    const LIMIT = 30, MAX_PAGES = 200, BATCH = 6   // hasta 6000 ítems
+    const crudos: any[] = []
+    let pagina = 0
+    while (pagina < MAX_PAGES) {
+      const tanda = Array.from({ length: BATCH }, (_, i) => pagina + i).filter(p => p < MAX_PAGES)
+      const resultados = await Promise.all(tanda.map(async (p) => {
+        const res = await fetch(`${ALEGRA_BASE}/items?limit=${LIMIT}&start=${p * LIMIT}&order_direction=ASC&order_field=name`, {
+          headers: { 'Authorization': authHeader, 'Content-Type': 'application/json' },
         })
+        const txt = await res.text()
+        if (!res.ok) return { p, ok: false, status: res.status, txt }
+        let arr: any[]
+        try { arr = JSON.parse(txt) } catch { arr = [] }
+        return { p, ok: true, arr: Array.isArray(arr) ? arr : [] }
+      }))
+      resultados.sort((a, b) => a.p - b.p)
+      let detener = false
+      for (const r of resultados) {
+        if (!r.ok) { if (r.p === 0) return json({ error: `Alegra ${r.status}: ${r.txt}` }, r.status); detener = true; break }
+        if (!r.arr.length) { detener = true; break }
+        crudos.push(...r.arr)
+        if (r.arr.length < LIMIT) detener = true
       }
-      if (pagina.length < limit) break
+      if (detener) break
+      pagina += BATCH
+    }
+    const items: any[] = []
+    for (const it of crudos) {
+      // Omite los ítems inactivos en Alegra
+      if (String(it.status || '').toLowerCase() === 'inactive') continue
+      items.push({
+        id: String(it.id),
+        name: it.name || '',
+        reference: it.reference || it.code || '',
+        price: Array.isArray(it.price) ? (it.price[0]?.price ?? 0) : (it.price ?? 0),
+        available: it.inventory?.availableQuantity ?? null,
+        // Señales para distinguir producto (con inventario) de "solo facturación" (servicio)
+        inventoriable: it.inventory != null && it.inventory?.availableQuantity != null,
+        type: it.type || '',
+        esServicio: String(it.type || '').toLowerCase() === 'service',
+      })
     }
     return json({ ok: true, total: items.length, items })
   } catch (e) {

@@ -853,6 +853,25 @@ export default function Costos() {
   // g/bache cambia → el % se deriva en render (no se almacena)
   const handleCantidadChange = (id, val) => updIng(id, 'cantidad', val)
 
+  // Cambia el modo de ingreso g/bache ↔ %. Al pasar a %, SIEMBRA cada fila con su % actual
+  // de la receta y fija el peso total con los gramos actuales — así los porcentajes se
+  // sostienen tal cual (antes quedaban vacíos/viejos y la receta se descuadraba al editarlos).
+  const cambiarModoIng = (m) => {
+    if (m === modoIng) return
+    if (m === 'porcentaje') {
+      const total = ingredientesEff.reduce((s, i) => i.tipo !== 'relativo' ? s + (parseFloat(i.cantidad) || 0) : s, 0)
+      if (total > 0) {
+        if (!(parseFloat(pesoBacheTotal) > 0)) setPesoBacheTotal(String(Math.round(total * 10) / 10))
+        setIngredientes(prev => prev.map(r => {
+          if (r.tipo === 'relativo') return r
+          const eff = ingredientesEff.find(x => x._id === r._id)
+          return { ...r, pct: eff && eff.pctReceta > 0 ? eff.pctReceta.toFixed(2) : r.pct }
+        }))
+      }
+    }
+    setModoIng(m)
+  }
+
   // ---- Empaque: detecta por categoría O por nombre; el resto va en "Otros insumos"
   // para que SIEMPRE haya opciones disponibles ----
   const RE_EMPAQUE = /empaque|envase|caja|bolsa|etiqueta|filtro|tapa|frasco|envoltura|sticker|rotulo|rótulo/i
@@ -1230,7 +1249,7 @@ export default function Costos() {
             <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10, flexWrap:'wrap' }}>
               <span style={{ fontSize:'0.8rem', color:'var(--texto-suave)' }}>Ingresar por:</span>
               {[['gramos','g / bache'],['porcentaje','% (porcentaje)']].map(([m,lbl],i) => (
-                <button key={m} type="button" onClick={() => setModoIng(m)} style={{
+                <button key={m} type="button" onClick={() => cambiarModoIng(m)} style={{
                   padding:'4px 10px', fontSize:'0.78rem', cursor:'pointer', fontWeight:600,
                   background: modoIng===m ? 'var(--selva)' : 'transparent',
                   color: modoIng===m ? 'var(--crema)' : 'var(--texto-suave)',
@@ -1326,7 +1345,7 @@ export default function Costos() {
                       {/* % receta */}
                       {esRelativo
                         ? <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
-                            <input type="number" className="form-control" placeholder="0" value={r.pct||''} onChange={e => updIng(r._id,'pct',e.target.value)} step="0.01" style={{ textAlign:'right', paddingRight:16, borderColor: accent }} />
+                            <input type="number" className="form-control" placeholder="0" value={r.pct||''} onFocus={e => e.target.select()} onChange={e => updIng(r._id,'pct',e.target.value)} step="0.01" style={{ textAlign:'right', paddingRight:16, borderColor: accent }} />
                             <span style={{ position:'absolute', right:6, fontSize:'0.78rem', color:'var(--texto-suave)', pointerEvents:'none' }}>%</span>
                           </div>
                         : <span style={{ textAlign:'right', paddingTop:8, fontSize:'0.88rem', color: pctRow>0 ? 'var(--selva)' : 'var(--texto-suave)', fontWeight: pctRow>0 ? 600 : 400 }}>
@@ -1342,12 +1361,12 @@ export default function Costos() {
                         : modoIng === 'porcentaje'
                           ? <div style={{ display:'flex', flexDirection:'column' }}>
                               <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
-                                <input type="number" className="form-control" placeholder="%" value={r.pct||''} onChange={e => updIng(r._id,'pct',e.target.value)} step="0.01" style={{ textAlign:'right', paddingRight:16, background:'rgba(124,179,66,0.06)' }} />
+                                <input type="number" className="form-control" placeholder="%" value={r.pct||''} onFocus={e => e.target.select()} onChange={e => updIng(r._id,'pct',e.target.value)} step="0.01" style={{ textAlign:'right', paddingRight:16, background:'rgba(124,179,66,0.06)' }} />
                                 <span style={{ position:'absolute', right:6, fontSize:'0.78rem', color:'var(--texto-suave)', pointerEvents:'none' }}>%</span>
                               </div>
                               <span style={{ fontSize:'0.68rem', color:'var(--texto-suave)', textAlign:'right' }}>{cantEff > 0 ? cantEff.toFixed(1)+' g' : '—'}</span>
                             </div>
-                          : <input type="number" className="form-control" placeholder="g/bache" value={r.cantidad||''} onChange={e => handleCantidadChange(r._id, e.target.value)} style={{ textAlign:'right', background:'rgba(124,179,66,0.06)' }} />
+                          : <input type="number" className="form-control" placeholder="g/bache" value={r.cantidad||''} onFocus={e => e.target.select()} onChange={e => handleCantidadChange(r._id, e.target.value)} style={{ textAlign:'right', background:'rgba(124,179,66,0.06)' }} />
                       }
 
                       {/* $/Kg — editable; si es de lista y se cambia, queda como override (no toca la MP hasta confirmar al guardar) */}

@@ -16,7 +16,7 @@ import { Download, Tags, Tag, Plus, Pencil, X, Package, ClipboardList, FileText,
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const EMPTY_MP = { nombre: '', categoria: 'pulpa', tipo: 'comprado', unidad: 'Kg', precio: '', stock_min: 0, stock: 0, lote: '', vencimiento: '', obs: '', extra: {}, vendible: false, precio_venta: '' }
-const EMPTY_MOV = { mp_id: '', tipo: 'entrada', cantidad: '', fecha: new Date().toISOString().split('T')[0], responsable: '', obs: '', lote: '', vencimiento: '', extra: {}, costo: '', motivo: 'consumo', lote_id: '', proveedor: '' }
+const EMPTY_MOV = { mp_id: '', tipo: 'entrada', cantidad: '', responsable: '', obs: '', lote: '', vencimiento: '', extra: {}, costo: '', motivo: 'consumo', lote_id: '', proveedor: '' }
 // Motivos de salida/ajuste manual de inventario
 const MOTIVOS_SALIDA = [
   { value: 'consumo', label: 'Consumo / uso' },
@@ -161,6 +161,21 @@ export default function Inventario() {
       if (payload.categoria) { try { await supabase.from('mp_categories').upsert({ nombre: payload.categoria }, { onConflict: 'nombre' }) } catch { /* ignora si la tabla/política no está */ } }
       if (editMPId) {
         const { error } = await supabase.from('raw_materials').update(payload).eq('id', editMPId); if (error) throw error
+        // Auditoría: registra QUÉ campos cambiaron, quién y cuándo (tabla v94, tolerante)
+        const mpAnt = mps.find(m => m.id === editMPId)
+        if (mpAnt) {
+          const CAMPOS = { nombre: 'Nombre', categoria: 'Categoría', tipo: 'Tipo', unidad: 'Unidad', precio: 'Precio', stock: 'Stock', stock_min: 'Stock mínimo', lote: 'Lote', vencimiento: 'Vencimiento', obs: 'Observación', vendible: 'Vendible', precio_venta: 'Precio de venta' }
+          const cambios = []
+          for (const [k, label] of Object.entries(CAMPOS)) {
+            const antes = mpAnt[k], despues = payload[k]
+            const na = antes == null || antes === '' ? '' : String(antes)
+            const nd = despues == null || despues === '' ? '' : String(despues)
+            if (na !== nd) cambios.push({ campo: label, antes: na || '—', despues: nd || '—' })
+          }
+          if (cambios.length) {
+            try { await supabase.from('mp_edit_log').insert({ mp_id: editMPId, cambios, editado_por: profile?.nombre || '' }) } catch { /* tabla v94 opcional */ }
+          }
+        }
         // Si cambió la unidad de medida, los lotes PEPS ya guardados quedan expresados en el factor
         // VIEJO (p.ej. Gramo→Kg cambia el factor de 1 a 1000) — hay que reescalarlos, si no la
         // trazabilidad de lotes queda hasta 1000x errónea frente al nuevo stock.
@@ -236,13 +251,17 @@ export default function Inventario() {
       // El usuario ingresa la cantidad en unidad BASE (g/ml/u); se guarda en la unidad de precio.
       const cantidad = (parseFloat(formMov.cantidad) || 0) / factorU(mp?.unidad)
       if (!cantidad) throw new Error('Ingresa una cantidad')
+      // La fecha del movimiento SIEMPRE es el día en que se registra (fecha LOCAL, no editable):
+      // el usuario no puede antedatar ni posfechar movimientos de inventario.
+      const d = new Date()
+      const fechaHoy = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
       const extra = { ...(formMov.extra || {}) }
       // PEPS: entrada crea lote; salida consume del lote más antiguo/próximo a vencer
       if ((formMov.tipo === 'entrada' || (formMov.tipo === 'ajuste' && cantidad > 0)) && !esEmpaque(mp?.categoria)) {
         // Ajuste positivo también crea lote — si no, ese sobrante queda contabilizado en el stock
         // general pero invisible/sin respaldo en la trazabilidad PEPS para siempre.
         await crearLoteEntrada({
-          mp_id: mpId, lote: formMov.lote, vencimiento: formMov.vencimiento, fecha: formMov.fecha,
+          mp_id: mpId, lote: formMov.lote, vencimiento: formMov.vencimiento, fecha: fechaHoy,
           cantidad, costo_unitario: formMov.costo !== '' ? parseFloat(formMov.costo) || 0 : (mp?.precio || 0),
           creado_por: profile?.nombre || '', proveedor: formMov.proveedor || '',
         })
@@ -265,7 +284,7 @@ export default function Inventario() {
         ? `[${motivoLabel(formMov.motivo)}] ${formMov.obs || ''}`.trim()
         : formMov.obs
       const { error: movErr } = await supabase.from('inventory_movements').insert({
-        mp_id: mpId, tipo: formMov.tipo, cantidad, fecha: formMov.fecha,
+        mp_id: mpId, tipo: formMov.tipo, cantidad, fecha: fechaHoy,
         responsable: formMov.responsable, obs: obsFinal,
         lote: formMov.lote || '', vencimiento: formMov.vencimiento || null, extra,
       })
@@ -343,8 +362,24 @@ export default function Inventario() {
 
   const bajo = mps.filter(m => m.stock > 0 && m.stock <= m.stock_min).length
   const cero = mps.filter(m => m.stock <= 0).length
-  const mpsFiltrados = mps.filter(m => !filtroCat || m.categoria === filtroCat)
+  // Filtro por ESTADO del stock: sin stock, stock bajo, por vencer/vencidas
+  const [filtroEstado, setFiltroEstado] = useState('')
+  const tieneLotePorVencer = (m) => lotesDe(m.id).some(l => (l.cantidad_actual || 0) > 0 && ['por_vencer', 'vencido'].includes(estadoLote(l.vencimiento)))
+  const pasaEstado = (m) => {
+    if (!filtroEstado) return true
+    if (filtroEstado === 'sin_stock') return (m.stock || 0) <= 0
+    if (filtroEstado === 'bajo') return (m.stock || 0) > 0 && (m.stock_min || 0) > 0 && m.stock <= m.stock_min
+    if (filtroEstado === 'por_vencer') return tieneLotePorVencer(m)
+    return true
+  }
+  const mpsFiltrados = mps.filter(m => (!filtroCat || m.categoria === filtroCat) && pasaEstado(m))
   const histMovs = histMP ? movimientos.filter(mv => mv.mp_id === histMP.id) : []
+  // Auditoría de EDICIONES de la ficha de la MP (tabla v94 — si no existe, lista vacía)
+  const { data: histEdits = [] } = useQuery({
+    queryKey: ['mp_edit_log', histMP?.id],
+    queryFn: async () => { const { data } = await supabase.from('mp_edit_log').select('*').eq('mp_id', histMP.id).order('created_at', { ascending: false }).limit(100); return data || [] },
+    enabled: !!histMP?.id && modalHist,
+  })
 
   // Lote/vencimiento vigente = el de la última ENTRADA registrada (movimientos vienen ordenados desc),
   // con respaldo en el campo de la MP. Así se actualiza a medida que se dan ingresos.
@@ -388,7 +423,14 @@ export default function Inventario() {
             <option value="">Todas las categorías</option>
             {categorias.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-          {filtroCat && <button className="btn btn-sm btn-secondary" onClick={() => setFiltroCat('')}>Limpiar filtro</button>}
+          <label className="form-label" style={{ margin: 0 }}>Estado:</label>
+          <select className="form-control" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} style={{ width: 'auto' }}>
+            <option value="">Todos</option>
+            <option value="sin_stock">Sin stock</option>
+            <option value="bajo">Stock bajo</option>
+            <option value="por_vencer">Por vencer / vencidas</option>
+          </select>
+          {(filtroCat || filtroEstado) && <button className="btn btn-sm btn-secondary" onClick={() => { setFiltroCat(''); setFiltroEstado('') }}>Limpiar filtros</button>}
           <span style={{ marginLeft: 'auto', fontSize: '0.8rem', color: 'var(--texto-suave)' }}>Clic en una fila para ver su historial</span>
         </div>
 
@@ -401,7 +443,10 @@ export default function Inventario() {
               const lv = loteVigente(m)
               return (
                 <AccordionItem key={m.id}
-                  titulo={<>{m.nombre} {m.tipo === 'interno' && <span className="badge badge-dorado" style={{ fontSize: '0.6rem' }}>interno</span>}</>}
+                  titulo={<>
+                    {((m.stock || 0) <= 0 || ((m.stock_min || 0) > 0 && m.stock <= m.stock_min)) && <AlertTriangle size={14} aria-hidden="true" style={{ color: (m.stock || 0) <= 0 ? 'var(--rojo)' : 'var(--dorado)', display: 'inline', verticalAlign: '-2px', marginRight: 4 }} />}
+                    {m.nombre} {m.tipo === 'interno' && <span className="badge badge-dorado" style={{ fontSize: '0.6rem' }}>interno</span>}
+                  </>}
                   sub={<><span className={`badge ${badge}`} style={{ fontSize: '0.62rem' }}>{label}</span> · {fBase(m.stock, m.unidad)}</>}
                 >
                   <Fila et="Categoría">{m.categoria}</Fila>
@@ -586,7 +631,6 @@ export default function Inventario() {
             <label className="form-label">Cantidad {formMov.mp_id && <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(en {baseLbl(mps.find(m => String(m.id) === String(formMov.mp_id))?.unidad)})</small>} {formMov.tipo === 'ajuste' && <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(+ suma / − resta)</small>}</label>
             <input type="number" className="form-control" value={formMov.cantidad} onChange={e => setFormMov(f => ({ ...f, cantidad: e.target.value }))} min={formMov.tipo === 'ajuste' ? undefined : 0} />
           </div>
-          <div className="form-group"><label className="form-label">Fecha</label><input type="date" className="form-control" value={formMov.fecha} onChange={e => setFormMov(f => ({ ...f, fecha: e.target.value }))} /></div>
         </div>
         {/* Costo en entradas — actualiza el precio de la MP (y recalcula las fichas) */}
         {formMov.tipo === 'entrada' && (() => {
@@ -767,6 +811,28 @@ export default function Inventario() {
                 </tbody>
               </table>
             </div>
+
+            <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 14 }}>✏ Ediciones de la ficha ({histEdits.length})</div>
+            {histEdits.length === 0
+              ? <p style={{ fontSize: '0.82rem', color: 'var(--texto-suave)' }}>Sin ediciones registradas (se auditan desde que se activó el registro).</p>
+              : <div className="table-wrap" style={{ maxHeight: 220, overflowY: 'auto' }}>
+                  <table style={{ fontSize: '0.82rem' }}>
+                    <thead><tr><th>Fecha y hora</th><th>Quién</th><th>Cambios</th></tr></thead>
+                    <tbody>
+                      {histEdits.map(e => (
+                        <tr key={e.id}>
+                          <td style={{ whiteSpace: 'nowrap' }}>{e.created_at ? new Date(e.created_at).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td>
+                          <td><strong>{e.editado_por || '—'}</strong></td>
+                          <td>
+                            {(Array.isArray(e.cambios) ? e.cambios : []).map((c, k) => (
+                              <div key={k}><strong>{c.campo}:</strong> <span style={{ color: 'var(--texto-suave)' }}>{c.antes}</span> → <span style={{ color: 'var(--selva)' }}>{c.despues}</span></div>
+                            ))}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>}
           </>
         )}
       </Modal>

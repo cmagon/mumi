@@ -220,25 +220,28 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
   const nombresIng = ingredientes.map(i => i.nombre).filter(Boolean)
   const ordIng = useReorder(setIngredientes)
 
-  // Al editar el % de un normal: calcula sus gramos manteniendo fijos los demás, y recalcula todos los %
+  // Al editar el % de un normal: para que los porcentajes ESCRITOS por el usuario se sostengan
+  // (y no se "descuadren" recalculándose entre sí), se trabaja SIEMPRE contra un peso total fijo:
+  // si el usuario no lo ha definido, se congela automáticamente el total actual de gramos la
+  // primera vez que edita un %. Así % → gramos es determinista y cada % queda tal cual se escribió.
   const handlePctChange = (id, val) => {
-    const totalFijo = parseFloat(pesoTotalMezcla) || 0
+    let totalFijo = parseFloat(pesoTotalMezcla) || 0
+    if (!(totalFijo > 0)) {
+      const totalActual = ingredientes.reduce((s, r) => r.tipo === 'normal' ? s + (parseFloat(r.gramos) || 0) : s, 0)
+      if (totalActual > 0) {
+        totalFijo = Math.round(totalActual * 10) / 10
+        setPesoTotalMezcla(String(totalFijo))
+        toast(`Peso total de la mezcla fijado en ${totalFijo} g para que los % se mantengan — puedes cambiarlo arriba`, 'info')
+      }
+    }
     setIngredientes(prev => {
       const pct = parseFloat(val) || 0
-      // Si hay peso total fijo: gramos = % × total / 100 (determinista)
+      // Con peso total fijo: gramos = % × total / 100 (determinista, los demás % no se tocan)
       if (totalFijo > 0) {
         return prev.map(r => r._id === id ? { ...r, pct: val, gramos: pct > 0 ? (pct / 100 * totalFijo).toFixed(1) : '' } : r)
       }
-      // Si no, se calcula manteniendo fijos los demás gramos
-      const sumOtros = prev.reduce((s, r) => (r.tipo === 'normal' && r._id !== id) ? s + (parseFloat(r.gramos) || 0) : s, 0)
-      let nuevoGramos = ''
-      if (pct > 0 && pct < 100 && sumOtros > 0) nuevoGramos = ((pct / 100 * sumOtros) / (1 - pct / 100)).toFixed(1)
-      const total = sumOtros + (parseFloat(nuevoGramos) || 0)
-      return prev.map(r => {
-        if (r.tipo !== 'normal') return r._id === id ? { ...r, pct: val } : r
-        if (r._id === id) return { ...r, pct: val, gramos: nuevoGramos !== '' ? nuevoGramos : r.gramos }
-        return { ...r, pct: total > 0 ? ((parseFloat(r.gramos) || 0) / total * 100).toFixed(3) : r.pct }
-      })
+      // Sin total (receta vacía): solo guarda el % escrito
+      return prev.map(r => r._id === id ? { ...r, pct: val } : r)
     })
   }
 
@@ -558,11 +561,11 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
 
                   {/* % */}
                   <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                    <input type="number" className="form-control" placeholder="0" value={r.pct} disabled={soloLectura} onChange={e => esRelativo ? updIng(r._id, 'pct', e.target.value) : handlePctChange(r._id, e.target.value)} step="0.01" style={{ textAlign: 'right', paddingRight: 18, borderColor: accentColor }} />
+                    <input type="number" className="form-control" placeholder="0" value={r.pct} disabled={soloLectura} onFocus={e => e.target.select()} onChange={e => esRelativo ? updIng(r._id, 'pct', e.target.value) : handlePctChange(r._id, e.target.value)} step="0.01" style={{ textAlign: 'right', paddingRight: 18, borderColor: accentColor }} />
                     <span style={{ position: 'absolute', right: 6, fontSize: '0.78rem', color: 'var(--texto-suave)', pointerEvents: 'none' }}>%</span>
                   </div>
                   {/* g */}
-                  <input type="number" className="form-control" placeholder="g" value={r.gramos || ''} disabled={soloLectura} onChange={e => handleGramosChange(r._id, e.target.value)} style={{ textAlign: 'right', background: esRelativo ? 'rgba(200,169,74,0.1)' : 'rgba(124,179,66,0.08)', borderColor: accentColor }} />
+                  <input type="number" className="form-control" placeholder="g" value={r.gramos || ''} disabled={soloLectura} onFocus={e => e.target.select()} onChange={e => handleGramosChange(r._id, e.target.value)} style={{ textAlign: 'right', background: esRelativo ? 'rgba(200,169,74,0.1)' : 'rgba(124,179,66,0.08)', borderColor: accentColor }} />
                   {/* $/Kg — editable aunque venga de lista */}
                   <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                     <span style={{ position: 'absolute', left: 6, fontSize: '0.78rem', color: 'var(--texto-suave)', pointerEvents: 'none' }}>$</span>
