@@ -198,6 +198,42 @@ export default function OrdenesProduccion() {
   const [ordenPrep, setOrdenPrep]   = useState(null)
   const [prepIngs, setPrepIngs]     = useState([])
   const [prepTraza, setPrepTraza]   = useState([])   // trazabilidad de lotes de MP de la orden abierta
+  // Detalle de un lote de MP (clic en "Lotes usados"): trae del inventario cuándo se compró,
+  // a qué proveedor, costo, etc. — trazabilidad completa hacia atrás (pulpas de campesinos).
+  const [detalleLoteMp, setDetalleLoteMp] = useState(null)   // { mpNombre, lote, unidad, cargando, filas: [...] }
+  const abrirDetalleLoteMp = async (t, l) => {
+    // Unidad REAL desde el inventario (la traza de órdenes antiguas puede traerla vacía)
+    const mpInv = mps.find(m => String(m.id) === String(t.mp_id)) || mps.find(m => (m.nombre || '').trim().toLowerCase() === (t.nombre || '').trim().toLowerCase())
+    const unidad = mpInv?.unidad || t.unidad || ''
+    setDetalleLoteMp({ mpNombre: t.nombre, lote: l.lote || '', unidad, cargando: true, filas: [] })
+    try {
+      let data
+      if (l.id) {
+        // La reserva PEPS guarda el id exacto del lote → búsqueda precisa
+        const r = await supabase.from('raw_material_lots').select('*').eq('id', l.id)
+        data = r.data
+      } else {
+        let q = supabase.from('raw_material_lots').select('*').order('fecha_entrada', { ascending: false })
+        if (t.mp_id) q = q.eq('mp_id', t.mp_id)
+        q = (l.lote || '').trim() ? q.eq('lote', l.lote.trim()) : q.eq('lote', '')
+        const r = await q; data = r.data
+      }
+      setDetalleLoteMp({ mpNombre: t.nombre, lote: l.lote || '', unidad, cargando: false, filas: data || [] })
+    } catch {
+      setDetalleLoteMp({ mpNombre: t.nombre, lote: l.lote || '', unidad, cargando: false, filas: [] })
+    }
+  }
+  // Cantidades de lote: se guardan en la unidad de PRECIO de la MP (Kg/Litro=÷1000) — se muestran
+  // en la unidad BASE en que se ingresan (gramos/ml); "Unidad" y otros quedan como conteo.
+  const fmtCantLote = (v, unidad) => {
+    const n = Number(v) || 0
+    const un = String(unidad || '').toLowerCase()
+    if (un.startsWith('kg') || un.startsWith('kilo')) return `${fCant(n * 1000)} g`
+    if (un.startsWith('gramo') || un === 'g') return `${fCant(n)} g`
+    if (un.startsWith('litro') || un === 'l') return `${fCant(n * 1000)} ml`
+    if (un.startsWith('mililitro') || un === 'ml') return `${fCant(n)} ml`
+    return `${fNum(n)} ${unidad || 'u'}`
+  }
   const [prepInfo, setPrepInfo]     = useState(null)
   const [prepDatos, setPrepDatos]   = useState(null)   // datos previstos (mezcla, unidades, costos)
   const [prepFicha, setPrepFicha]   = useState(null)   // { url, nombre } ficha técnica
@@ -3095,7 +3131,17 @@ export default function OrdenesProduccion() {
                             <td className="td-number">{aBase(t.consumo, t.unidad)}</td>
                             <td style={{ fontSize: '0.8rem' }}>
                               {(t.lotes || []).length
-                                ? t.lotes.map((l, k) => `${l.lote || 's/lote'}${l.vencimiento ? ' (vence ' + fFecha(l.vencimiento) + ')' : ''}: ${aBase(l.cantidad, t.unidad)}`).join(' · ')
+                                ? t.lotes.map((l, k) => (
+                                    <span key={k}>
+                                      {k > 0 && ' · '}
+                                      <button type="button" onClick={() => abrirDetalleLoteMp(t, l)}
+                                        title="Ver detalles del lote (compra, proveedor, costo)"
+                                        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--selva-claro)', textDecoration: 'underline', fontSize: 'inherit', fontFamily: 'inherit' }}>
+                                        {l.lote || 's/lote'}
+                                      </button>
+                                      {l.vencimiento ? ` (vence ${fFecha(l.vencimiento)})` : ''}: {aBase(l.cantidad, t.unidad)}
+                                    </span>
+                                  ))
                                 : (t.sin_lote_cantidad > 0 || t.sin_lote) ? '' : '—'}
                               {t.sin_lote_cantidad > 0 && <span style={{ color: 'var(--tierra)' }}>{(t.lotes || []).length ? ' · ' : ''}⚠ {aBase(t.sin_lote_cantidad, t.unidad)} sin lote (stock general)</span>}
                               {t.sin_lote && !t.sin_lote_cantidad && <span style={{ color: 'var(--texto-suave)' }}>Sin lote (forzado)</span>}
@@ -3156,6 +3202,35 @@ export default function OrdenesProduccion() {
             </tbody>
           </table>
         </div>
+      </Modal>
+
+      {/* Modal: detalle de un lote de MP consumido (trazabilidad hacia la compra) */}
+      <Modal open={!!detalleLoteMp} onClose={() => setDetalleLoteMp(null)} guard={false}
+        title={`🧊 Lote "${detalleLoteMp?.lote || 's/lote'}" — ${detalleLoteMp?.mpNombre || ''}`}
+        footer={<button className="btn btn-secondary" onClick={() => setDetalleLoteMp(null)}>Cerrar</button>}>
+        {detalleLoteMp?.cargando && <p style={{ fontSize: '0.88rem' }}>Cargando detalles del lote…</p>}
+        {detalleLoteMp && !detalleLoteMp.cargando && detalleLoteMp.filas.length === 0 && (
+          <p className="empty-table">No se encontró este lote en el inventario (pudo haberse eliminado o renombrado).</p>
+        )}
+        {detalleLoteMp && !detalleLoteMp.cargando && detalleLoteMp.filas.map((lf) => {
+          const u = detalleLoteMp.unidad
+          const consumido = Math.max(0, (lf.cantidad_inicial || 0) - (lf.cantidad_actual || 0) - (lf.cantidad_reservada || 0))
+          return (
+          <table key={lf.id} style={{ fontSize: '0.88rem', width: '100%', marginBottom: 10 }}>
+            <tbody>
+              <tr><td style={{ color: 'var(--texto-suave)', width: 190 }}>Fecha de compra/entrada</td><td><strong>{fFecha(lf.fecha_entrada)}</strong></td></tr>
+              <tr><td style={{ color: 'var(--texto-suave)' }}>Proveedor</td><td><strong>{lf.proveedor || '— (sin registrar)'}</strong></td></tr>
+              <tr><td style={{ color: 'var(--texto-suave)' }}>Costo unitario de compra</td><td>{lf.costo_unitario ? `${fCOP(lf.costo_unitario)}${u ? ` por ${u}` : ''}` : '—'}</td></tr>
+              <tr><td style={{ color: 'var(--texto-suave)' }}>Cantidad inicial</td><td>{fmtCantLote(lf.cantidad_inicial, u)}</td></tr>
+              <tr><td style={{ color: 'var(--texto-suave)' }}>Ya consumido</td><td>{fmtCantLote(consumido, u)}</td></tr>
+              <tr><td style={{ color: 'var(--texto-suave)' }}>Reservado (órdenes en proceso)</td><td>{(lf.cantidad_reservada || 0) > 0 ? <strong style={{ color: 'var(--tierra)' }}>{fmtCantLote(lf.cantidad_reservada, u)}</strong> : <span>0 <small style={{ color: 'var(--texto-suave)' }}>(si la orden ya se cerró, su reserva pasó a "consumido")</small></span>}</td></tr>
+              <tr><td style={{ color: 'var(--texto-suave)' }}>Disponible hoy</td><td><strong>{fmtCantLote(lf.cantidad_actual, u)}</strong></td></tr>
+              <tr><td style={{ color: 'var(--texto-suave)' }}>Vencimiento</td><td>{lf.vencimiento ? fFecha(lf.vencimiento) : '—'}</td></tr>
+              <tr><td style={{ color: 'var(--texto-suave)' }}>Registrado por</td><td>{lf.creado_por || '—'}</td></tr>
+            </tbody>
+          </table>
+          )
+        })}
       </Modal>
     </div>
   )

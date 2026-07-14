@@ -17,7 +17,7 @@ import {
 
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
-const EMPTY_PROD = { nombre: '', sku: '', alegra_item_id: '', tipo: 'base', stock_min: '', costo_unitario: '', precio_mayor: '', precio_detal: '', activo: true, unidad_medida: 'unit', codigo_unspsc: '', categoria_alegra_id: '', categoria_alegra_nombre: '', surtido_a: '', surtido_b: '', product_id: null, mp_id: null, _stock_inicial: 0 }
+const EMPTY_PROD = { nombre: '', descripcion: '', sku: '', alegra_item_id: '', tipo: 'base', stock_min: '', costo_unitario: '', precio_mayor: '', precio_detal: '', activo: true, unidad_medida: 'unit', codigo_unspsc: '', categoria_alegra_id: '', categoria_alegra_nombre: '', surtido_a: '', surtido_b: '', product_id: null, mp_id: null, _stock_inicial: 0 }
 const EMPTY_AJUSTE = { tipo: 'entrada', cantidad: '', lote: '', motivo: '' }
 
 export default function ProductosTerminados() {
@@ -56,6 +56,63 @@ export default function ProductosTerminados() {
   const [modalAjuste, setModalAjuste] = useState(null)   // producto al que se ajusta
   const [aForm, setAForm] = useState(EMPTY_AJUSTE)
   const [kardexDe, setKardexDe] = useState(null)
+  // Imágenes dentro del modal de edición del producto (la primera es la principal)
+  const [edImgs, setEdImgs] = useState([])
+  const [subiendoEdImg, setSubiendoEdImg] = useState(false)
+  const subirEdImgs = async (files) => {
+    if (!files?.length) return
+    setSubiendoEdImg(true)
+    try {
+      const nuevas = []
+      for (const file of files) {
+        const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
+        const path = `terminados/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`
+        const { error } = await supabase.storage.from('product-images').upload(path, file, { upsert: true })
+        if (error) throw error
+        const { data } = supabase.storage.from('product-images').getPublicUrl(path)
+        nuevas.push(data.publicUrl)
+      }
+      setEdImgs(prev => [...prev, ...nuevas])
+    } catch (e) { toast('No se pudo subir: ' + e.message, 'error') }
+    finally { setSubiendoEdImg(false) }
+  }
+  // Auditoría (admin): historial global de ajustes/movimientos de producto terminado
+  const [modalHistAjustes, setModalHistAjustes] = useState(false)
+  const [histSoloManuales, setHistSoloManuales] = useState(true)
+  // Galería de imágenes por producto (para catálogos / futuras integraciones con otras APIs)
+  const [galeriaDe, setGaleriaDe] = useState(null)       // producto cuya galería se edita
+  const [galeriaImgs, setGaleriaImgs] = useState([])
+  const [subiendoGal, setSubiendoGal] = useState(false)
+  const imgsDe = (p) => { try { const a = Array.isArray(p.imagenes) ? p.imagenes : JSON.parse(p.imagenes || '[]'); return a.length ? a : (p.imagen_url ? [p.imagen_url] : []) } catch { return p.imagen_url ? [p.imagen_url] : [] } }
+  const abrirGaleria = (p) => { setGaleriaDe(p); setGaleriaImgs(imgsDe(p)) }
+  const subirImgGaleria = async (files) => {
+    if (!files?.length) return
+    setSubiendoGal(true)
+    try {
+      const nuevas = []
+      for (const file of files) {
+        const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
+        const path = `terminados/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`
+        const { error } = await supabase.storage.from('product-images').upload(path, file, { upsert: true })
+        if (error) throw error
+        const { data } = supabase.storage.from('product-images').getPublicUrl(path)
+        nuevas.push(data.publicUrl)
+      }
+      setGaleriaImgs(prev => [...prev, ...nuevas])
+    } catch (e) { toast('No se pudo subir: ' + e.message, 'error') }
+    finally { setSubiendoGal(false) }
+  }
+  const guardarGaleria = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.from('finished_products').update({ imagen_url: galeriaImgs[0] || null }).eq('id', galeriaDe.id)
+      if (error) throw error
+      // Columna v92 — tolerante si la migración aún no se corre
+      try { await supabase.from('finished_products').update({ imagenes: galeriaImgs }).eq('id', galeriaDe.id) } catch { /* opcional */ }
+    },
+    meta: { label: 'Guardando imágenes…' },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['finished_products'] }); setGaleriaDe(null); toast('Imágenes guardadas ✓') },
+    onError: (e) => toast(e.message, 'error'),
+  })
   const [modalGen, setModalGen] = useState(false)        // generar surtidos
   const [selGen, setSelGen] = useState([])               // ids de base seleccionados
   const [modalEnlace, setModalEnlace] = useState(false)  // enlazar con Alegra
@@ -131,7 +188,9 @@ export default function ProductosTerminados() {
     queryFn: async () => {
       const { data } = await supabase.functions.invoke('alegra-items', { body: {} })
       const map = {}
-      for (const it of (data?.items || [])) if (it?.id != null) map[String(it.id)] = it.available
+      // Guarda el ítem completo (nombre, referencia, disponible) para poder AUDITAR
+      // diferencias app ↔ Alegra, no solo el stock.
+      for (const it of (data?.items || [])) if (it?.id != null) map[String(it.id)] = { available: it.available, name: it.name || '', reference: it.reference || '' }
       return map
     },
     enabled: esAdmin, retry: false, staleTime: 2 * 60 * 1000, refetchOnWindowFocus: false,
@@ -139,7 +198,7 @@ export default function ProductosTerminados() {
   // Fichas de producto: el costo del surtido se promedia desde el costo de la FICHA (no del catálogo)
   const { data: fichas = [], isFetching: fetchingFichas, isSuccess: okFichas } = useQuery({
     queryKey: ['fichas_costo_terminado'],
-    queryFn: async () => { const { data } = await supabase.from('products_costing').select('id, nombre, tipo, costo_final, precio_mayor, precio_detal, activo, imagen_url, mp_id, ingredientes, rendimiento, desperdicio, peso_unidad').order('nombre'); return data || [] },
+    queryFn: async () => { const { data } = await supabase.from('products_costing').select('id, nombre, tipo, costo_final, precio_mayor, precio_detal, activo, imagen_url, mp_id, ingredientes, rendimiento, desperdicio, peso_unidad, descripcion').order('nombre'); return data || [] },
     staleTime: 1000 * 60 * 5, refetchOnWindowFocus: false, refetchOnMount: 'always',
   })
   // Loader SOLO en la primera carga (hasta tener datos frescos: stock + estado de Alegra).
@@ -160,6 +219,30 @@ export default function ProductosTerminados() {
   // Los productos tipo 'mp' reflejan el stock de la materia prima (Inventario MP), no un stock propio
   const mpStockById = Object.fromEntries(mpsVendibles.map(m => [m.id, Number(m.stock) || 0]))
   const stockReal = (p) => (p.tipo === 'mp' && p.mp_id != null && mpStockById[p.mp_id] != null) ? mpStockById[p.mp_id] : Number(p.stock || 0)
+
+  // ── Auditoría app ↔ Alegra: detecta productos cuyos datos difieren de lo que Alegra tiene ──
+  const [modalAuditoria, setModalAuditoria] = useState(false)
+  const difsAlegra = useMemo(() => {
+    const out = []
+    if (!Object.keys(alegraStock).length) return out
+    for (const p of productos) {
+      if (!p.alegra_item_id) continue
+      const a = alegraStock[String(p.alegra_item_id)]
+      if (!a) { out.push({ producto: p.nombre, campo: 'enlace', app: `ID ${p.alegra_item_id}`, alegra: 'no existe en Alegra' }); continue }
+      const stockApp = stockReal(p)
+      if (a.available != null && Math.abs((Number(a.available) || 0) - stockApp) > 0.001) {
+        out.push({ producto: p.nombre, campo: 'stock', app: fNum(stockApp), alegra: fNum(Number(a.available) || 0) })
+      }
+      if ((p.nombre || '').trim().toLowerCase() !== (a.name || '').trim().toLowerCase()) {
+        out.push({ producto: p.nombre, campo: 'nombre', app: p.nombre, alegra: a.name || '(vacío)' })
+      }
+      if ((p.sku || '').trim() && (p.sku || '').trim().toLowerCase() !== (a.reference || '').trim().toLowerCase()) {
+        out.push({ producto: p.nombre, campo: 'SKU', app: p.sku, alegra: a.reference || '(vacío)' })
+      }
+    }
+    return out
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productos, alegraStock, mpsVendibles])
   // Fichas ACTIVAS (vendibles) que aún no están en el catálogo de terminados
   const fichasDisponibles = fichas.filter(f => (f.tipo || '') !== 'subproducto' && f.activo !== false &&
     !productos.some(p => p.product_id === f.id || (p.nombre || '').toLowerCase() === (f.nombre || '').toLowerCase()))
@@ -167,11 +250,11 @@ export default function ProductosTerminados() {
   // (costo, precios) para que el usuario termine de definir SKU, stock mínimo, categoría,
   // código UNSPSC, etc. ANTES de crear el producto terminado.
   const prepararDesdeFicha = (f) => {
-    setPForm({ ...EMPTY_PROD, nombre: f.nombre, tipo: 'base', product_id: f.id,
+    setPForm({ ...EMPTY_PROD, nombre: f.nombre, descripcion: f.descripcion || '', tipo: 'base', product_id: f.id,
       costo_unitario: Math.round(Number(f.costo_final) || 0),
       precio_mayor: Math.round(Number(f.precio_mayor) || 0), precio_detal: Math.round(Number(f.precio_detal) || 0),
     })
-    setPEditId(null); setModalFicha(false); setModalProd(true)
+    setEdImgs(f.imagen_url ? [f.imagen_url] : []); setPEditId(null); setModalFicha(false); setModalProd(true)
   }
   const prepararDesdeMp = (m) => {
     const f = fichaMpDe(m.id)   // ficha de MP con costos ya asignados
@@ -182,7 +265,7 @@ export default function ProductosTerminados() {
       precio_detal: Math.round(Number(f.precio_detal) || 0),
       _stock_inicial: Number(m.stock) || 0,
     })
-    setPEditId(null); setModalMp(false); setModalProd(true)
+    setEdImgs([]); setPEditId(null); setModalMp(false); setModalProd(true)
   }
 
   const costoFicha = (p) => {
@@ -219,19 +302,36 @@ export default function ProductosTerminados() {
       if (!pForm.nombre.trim()) throw new Error('Indica el nombre comercial del producto')
       if (pForm.stock_min === '' || pForm.stock_min == null) throw new Error('Define el stock mínimo (usa 0 si no quieres alerta de stock bajo)')
       if (alegraCategorias.length > 0 && !pForm.categoria_alegra_id) throw new Error('Elige una categoría de Alegra')
-      const payload = { nombre: pForm.nombre.trim(), sku: pForm.sku || null, alegra_item_id: pForm.alegra_item_id || null, tipo: pForm.tipo, stock_min: parseFloat(pForm.stock_min) || 0, costo_unitario: parseFloat(pForm.costo_unitario) || 0, precio_mayor: parseFloat(pForm.precio_mayor) || 0, precio_detal: parseFloat(pForm.precio_detal) || 0, activo: pForm.activo, unidad_medida: pForm.unidad_medida || 'unit', codigo_unspsc: pForm.codigo_unspsc || null, categoria_alegra_id: pForm.categoria_alegra_id || null, categoria_alegra_nombre: pForm.categoria_alegra_nombre || null, surtido_a: pForm.surtido_a ? Number(pForm.surtido_a) : null, surtido_b: pForm.surtido_b ? Number(pForm.surtido_b) : null }
+      const payload = { nombre: pForm.nombre.trim(), descripcion: (pForm.descripcion || '').trim() || null, sku: pForm.sku || null, alegra_item_id: pForm.alegra_item_id || null, tipo: pForm.tipo, stock_min: parseFloat(pForm.stock_min) || 0, costo_unitario: parseFloat(pForm.costo_unitario) || 0, precio_mayor: parseFloat(pForm.precio_mayor) || 0, precio_detal: parseFloat(pForm.precio_detal) || 0, imagen_url: edImgs[0] || null, activo: pForm.activo, unidad_medida: pForm.unidad_medida || 'unit', codigo_unspsc: pForm.codigo_unspsc || null, categoria_alegra_id: pForm.categoria_alegra_id || null, categoria_alegra_nombre: pForm.categoria_alegra_nombre || null, surtido_a: pForm.surtido_a ? Number(pForm.surtido_a) : null, surtido_b: pForm.surtido_b ? Number(pForm.surtido_b) : null }
+      let out
       if (pEditId) {
         const { error } = await supabase.from('finished_products').update(payload).eq('id', pEditId); if (error) throw error
-        return { id: pEditId, esNuevo: false }
+        out = { id: pEditId, esNuevo: false }
       } else {
         // product_id/mp_id (enlace con la ficha o la MP) solo se fija AL CREAR; nunca se toca al editar.
         const { data, error } = await supabase.from('finished_products').insert({ ...payload, product_id: pForm.product_id || null, mp_id: pForm.mp_id || null, stock: pForm._stock_inicial || 0 }).select('id').single()
         if (error) throw error
-        return { id: data.id, esNuevo: true }
+        out = { id: data.id, esNuevo: true }
       }
+      // Galería de imágenes (columna v92) — aparte y tolerante
+      try { await supabase.from('finished_products').update({ imagenes: edImgs }).eq('id', out.id) } catch { /* opcional */ }
+      // Propaga los cambios a la FICHA DE PRODUCTO enlazada (nombre, descripción e imágenes),
+      // para que ambas queden consistentes. El usuario ya confirmó antes de guardar.
+      const pid = pEditId ? (productos.find(x => x.id === pEditId)?.product_id || null) : (pForm.product_id || null)
+      if (pid) {
+        await supabase.from('products_costing').update({
+          nombre: pForm.nombre.trim(),
+          descripcion: (pForm.descripcion || '').trim() || null,
+          imagen_url: edImgs[0] || '',
+        }).eq('id', pid)
+        try { await supabase.from('products_costing').update({ imagenes: edImgs }).eq('id', pid) } catch { /* columna v92 opcional */ }
+      }
+      return out
     },
     onSuccess: async ({ id, esNuevo }) => {
       qc.invalidateQueries({ queryKey: ['finished_products'] })
+      qc.invalidateQueries({ queryKey: ['fichas_costo_terminado'] })
+      qc.invalidateQueries({ queryKey: ['products_costing'] })
       const nombre = pForm.nombre.trim()
       // Si el usuario pidió "crear en Alegra al guardar" (no había match ni enlace previo), se crea ahora con el id ya persistido.
       if (esNuevo && crearAlGuardar && !pForm.alegra_item_id) {
@@ -252,20 +352,33 @@ export default function ProductosTerminados() {
       if (error) throw error
       if (data?.error) throw new Error(data.error)
       const items = data?.items || []
+      // 1) Coincidencia EXACTA por SKU/referencia o por nombre completo
       const porRef = pForm.sku ? items.filter(it => norm(it.reference) === norm(pForm.sku)) : []
       const porNom = items.filter(it => norm(it.name) === norm(pForm.nombre))
-      const candidatos = porRef.length ? porRef : porNom
-      const match = candidatos.find(it => !it.esServicio) || candidatos[0] || null
-      return match
+      const exactos = porRef.length ? porRef : porNom
+      const match = exactos.find(it => !it.esServicio) || exactos[0] || null
+      // 2) SIMILARES: ítems que comparten palabras clave con el nombre (ignora conectores y
+      //    presentaciones tipo "x40g"), ordenados por cuántas palabras coinciden.
+      const STOP = new Set(['de', 'la', 'el', 'los', 'las', 'con', 'y', 'x', 'del', 'en', 'a', 'mumi'])
+      const tokens = (s) => norm(s).normalize('NFD').replace(/[̀-ͯ]/g, '').split(' ').filter(w => w.length > 2 && !STOP.has(w) && !/^x?\d+(g|gr|ml|kg|und|u)?$/.test(w))
+      const tNom = tokens(pForm.nombre)
+      const similares = tNom.length ? items
+        .filter(it => !match || String(it.id) !== String(match.id))
+        .map(it => { const ti = tokens(it.name); const score = tNom.filter(w => ti.some(x => x.includes(w) || w.includes(x))).length; return { it, score } })
+        .filter(x => x.score > 0)
+        .sort((a, b) => b.score - a.score || (a.it.esServicio ? 1 : 0) - (b.it.esServicio ? 1 : 0))
+        .slice(0, 8)
+        .map(x => x.it) : []
+      return { match, similares }
     },
     meta: { label: 'Buscando en Alegra…' },
-    onMutate: () => setAlegraVerif({ estado: 'buscando', match: null }),
-    onSuccess: (match) => setAlegraVerif({ estado: match ? 'coincidencia' : 'sin_match', match }),
-    onError: (e) => { setAlegraVerif({ estado: 'idle', match: null }); toast('No se pudo verificar en Alegra: ' + e.message, 'error') },
+    onMutate: () => setAlegraVerif({ estado: 'buscando', match: null, similares: [] }),
+    onSuccess: ({ match, similares }) => setAlegraVerif({ estado: match ? 'coincidencia' : 'sin_match', match, similares }),
+    onError: (e) => { setAlegraVerif({ estado: 'idle', match: null, similares: [] }); toast('No se pudo verificar en Alegra: ' + e.message, 'error') },
   })
   const enlazarDesdeModal = (match) => {
     setPForm(f => ({ ...f, alegra_item_id: String(match.id), sku: f.sku || match.reference || f.sku }))
-    setAlegraVerif({ estado: 'idle', match: null })
+    setAlegraVerif({ estado: 'idle', match: null, similares: [] })
     toast(`Se enlazará con "${match.name}" al guardar`, 'success')
   }
   // Cada vez que se abre el modal (nuevo o editar), reinicia el estado de verificación de Alegra
@@ -570,8 +683,7 @@ export default function ProductosTerminados() {
                   {[
                     { ico: Settings, label: 'Configurar Alegra', on: () => abrirConfig() },
                     { ico: Plug, label: 'Enlazar con Alegra (masivo)', on: () => abrirEnlace() },
-                    { ico: ArrowUpFromLine, label: sincronizarTodo.isPending ? 'Enviando...' : 'Enviar stock a Alegra', on: () => sincronizarTodo.mutate(), disabled: sincronizarTodo.isPending },
-                    { ico: ArrowDownToLine, label: traerDesdeAlegra.isPending ? 'Trayendo...' : 'Traer ventas de Alegra', on: () => traerDesdeAlegra.mutate(), disabled: traerDesdeAlegra.isPending },
+                    { ico: ArrowDownToLine, label: traerDesdeAlegra.isPending ? 'Trayendo...' : 'Traer ventas de Alegra (respaldo del webhook)', on: () => traerDesdeAlegra.mutate(), disabled: traerDesdeAlegra.isPending },
                   ].map((it, i) => (
                     <button key={i} disabled={it.disabled} onClick={() => { it.on(); setMenuAlegraOpen(false) }}
                       style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '8px 10px', border: 'none', background: 'transparent', cursor: it.disabled ? 'default' : 'pointer', fontSize: '0.84rem', borderRadius: 6, color: 'var(--texto)' }}
@@ -583,11 +695,22 @@ export default function ProductosTerminados() {
               )}
             </div>
           )}
+          {esAdmin && (
+            <button className={`btn btn-sm ${difsAlegra.length ? 'btn-dorado' : 'btn-secondary'}`} style={{ position: 'relative' }}
+              title={difsAlegra.length ? `${difsAlegra.length} diferencia(s) entre la app y Alegra — clic para revisar` : 'La app y Alegra están sincronizadas. Clic para ver el detalle o forzar un reenvío.'}
+              onClick={() => setModalAuditoria(true)}>
+              <Ico as={ArrowUpFromLine} size={14} />Sincronizar con Alegra
+              {difsAlegra.length > 0 && (
+                <span style={{ position: 'absolute', top: -6, right: -6, background: 'var(--rojo)', color: '#fff', borderRadius: '50%', minWidth: 18, height: 18, fontSize: '0.66rem', fontWeight: 700, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 4px' }}>{difsAlegra.length}</span>
+              )}
+            </button>
+          )}
           <button className="btn btn-secondary btn-sm" onClick={() => actualizarCostos.mutate()} disabled={actualizarCostos.isPending}>{actualizarCostos.isPending ? 'Actualizando...' : <><Ico as={DollarSign} size={14} />Actualizar costos desde fichas</>}</button>
+          {esAdmin && <button className="btn btn-secondary btn-sm" title="Auditoría: quién ajustó el inventario, qué movió, cuánto y cuándo" onClick={() => setModalHistAjustes(true)}><Ico as={ScrollText} size={14} />Historial de ajustes</button>}
           {fichasDisponibles.length > 0 && <button className="btn btn-secondary btn-sm" onClick={() => setModalFicha(true)}><Ico as={ClipboardList} size={14} />Agregar producto ({fichasDisponibles.length})</button>}
           {mpsDisponibles.length > 0 && <button className="btn btn-secondary btn-sm" onClick={() => setModalMp(true)}><Ico as={FlaskConical} size={14} />Agregar MP vendible ({mpsDisponibles.length})</button>}
           <button className="btn btn-secondary btn-sm" onClick={() => { setSelGen(baseProds.map(p => p.id)); setModalGen(true) }}><Ico as={Shuffle} size={14} />Generar surtidos</button>
-          <button className="btn btn-primary btn-sm" onClick={() => { setPForm(EMPTY_PROD); setPEditId(null); setModalProd(true) }}><Ico as={Plus} size={14} />Nuevo producto</button>
+          <button className="btn btn-primary btn-sm" onClick={() => { setPForm(EMPTY_PROD); setEdImgs([]); setPEditId(null); setModalProd(true) }}><Ico as={Plus} size={14} />Nuevo producto</button>
           </>}
         </div>
       </div>
@@ -621,14 +744,21 @@ export default function ProductosTerminados() {
                     const bajo = (p.stock_min || 0) > 0 && disp <= Number(p.stock_min || 0)
                     return (
                       <tr key={p.id} style={p.activo === false ? { opacity: 0.55 } : undefined}>
-                        <td><strong>{p.nombre}</strong></td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                            {(() => { const im = imgsDe(p); return im.length
+                              ? <img src={im[0]} alt="" title={`${im.length} imagen(es) — clic en 📷 para gestionar`} style={{ width: 30, height: 30, borderRadius: 4, objectFit: 'cover', flexShrink: 0, cursor: 'pointer' }} onClick={() => abrirGaleria(p)} />
+                              : <div onClick={() => abrirGaleria(p)} title="Sin imágenes — clic para agregar" style={{ width: 30, height: 30, borderRadius: 4, background: 'var(--crema)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', color: 'var(--texto-suave)', flexShrink: 0, cursor: 'pointer' }}>📷</div> })()}
+                            <strong>{p.nombre}</strong>
+                          </div>
+                        </td>
                         <td className="col-opcional-2"><span className={`badge ${p.tipo === 'surtido' ? 'badge-dorado' : p.tipo === 'mp' ? 'badge-gris' : 'badge-azul'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>{p.tipo === 'surtido' ? <><Shuffle size={11} aria-hidden="true" /> Surtido</> : p.tipo === 'mp' ? <><FlaskConical size={11} aria-hidden="true" /> MP</> : 'Base'}</span></td>
                         <td className="col-opcional">{p.sku || '—'}</td>
                         <td className="col-opcional-2">{p.alegra_item_id ? <Check size={14} aria-hidden="true" style={{ color: 'var(--selva)' }} /> : '—'}</td>
                         <td className="td-number"><strong style={{ color: bajo ? 'var(--rojo)' : undefined }}>{fNum(disp)}</strong>{bajo && <div style={{ fontSize: '0.65rem', color: 'var(--rojo)', display: 'flex', alignItems: 'center', gap: 2 }}><AlertTriangle size={10} aria-hidden="true" /> bajo</div>}{reservado > 0 && <div style={{ fontSize: '0.62rem', color: 'var(--tierra)' }}>Reservado: {fNum(reservado)} · Total: {fNum(totalStock)}</div>}{p.tipo === 'mp' && <div style={{ fontSize: '0.6rem', color: 'var(--texto-suave)' }}>stock de MP</div>}</td>
                         {(() => {
                           if (!p.alegra_item_id) return <td className="td-number" style={{ color: 'var(--texto-suave)' }}>—</td>
-                          const av = alegraStock[String(p.alegra_item_id)]
+                          const av = alegraStock[String(p.alegra_item_id)]?.available
                           if (av === undefined) return <td className="td-number" style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>{cargandoAlegraStock ? '…' : 's/d'}</td>
                           const ok = Math.round(Number(av)) === Math.round(Number(p.stock || 0))
                           return <td className="td-number"><span style={{ display: 'inline-flex', alignItems: 'center', gap: 3, color: ok ? 'var(--selva)' : 'var(--tierra)' }}>{fNum(av)} {ok ? <Check size={12} aria-hidden="true" /> : <AlertTriangle size={12} aria-hidden="true" />}</span></td>
@@ -649,7 +779,7 @@ export default function ProductosTerminados() {
                             <button className="btn btn-xs btn-secondary" title="Kardex (movimientos)" onClick={() => setKardexDe(p)}><ScrollText size={13} aria-hidden="true" /></button>
                             {!p.alegra_item_id && esAdmin && <button className="btn btn-xs btn-dorado" title="Busca si ya existe en Alegra por SKU/nombre; si no existe, permite crearlo" disabled={verifAlegra?.buscando} onClick={() => verificarEnAlegraFila(p)}><Ico as={Plug} size={13} />{verifAlegra?.p?.id === p.id && verifAlegra.buscando ? 'Verificando...' : 'Verificar / Crear en Alegra'}</button>}
                             <button className="btn btn-xs btn-secondary" title={p.alegra_item_id ? 'Sincronizar stock y costo con Alegra' : 'Falta el ID del ítem en Alegra'} disabled={!p.alegra_item_id || sincronizarUno.isPending} onClick={() => sincronizarUno.mutate(p)}><RefreshCw size={13} aria-hidden="true" /></button>
-                            <button className="btn btn-xs btn-secondary" onClick={() => { setPForm({ nombre: p.nombre, sku: p.sku || '', alegra_item_id: p.alegra_item_id || '', tipo: p.tipo || 'base', stock_min: p.stock_min || '', costo_unitario: p.costo_unitario || '', precio_mayor: p.precio_mayor || '', precio_detal: p.precio_detal || '', activo: p.activo !== false, unidad_medida: p.unidad_medida || 'unit', codigo_unspsc: p.codigo_unspsc || '', categoria_alegra_id: p.categoria_alegra_id || '', categoria_alegra_nombre: p.categoria_alegra_nombre || '', surtido_a: p.surtido_a || '', surtido_b: p.surtido_b || '' }); setPEditId(p.id); setModalProd(true) }} title="Editar"><Pencil size={13} aria-hidden="true" /></button>
+                            <button className="btn btn-xs btn-secondary" onClick={() => { setPForm({ nombre: p.nombre, descripcion: p.descripcion || '', sku: p.sku || '', alegra_item_id: p.alegra_item_id || '', tipo: p.tipo || 'base', stock_min: p.stock_min || '', costo_unitario: p.costo_unitario || '', precio_mayor: p.precio_mayor || '', precio_detal: p.precio_detal || '', activo: p.activo !== false, unidad_medida: p.unidad_medida || 'unit', codigo_unspsc: p.codigo_unspsc || '', categoria_alegra_id: p.categoria_alegra_id || '', categoria_alegra_nombre: p.categoria_alegra_nombre || '', surtido_a: p.surtido_a || '', surtido_b: p.surtido_b || '' }); setEdImgs(imgsDe(p)); setPEditId(p.id); setModalProd(true) }} title="Editar"><Pencil size={13} aria-hidden="true" /></button>
                             {esAdmin && (p.alegra_item_id
                               ? <button className="btn btn-xs btn-danger" disabled title="Está enlazado a Alegra. Desenlázalo primero para poder eliminarlo." style={{ opacity: 0.5 }}><X size={13} aria-hidden="true" /></button>
                               : <button className="btn btn-xs btn-danger" title="Quitar del catálogo" onClick={() => confirmar(`¿Quitar "${p.nombre}" SOLO del catálogo de Producto Terminado?\n\nEsto NO elimina la ficha de producto ni su costo. Podrás recrearlo desde la ficha cuando quieras.`).then(ok => ok && delProd.mutate(p.id))}><X size={13} aria-hidden="true" /></button>)}
@@ -845,7 +975,15 @@ export default function ProductosTerminados() {
             </button>
           )}
           <button className="btn btn-secondary" onClick={() => setModalProd(false)}>Cancelar</button>
-          <button className="btn btn-primary" onClick={() => saveProd.mutate()} disabled={saveProd.isPending}>Guardar</button>
+          <button className="btn btn-primary" disabled={saveProd.isPending || subiendoEdImg} onClick={async () => {
+            // Si el producto está enlazado a una ficha de costos, avisar que también se actualizará
+            const pid = pEditId ? (productos.find(x => x.id === pEditId)?.product_id || null) : (pForm.product_id || null)
+            if (pid) {
+              const ok = await confirmar('Este producto está enlazado a una ficha de producto.\n\nAl guardar, el nombre, la descripción y las imágenes también se actualizarán en esa ficha para que queden consistentes.\n\n¿Continuar?', { title: 'También se actualizará la ficha', confirmText: 'Sí, guardar', danger: false })
+              if (!ok) return
+            }
+            saveProd.mutate()
+          }}>Guardar</button>
         </>}>
         <div className="form-grid">
           <div className="form-group" style={{ gridColumn: '1 / -1' }}>
@@ -854,6 +992,28 @@ export default function ProductosTerminados() {
             <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
               Cómo nombrarlo: <strong>Producto + Marca + Presentación + Cantidad</strong> (ej. "Bocadillo Mumi Surtido Seje-Arazá x 250g").
             </small>
+          </div>
+          <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+            <label className="form-label">Descripción <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(se sincroniza con la descripción del ítem en Alegra)</small></label>
+            <textarea className="form-control" rows={2} maxLength={500} value={pForm.descripcion || ''} onChange={e => setPForm(f => ({ ...f, descripcion: e.target.value }))} />
+          </div>
+          <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+            <label className="form-label">Imágenes <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(la primera es la principal — ★ para cambiarla)</small></label>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+              {edImgs.map((url, i) => (
+                <div key={url + i} style={{ position: 'relative', width: 64, height: 64, borderRadius: 6, overflow: 'hidden', border: i === 0 ? '2px solid var(--dorado)' : '1px solid var(--crema-oscuro)' }}>
+                  <img src={url} alt={`imagen ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                  <div style={{ position: 'absolute', top: 2, right: 2, display: 'flex', gap: 2 }}>
+                    {i > 0 && <button type="button" title="Hacer principal" onClick={() => setEdImgs(prev => [prev[i], ...prev.filter((_, idx) => idx !== i)])} style={{ background: 'rgba(0,0,0,0.55)', color: '#ffd54f', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.68rem', padding: '1px 4px' }}>★</button>}
+                    <button type="button" title="Quitar" onClick={() => setEdImgs(prev => prev.filter((_, idx) => idx !== i))} style={{ background: 'rgba(0,0,0,0.55)', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.68rem', padding: '1px 4px' }}>✕</button>
+                  </div>
+                </div>
+              ))}
+              <label style={{ width: 64, height: 64, border: '2px dashed var(--crema-oscuro)', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.4rem', background: 'var(--crema)', color: 'var(--texto-suave)' }}>
+                {subiendoEdImg ? '…' : '＋'}
+                <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => { subirEdImgs([...(e.target.files || [])]); e.target.value = '' }} />
+              </label>
+            </div>
           </div>
           <div className="form-group"><label className="form-label">Tipo</label><select className="form-control" value={pForm.tipo} onChange={e => setPForm(f => ({ ...f, tipo: e.target.value }))}><option value="base">Base</option><option value="surtido">Surtido</option></select></div>
           <div className="form-group"><label className="form-label">SKU / Referencia (Alegra)</label><input className="form-control" value={pForm.sku} onChange={e => setPForm(f => ({ ...f, sku: e.target.value }))} /></div>
@@ -873,18 +1033,41 @@ export default function ProductosTerminados() {
                 )}
                 {alegraVerif.estado === 'coincidencia' && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', background: 'rgba(124,179,66,0.08)', border: '1px solid rgba(124,179,66,0.3)', borderRadius: 8, padding: '8px 10px' }}>
-                    <span style={{ fontSize: '0.85rem' }}>Ya existe en Alegra: <strong>{alegraVerif.match.name}</strong>{alegraVerif.match.reference ? ` (ref: ${alegraVerif.match.reference})` : ''}</span>
+                    <span style={{ fontSize: '0.85rem' }}>Coincidencia exacta en Alegra: <strong>{alegraVerif.match.name}</strong>{alegraVerif.match.reference ? ` (ref: ${alegraVerif.match.reference})` : ''}</span>
                     <button type="button" className="btn btn-xs btn-primary" onClick={() => enlazarDesdeModal(alegraVerif.match)}>Enlazar con este</button>
-                    <button type="button" className="btn btn-xs btn-secondary" onClick={() => setAlegraVerif({ estado: 'idle', match: null })}>No es este</button>
+                    <button type="button" className="btn btn-xs btn-secondary" onClick={() => setAlegraVerif({ estado: 'idle', match: null, similares: [] })}>No es este</button>
                   </div>
                 )}
-                {alegraVerif.estado === 'sin_match' && (
+                {alegraVerif.estado === 'sin_match' && !(alegraVerif.similares || []).length && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', background: 'var(--crema)', borderRadius: 8, padding: '8px 10px' }}>
-                    <span style={{ fontSize: '0.85rem', color: 'var(--texto-suave)' }}>No se encontró en Alegra un ítem con este nombre/SKU.</span>
+                    <span style={{ fontSize: '0.85rem', color: 'var(--texto-suave)' }}>No se encontró en Alegra ningún ítem parecido a este nombre/SKU.</span>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer' }}>
                       <input type="checkbox" checked={crearAlGuardar} onChange={e => setCrearAlGuardar(e.target.checked)} />
                       Crear en Alegra al guardar
                     </label>
+                  </div>
+                )}
+                {(alegraVerif.estado === 'coincidencia' || alegraVerif.estado === 'sin_match') && (alegraVerif.similares || []).length > 0 && (
+                  <div style={{ marginTop: 8, background: 'var(--crema)', borderRadius: 8, padding: '8px 10px' }}>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', marginBottom: 6 }}>
+                      {alegraVerif.estado === 'sin_match' ? 'Sin coincidencia exacta, pero hay ítems PARECIDOS en Alegra — revisa si alguno corresponde:' : 'Otros ítems parecidos en Alegra:'}
+                    </div>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 170, overflowY: 'auto' }}>
+                      {alegraVerif.similares.map(it => (
+                        <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--blanco)', border: '1px solid var(--crema-oscuro)', borderRadius: 6, padding: '5px 8px' }}>
+                          <span style={{ flex: 1, fontSize: '0.82rem' }}>
+                            <strong>{it.name}</strong>{it.reference ? <small style={{ color: 'var(--texto-suave)' }}> · ref: {it.reference}</small> : ''}{it.esServicio ? <small style={{ color: 'var(--tierra)' }}> · solo facturación</small> : ''}
+                          </span>
+                          <button type="button" className="btn btn-xs btn-primary" onClick={() => enlazarDesdeModal(it)}>Enlazar</button>
+                        </div>
+                      ))}
+                    </div>
+                    {alegraVerif.estado === 'sin_match' && (
+                      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', cursor: 'pointer', marginTop: 8 }}>
+                        <input type="checkbox" checked={crearAlGuardar} onChange={e => setCrearAlGuardar(e.target.checked)} />
+                        Ninguno corresponde — crear en Alegra al guardar
+                      </label>
+                    )}
                   </div>
                 )}
                 {!esAdmin && <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Solo un admin puede verificar/crear/enlazar con Alegra.</small>}
@@ -1138,6 +1321,116 @@ export default function ProductosTerminados() {
         </div>
       </Modal>
 
+      {/* Modal: historial global de ajustes de inventario (auditoría admin) */}
+      <Modal open={modalHistAjustes} onClose={() => setModalHistAjustes(false)} guard={false} size="modal-xl"
+        title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><ScrollText size={18} aria-hidden="true" /> Historial de ajustes de inventario</span>}
+        footer={<button className="btn btn-secondary" onClick={() => setModalHistAjustes(false)}>Cerrar</button>}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 10, flexWrap: 'wrap' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer' }}>
+            <input type="checkbox" checked={histSoloManuales} onChange={e => setHistSoloManuales(e.target.checked)} />
+            Solo ajustes manuales
+          </label>
+          <small style={{ color: 'var(--texto-suave)' }}>Desmarca para ver también los movimientos automáticos (producción, ventas de Alegra). Últimos 500 movimientos.</small>
+        </div>
+        {(() => {
+          const nombreFP = Object.fromEntries(productos.map(p => [p.id, p.nombre]))
+          const lista = movimientos.filter(m => !histSoloManuales || (m.origen || '') === 'manual')
+          return (
+            <div className="table-wrap" style={{ maxHeight: 420, overflowY: 'auto' }}>
+              <table style={{ fontSize: '0.84rem' }}>
+                <thead><tr><th>Fecha y hora</th><th>Quién</th><th>Producto</th><th>Tipo</th><th className="td-number">Cantidad</th><th>Lote</th><th>Origen</th><th>Motivo / detalle</th></tr></thead>
+                <tbody>
+                  {lista.length === 0
+                    ? <tr><td colSpan={8} className="empty-table">{histSoloManuales ? 'Sin ajustes manuales registrados.' : 'Sin movimientos.'}</td></tr>
+                    : lista.map(m => (
+                      <tr key={m.id}>
+                        <td style={{ whiteSpace: 'nowrap' }}>{m.created_at ? new Date(m.created_at).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : (m.fecha ? fFecha(m.fecha) : '—')}</td>
+                        <td><strong>{m.creado_por || '—'}</strong></td>
+                        <td>{nombreFP[m.finished_id] || '—'}</td>
+                        <td><span className={`badge ${m.tipo === 'entrada' ? 'badge-verde' : m.tipo === 'salida' ? 'badge-gris' : 'badge-dorado'}`}>{m.tipo}</span></td>
+                        <td className="td-number">{fNum(m.cantidad)}</td>
+                        <td>{m.lote || '—'}</td>
+                        <td>{m.origen || '—'}</td>
+                        <td style={{ fontSize: '0.78rem' }}>{m.obs || '—'}</td>
+                      </tr>
+                    ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        })()}
+      </Modal>
+
+      {/* Modal: galería de imágenes del producto (para catálogos / futuras integraciones) */}
+      <Modal open={!!galeriaDe} onClose={() => setGaleriaDe(null)} guard={false}
+        title={`📷 Imágenes — ${galeriaDe?.nombre || ''}`}
+        footer={<>
+          <button className="btn btn-secondary" onClick={() => setGaleriaDe(null)}>Cancelar</button>
+          <button className="btn btn-primary" disabled={guardarGaleria.isPending || subiendoGal} onClick={() => guardarGaleria.mutate()}>{guardarGaleria.isPending ? 'Guardando...' : 'Guardar imágenes'}</button>
+        </>}>
+        <div className="alert alert-info" style={{ fontSize: '0.8rem' }}>
+          La <strong>primera</strong> imagen es la principal. Estas imágenes quedan guardadas con el producto para catálogos y futuras integraciones con otros servicios (Alegra no acepta imágenes por API).
+        </div>
+        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+          {galeriaImgs.map((url, i) => (
+            <div key={url + i} style={{ position: 'relative', width: 96, height: 96, borderRadius: 8, overflow: 'hidden', border: i === 0 ? '2px solid var(--dorado)' : '1px solid var(--crema-oscuro)' }}>
+              <img src={url} alt={`imagen ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              <div style={{ position: 'absolute', top: 3, right: 3, display: 'flex', gap: 3 }}>
+                {i > 0 && <button type="button" title="Hacer principal" onClick={() => setGaleriaImgs(prev => [prev[i], ...prev.filter((_, idx) => idx !== i)])} style={{ background: 'rgba(0,0,0,0.55)', color: '#ffd54f', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.78rem', padding: '1px 5px' }}>★</button>}
+                <button type="button" title="Quitar" onClick={() => setGaleriaImgs(prev => prev.filter((_, idx) => idx !== i))} style={{ background: 'rgba(0,0,0,0.55)', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.78rem', padding: '1px 5px' }}>✕</button>
+              </div>
+              {i === 0 && <span style={{ position: 'absolute', bottom: 3, left: 3, background: 'var(--dorado)', color: '#2b1c04', fontSize: '0.6rem', fontWeight: 700, borderRadius: 3, padding: '0 5px' }}>PRINCIPAL</span>}
+            </div>
+          ))}
+          <label style={{ width: 96, height: 96, border: '2px dashed var(--crema-oscuro)', borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.6rem', background: 'var(--crema)', color: 'var(--texto-suave)' }}>
+            {subiendoGal ? '…' : '＋'}
+            <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => { subirImgGaleria([...(e.target.files || [])]); e.target.value = '' }} />
+          </label>
+        </div>
+      </Modal>
+
+      {/* Modal: auditoría app ↔ Alegra + sincronización de respaldo */}
+      <Modal open={modalAuditoria} onClose={() => setModalAuditoria(false)} guard={false} size="modal-lg"
+        title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><ArrowUpFromLine size={18} aria-hidden="true" /> Sincronización con Alegra</span>}
+        footer={<>
+          <button className="btn btn-secondary" onClick={() => setModalAuditoria(false)}>Cerrar</button>
+          <button className="btn btn-primary" disabled={sincronizarTodo.isPending}
+            onClick={async () => { await sincronizarTodo.mutateAsync(); qc.invalidateQueries({ queryKey: ['alegra_items_stock'] }) }}>
+            {sincronizarTodo.isPending ? 'Sincronizando...' : 'Sincronizar todo ahora (app → Alegra)'}
+          </button>
+        </>}>
+        <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>
+          Los cambios en fichas, ajustes de stock y producción se envían a Alegra <strong>automáticamente</strong>. Esta pantalla es un
+          <strong> respaldo</strong>: compara lo que tiene la app contra lo que tiene Alegra (stock, nombre y SKU) y te muestra cualquier diferencia.
+        </div>
+        {cargandoAlegraStock && <p style={{ fontSize: '0.86rem' }}>Consultando datos actuales de Alegra…</p>}
+        {!cargandoAlegraStock && difsAlegra.length === 0 && (
+          <p style={{ fontSize: '0.9rem', color: 'var(--selva)' }}><Check size={15} aria-hidden="true" style={{ display: 'inline', verticalAlign: '-2px' }} /> Todo coincide — la app y Alegra están sincronizadas.</p>
+        )}
+        {difsAlegra.length > 0 && (
+          <div className="table-wrap">
+            <table style={{ fontSize: '0.84rem' }}>
+              <thead><tr><th>Producto</th><th>Campo</th><th>Valor en la app</th><th>Valor en Alegra</th></tr></thead>
+              <tbody>
+                {difsAlegra.map((d, i) => (
+                  <tr key={i}>
+                    <td><strong>{d.producto}</strong></td>
+                    <td><span className="badge badge-dorado">{d.campo}</span></td>
+                    <td style={{ color: 'var(--selva)' }}>{d.app}</td>
+                    <td style={{ color: 'var(--tierra)' }}>{d.alegra}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {difsAlegra.length > 0 && (
+          <small style={{ display: 'block', marginTop: 8, color: 'var(--texto-suave)', fontSize: '0.76rem' }}>
+            "Sincronizar todo ahora" envía los valores de la APP hacia Alegra (la app es la fuente de verdad). Si el valor correcto es el de Alegra, corrige primero el dato en la app.
+          </small>
+        )}
+      </Modal>
+
       {/* Modal: resultado de "Verificar / Crear en Alegra" (evita duplicados en Alegra) */}
       <Modal open={!!verifAlegra} onClose={() => setVerifAlegra(null)} guard={false}
         title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Plug size={18} aria-hidden="true" /> Verificación en Alegra</span>}
@@ -1209,18 +1502,19 @@ export default function ProductosTerminados() {
         footer={<button className="btn btn-secondary" onClick={() => setKardexDe(null)}>Cerrar</button>}>
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Fecha</th><th>Tipo</th><th className="td-number">Cantidad</th><th>Lote</th><th>Origen</th><th>Detalle</th></tr></thead>
+            <thead><tr><th>Fecha</th><th>Tipo</th><th className="td-number">Cantidad</th><th>Lote</th><th>Origen</th><th>Detalle</th>{esAdmin && <th>Quién</th>}</tr></thead>
             <tbody>
               {kardex.length === 0
-                ? <tr><td colSpan={6} className="empty-table">Sin movimientos.</td></tr>
+                ? <tr><td colSpan={esAdmin ? 7 : 6} className="empty-table">Sin movimientos.</td></tr>
                 : kardex.map(m => (
                     <tr key={m.id}>
-                      <td>{m.fecha ? fFecha(m.fecha) : (m.created_at ? fFecha(m.created_at.slice(0, 10)) : '—')}</td>
+                      <td>{m.created_at ? new Date(m.created_at).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : (m.fecha ? fFecha(m.fecha) : '—')}</td>
                       <td><span className={`badge ${m.tipo === 'entrada' ? 'badge-verde' : m.tipo === 'salida' ? 'badge-gris' : 'badge-dorado'}`}>{m.tipo}</span></td>
                       <td className="td-number">{fNum(m.cantidad)}</td>
                       <td>{m.lote || '—'}</td>
                       <td>{m.origen || '—'}</td>
                       <td style={{ fontSize: '0.78rem' }}>{m.obs || '—'}</td>
+                      {esAdmin && <td style={{ fontSize: '0.78rem' }}>{m.creado_por || '—'}</td>}
                     </tr>
                   ))}
             </tbody>

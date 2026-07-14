@@ -14,10 +14,9 @@ import Modal from '../components/ui/Modal'
 import MoneyInput from '../components/ui/MoneyInput'
 import { useConfirm } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
-import * as XLSX from 'xlsx'
 import Receta from './Receta'
 import { CATALOGO_PARAMS, PARAM_UNIDAD, PRESENTACIONES } from '../lib/calidad'
-import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Printer, Settings, ShoppingCart, Tag, Trash2, Undo2, X, ChevronUp, ChevronDown, Plus } from 'lucide-react'
+import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Settings, ShoppingCart, Tag, Trash2, Undo2, X, ChevronUp, ChevronDown, Plus } from 'lucide-react'
 import { descargarFichaExcel } from '../lib/fichaExcel'
 import { getConfig } from '../lib/appConfig'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
@@ -26,7 +25,7 @@ const EMPTY_PROD = {
   nombre: '', tipo: 'galleta', bache: 70, baches_mes: 3,
   merma: 0, comision: 3, precio_mayor: 10000, precio_detal: 15000,
   presentacion: 'Unidad', activo: true, mp_id: '',
-  vida_util_valor: '', vida_util_unidad: 'meses',
+  vida_util_valor: '', vida_util_unidad: 'meses', descripcion: '',
 }
 const EMPTY_ING = { mpId: '', nombre: '', modo: 'lista', precio: '', presentacion: 1000, pct: '', cantidad: '', tipo: 'normal', base: '' }
 
@@ -58,8 +57,9 @@ export default function Costos() {
   const [adicionales, setAdicionales] = useState([])
   const [adicOpen, setAdicOpen] = useState(false)
 
-  // ---- Imagen del producto ----
-  const [imgData, setImgData] = useState('')
+  // ---- Imágenes del producto (galería): la PRIMERA es la principal (imagen_url) ----
+  const [imagenes, setImagenes] = useState([])   // array de URLs públicas
+  const [subiendoImg, setSubiendoImg] = useState(false)
 
   // ---- Parámetros de producción (para ancla + guardar) ----
   const [rendimiento, setRendimiento] = useState(62)
@@ -140,6 +140,48 @@ export default function Costos() {
     await supabase.from('product_cost_history').delete().eq('id', id)
     qc.invalidateQueries({ queryKey: ['product_cost_history'] })
   }
+
+  // ── Restaurar una versión del histórico (solo la RECETA: ingredientes, cantidades y costos) ──
+  const [restaurarH, setRestaurarH] = useState(null)   // registro del histórico elegido
+  // Convierte el snapshot guardado en filas de ingredientes del formulario. Los snapshots nuevos
+  // traen mpId/modo/tipo; los antiguos solo nombre/cantidad/precio → se empareja la MP por nombre.
+  const snapshotAFilas = (h) => (Array.isArray(h?.snapshot) ? h.snapshot : []).map(s => {
+    const mp = s.mpId
+      ? mps.find(m => String(m.id) === String(s.mpId))
+      : mps.find(m => (m.nombre || '').trim().toLowerCase() === (s.nombre || '').trim().toLowerCase())
+    return {
+      ...EMPTY_ING, _id: Date.now() + Math.random(),
+      mpId: mp ? String(mp.id) : '', nombre: s.nombre || '', modo: mp ? 'lista' : 'manual',
+      precio: s.precio != null ? String(s.precio) : '', precioOverride: !!s.precioOverride,
+      presentacion: s.presentacion || (mp ? presDeUnidad(mp.unidad) : 1000),
+      pct: s.pct || '', cantidad: s.cantidad || '', tipo: s.tipo || 'normal', base: s.base || '',
+    }
+  })
+  const aplicarVersionEnFormulario = (h) => {
+    setIngredientes(snapshotAFilas(h))
+    setRestaurarH(null)
+    toast('Versión cargada en el formulario — revisa los costos y guarda la ficha para confirmar el reemplazo')
+  }
+  const crearCopiaDeVersion = useMutation({
+    mutationFn: async (h) => {
+      const p = productos.find(x => x.id === editingId)
+      if (!p) throw new Error('Guarda primero la ficha para poder crear copias de sus versiones')
+      const { id, created_at, ...resto } = p
+      const ings = snapshotAFilas(h).map(({ _id, ...r }) => r)
+      const { error } = await supabase.from('products_costing').insert({
+        ...resto,
+        nombre: `${p.nombre} (versión ${fFecha(h.created_at)})`,
+        sku: null, alegra_item_id: null, stock_terminado: 0, activo: false,   // copia de referencia: no reparte CIF
+        ingredientes: JSON.stringify(ings),
+        fecha_creado: new Date().toISOString().split('T')[0],
+      })
+      if (error) throw error
+      return h
+    },
+    meta: { label: 'Creando copia de la versión…' },
+    onSuccess: (h) => { qc.invalidateQueries({ queryKey: ['products_costing'] }); setRestaurarH(null); toast(`Copia creada: "${productos.find(x => x.id === editingId)?.nombre} (versión ${fFecha(h.created_at)})" ✓ — quedó inactiva para no repartir CIF`) },
+    onError: (e) => toast(e.message, 'error'),
+  })
 
   // Parámetros de nómina (para calcular el costo de la nómina que entra al CIF)
   const { data: nominaParams } = useQuery({
@@ -326,7 +368,7 @@ export default function Costos() {
   // ---- Limpiar formulario ----
   const limpiarForm = () => {
     setFormProd(EMPTY_PROD); setIngredientes([]); setProcesos([]); setEmpaque([])
-    setImgData(''); setRendimiento(62); setDesperdicio(2); setPesoUnidad(1000)
+    setImagenes([]); setRendimiento(62); setDesperdicio(2); setPesoUnidad(1000)
     setPorciona(false); setPesoSubporcion(''); setModoIng('gramos'); setPesoBacheTotal('')
     setBrix(75); setBrixAplica(false); setParamsCalidad([]); setCamposExtra([])
     setCategorias([]); setAdicionales([]); setAdicOpen(false)
@@ -380,7 +422,7 @@ export default function Costos() {
     setProcesos([]); setEmpaque([])   // el usuario agrega MO y empaque
     setRendimiento(r.rendimiento || 62); setDesperdicio(r.desperdicio ?? 2); setPesoUnidad(r.peso_unidad || 1000)
     setBrix(r.brix || 75); setBrixAplica(!!r.brix_aplica)
-    setImgData(r.imagen_url || '')
+    setImagenes(r.imagen_url ? [r.imagen_url] : [])
     setFichaNombre(r.ficha_nombre || ''); setFichaPath(r.ficha_url || ''); setFichaFile(null)
     setTab('nuevo')
     toast(`Receta "${r.nombre}" cargada — agrega MO/empaque y guárdala como producto`)
@@ -393,7 +435,7 @@ export default function Costos() {
     if (!p) return
     setEditingId(p.id)
     setSelFuente(`prod-${p.id}`)
-    setFormProd({ nombre: p.nombre, tipo: p.tipo, bache: p.bache, baches_mes: p.baches_mes, merma: p.merma, comision: p.comision, precio_mayor: p.precio_mayor, precio_detal: p.precio_detal, presentacion: p.presentacion || 'Unidad', activo: p.activo !== false, mp_id: p.mp_id || '', vida_util_valor: p.vida_util_valor || '', vida_util_unidad: p.vida_util_unidad || 'meses' })
+    setFormProd({ nombre: p.nombre, tipo: p.tipo, bache: p.bache, baches_mes: p.baches_mes, merma: p.merma, comision: p.comision, precio_mayor: p.precio_mayor, precio_detal: p.precio_detal, presentacion: p.presentacion || 'Unidad', activo: p.activo !== false, mp_id: p.mp_id || '', vida_util_valor: p.vida_util_valor || '', vida_util_unidad: p.vida_util_unidad || 'meses', descripcion: p.descripcion || '' })
     setCamposExtra(parseJSON(p.campos_personalizados, []))
     setCategorias(parseJSON(p.categorias, []))
     const adic = parseJSON(p.costos_adicionales, [])
@@ -406,7 +448,7 @@ export default function Costos() {
     setPorciona(!!p.porciona); setPesoSubporcion(p.peso_subporcion || '')
     setBrix(p.brix || 75); setBrixAplica(!!p.brix_aplica)
     setParamsCalidad(parseJSON(p.parametros_calidad, []))
-    setImgData(p.imagen_url || '')
+    setImagenes((() => { try { const a = Array.isArray(p.imagenes) ? p.imagenes : JSON.parse(p.imagenes || '[]'); return a.length ? a : (p.imagen_url ? [p.imagen_url] : []) } catch { return p.imagen_url ? [p.imagen_url] : [] } })())
     setFichaNombre(p.ficha_nombre || ''); setFichaPath(p.ficha_url || ''); setFichaFile(null)
     setTab('nuevo')
     toast(`"${p.nombre}" cargado para edición`)
@@ -420,19 +462,8 @@ export default function Costos() {
       // MPs cuyo precio se replicará al inventario (y por ende a todas las recetas)
       const mpsCambiadas = new Set((actualizarMP ? cambiosMP : []).map(c => String(c.mpId)))
 
-      // Subir imagen si hay nueva
-      let imagenUrl = imgData
-      if (imgData && imgData.startsWith('data:') && !editingId) {
-        // Subir base64 como archivo
-        const res = await fetch(imgData); const blob = await res.blob()
-        const ext = blob.type.split('/')[1] || 'jpg'
-        const path = `productos/${Date.now()}.${ext}`
-        const { error: imgErr } = await supabase.storage.from('product-images').upload(path, blob, { upsert: true })
-        if (!imgErr) {
-          const { data: urlData } = supabase.storage.from('product-images').getPublicUrl(path)
-          imagenUrl = urlData.publicUrl
-        }
-      }
+      // Imágenes: ya se subieron al elegirlas; la PRIMERA de la galería es la principal.
+      const imagenUrl = imagenes[0] || ''
 
       // Subir ficha técnica
       let fichaPathFinal = fichaPath
@@ -470,6 +501,7 @@ export default function Costos() {
         precio_detal: parseFloat(formProd.precio_detal) || 0,
         vida_util_valor: parseFloat(formProd.vida_util_valor) || null,
         vida_util_unidad: formProd.vida_util_valor ? (formProd.vida_util_unidad || 'meses') : null,
+        descripcion: (formProd.descripcion || '').trim() || null,
         ingredientes: JSON.stringify(ingredientesConPct),
         procesos: JSON.stringify(procesos),
         empaque: JSON.stringify(empaque),
@@ -510,7 +542,11 @@ export default function Costos() {
                 const mp = mps.find(m => String(m.id) === String(i.mpId))
                 const unidad = mp?.unidad || ''
                 const costo = ((parseFloat(i.precio) || 0) / (parseFloat(i.presentacion) || 1000)) * (parseFloat(i.cantidad) || 0)
-                return { nombre: i.nombre, cantidad: Number(i.cantidad || 0).toFixed(1), precio: parseFloat(i.precio) || 0, unidad, costo: Math.round(costo) }
+                // Además de los campos de visualización, se guardan los técnicos (mpId, modo, tipo...)
+                // para poder RESTAURAR esta versión de la receta con fidelidad.
+                return { nombre: i.nombre, cantidad: Number(i.cantidad || 0).toFixed(1), precio: parseFloat(i.precio) || 0, unidad, costo: Math.round(costo),
+                  mpId: i.mpId || '', modo: i.modo || 'lista', presentacion: i.presentacion || 1000, precioOverride: !!i.precioOverride,
+                  tipo: i.tipo || 'normal', base: i.base || '', pct: i.pct || '' }
               }),
               costo_mp: r.totalMPBache || 0, cvu: r.cvu || 0, costo_total: r.costoTotalUnit || 0,
               creado_por: profile?.nombre || '',
@@ -528,9 +564,14 @@ export default function Costos() {
         const idFicha = editingId || datos._newId
         if (idFicha) await supabase.from('products_costing').update({
           categorias: categorias.filter(Boolean),
-          costos_adicionales: adicionales.filter(a => a.descripcion?.trim() || a.valor).map(a => ({ descripcion: a.descripcion || '', valor: parseFloat(a.valor) || 0, base: a.base || 'unidad' })),
+          costos_adicionales: adicionales.filter(a => a.descripcion?.trim() || a.valor).map(a => ({ descripcion: a.descripcion || '', valor: parseFloat(a.valor) || 0, base: a.base || 'unidad', ...(a.dep ? { dep: a.dep } : {}) })),
         }).eq('id', idFicha)
       } catch { /* columnas opcionales: no bloquea el guardado */ }
+      // Galería de imágenes — escritura aparte y tolerante (columna v92 opcional).
+      try {
+        const idFicha = editingId || datos._newId
+        if (idFicha) await supabase.from('products_costing').update({ imagenes }).eq('id', idFicha)
+      } catch { /* columna opcional: no bloquea el guardado */ }
 
       // Actualiza el costo/precio/nombre en el catálogo de PRODUCTO TERMINADO SOLO SI ya fue
       // agregado allí manualmente (botón "Agregar producto" en Inventario de Producto Terminado).
@@ -543,12 +584,15 @@ export default function Costos() {
           if (ya) {
             await supabase.from('finished_products').update({
               nombre: formProd.nombre.trim(),
+              descripcion: (formProd.descripcion || '').trim() || null,
               costo_unitario: Math.round(r.costoFinal || 0),
               precio_mayor: parseFloat(formProd.precio_mayor) || 0,
               precio_detal: parseFloat(formProd.precio_detal) || 0,
               imagen_url: imagenUrl || null,
               activo: formProd.activo !== false,
             }).eq('id', ya.id)
+            // Galería de imágenes (columna v92) — aparte y tolerante para no bloquear la sincronización
+            try { await supabase.from('finished_products').update({ imagenes }).eq('id', ya.id) } catch { /* opcional */ }
             // Si ese terminado está enlazado a Alegra, empuja costo/precio/nombre automáticamente
             if (ya.alegra_item_id) { try { await supabase.functions.invoke('alegra-push-stock', { body: { finished_id: ya.id } }) } catch (e) { console.warn('No se pudo sincronizar con Alegra:', e) } }
           }
@@ -773,6 +817,39 @@ export default function Costos() {
     setIngredientes(p => p.map(r => r._id === id ? { ...r, modo, mpId: '', nombre: modo==='lista'?'':r.nombre, precio: '' } : r))
   }
 
+  // ── Crear una MP en el inventario DESDE un ingrediente manual (sin salir de la ficha) ──
+  // Al guardar, el ingrediente pasa automáticamente a modo Lista enlazado a la MP nueva.
+  const [nuevaMpIng, setNuevaMpIng] = useState(null)   // { ingId, nombre, categoria, unidad, precio }
+  const categoriasMp = [...new Set(mps.map(m => m.categoria).filter(Boolean))].sort()
+  const abrirNuevaMpDesdeIng = (r) => {
+    setNuevaMpIng({ ingId: r._id, nombre: (r.nombre || '').trim(), categoria: '', unidad: 'Kg', precio: r.precio || '' })
+  }
+  const crearMpDesdeIng = useMutation({
+    mutationFn: async () => {
+      const n = (nuevaMpIng?.nombre || '').trim()
+      if (!n) throw new Error('Escribe el nombre de la materia prima')
+      if (mps.some(m => (m.nombre || '').trim().toLowerCase() === n.toLowerCase())) throw new Error('Ya existe una MP con ese nombre en el inventario — úsala desde el modo Lista')
+      const categoria = (nuevaMpIng.categoria || 'otro').trim() || 'otro'
+      try { await supabase.from('mp_categories').upsert({ nombre: categoria }, { onConflict: 'nombre' }) } catch { /* tabla opcional */ }
+      const { data, error } = await supabase.from('raw_materials').insert({
+        nombre: n, categoria, tipo: 'comprado', unidad: nuevaMpIng.unidad || 'Kg',
+        precio: parseFloat(nuevaMpIng.precio) || 0, stock: 0, stock_min: 0, vendible: false,
+      }).select('id, nombre, precio, unidad').single()
+      if (error) throw error
+      return data
+    },
+    onSuccess: (mp) => {
+      qc.invalidateQueries({ queryKey: ['raw_materials'] })
+      // Enlaza el ingrediente que originó la creación con la MP nueva (pasa a modo Lista)
+      setIngredientes(p => p.map(r => r._id === nuevaMpIng.ingId
+        ? { ...r, modo: 'lista', mpId: String(mp.id), nombre: mp.nombre, precio: String(mp.precio ?? ''), presentacion: presDeUnidad(mp.unidad), precioOverride: false }
+        : r))
+      setNuevaMpIng(null)
+      toast(`"${mp.nombre}" creada en el inventario y enlazada al ingrediente ✓`)
+    },
+    onError: (e) => toast(e.message, 'error'),
+  })
+
   // g/bache cambia → el % se deriva en render (no se almacena)
   const handleCantidadChange = (id, val) => updIng(id, 'cantidad', val)
 
@@ -803,13 +880,30 @@ export default function Costos() {
     } catch (err) { toast('Error: ' + err.message, 'error') }
   }
 
-  // Imagen del producto
-  const handleImg = (e) => {
-    const file = e.target.files[0]; if (!file) return
-    const reader = new FileReader()
-    reader.onload = ev => setImgData(ev.target.result)
-    reader.readAsDataURL(file)
+  // Imágenes del producto: sube al bucket de inmediato y agrega la URL a la galería.
+  // Acepta varias a la vez. Se guardan con la ficha al presionar Guardar.
+  const handleImg = async (e) => {
+    const files = [...(e.target.files || [])]
+    e.target.value = ''
+    if (!files.length) return
+    setSubiendoImg(true)
+    try {
+      const nuevas = []
+      for (const file of files) {
+        const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
+        const path = `productos/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`
+        const { error } = await supabase.storage.from('product-images').upload(path, file, { upsert: true })
+        if (error) throw error
+        const { data } = supabase.storage.from('product-images').getPublicUrl(path)
+        nuevas.push(data.publicUrl)
+      }
+      setImagenes(prev => [...prev, ...nuevas])
+      toast(`${nuevas.length} imagen(es) cargada(s) ✓ — recuerda guardar la ficha`)
+    } catch (err) { toast('No se pudo subir la imagen: ' + err.message, 'error') }
+    finally { setSubiendoImg(false) }
   }
+  const quitarImagen = (i) => setImagenes(prev => prev.filter((_, idx) => idx !== i))
+  const hacerPrincipal = (i) => setImagenes(prev => [prev[i], ...prev.filter((_, idx) => idx !== i)])
 
   // Resultado ancla (useMemo para calcular en tiempo real)
   const anclaResultado = useMemo(() => {
@@ -852,44 +946,6 @@ export default function Costos() {
     } catch (e) { toast('No se pudo generar el Excel: ' + e.message, 'error') }
   }
 
-  // Importa una ficha desde un Excel exportado (hoja "Datos"). Restaura lo importante (sin CIF, que es global).
-  const importarFichaExcel = async (file) => {
-    if (!file) return
-    try {
-      const buf = await file.arrayBuffer()
-      const wb = XLSX.read(buf, { type: 'array' })
-      const shName = wb.SheetNames.find(n => /^datos/i.test(n))
-      const sh = shName ? wb.Sheets[shName] : null
-      if (!sh) { toast('El archivo no tiene la hoja "Datos" para importar.', 'error'); return }
-      const rows = XLSX.utils.sheet_to_json(sh, { header: 1 })
-      const o = {}
-      for (const row of rows) { const k = row?.[0]; if (k && String(k).trim() !== 'campo') o[String(k).trim()] = row[1] }
-      if (!o.nombre) { toast('No se encontró el nombre del producto en el archivo.', 'error'); return }
-      const jstr = (v) => (typeof v === 'string' ? v : JSON.stringify(v || []))
-      const jarr = (v) => { try { return typeof v === 'string' ? JSON.parse(v) : (Array.isArray(v) ? v : []) } catch { return [] } }
-      const payload = {
-        nombre: String(o.nombre).trim(), tipo: o.tipo || 'galleta', sku: o.sku ? String(o.sku) : null,
-        rendimiento: parseFloat(o.rendimiento) || 62, desperdicio: parseFloat(o.desperdicio) || 2, peso_unidad: parseFloat(o.peso_unidad) || 1000,
-        precio_mayor: parseFloat(o.precio_mayor) || 0, precio_detal: parseFloat(o.precio_detal) || 0,
-        merma: parseFloat(o.merma) || 0, comision: parseFloat(o.comision) || 0, presentacion: o.presentacion || 'Unidad',
-        bache: parseFloat(o.bache) || 0, baches_mes: parseFloat(o.baches_mes) || 0,
-        ingredientes: jstr(o.ingredientes), procesos: jstr(o.procesos), empaque: jstr(o.empaque),
-        parametros_calidad: jarr(o.parametros_calidad), campos_personalizados: jarr(o.campos_personalizados),
-        activo: true,
-      }
-      const existe = productos.find(p => (p.nombre || '').toLowerCase() === payload.nombre.toLowerCase())
-      if (existe) {
-        const ok = await confirmar(`Ya existe una ficha "${payload.nombre}". ¿Sobrescribir sus datos (sin tocar el CIF global)?`)
-        if (!ok) return
-        const { error } = await supabase.from('products_costing').update(payload).eq('id', existe.id); if (error) throw error
-      } else {
-        const { error } = await supabase.from('products_costing').insert(payload); if (error) throw error
-      }
-      qc.invalidateQueries({ queryKey: ['products_costing'] })
-      toast(`Ficha "${payload.nombre}" importada ✓ (recuerda revisarla y guardar para recalcular costos)`)
-    } catch (e) { toast('No se pudo importar: ' + e.message, 'error') }
-  }
-
   // ---- RENDER ----
   return (
     <div>
@@ -897,12 +953,8 @@ export default function Costos() {
         <h1 className="page-title">{soloReceta ? 'Calcular Recetas Rápidas o de Prueba' : 'Calculadora de Costos'}</h1>
         {!soloReceta && (
           <div className="page-actions">
-            <button className="btn btn-secondary btn-sm" onClick={() => setTab('lista')}><Ico as={ClipboardList} size={14} />Productos</button>
+            <button className="btn btn-secondary btn-sm" title="Ir a Producto Terminado para agregar estos productos al catálogo vendible y enlazarlos con el software de facturación" onClick={() => navigate('/terminados')}><Ico as={Package} size={14} />Agregar / enlazar con facturación</button>
             {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalPapelera(true)}><Ico as={Trash2} size={14} />Papelera{papelera.length > 0 ? ` (${papelera.length})` : ''}</button>}
-            {esAdmin && <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer', margin: 0 }} title="Importar una ficha desde un Excel exportado (restaura lo importante, sin el CIF)">
-              <Ico as={FileSpreadsheet} size={14} />Importar ficha
-              <input type="file" accept=".xlsx,.xls" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; e.target.value = ''; importarFichaExcel(f) }} />
-            </label>}
             <button className="btn btn-dorado btn-sm" onClick={() => { limpiarForm(); setTab('nuevo') }}>+ Nueva Ficha</button>
           </div>
         )}
@@ -1070,23 +1122,35 @@ export default function Costos() {
           <details className="card" open>
             <summary className="card-title"><Ico as={FileText} size={14} />Información básica<span className="card-hint">{formProd.nombre || 'nombre, tipo, SKU, vida útil...'}</span></summary>
             <div className="card-acc-body">
-            <div className="grid-resp" style={{ gridTemplateColumns:'80px 1fr', gap:20, alignItems:'start' }}>
-              {/* Imagen */}
-              <div>
-                <label className="form-label">Imagen</label>
-                <div
-                  onClick={() => imgInputRef.current?.click()}
-                  style={{ width:72, height:72, border:'2px dashed var(--crema-oscuro)', borderRadius:'var(--radio)', overflow:'hidden', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'1.8rem', background: imgData ? 'transparent' : 'var(--crema)' }}
-                >
-                  {imgData ? <img src={imgData} style={{ width:'100%', height:'100%', objectFit:'cover' }} alt="producto" /> : '📷'}
-                  <input type="file" accept="image/*" ref={imgInputRef} onChange={handleImg} style={{ display:'none' }} />
+            {/* Galería de imágenes: la primera es la principal (miniatura del listado y del terminado) */}
+            <div className="form-group">
+              <label className="form-label">Imágenes <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(la primera es la principal — clic en ★ para cambiarla)</small></label>
+              <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'flex-start' }}>
+                {imagenes.map((url, i) => (
+                  <div key={url + i} style={{ position:'relative', width:72, height:72, borderRadius:'var(--radio)', overflow:'hidden', border: i === 0 ? '2px solid var(--dorado)' : '1px solid var(--crema-oscuro)' }}>
+                    <img src={url} alt={`imagen ${i + 1}`} style={{ width:'100%', height:'100%', objectFit:'cover' }} />
+                    <div style={{ position:'absolute', top:2, right:2, display:'flex', gap:2 }}>
+                      {i > 0 && <button type="button" title="Hacer principal" onClick={() => hacerPrincipal(i)} style={{ background:'rgba(0,0,0,0.55)', color:'#ffd54f', border:'none', borderRadius:4, cursor:'pointer', fontSize:'0.7rem', padding:'1px 4px' }}>★</button>}
+                      <button type="button" title="Quitar imagen" onClick={() => quitarImagen(i)} style={{ background:'rgba(0,0,0,0.55)', color:'#fff', border:'none', borderRadius:4, cursor:'pointer', fontSize:'0.7rem', padding:'1px 4px' }}>✕</button>
+                    </div>
+                    {i === 0 && <span style={{ position:'absolute', bottom:2, left:2, background:'var(--dorado)', color:'#2b1c04', fontSize:'0.58rem', fontWeight:700, borderRadius:3, padding:'0 4px' }}>PRINCIPAL</span>}
+                  </div>
+                ))}
+                <div onClick={() => !subiendoImg && imgInputRef.current?.click()}
+                  style={{ width:72, height:72, border:'2px dashed var(--crema-oscuro)', borderRadius:'var(--radio)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'1.6rem', background:'var(--crema)', color:'var(--texto-suave)' }}>
+                  {subiendoImg ? '…' : '＋'}
+                  <input type="file" accept="image/*" multiple ref={imgInputRef} onChange={handleImg} style={{ display:'none' }} />
                 </div>
-                {imgData && <button className="btn btn-xs btn-danger" style={{ marginTop:4 }} onClick={() => setImgData('')}><X size={13} aria-hidden="true" /></button>}
               </div>
+            </div>
 
-              {/* Campos */}
-              <div className="form-grid">
-                <div className="form-group"><label className="form-label">Nombre del Producto</label><input className="form-control" value={formProd.nombre} onChange={e => setFormProd(f=>({...f,nombre:e.target.value}))} placeholder="Nombre de mi producto" /></div>
+            {/* Campos */}
+            <div className="form-grid">
+                <div className="form-group" style={{ gridColumn:'1 / -1' }}><label className="form-label">Nombre del Producto</label><input className="form-control" value={formProd.nombre} onChange={e => setFormProd(f=>({...f,nombre:e.target.value}))} placeholder="Nombre de mi producto" /></div>
+                <div className="form-group" style={{ gridColumn:'1 / -1' }}>
+                  <label className="form-label">Descripción del producto <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(opcional)</small></label>
+                  <textarea className="form-control" rows={2} maxLength={500} value={formProd.descripcion || ''} onChange={e => setFormProd(f=>({...f,descripcion:e.target.value}))} />
+                </div>
                 <div className="form-group">
                   <label className="form-label">Estado del producto</label>
                   <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', padding:'8px 0' }}>
@@ -1124,31 +1188,22 @@ export default function Costos() {
                   <input className="form-control" list="dl-presentaciones" value={formProd.presentacion || ''} onChange={e => setFormProd(f=>({...f,presentacion:e.target.value}))} placeholder="Ej: Caja, Unidad, Kilo..." />
                   <datalist id="dl-presentaciones">{PRESENTACIONES.map(p => <option key={p} value={p} />)}</datalist>
                 </div>
-                <div className="form-group"><label className="form-label">{presLabel}s por bache</label><input type="number" className="form-control" value={formProd.bache} onChange={e => setFormProd(f=>({...f,bache:e.target.value}))} min={1} /></div>
-                <div className="form-group"><label className="form-label">Baches por mes</label><input type="number" className="form-control" value={formProd.baches_mes} onChange={e => setFormProd(f=>({...f,baches_mes:e.target.value}))} min={1} /></div>
-                <div className="form-group">
-                  <label className="form-label">Vida útil <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(opcional)</small></label>
-                  <div style={{ display:'flex', gap:6, alignItems:'center' }}>
-                    <input type="number" className="form-control" value={formProd.vida_util_valor} onChange={e => setFormProd(f=>({...f,vida_util_valor:e.target.value}))} min={0} placeholder="Ej: 6" style={{ flex:1 }} />
-                    <select className="form-control" value={formProd.vida_util_unidad} onChange={e => setFormProd(f=>({...f,vida_util_unidad:e.target.value}))} style={{ flex:1 }}>
-                      <option value="dias">Días</option>
-                      <option value="meses">Meses</option>
-                    </select>
-                  </div>
-                  <small style={{ color:'var(--texto-suave)', fontSize:'0.68rem' }}>Precarga el vencimiento al producir.</small>
-                </div>
-                <div className="form-group"><label className="form-label">% Comisión</label><input type="number" className="form-control" value={formProd.comision} onChange={e => setFormProd(f=>({...f,comision:e.target.value}))} min={0} max={100} step={0.5} /></div>
-              </div>
             </div>
 
             {/* Campos personalizados */}
             <div style={{ marginTop:14, paddingTop:12, borderTop:'1px solid var(--crema-oscuro)' }}>
-              <div style={{ display:'flex', alignItems:'center', marginBottom:8 }}>
-                <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem' }}><Ico as={Tag} size={14} />Campos personalizados <small style={{ fontWeight:400, color:'var(--texto-suave)' }}>— datos adicionales del producto</small></div>
-                <button type="button" className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={addCampoExtra}>+ Agregar campo</button>
+              <div style={{ display:'flex', alignItems:'center', marginBottom:8, gap:6, flexWrap:'wrap' }}>
+                <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem' }}><Ico as={Tag} size={14} />Datos adicionales del producto</div>
+                <div style={{ marginLeft:'auto', display:'flex', gap:6, flexWrap:'wrap' }}>
+                  {['Registro Invima', 'Código de barras'].map(n => (
+                    <button key={n} type="button" className="btn btn-sm btn-secondary" disabled={camposExtra.some(c => c.nombre === n)}
+                      onClick={() => setCamposExtra(c => [...c, { nombre: n, valor: '' }])}>+ {n}</button>
+                  ))}
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={addCampoExtra}>+ Otro</button>
+                </div>
               </div>
               {camposExtra.length === 0
-                ? <p style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}>Sin campos. Ej: Registro INVIMA, Vida útil, Lote, Código de barras...</p>
+                ? <p style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}>Sin datos adicionales. Usa los botones para agregar Registro Invima, Código de barras u otro campo.</p>
                 : camposExtra.map((c, i) => (
                   <div key={i} style={{ display:'grid', gridTemplateColumns:'1fr 1.4fr auto', gap:8, marginBottom:8, alignItems:'center' }}>
                     <input className="form-control" placeholder="Nombre del campo" value={c.nombre} onChange={e => updCampoExtra(i,'nombre',e.target.value)} />
@@ -1232,7 +1287,15 @@ export default function Costos() {
                           ))}
                         </div>
                         {modo === 'manual'
-                          ? <input key={`ing-man-${r._id}`} className="form-control" placeholder="Nombre ingrediente" value={r.nombre||''} onChange={e => updIng(r._id,'nombre',e.target.value)} style={{ borderColor: accent }} />
+                          ? <>
+                              <input key={`ing-man-${r._id}`} className="form-control" placeholder="Nombre ingrediente" value={r.nombre||''} onChange={e => updIng(r._id,'nombre',e.target.value)} style={{ borderColor: accent }} />
+                              {(r.nombre||'').trim() && (
+                                <button type="button" onClick={() => abrirNuevaMpDesdeIng(r)}
+                                  style={{ background:'none', border:'none', padding:0, textAlign:'left', cursor:'pointer', color:'var(--selva-claro)', fontSize:'0.7rem', textDecoration:'underline' }}>
+                                  + Agregar "{r.nombre.trim()}" al inventario de MP
+                                </button>
+                              )}
+                            </>
                           : <select key={`ing-lst-${r._id}`} className="form-control" value={r.mpId||''} onChange={e => handleSelectMP(r._id, e.target.value)} style={{ borderColor: accent }}>
                               <option value="">Seleccionar MP...</option>
                               {mpsIngredientes.map(m => <option key={m.id} value={m.id}>{m.nombre} — {fCOP(m.precio)}/{m.unidad}</option>)}
@@ -1321,6 +1384,19 @@ export default function Costos() {
             <summary className="card-title"><Ico as={Settings} size={14} />Parámetros de Producción <span className="card-hint">rendimiento, desperdicio, calidad</span></summary>
             <div className="card-acc-body">
             <div className="form-grid">
+              <div className="form-group"><label className="form-label">{presLabel}s por bache</label><input type="number" className="form-control" value={formProd.bache} onChange={e => setFormProd(f=>({...f,bache:e.target.value}))} min={1} /></div>
+              <div className="form-group"><label className="form-label">Baches por mes</label><input type="number" className="form-control" value={formProd.baches_mes} onChange={e => setFormProd(f=>({...f,baches_mes:e.target.value}))} min={1} /></div>
+              <div className="form-group">
+                <label className="form-label">Vida útil <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(opcional)</small></label>
+                <div style={{ display:'flex', gap:6, alignItems:'center' }}>
+                  <input type="number" className="form-control" value={formProd.vida_util_valor} onChange={e => setFormProd(f=>({...f,vida_util_valor:e.target.value}))} min={0} placeholder="Ej: 6" style={{ flex:1 }} />
+                  <select className="form-control" value={formProd.vida_util_unidad} onChange={e => setFormProd(f=>({...f,vida_util_unidad:e.target.value}))} style={{ flex:1 }}>
+                    <option value="dias">Días</option>
+                    <option value="meses">Meses</option>
+                  </select>
+                </div>
+                <small style={{ color:'var(--texto-suave)', fontSize:'0.68rem' }}>Precarga el vencimiento al producir.</small>
+              </div>
               <div className="form-group"><label className="form-label">Rendimiento esperado (%)</label><input type="number" className="form-control" value={rendimiento} onChange={e => setRendimiento(e.target.value)} min={1} max={100} step={0.1} /><small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>% de la mezcla que se convierte en producto (ej. por evaporación/cocción).</small></div>
               <div className="form-group"><label className="form-label">% Desperdicio</label><input type="number" className="form-control" value={desperdicio} onChange={e => setDesperdicio(e.target.value)} min={0} max={50} step={0.1} /><small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Desperdicio <strong>adicional</strong> que se pierde <strong>después</strong> del rendimiento (no es la diferencia de 100 − rendimiento; se descuenta sobre lo ya rendido).</small></div>
               <div className="form-group"><label className="form-label">Peso por {presLabel} (g)</label><input type="number" className="form-control" value={pesoUnidad} onChange={e => setPesoUnidad(e.target.value)} min={1} /></div>
@@ -1487,16 +1563,50 @@ export default function Costos() {
             {adicOpen && (
               <div>
                 <small style={{ color:'var(--texto-suave)', display:'block', marginBottom:8 }}>Costos extra personalizados (depreciación de máquinas, arriendo específico, etc.). Suman al <strong>costo final por unidad</strong> según su base.</small>
-                {adicionales.map((a, i) => (
+                {adicionales.map((a, i) => {
+                  const updA = (campos) => setAdicionales(arr => arr.map((x,idx) => idx===i ? { ...x, ...campos } : x))
+                  if (a.dep) {
+                    // Modo depreciación por horas: valor de la máquina ÷ horas de vida útil × horas por bache.
+                    // Cada cambio en los 3 parámetros recalcula `valor` (base bache), que es lo que usa el costeo.
+                    const vm = parseFloat(a.dep.valorMaquina) || 0, hv = parseFloat(a.dep.horasVida) || 0, hb = parseFloat(a.dep.horasBache) || 0
+                    const costoHora = hv > 0 ? vm / hv : 0
+                    const valorBache = costoHora * hb
+                    const updDep = (campo, val) => {
+                      const dep = { ...a.dep, [campo]: val }
+                      const vm2 = parseFloat(dep.valorMaquina) || 0, hv2 = parseFloat(dep.horasVida) || 0, hb2 = parseFloat(dep.horasBache) || 0
+                      updA({ dep, valor: hv2 > 0 ? (vm2 / hv2) * hb2 : 0, base: 'bache' })
+                    }
+                    return (
+                      <div key={a._id || i} style={{ border:'1px solid var(--crema-oscuro)', borderRadius:'var(--radio)', padding:'8px 10px', marginBottom:6 }}>
+                        <div style={{ display:'grid', gridTemplateColumns:'1.4fr 0.9fr 0.7fr 0.7fr auto', gap:6, alignItems:'end' }}>
+                          <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Máquina / equipo</label><input className="form-control" value={a.descripcion || ''} onChange={e => updA({ descripcion: e.target.value })} placeholder="Ej. Depreciación horno" /></div>
+                          <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Valor máquina ($)</label><input type="number" className="form-control" value={a.dep.valorMaquina ?? ''} onChange={e => updDep('valorMaquina', e.target.value)} min={0} step="any" placeholder="4000000" /></div>
+                          <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Vida útil (horas)</label><input type="number" className="form-control" value={a.dep.horasVida ?? ''} onChange={e => updDep('horasVida', e.target.value)} min={0} step="any" placeholder="10000" /></div>
+                          <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Horas por bache</label><input type="number" className="form-control" value={a.dep.horasBache ?? ''} onChange={e => updDep('horasBache', e.target.value)} min={0} step="any" placeholder="2" /></div>
+                          <button type="button" className="btn btn-xs btn-danger" onClick={() => setAdicionales(arr => arr.filter((_,idx) => idx!==i))}>✕</button>
+                        </div>
+                        <small style={{ display:'block', marginTop:4, color: valorBache > 0 ? 'var(--selva)' : 'var(--texto-suave)', fontSize:'0.72rem' }}>
+                          {valorBache > 0
+                            ? <>Costo/hora: <strong>{fCOP(costoHora)}</strong> × {hb} h = <strong>{fCOP(valorBache)}</strong> por bache (se divide entre las unidades del bache).</>
+                            : 'Llena los tres valores para calcular la depreciación por bache.'}
+                        </small>
+                      </div>
+                    )
+                  }
+                  return (
                   <div key={a._id || i} style={{ display:'grid', gridTemplateColumns:'1.4fr 0.9fr 0.9fr auto', gap:6, alignItems:'end', marginBottom:6 }}>
-                    <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Descripción</label><input className="form-control" value={a.descripcion || ''} onChange={e => setAdicionales(arr => arr.map((x,idx) => idx===i ? { ...x, descripcion:e.target.value } : x))} placeholder="Ej. Depreciación horno" /></div>
-                    <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Valor (COP)</label><input type="number" className="form-control" value={a.valor ?? ''} onChange={e => setAdicionales(arr => arr.map((x,idx) => idx===i ? { ...x, valor:e.target.value } : x))} min={0} step="any" /></div>
-                    <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Base</label><select className="form-control" value={a.base || 'unidad'} onChange={e => setAdicionales(arr => arr.map((x,idx) => idx===i ? { ...x, base:e.target.value } : x))}><option value="unidad">por unidad</option><option value="bache">por bache</option><option value="mes">por mes</option></select></div>
+                    <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Descripción</label><input className="form-control" value={a.descripcion || ''} onChange={e => updA({ descripcion: e.target.value })} placeholder="Ej. Depreciación horno" /></div>
+                    <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Valor (COP)</label><input type="number" className="form-control" value={a.valor ?? ''} onChange={e => updA({ valor: e.target.value })} min={0} step="any" /></div>
+                    <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Base</label><select className="form-control" value={a.base || 'unidad'} onChange={e => updA({ base: e.target.value })}><option value="unidad">por unidad</option><option value="bache">por bache</option><option value="mes">por mes</option></select></div>
                     <button type="button" className="btn btn-xs btn-danger" onClick={() => setAdicionales(arr => arr.filter((_,idx) => idx!==i))}>✕</button>
                   </div>
-                ))}
-                <button type="button" className="btn btn-sm btn-secondary" onClick={() => setAdicionales(arr => [...arr, { _id: Date.now()+Math.random(), descripcion:'', valor:'', base:'unidad' }])}><Ico as={Plus} size={13} /> Agregar costo</button>
-                <small style={{ display:'block', marginTop:8, color:'var(--texto-suave)', fontSize:'0.72rem' }}>Base: <strong>por unidad</strong> suma directo; <strong>por bache</strong> se divide entre las unidades del bache; <strong>por mes</strong> se divide entre las unidades del mes.</small>
+                  )
+                })}
+                <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => setAdicionales(arr => [...arr, { _id: Date.now()+Math.random(), descripcion:'', valor:'', base:'unidad' }])}><Ico as={Plus} size={13} /> Agregar costo</button>
+                  <button type="button" className="btn btn-sm btn-dorado" title="Calcula la depreciación según las horas que la máquina trabaja en cada bache" onClick={() => setAdicionales(arr => [...arr, { _id: Date.now()+Math.random(), descripcion:'', valor:'', base:'bache', dep: { valorMaquina:'', horasVida:'', horasBache:'' } }])}><Ico as={Clock} size={13} /> Depreciación por horas</button>
+                </div>
+                <small style={{ display:'block', marginTop:8, color:'var(--texto-suave)', fontSize:'0.72rem' }}>Base: <strong>por unidad</strong> suma directo; <strong>por bache</strong> se divide entre las unidades del bache; <strong>por mes</strong> se divide entre las unidades del mes. La <strong>depreciación por horas</strong> calcula sola el valor por bache: (valor máquina ÷ horas de vida útil) × horas que usa este producto por bache.</small>
               </div>
             )}
           </div>
@@ -1524,7 +1634,10 @@ export default function Costos() {
           <div className="grid-resp" style={{ gridTemplateColumns:'1fr 1fr', gap:20 }}>
             <div className="card">
               <div className="card-title"><Ico as={DollarSign} size={14} />Precios de Venta</div>
-              <div className="form-group"><label className="form-label">Precio de venta por mayor <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(tu precio de lista)</small></label><MoneyInput value={formProd.precio_mayor} onChange={v => setFormProd(f=>({...f,precio_mayor:v}))} /></div>
+              <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:10 }}>
+                <div className="form-group"><label className="form-label">Precio de venta por mayor <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(tu precio de lista)</small></label><MoneyInput value={formProd.precio_mayor} onChange={v => setFormProd(f=>({...f,precio_mayor:v}))} /></div>
+                <div className="form-group"><label className="form-label">% Comisión <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(vendedor)</small></label><input type="number" className="form-control" value={formProd.comision} onChange={e => setFormProd(f=>({...f,comision:e.target.value}))} min={0} max={100} step={0.5} /></div>
+              </div>
               {calcResult && (parseFloat(formProd.comision) || 0) > 0 && (
                 <div style={{ background:'rgba(124,179,66,0.08)', border:'1px solid rgba(124,179,66,0.25)', borderRadius:'var(--radio)', padding:'10px 12px', marginBottom:14 }}>
                   <div style={{ fontSize:'0.76rem', color:'var(--texto-suave)' }}>💼 Precio especial para el distribuidor <small>(precio por mayor − {formProd.comision}% de comisión)</small></div>
@@ -1647,7 +1760,10 @@ export default function Costos() {
                               })}
                               {(!Array.isArray(h.snapshot) || h.snapshot.length === 0) && '—'}
                             </td>
-                            <td><button className="btn btn-xs btn-danger" title="Eliminar este registro del histórico"
+                            <td style={{ whiteSpace:'nowrap' }}>
+                              <button className="btn btn-xs btn-dorado" title="Restaurar esta versión de la receta" style={{ marginRight:4 }}
+                                onClick={() => setRestaurarH(h)}><Ico as={Undo2} size={13} />Restaurar</button>
+                              <button className="btn btn-xs btn-danger" title="Eliminar este registro del histórico"
                               onClick={() => confirmar('¿Eliminar este registro del histórico?').then(ok => ok && borrarHistorial(h.id))}><X size={13} aria-hidden="true" /></button></td>
                           </tr>
                         ))}
@@ -1659,6 +1775,68 @@ export default function Costos() {
           )}
 
           {/* ── Modal: Gestionar tipos de producto (admin) ── */}
+          {/* ── Modal: restaurar versión del histórico de la receta ── */}
+          <Modal open={!!restaurarH} onClose={() => setRestaurarH(null)} guard={false}
+            title={`↩ Restaurar versión del ${restaurarH?.created_at ? new Date(restaurarH.created_at).toLocaleString('es-CO') : ''}`}
+            footer={<button className="btn btn-secondary" onClick={() => setRestaurarH(null)}>Cancelar</button>}>
+            {restaurarH && <>
+              <div className="alert alert-warning" style={{ fontSize:'0.84rem' }}>
+                Esta acción recupera la <strong>receta</strong> de esa fecha (ingredientes, cantidades y costos). Los procesos, empaque, precios y demás datos de la ficha no cambian.
+              </div>
+              <div className="table-wrap" style={{ maxHeight:180, overflowY:'auto', marginBottom:12 }}>
+                <table style={{ fontSize:'0.82rem' }}>
+                  <thead><tr><th>Ingrediente</th><th className="td-number">Cantidad</th><th className="td-number">Precio</th></tr></thead>
+                  <tbody>
+                    {(Array.isArray(restaurarH.snapshot) ? restaurarH.snapshot : []).map((s, k) => (
+                      <tr key={k}><td>{s.nombre}</td><td className="td-number">{s.cantidad} g</td><td className="td-number">{fCOP(s.precio || 0)}/{s.unidad || 'Kg'}</td></tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div style={{ display:'flex', flexDirection:'column', gap:8 }}>
+                <button className="btn btn-primary" onClick={() => aplicarVersionEnFormulario(restaurarH)}>
+                  ⚠ Reemplazar la receta actual
+                  <small style={{ display:'block', fontWeight:400, fontSize:'0.72rem' }}>Carga esta versión en el formulario (reemplaza los ingredientes actuales). No se guarda hasta que guardes la ficha.</small>
+                </button>
+                <button className="btn btn-dorado" disabled={crearCopiaDeVersion.isPending} onClick={() => crearCopiaDeVersion.mutate(restaurarH)}>
+                  ⧉ {crearCopiaDeVersion.isPending ? 'Creando copia...' : 'Crear como copia'}
+                  <small style={{ display:'block', fontWeight:400, fontSize:'0.72rem' }}>Crea una ficha nueva e inactiva con esta versión de la receta, sin tocar la ficha actual.</small>
+                </button>
+              </div>
+            </>}
+          </Modal>
+
+          {/* ── Modal: crear MP en el inventario desde un ingrediente manual ── */}
+          <Modal open={!!nuevaMpIng} onClose={() => setNuevaMpIng(null)} guard={false} title="Agregar al inventario de MP"
+            footer={<>
+              <button className="btn btn-secondary" onClick={() => setNuevaMpIng(null)}>Cancelar</button>
+              <button className="btn btn-primary" disabled={crearMpDesdeIng.isPending} onClick={() => crearMpDesdeIng.mutate()}>{crearMpDesdeIng.isPending ? 'Creando...' : 'Crear y enlazar'}</button>
+            </>}>
+            {nuevaMpIng && <>
+              <div className="alert alert-info" style={{ fontSize:'0.82rem' }}>
+                Se creará la materia prima en el Inventario MP (con stock 0) y este ingrediente quedará enlazado a ella automáticamente. Las entradas de stock y demás detalles se manejan luego en Inventario MP.
+              </div>
+              <div className="form-group"><label className="form-label">Nombre</label><input className="form-control" value={nuevaMpIng.nombre} onChange={e => setNuevaMpIng(v => ({ ...v, nombre: e.target.value }))} /></div>
+              <div className="form-group">
+                <label className="form-label">Categoría</label>
+                <input className="form-control" list="dl-cat-mp-ing" value={nuevaMpIng.categoria} onChange={e => setNuevaMpIng(v => ({ ...v, categoria: e.target.value }))} placeholder="Elige o escribe una (ej: pulpa)" />
+                <datalist id="dl-cat-mp-ing">{categoriasMp.map(c => <option key={c} value={c} />)}</datalist>
+              </div>
+              <div className="form-grid">
+                <div className="form-group">
+                  <label className="form-label">Unidad</label>
+                  <select className="form-control" value={nuevaMpIng.unidad} onChange={e => setNuevaMpIng(v => ({ ...v, unidad: e.target.value }))}>
+                    {['Kg','Gramo','Litro','Mililitro','Unidad'].map(u => <option key={u} value={u}>{u}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Precio por {nuevaMpIng.unidad}</label>
+                  <MoneyInput value={nuevaMpIng.precio} onChange={p => setNuevaMpIng(v => ({ ...v, precio: p }))} />
+                </div>
+              </div>
+            </>}
+          </Modal>
+
           <Modal open={tiposModal} onClose={() => setTiposModal(false)} title="Tipos de Producto"
             footer={<button className="btn btn-secondary" onClick={() => setTiposModal(false)}>Cerrar</button>}
           >
@@ -1896,7 +2074,6 @@ export default function Costos() {
           <>
             <button className="btn btn-secondary" onClick={() => setVerModal(false)}>Cerrar</button>
             <button className="btn btn-primary" onClick={() => { cargarProducto(verProd?.id); setVerModal(false) }}><Ico as={Pencil} size={14} />Editar esta ficha</button>
-            <button className="btn btn-dorado" onClick={() => window.print()}><Ico as={Printer} size={14} />Imprimir</button>
           </>
         }
       >
@@ -1905,24 +2082,91 @@ export default function Costos() {
           const unidsMes = verProd.bache * verProd.baches_mes * (1 - (verProd.merma||0)/100)
           const pctCIF = totalUnidsPortafolio > 0 ? unidsMes/totalUnidsPortafolio*100 : 0
           const peq = peqMultiproducto.find(x => x.nombre === verProd.nombre)
+          const vIngs = parseJSON(verProd.ingredientes, [])
+          const vProcs = parseJSON(verProd.procesos, [])
+          const vEmps = parseJSON(verProd.empaque, [])
+          const vCampos = parseJSON(verProd.campos_personalizados, [])
+          const vCalidad = parseJSON(verProd.parametros_calidad, [])
+          const vAdic = parseJSON(verProd.costos_adicionales, [])
+          const totalG = vIngs.reduce((s, i) => s + (parseFloat(i.cantidad) || 0), 0)
           return (
           <>
-            <div className="grid-resp" style={{ gridTemplateColumns:'1fr 1fr', gap:16, marginBottom:16 }}>
+            <div className="grid-resp" style={{ gridTemplateColumns:'1fr 1fr', gap:'8px 16px', marginBottom:16 }}>
               {verProd.imagen_url && <div style={{ gridColumn:'span 2' }}><img src={verProd.imagen_url} alt={verProd.nombre} style={{ height:120, objectFit:'contain', borderRadius:4 }} /></div>}
               <div><strong>Tipo:</strong> {verProd.tipo}</div>
+              <div><strong>Presentación:</strong> {verProd.presentacion || 'Unidad'}</div>
               <div><strong>Unidades/bache:</strong> {verProd.bache}</div>
               <div><strong>Baches/mes:</strong> {verProd.baches_mes}</div>
               <div><strong>Unidades/mes:</strong> {fNum(unidsMes)}</div>
+              <div><strong>Vida útil:</strong> {verProd.vida_util_valor ? `${verProd.vida_util_valor} ${verProd.vida_util_unidad === 'dias' ? 'día(s)' : 'mes(es)'}` : '—'}</div>
+              <div><strong>Rendimiento:</strong> {verProd.rendimiento || 62}%</div>
+              <div><strong>Desperdicio:</strong> {verProd.desperdicio ?? 2}%</div>
+              <div><strong>Peso/unidad:</strong> {fNum(verProd.peso_unidad || 0)} g</div>
+              <div><strong>% Comisión:</strong> {verProd.comision || 0}%</div>
+              {vCampos.map((c, k) => <div key={k}><strong>{c.nombre}:</strong> {c.valor || '—'}</div>)}
             </div>
+
+            {vIngs.length > 0 && <>
+              <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', marginBottom:6 }}>🌿 Receta ({vIngs.length} ingredientes · {fNum(totalG)} g/bache)</div>
+              <div className="table-wrap" style={{ maxHeight:200, overflowY:'auto', marginBottom:14 }}>
+                <table style={{ fontSize:'0.82rem' }}>
+                  <thead><tr><th>Ingrediente</th><th className="td-number">g/bache</th><th className="td-number">% receta</th><th className="td-number">$/presentación</th></tr></thead>
+                  <tbody>
+                    {vIngs.map((i, k) => (
+                      <tr key={k}>
+                        <td>{i.nombre}{i.tipo === 'relativo' ? <small style={{ color:'var(--tierra)' }}> (relativo)</small> : ''}</td>
+                        <td className="td-number">{fNum(parseFloat(i.cantidad) || 0)}</td>
+                        <td className="td-number">{totalG > 0 ? ((parseFloat(i.cantidad) || 0) / totalG * 100).toFixed(1) + '%' : '—'}</td>
+                        <td className="td-number">{fCOP(parseFloat(i.precio) || 0)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>}
+
+            {vProcs.length > 0 && <>
+              <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', marginBottom:6 }}>⏱ Procesos (mano de obra)</div>
+              <div style={{ fontSize:'0.84rem', marginBottom:14 }}>
+                {vProcs.map((p, k) => <span key={k}>{k > 0 && ' · '}{p.nombre || 'Proceso'}: <strong>{fNum(parseFloat(p.minutos) || 0)} min</strong></span>)}
+                {' '}<small style={{ color:'var(--texto-suave)' }}>(total {fNum(vProcs.reduce((s, p) => s + (parseFloat(p.minutos) || 0), 0))} min/bache)</small>
+              </div>
+            </>}
+
+            {vEmps.length > 0 && <>
+              <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', marginBottom:6 }}>📦 Empaque</div>
+              <div style={{ fontSize:'0.84rem', marginBottom:14 }}>
+                {vEmps.map((e, k) => <span key={k}>{k > 0 && ' · '}{e.nombre || 'Ítem'}: {fNum(parseFloat(e.cantidad) || 0)} × {fCOP((parseFloat(e.precio) || 0) / (parseFloat(e.presentacion) || 1))}</span>)}
+              </div>
+            </>}
+
+            {vCalidad.length > 0 && <>
+              <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', marginBottom:6 }}>🧪 Parámetros de calidad</div>
+              <div style={{ fontSize:'0.84rem', marginBottom:14 }}>
+                {vCalidad.map((p, k) => <span key={k}>{k > 0 && ' · '}{p.nombre}: <strong>{p.valor}{p.unidad ? ` ${p.unidad}` : ''}</strong></span>)}
+              </div>
+            </>}
+
+            {vAdic.length > 0 && <>
+              <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', marginBottom:6 }}>💰 Costos adicionales</div>
+              <div style={{ fontSize:'0.84rem', marginBottom:14 }}>
+                {vAdic.map((a, k) => <span key={k}>{k > 0 && ' · '}{a.descripcion || 'Costo'}: <strong>{fCOP(parseFloat(a.valor) || 0)}</strong> <small style={{ color:'var(--texto-suave)' }}>por {a.base || 'unidad'}</small></span>)}
+              </div>
+            </>}
+
+            <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', marginBottom:6 }}>📊 Costos y márgenes (en vivo)</div>
             <table>
               <thead><tr><th>Concepto</th><th className="td-number">Valor (en vivo)</th></tr></thead>
               <tbody>
                 <tr><td>Costo MP + empaque por unidad</td><td className="td-number">{fCOP(rc.cvu)}</td></tr>
                 <tr><td>(+) Mano de obra/overhead por unidad <small style={{ color:'var(--texto-suave)' }}>({rc.totalMinutos} min × {fCOP(rc.costoMin)}/min)</small></td><td className="td-number text-dorado">{fCOP(rc.moUnit)}</td></tr>
+                {(rc.adicUnit || 0) > 0 && <tr><td>(+) Costos adicionales por unidad</td><td className="td-number text-dorado">{fCOP(rc.adicUnit)}</td></tr>}
                 <tr style={{ fontWeight:700, borderTop:'2px solid var(--crema-oscuro)' }}><td>= COSTO TOTAL por unidad</td><td className="td-number">{fCOP(rc.costoTotalUnit)}</td></tr>
                 <tr style={{ color:'var(--selva-claro)' }}><td>Precio Mayor → Ganancia/u</td><td className="td-number">{fCOP(verProd.precio_mayor)} → {fCOP(rc.utilMayor)}</td></tr>
+                {(rc.comUnit || 0) > 0 && <tr style={{ color:'var(--tierra)' }}><td>(−) Comisión distribuidor → Ganancia neta/u</td><td className="td-number">{fCOP(rc.comUnit)} → {fCOP(rc.utilMayorNeto)}</td></tr>}
                 <tr style={{ color:'var(--selva)' }}><td>Precio Detal → Ganancia/u</td><td className="td-number">{fCOP(verProd.precio_detal)} → {fCOP(rc.utilDetal)}</td></tr>
                 <tr style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}><td>Punto de equilibrio (calculado)</td><td className="td-number">{peq && peq.pe>0 ? fNum(peq.pe)+' unid/mes' : '—'}</td></tr>
+                <tr style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}><td>% participación CIF (unid/mes del portafolio)</td><td className="td-number">{pctCIF > 0 ? pctCIF.toFixed(1) + '%' : '—'}</td></tr>
               </tbody>
             </table>
           </>

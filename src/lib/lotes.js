@@ -1,12 +1,13 @@
 import { supabase } from './supabase'
 
 // Crea un lote a partir de una ENTRADA de materia prima.
-export async function crearLoteEntrada({ mp_id, lote, vencimiento, fecha, cantidad, costo_unitario, creado_por }) {
+export async function crearLoteEntrada({ mp_id, lote, vencimiento, fecha, cantidad, costo_unitario, creado_por, proveedor }) {
   await supabase.from('raw_material_lots').insert({
     mp_id, lote: lote || '', vencimiento: vencimiento || null,
     fecha_entrada: fecha || new Date().toISOString().split('T')[0],
     cantidad_inicial: cantidad, cantidad_actual: cantidad,
     costo_unitario: costo_unitario || 0, creado_por: creado_por || '',
+    ...(proveedor ? { proveedor } : {}),
   })
 }
 
@@ -31,13 +32,19 @@ export async function consumirPEPS({ mp_id, cantidad }) {
 
 // RESERVA `cantidad` aplicando PEPS: mueve de "disponible" (cantidad_actual) a "reservado"
 // (cantidad_reservada). Se usa cuando una orden inicia producción. Devuelve los lotes tomados.
+// Versión ATÓMICA en SQL (migración v90): toda la reserva ocurre en una transacción en la BD
+// (con bloqueo de filas), así no queda a medias si se cae la red / se cierra la pestaña y no
+// hay carreras entre dos usuarios reservando a la vez. Si la función SQL aún no está desplegada,
+// cae al método anterior (escrituras desde el cliente) para no romper la producción.
 export async function reservarPEPS({ mp_id, cantidad, preferLoteId = null }) {
+  const { data, error } = await supabase.rpc('reservar_peps_lotes', { p_mp_id: mp_id, p_cantidad: cantidad, p_prefer_lote: preferLoteId || null })
+  if (!error && data) return { reservados: data.reservados || [], faltante: Number(data.faltante) || 0 }
+  // Fallback (migración v90 sin correr): método anterior, no atómico
   const { data: raw } = await supabase.from('raw_material_lots').select('*')
     .eq('mp_id', mp_id).gt('cantidad_actual', 0)
     .order('vencimiento', { ascending: true, nullsFirst: false })
     .order('fecha_entrada', { ascending: true })
   let lotes = raw || []
-  // Si el usuario eligió un lote específico, se consume primero (luego PEPS para el resto si falta)
   if (preferLoteId) {
     const pref = lotes.filter(l => String(l.id) === String(preferLoteId))
     const resto = lotes.filter(l => String(l.id) !== String(preferLoteId))
@@ -60,8 +67,12 @@ export async function reservarPEPS({ mp_id, cantidad, preferLoteId = null }) {
 
 // LIBERA reservas (orden eliminada/no ejecutada): vuelve de "reservado" a "disponible".
 export async function liberarReservaLotes(reservas = []) {
-  for (const r of reservas) {
-    if (!r.id) continue
+  const conId = (reservas || []).filter(r => r.id)
+  if (!conId.length) return
+  const { error } = await supabase.rpc('liberar_reserva_lotes', { p_reservas: conId.map(r => ({ id: r.id, cantidad: r.cantidad })) })
+  if (!error) return
+  // Fallback (migración v90 sin correr)
+  for (const r of conId) {
     const { data: l } = await supabase.from('raw_material_lots').select('cantidad_actual, cantidad_reservada').eq('id', r.id).single()
     if (!l) continue
     await supabase.from('raw_material_lots').update({
@@ -73,8 +84,12 @@ export async function liberarReservaLotes(reservas = []) {
 
 // CONSUME definitivo (orden cerrada/enviada): quita de "reservado" (ya salió de disponible al reservar).
 export async function consumirReservaLotes(reservas = []) {
-  for (const r of reservas) {
-    if (!r.id) continue
+  const conId = (reservas || []).filter(r => r.id)
+  if (!conId.length) return
+  const { error } = await supabase.rpc('consumir_reserva_lotes', { p_reservas: conId.map(r => ({ id: r.id, cantidad: r.cantidad })) })
+  if (!error) return
+  // Fallback (migración v90 sin correr)
+  for (const r of conId) {
     const { data: l } = await supabase.from('raw_material_lots').select('cantidad_reservada').eq('id', r.id).single()
     if (!l) continue
     await supabase.from('raw_material_lots').update({

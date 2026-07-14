@@ -758,7 +758,7 @@ export default function Produccion() {
             {analisisComb.length === 0
               ? <p className="empty-table">Sin datos</p>
               : analisisComb.map(row => (
-                <AccordionItem key={row.nombre} titulo={row.nombre} sub={`Total: ${fNum(row.total)}`}>
+                <AccordionItem key={row.nombre} titulo={row.nombre} sub={<>{(() => { const nf = nombreFinal({ producto: row.nombre }); return nf !== row.nombre ? `→ ${nf} · ` : '' })()}Total: {fNum(row.total)}</>}>
                   {row.meses.every(v => !v)
                     ? <p style={{ color: 'var(--texto-suave)', fontSize: '0.85rem' }}>Sin producción registrada</p>
                     : row.meses.map((v, i) => v > 0 && <Fila key={i} et={MESES[i + 1]}>{fNum(v)}</Fila>)}
@@ -774,13 +774,16 @@ export default function Produccion() {
               <tbody>
                 {analisisComb.length === 0
                   ? <tr><td colSpan={14} className="empty-table">Sin producción aprobada en {anioAnalisis}</td></tr>
-                  : analisisComb.map(row => (
+                  : analisisComb.map(row => {
+                  const nomFinal = nombreFinal({ producto: row.nombre })
+                  return (
                   <tr key={row.nombre}>
-                    <td><strong>{row.nombre}</strong></td>
+                    <td><strong>{row.nombre}</strong>{nomFinal !== row.nombre && <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>→ {nomFinal}</div>}</td>
                     {row.meses.map((v, i) => <td key={i} className="td-number">{v > 0 ? fNum(v) : '—'}</td>)}
                     <td className="td-number"><strong>{fNum(row.total)}</strong></td>
                   </tr>
-                ))}
+                  )
+                })}
                 {analisisComb.length > 0 && (
                   <tr style={{ background: 'rgba(45,90,61,0.06)', fontWeight: 700 }}>
                     <td><strong>Total mes</strong></td>

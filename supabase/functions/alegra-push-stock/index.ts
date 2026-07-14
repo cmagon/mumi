@@ -38,10 +38,11 @@ async function getCreds(supabase: any) {
 // 1) Actualiza nombre, precios (por lista) y costo del ítem (PUT /items). El stock NO se setea aquí.
 async function pushDatos(authHeader: string, itemId: string, costo?: number, nombre?: string,
   precioMayor?: number, precioDetal?: number, listaMayor?: string, listaDetal?: string,
-  unidad?: string, unspsc?: string, catId?: string, sku?: string) {
+  unidad?: string, unspsc?: string, catId?: string, sku?: string, descripcion?: string) {
   const body: Record<string, unknown> = {}
   if (nombre && nombre.trim()) body.name = nombre.trim()
   if (sku && String(sku).trim()) body.reference = String(sku).trim()   // SKU / referencia
+  if (descripcion && String(descripcion).trim()) body.description = String(descripcion).trim().slice(0, 500)
   // Precios: lee la estructura actual del ítem y actualiza el precio de cada lista mapeada,
   // preservando las demás listas (más robusto que enviar un arreglo nuevo).
   const hayListas = (listaMayor && (precioMayor || 0) > 0) || (listaDetal && (precioDetal || 0) > 0)
@@ -115,7 +116,7 @@ Deno.serve(async (req) => {
   const authHeader = 'Basic ' + btoa(`${email}:${token}`)
   try {
     const { finished_id, all } = await req.json().catch(() => ({}))
-    let query = supabase.from('finished_products').select('id, nombre, sku, alegra_item_id, stock, costo_unitario, precio_mayor, precio_detal, unidad_medida, codigo_unspsc, categoria_alegra_id')
+    let query = supabase.from('finished_products').select('id, nombre, sku, alegra_item_id, stock, costo_unitario, precio_mayor, precio_detal, unidad_medida, codigo_unspsc, categoria_alegra_id, descripcion')
     if (!all) query = query.eq('id', finished_id)
     else query = query.not('alegra_item_id', 'is', null)
     const { data: prods } = await query
@@ -126,7 +127,7 @@ Deno.serve(async (req) => {
       if (!p.alegra_item_id) { resultados.push({ producto: p.nombre, estado: 'sin alegra_item_id' }); continue }
       try {
         const id = String(p.alegra_item_id)
-        const datosRes = await pushDatos(authHeader, id, Number(p.costo_unitario || 0), p.nombre, Number(p.precio_mayor || 0), Number(p.precio_detal || 0), listaMayor, listaDetal, p.unidad_medida, p.codigo_unspsc, p.categoria_alegra_id, p.sku)
+        const datosRes = await pushDatos(authHeader, id, Number(p.costo_unitario || 0), p.nombre, Number(p.precio_mayor || 0), Number(p.precio_detal || 0), listaMayor, listaDetal, p.unidad_medida, p.codigo_unspsc, p.categoria_alegra_id, p.sku, p.descripcion)
         const stockRes = await ajustarStock(authHeader, id, Number(p.stock || 0), Number(p.costo_unitario || 0))
         resultados.push({ producto: p.nombre, stock: Number(p.stock || 0), ajuste: stockRes, estado: 'ok',
           debug: { precio_detal: Number(p.precio_detal || 0), lista_mayor: listaMayor || '(sin mapear)', lista_detal: listaDetal || '(sin mapear)', precio_enviado: datosRes?.precio_enviado } })

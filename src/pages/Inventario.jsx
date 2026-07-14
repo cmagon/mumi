@@ -16,7 +16,7 @@ import { Download, Tags, Tag, Plus, Pencil, X, Package, ClipboardList, FileText,
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const EMPTY_MP = { nombre: '', categoria: 'pulpa', tipo: 'comprado', unidad: 'Kg', precio: '', stock_min: 0, stock: 0, lote: '', vencimiento: '', obs: '', extra: {}, vendible: false, precio_venta: '' }
-const EMPTY_MOV = { mp_id: '', tipo: 'entrada', cantidad: '', fecha: new Date().toISOString().split('T')[0], responsable: '', obs: '', lote: '', vencimiento: '', extra: {}, costo: '', motivo: 'consumo', lote_id: '' }
+const EMPTY_MOV = { mp_id: '', tipo: 'entrada', cantidad: '', fecha: new Date().toISOString().split('T')[0], responsable: '', obs: '', lote: '', vencimiento: '', extra: {}, costo: '', motivo: 'consumo', lote_id: '', proveedor: '' }
 // Motivos de salida/ajuste manual de inventario
 const MOTIVOS_SALIDA = [
   { value: 'consumo', label: 'Consumo / uso' },
@@ -50,17 +50,24 @@ const esEmpaque = (categoria) => /empaque|envase/i.test(categoria || '')
 
 // ---- Editor de campos personalizados (objeto JSONB clave→valor) ----
 function CamposExtra({ value = {}, onChange }) {
-  const entries = Object.entries(value || {})
-  const setEntry = (i, k, v) => {
-    const next = entries.map(([ek, ev], idx) => idx === i ? [k, v] : [ek, ev])
-    onChange(Object.fromEntries(next.filter(([kk]) => kk !== '')))
-  }
-  const addEntry = () => onChange({ ...(value || {}), [`campo_${entries.length + 1}`]: '' })
-  const delEntry = (i) => onChange(Object.fromEntries(entries.filter((_, idx) => idx !== i)))
+  // Estado interno como ARRAY de filas: permite dejar el nombre vacío mientras se escribe
+  // (antes el campo se borraba solo al vaciar el nombre, porque el objeto filtraba claves vacías).
+  const [rows, setRows] = useState(() => Object.entries(value || {}))
+  const build = (rs) => Object.fromEntries(rs.filter(([k]) => String(k).trim() !== ''))
+  // Re-sincroniza SOLO si el valor cambió desde afuera (reset del formulario, cargar otra MP),
+  // no cuando el cambio vino de este mismo componente.
+  useEffect(() => {
+    if (JSON.stringify(build(rows)) !== JSON.stringify(value || {})) setRows(Object.entries(value || {}))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value])
+  const commit = (rs) => { setRows(rs); onChange(build(rs)) }
+  const setEntry = (i, k, v) => commit(rows.map(([ek, ev], idx) => idx === i ? [k, v] : [ek, ev]))
+  const addEntry = () => commit([...rows, ['', '']])
+  const delEntry = (i) => commit(rows.filter((_, idx) => idx !== i))
   return (
     <div className="form-group">
       <label className="form-label">Campos personalizados <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(fecha cosecha, productor, etc.)</small></label>
-      {entries.map(([k, v], i) => (
+      {rows.map(([k, v], i) => (
         <div key={i} style={{ display: 'grid', gridTemplateColumns: '1fr 1fr auto', gap: 6, marginBottom: 6 }}>
           <input className="form-control" placeholder="Nombre del campo" value={k} onChange={e => setEntry(i, e.target.value, v)} />
           <input className="form-control" placeholder="Valor" value={v} onChange={e => setEntry(i, k, e.target.value)} />
@@ -127,6 +134,8 @@ export default function Inventario() {
   const [lotesMP, setLotesMP] = useState(null)
   const lotesDe = (mpId) => lotesDB.filter(l => l.mp_id === mpId).sort((a, b) => (a.vencimiento || '9999') < (b.vencimiento || '9999') ? -1 : (a.fecha_entrada < b.fecha_entrada ? -1 : 1))
   const stockLotes = (mpId) => lotesDe(mpId).reduce((s, l) => s + (l.cantidad_actual || 0), 0)
+  // Proveedores ya registrados en lotes anteriores (para autocompletar en nuevas entradas)
+  const proveedoresConocidos = [...new Set(lotesDB.map(l => (l.proveedor || '').trim()).filter(Boolean))].sort()
 
   // Lista de nombres de categoría (tabla + las usadas por MPs por seguridad)
   const categorias = [...new Set([...categoriasDB.map(c => c.nombre), ...mps.map(m => m.categoria).filter(Boolean)])].sort()
@@ -235,8 +244,9 @@ export default function Inventario() {
         await crearLoteEntrada({
           mp_id: mpId, lote: formMov.lote, vencimiento: formMov.vencimiento, fecha: formMov.fecha,
           cantidad, costo_unitario: formMov.costo !== '' ? parseFloat(formMov.costo) || 0 : (mp?.precio || 0),
-          creado_por: profile?.nombre || '',
+          creado_por: profile?.nombre || '', proveedor: formMov.proveedor || '',
         })
+        if (formMov.proveedor) extra.proveedor = formMov.proveedor
       } else if (!esEmpaque(mp?.categoria) && (formMov.tipo === 'salida' || (formMov.tipo === 'ajuste' && cantidad < 0))) {
         // Salida (o ajuste negativo): exige motivo; descuenta del lote elegido o por PEPS
         if (!formMov.motivo) throw new Error('Indica el motivo de la salida')
@@ -611,10 +621,17 @@ export default function Inventario() {
         )}
         {/* Lote y vencimiento — solo en entradas (crea el lote), no aplican a empaques */}
         {formMov.tipo === 'entrada' && !esEmpaque(mps.find(m => String(m.id) === String(formMov.mp_id))?.categoria) && (
-          <div className="form-grid-2">
-            <div className="form-group"><label className="form-label">Lote</label><input className="form-control" value={formMov.lote} onChange={e => setFormMov(f => ({ ...f, lote: e.target.value }))} placeholder="N° de lote" /></div>
-            <div className="form-group"><label className="form-label">Fecha de vencimiento</label><input type="date" className="form-control" value={formMov.vencimiento || ''} onChange={e => setFormMov(f => ({ ...f, vencimiento: e.target.value }))} /></div>
-          </div>
+          <>
+            <div className="form-grid-2">
+              <div className="form-group"><label className="form-label">Lote</label><input className="form-control" value={formMov.lote} onChange={e => setFormMov(f => ({ ...f, lote: e.target.value }))} placeholder="N° de lote" /></div>
+              <div className="form-group"><label className="form-label">Fecha de vencimiento</label><input type="date" className="form-control" value={formMov.vencimiento || ''} onChange={e => setFormMov(f => ({ ...f, vencimiento: e.target.value }))} /></div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Proveedor <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(a quién se le compró este lote)</small></label>
+              <input className="form-control" list="dl-proveedores-mp" value={formMov.proveedor || ''} onChange={e => setFormMov(f => ({ ...f, proveedor: e.target.value }))} />
+              <datalist id="dl-proveedores-mp">{proveedoresConocidos.map(p => <option key={p} value={p} />)}</datalist>
+            </div>
+          </>
         )}
         <div className="form-group"><label className="form-label">Responsable</label><input className="form-control" value={formMov.responsable} onChange={e => setFormMov(f => ({ ...f, responsable: e.target.value }))} placeholder="Nombre del responsable" /></div>
         <div className="form-group"><label className="form-label">Observación</label><textarea className="form-control" rows={2} value={formMov.obs} onChange={e => setFormMov(f => ({ ...f, obs: e.target.value }))} /></div>
@@ -677,10 +694,10 @@ export default function Inventario() {
               </div>
               <div className="table-wrap">
                 <table>
-                  <thead><tr><th>#PEPS</th><th>Lote</th><th>Ingreso</th><th>Vence</th><th className="td-number">Inicial</th><th className="td-number">Disponible</th><th className="td-number">Reservado</th><th className="td-number">Costo/u</th><th>Estado</th></tr></thead>
+                  <thead><tr><th>#PEPS</th><th>Lote</th><th>Ingreso</th><th>Proveedor</th><th>Vence</th><th className="td-number">Inicial</th><th className="td-number">Disponible</th><th className="td-number">Reservado</th><th className="td-number">Costo/u</th><th>Estado</th></tr></thead>
                   <tbody>
                     {lotes.length === 0
-                      ? <tr><td colSpan={9} className="empty-table">Sin lotes. Registra una entrada para crear el primero.</td></tr>
+                      ? <tr><td colSpan={10} className="empty-table">Sin lotes. Registra una entrada para crear el primero.</td></tr>
                       : lotes.map((l, i) => {
                         const est = estadoLote(l.vencimiento)
                         const agotado = (l.cantidad_actual || 0) <= 0
@@ -689,6 +706,7 @@ export default function Inventario() {
                             <td>{agotado ? '—' : activos.indexOf(l) + 1}</td>
                             <td>{l.lote || '—'}</td>
                             <td>{fFecha(l.fecha_entrada)}</td>
+                            <td>{l.proveedor || '—'}</td>
                             <td>{l.vencimiento ? fFecha(l.vencimiento) : '—'}</td>
                             <td className="td-number">{fBase(l.cantidad_inicial, lotesMP.unidad)}</td>
                             <td className="td-number"><strong>{fBase(l.cantidad_actual, lotesMP.unidad)}</strong></td>
