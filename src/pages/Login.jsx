@@ -33,6 +33,13 @@ export default function Login() {
   const [verPass, setVerPass]   = useState(false)
   const [error, setError]       = useState('')
   const [loading, setLoading]   = useState(false)
+  // Aviso de conexión en vivo: sin internet no se puede iniciar sesión
+  const [offline, setOffline]   = useState(!navigator.onLine)
+  useEffect(() => {
+    const on = () => setOffline(false), off = () => setOffline(true)
+    window.addEventListener('online', on); window.addEventListener('offline', off)
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
+  }, [])
   const [msgRec, setMsgRec]     = useState('')
   const [recStep, setRecStep]   = useState('')      // '' | 'solicitar' | 'codigo'
   const [recEmail, setRecEmail] = useState('')
@@ -97,6 +104,9 @@ export default function Login() {
 
   const handleSubmit = async (e) => {
     e.preventDefault()
+    // Iniciar sesión requiere internet (la autenticación no funciona offline):
+    // mensaje claro en vez de un "usuario o contraseña incorrectos" engañoso.
+    if (!navigator.onLine) { setError('No tienes conexión a internet. Conéctate para poder iniciar sesión.'); return }
     if (!login || !password) { setError('Ingresa usuario y contraseña'); return }
     setLoading(true); setError('')
     try {
@@ -105,7 +115,7 @@ export default function Login() {
       await signIn(login, password)
       navigate('/dashboard')
     } catch {
-      setError('Usuario o contraseña incorrectos')
+      setError(navigator.onLine ? 'Usuario o contraseña incorrectos' : 'No tienes conexión a internet. Conéctate para poder iniciar sesión.')
     } finally {
       setLoading(false)
     }
@@ -231,6 +241,11 @@ export default function Login() {
           </button>
         </form>
 
+        {offline && (
+          <div role="alert" style={{ color: '#ffd9a0', fontSize: '0.85rem', marginTop: 12, background: 'rgba(176,125,24,0.18)', border: '1px solid rgba(176,125,24,0.45)', borderRadius: 8, padding: '8px 10px' }}>
+            📡 No tienes conexión a internet. Necesitas conexión para iniciar sesión.
+          </div>
+        )}
         {error && (
           <div role="alert" style={{ color: '#ffb4ab', fontSize: '0.85rem', marginTop: 12, background: 'rgba(192,57,43,0.16)', border: '1px solid rgba(231,76,60,0.35)', borderRadius: 8, padding: '8px 10px' }}>
             {error}

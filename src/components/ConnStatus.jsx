@@ -41,7 +41,20 @@ export default function ConnStatus() {
   // Estado "ocioso": en línea, sin pendientes ni mensaje → en móvil se oculta (no aporta y estorba)
   const idle = online && pend === 0 && !msg
 
-  return (
+  return (<>
+    {/* Banner GRANDE e inconfundible cuando no hay conexión: el usuario ve datos guardados
+        y debe saberlo sin duda (el puntico de abajo era muy fácil de pasar por alto). */}
+    {!online && (
+      <div role="alert" style={{
+        position: 'fixed', top: 0, left: 0, right: 0, zIndex: 4000,
+        background: '#9a3b3b', color: '#fff', textAlign: 'center',
+        padding: '8px 14px', fontSize: '0.85rem', fontWeight: 600,
+        boxShadow: '0 2px 10px rgba(0,0,0,0.3)',
+      }}>
+        📡 SIN CONEXIÓN — estás viendo la última información guardada en este dispositivo (puede estar desactualizada).
+        {pend > 0 ? ` Tienes ${pend} cambio(s) sin enviar: se sincronizarán solos al volver la conexión.` : ' Lo que registres se enviará automáticamente al reconectar.'}
+      </div>
+    )}
     <div className={`conn-status${idle ? ' conn-idle' : ''}`} style={{
       position: 'fixed', bottom: 14, right: 14, zIndex: 3000,
       display: 'flex', alignItems: 'center', gap: 8,
