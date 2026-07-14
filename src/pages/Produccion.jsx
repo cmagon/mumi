@@ -168,7 +168,21 @@ export default function Produccion() {
     queryKey: ['orden_ids'],
     queryFn: async () => { const { data } = await supabase.from('production_orders').select('id').order('id'); return data || [] },
   })
-  const ordenStartNum = parseInt(localStorage.getItem('mumi_orden_start')) || 1
+  // Numeración global desde SQL (app_config) — localStorage solo como respaldo offline
+  const { data: ordenStartCfg } = useQuery({
+    queryKey: ['app_config_orden_start'],
+    queryFn: async () => {
+      const { data } = await supabase.from('app_config').select('key, value').in('key', ['orden_start', 'vence_opts'])
+      const map = Object.fromEntries((data || []).map(r => [r.key, r.value]))
+      // Refresca el respaldo local de las opciones de vencimiento (los botones +N meses)
+      if (Array.isArray(map.vence_opts) && map.vence_opts.length) localStorage.setItem('mumi_vence_opts', JSON.stringify(map.vence_opts))
+      const n = parseInt(map.orden_start)
+      if (!isNaN(n) && n > 0) { localStorage.setItem('mumi_orden_start', String(n)); return n }
+      return null
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const ordenStartNum = ordenStartCfg || parseInt(localStorage.getItem('mumi_orden_start')) || 1
   const opNum = (id) => { const idx = ordenIdsData.findIndex(o => o.id === id); return (idx >= 0 ? idx : 0) + ordenStartNum }
 
   // Revertir un registro que proviene de una orden: devuelve la orden a "en proceso" para corregir desde Órdenes

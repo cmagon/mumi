@@ -184,6 +184,29 @@ export default function OrdenesProduccion() {
   const [ingDisp, setIngDisp] = useState('')
   // Opciones rápidas de vencimiento (personalizables, en meses)
   const [venceOpts, setVenceOpts] = useState(getVenceOpts)
+  const [ordenStartNum, setOrdenStartNum] = useState(() => parseInt(localStorage.getItem('mumi_orden_start')) || 1)
+  // Ajustes GLOBALES desde SQL (app_config): numeración de órdenes y opciones de vencimiento.
+  // Antes vivían solo en localStorage → cada dispositivo veía numeración/opciones distintas.
+  // localStorage queda únicamente como respaldo offline (se refresca con el valor de la BD).
+  useQuery({
+    queryKey: ['app_config_ordenes'],
+    queryFn: async () => {
+      const { data } = await supabase.from('app_config').select('key, value').in('key', ['orden_start', 'vence_opts'])
+      const map = Object.fromEntries((data || []).map(r => [r.key, r.value]))
+      if (map.orden_start != null) {
+        const n = parseInt(map.orden_start); if (!isNaN(n) && n > 0) { setOrdenStartNum(n); localStorage.setItem('mumi_orden_start', String(n)) }
+      }
+      if (Array.isArray(map.vence_opts) && map.vence_opts.length) {
+        setVenceOpts(map.vence_opts); localStorage.setItem('mumi_vence_opts', JSON.stringify(map.vence_opts))
+      }
+      return map
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const guardarCfgGlobal = async (key, value) => {
+    const { error } = await supabase.from('app_config').upsert({ key, value }, { onConflict: 'key' })
+    if (error) toast('No se pudo guardar el ajuste global: ' + error.message, 'error')
+  }
   const editarVenceOpts = async () => {
     const actual = venceOpts.join(', ')
     const r = await pedir('Opciones de vencimiento en MESES, separadas por coma (ej: 1, 2, 3, 6, 12, 24):', { defaultValue: actual })
@@ -191,9 +214,9 @@ export default function OrdenesProduccion() {
     const arr = r.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n) && n > 0)
     if (!arr.length) { toast('Ingresa al menos un número de meses válido', 'warning'); return }
     setVenceOpts(arr); localStorage.setItem('mumi_vence_opts', JSON.stringify(arr))
-    toast('Opciones de vencimiento actualizadas ✓')
+    await guardarCfgGlobal('vence_opts', arr)
+    toast('Opciones de vencimiento actualizadas (todos los dispositivos) ✓')
   }
-  const [ordenStartNum, setOrdenStartNum] = useState(() => parseInt(localStorage.getItem('mumi_orden_start')) || 1)
   const [modalEjec, setModalEjec]   = useState(false)
   const [ordenPrep, setOrdenPrep]   = useState(null)
   const [prepIngs, setPrepIngs]     = useState([])
@@ -367,7 +390,8 @@ export default function OrdenesProduccion() {
     const n = parseInt(r)
     if (isNaN(n) || n < 1) { toast('Ingresa un número válido (mayor a 0)', 'warning'); return }
     setOrdenStartNum(n); localStorage.setItem('mumi_orden_start', String(n))
-    toast(`Numeración reiniciada desde ${n} ✓`)
+    await guardarCfgGlobal('orden_start', n)
+    toast(`Numeración reiniciada desde ${n} (todos los dispositivos) ✓`)
   }
 
   // Si se llega desde un registro de producción con ?verOrden=, abre el detalle de esa orden
