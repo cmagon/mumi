@@ -11,6 +11,7 @@ import { useToast } from '../hooks/useToast'
 import { useReorder } from '../hooks/useReorder'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
+import BuscadorSelect from '../components/ui/BuscadorSelect'
 import MoneyInput from '../components/ui/MoneyInput'
 import { useConfirm } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
@@ -1315,10 +1316,9 @@ export default function Costos() {
                                 </button>
                               )}
                             </>
-                          : <select key={`ing-lst-${r._id}`} className="form-control" value={r.mpId||''} onChange={e => handleSelectMP(r._id, e.target.value)} style={{ borderColor: accent }}>
-                              <option value="">Seleccionar MP...</option>
-                              {mpsIngredientes.map(m => <option key={m.id} value={m.id}>{m.nombre} — {fCOP(m.precio)}/{m.unidad}</option>)}
-                            </select>
+                          : <BuscadorSelect key={`ing-lst-${r._id}`} value={r.mpId||''} placeholder="Escribe para buscar la MP..."
+                              opciones={mpsIngredientes.map(m => ({ value: String(m.id), label: m.nombre, sub: `${fCOP(m.precio)}/${m.unidad}` }))}
+                              onSelect={(v) => handleSelectMP(r._id, v)} />
                         }
                         {esRelativo && (
                           <div style={{ display:'flex', flexDirection:'column', gap:3, fontSize:'0.72rem', color:'var(--tierra)' }}>

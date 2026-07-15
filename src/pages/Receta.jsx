@@ -10,6 +10,7 @@ import { useConfirm } from '../context/ConfirmContext'
 import { useReorder } from '../hooks/useReorder'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
+import BuscadorSelect from '../components/ui/BuscadorSelect'
 
 export default function Receta({ embedded = false, productos = [], onConvertir }) {
   const toast = useToast()
@@ -520,20 +521,9 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
                           onChange={e => updIng(r._id, 'nombre', e.target.value)}
                           style={{ borderColor: accentColor }}
                         />
-                      : <select
-                          className="form-control"
-                          value={r.mpId || ''}
-                          disabled={soloLectura}
-                          onChange={e => handleSelectMP(r._id, e.target.value)}
-                          style={{ borderColor: accentColor }}
-                        >
-                          <option value="">Seleccionar MP...</option>
-                          {mps.map(m => (
-                            <option key={m.id} value={m.id}>
-                              {m.nombre} — {fCOP(m.precio)}/{m.unidad}
-                            </option>
-                          ))}
-                        </select>
+                      : <BuscadorSelect value={r.mpId || ''} disabled={soloLectura} placeholder="Escribe para buscar la MP..."
+                          opciones={mps.map(m => ({ value: String(m.id), label: m.nombre, sub: `${fCOP(m.precio)}/${m.unidad}` }))}
+                          onSelect={(v) => handleSelectMP(r._id, v)} />
                     }
 
                     {/* Selector "relativo a" (uno o varios) solo para tipo relativo */}

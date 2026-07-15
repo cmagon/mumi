@@ -74,5 +74,5 @@ export default function ConnStatus() {
         </button>
       )}
     </div>
-  )
+  </>)
 }

@@ -372,7 +372,10 @@ export default function Inventario() {
     if (filtroEstado === 'por_vencer') return tieneLotePorVencer(m)
     return true
   }
-  const mpsFiltrados = mps.filter(m => (!filtroCat || m.categoria === filtroCat) && pasaEstado(m))
+  const [buscarMP, setBuscarMP] = useState('')
+  const normBusq = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
+  const mpsFiltrados = mps.filter(m => (!filtroCat || m.categoria === filtroCat) && pasaEstado(m)
+    && (!buscarMP.trim() || normBusq(m.nombre).includes(normBusq(buscarMP)) || normBusq(m.categoria).includes(normBusq(buscarMP))))
   const histMovs = histMP ? movimientos.filter(mv => mv.mp_id === histMP.id) : []
   // Auditoría de EDICIONES de la ficha de la MP (tabla v94 — si no existe, lista vacía)
   const { data: histEdits = [] } = useQuery({
@@ -418,6 +421,7 @@ export default function Inventario() {
       <div className="card">
         <div className="card-title"><Ico as={Package} size={16} />Estado del Inventario</div>
         <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+          <input className="form-control" style={{ width: 200 }} placeholder="🔍 Buscar materia prima..." value={buscarMP} onChange={e => setBuscarMP(e.target.value)} />
           <label className="form-label" style={{ margin: 0 }}>Categoría:</label>
           <select className="form-control" value={filtroCat} onChange={e => setFiltroCat(e.target.value)} style={{ width: 'auto' }}>
             <option value="">Todas las categorías</option>
@@ -653,11 +657,13 @@ export default function Inventario() {
               </select>
             </div>
             <div className="form-group">
-              <label className="form-label">¿De qué lote se descuenta?</label>
+              <label className="form-label">¿De qué lote se descuenta? <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(solo aplica si el ajuste RESTA)</small></label>
+              {/* BUG corregido: aquí se usaba `mpSel`, que solo existe en el bloque de entradas —
+                  al elegir salida/ajuste con lotes cargados el modal se rompía (ReferenceError). */}
               <select className="form-control" value={formMov.lote_id} onChange={e => setFormMov(f => ({ ...f, lote_id: e.target.value }))}>
                 <option value="">Automático (PEPS: el más antiguo/próximo a vencer)</option>
                 {lotesDe(parseInt(formMov.mp_id)).map(l => (
-                  <option key={l.id} value={l.id}>Lote {l.lote || '(s/n)'} · {fBase(l.cantidad_actual, mpSel?.unidad)} disp.{l.vencimiento ? ` · vence ${l.vencimiento}` : ''}</option>
+                  <option key={l.id} value={l.id}>Lote {l.lote || '(s/n)'} · {fBase(l.cantidad_actual, mps.find(m => String(m.id) === String(formMov.mp_id))?.unidad)} disp.{l.vencimiento ? ` · vence ${l.vencimiento}` : ''}</option>
                 ))}
               </select>
             </div>

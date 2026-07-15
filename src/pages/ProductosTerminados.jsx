@@ -391,13 +391,35 @@ export default function ProductosTerminados() {
         .sort((a, b) => b.score - a.score || (a.it.esServicio ? 1 : 0) - (b.it.esServicio ? 1 : 0))
         .slice(0, 8)
         .map(x => x.it) : []
-      return { match, similares }
+      return { match, similares, items }
     },
     meta: { label: 'Buscando en Alegra…' },
-    onMutate: () => setAlegraVerif({ estado: 'buscando', match: null, similares: [] }),
-    onSuccess: ({ match, similares }) => setAlegraVerif({ estado: match ? 'coincidencia' : 'sin_match', match, similares }),
-    onError: (e) => { setAlegraVerif({ estado: 'idle', match: null, similares: [] }); toast('No se pudo verificar en Alegra: ' + e.message, 'error') },
+    onMutate: () => { setAlegraVerif({ estado: 'buscando', match: null, similares: [], items: [] }); setBusqAlegra('') },
+    onSuccess: ({ match, similares, items }) => setAlegraVerif({ estado: match ? 'coincidencia' : 'sin_match', match, similares, items }),
+    onError: (e) => { setAlegraVerif({ estado: 'idle', match: null, similares: [], items: [] }); toast('No se pudo verificar en Alegra: ' + e.message, 'error') },
   })
+  // Búsqueda EN VIVO sobre los ítems traídos de Alegra: filtra mientras el usuario escribe
+  const [busqAlegra, setBusqAlegra] = useState('')
+  const resultadosBusqAlegra = useMemo(() => {
+    const items = alegraVerif.items || []
+    const q = norm(busqAlegra).normalize('NFD').replace(/[̀-ͯ]/g, '')
+    if (!q.trim()) return null   // sin texto: se muestran los similares automáticos
+    const palabras = q.split(/\s+/).filter(Boolean)
+    return items
+      .map(it => {
+        const l = norm(it.name).normalize('NFD').replace(/[̀-ͯ]/g, '') + ' ' + norm(it.reference)
+        let score = 0
+        if (l.startsWith(q)) score = 3
+        else if (palabras.every(w => l.includes(w))) score = 2
+        else if (palabras.some(w => l.includes(w))) score = 1
+        return { it, score }
+      })
+      .filter(x => x.score > 0)
+      .sort((a, b) => b.score - a.score || (a.it.esServicio ? 1 : 0) - (b.it.esServicio ? 1 : 0))
+      .slice(0, 10)
+      .map(x => x.it)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [busqAlegra, alegraVerif.items])
   const enlazarDesdeModal = (match) => {
     setPForm(f => ({ ...f, alegra_item_id: String(match.id), sku: f.sku || match.reference || f.sku }))
     setAlegraVerif({ estado: 'idle', match: null, similares: [] })
@@ -1061,7 +1083,7 @@ export default function ProductosTerminados() {
                     <button type="button" className="btn btn-xs btn-secondary" onClick={() => setAlegraVerif({ estado: 'idle', match: null, similares: [] })}>No es este</button>
                   </div>
                 )}
-                {alegraVerif.estado === 'sin_match' && !(alegraVerif.similares || []).length && (
+                {alegraVerif.estado === 'sin_match' && !(alegraVerif.items || []).length && (
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', background: 'var(--crema)', borderRadius: 8, padding: '8px 10px' }}>
                     <span style={{ fontSize: '0.85rem', color: 'var(--texto-suave)' }}>No se encontró en Alegra ningún ítem parecido a este nombre/SKU.</span>
                     <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.85rem', cursor: 'pointer' }}>
@@ -1070,21 +1092,32 @@ export default function ProductosTerminados() {
                     </label>
                   </div>
                 )}
-                {(alegraVerif.estado === 'coincidencia' || alegraVerif.estado === 'sin_match') && (alegraVerif.similares || []).length > 0 && (
+                {(alegraVerif.estado === 'coincidencia' || alegraVerif.estado === 'sin_match') && (alegraVerif.items || []).length > 0 && (
                   <div style={{ marginTop: 8, background: 'var(--crema)', borderRadius: 8, padding: '8px 10px' }}>
-                    <div style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', marginBottom: 6 }}>
-                      {alegraVerif.estado === 'sin_match' ? 'Sin coincidencia exacta, pero hay ítems PARECIDOS en Alegra — revisa si alguno corresponde:' : 'Otros ítems parecidos en Alegra:'}
-                    </div>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 170, overflowY: 'auto' }}>
-                      {alegraVerif.similares.map(it => (
-                        <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--blanco)', border: '1px solid var(--crema-oscuro)', borderRadius: 6, padding: '5px 8px' }}>
-                          <span style={{ flex: 1, fontSize: '0.82rem' }}>
-                            <strong>{it.name}</strong>{it.reference ? <small style={{ color: 'var(--texto-suave)' }}> · ref: {it.reference}</small> : ''}{it.esServicio ? <small style={{ color: 'var(--tierra)' }}> · solo facturación</small> : ''}
-                          </span>
-                          <button type="button" className="btn btn-xs btn-primary" onClick={() => enlazarDesdeModal(it)}>Enlazar</button>
+                    <input className="form-control" style={{ marginBottom: 6 }} value={busqAlegra} onChange={e => setBusqAlegra(e.target.value)}
+                      placeholder={`🔍 Buscar entre los ${(alegraVerif.items || []).length} ítems de Alegra (filtra mientras escribes)...`} />
+                    {(() => {
+                      const lista = resultadosBusqAlegra !== null ? resultadosBusqAlegra : (alegraVerif.similares || [])
+                      return (<>
+                        <div style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', marginBottom: 6 }}>
+                          {resultadosBusqAlegra !== null
+                            ? (lista.length ? `${lista.length} coincidencia(s) con "${busqAlegra}":` : `Nada en Alegra coincide con "${busqAlegra}".`)
+                            : alegraVerif.estado === 'sin_match'
+                              ? (lista.length ? 'Sin coincidencia exacta, pero hay ítems PARECIDOS — revisa si alguno corresponde (o busca arriba):' : 'Sin parecidos automáticos — usa el buscador de arriba.')
+                              : (lista.length ? 'Otros ítems parecidos en Alegra:' : '')}
                         </div>
-                      ))}
-                    </div>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 170, overflowY: 'auto' }}>
+                          {lista.map(it => (
+                            <div key={it.id} style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--blanco)', border: '1px solid var(--crema-oscuro)', borderRadius: 6, padding: '5px 8px' }}>
+                              <span style={{ flex: 1, fontSize: '0.82rem' }}>
+                                <strong>{it.name}</strong>{it.reference ? <small style={{ color: 'var(--texto-suave)' }}> · ref: {it.reference}</small> : ''}{it.esServicio ? <small style={{ color: 'var(--tierra)' }}> · solo facturación</small> : ''}
+                              </span>
+                              <button type="button" className="btn btn-xs btn-primary" onClick={() => enlazarDesdeModal(it)}>Enlazar</button>
+                            </div>
+                          ))}
+                        </div>
+                      </>)
+                    })()}
                     {alegraVerif.estado === 'sin_match' && (
                       <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.82rem', cursor: 'pointer', marginTop: 8 }}>
                         <input type="checkbox" checked={crearAlGuardar} onChange={e => setCrearAlGuardar(e.target.checked)} />
