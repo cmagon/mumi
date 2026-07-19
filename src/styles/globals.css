@@ -955,13 +955,14 @@ details.card > .card-acc-body { padding: 20px 24px; }
 .pz-sec-hd { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: none; border: none; cursor: pointer; font-weight: 700; font-size: 0.9rem; color: var(--selva, #1a3a2a); text-align: left; }
 .pz-sec-hd.open { border-bottom: 1px solid var(--borde, #e5e5e5); }
 .pz-sec-body { padding: 14px; }
-.pz-preview { position: sticky; top: 12px; }
+.pz-preview { position: sticky; top: 12px; min-width: 0; max-width: 100%; overflow: hidden; }
 .pz-preview-bar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--selva, #1a3a2a); color: #fff; border-radius: 12px 12px 0 0; font-size: 0.82rem; font-weight: 600; }
 .pz-preview-bar > span:first-child { flex: 1; }
 .pz-devices { display: inline-flex; gap: 2px; background: rgba(255,255,255,0.14); border-radius: 999px; padding: 2px; }
 .pz-devices button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 24px; border: none; background: none; color: #fff; opacity: 0.7; border-radius: 999px; cursor: pointer; }
 .pz-devices button.on { background: #fff; color: var(--selva, #1a3a2a); opacity: 1; }
-.pz-stage { height: 78vh; min-height: 520px; border: 1px solid var(--borde, #e5e5e5); border-top: none; border-radius: 0 0 12px 12px; background: #eceae6; overflow: auto; display: flex; justify-content: center; align-items: flex-start; padding: 0; }
+.pz-stage { height: 78vh; min-height: 520px; max-width: 100%; border: 1px solid var(--borde, #e5e5e5); border-top: none; border-radius: 0 0 12px 12px; background: #eceae6; overflow: auto; display: flex; justify-content: center; align-items: flex-start; padding: 0; }
+.pz-stage-desktop .pz-device-frame { max-width: 100%; }
 .pz-stage-tablet, .pz-stage-mobile { padding: 20px 16px; }
 /* Escritorio: el iframe llena el escenario */
 .pz-stage-desktop .pz-device-frame { width: 100%; height: 100%; background: #fff; }

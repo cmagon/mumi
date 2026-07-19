@@ -12,6 +12,9 @@ export function cargarGoogleFonts(familias) {
   if (l.href !== href) l.href = href
 }
 
+// Envía un mensaje al panel de administración (cuando el catálogo corre dentro del iframe del editor)
+export const postCanvas = (msg) => { try { if (window.parent && window.parent !== window) window.parent.postMessage(msg, '*') } catch { /* noop */ } }
+
 // Favoritos: desactivado por ahora (se reactiva cuando haya cuentas de usuario)
 export const FAVORITOS = false
 // Buscador del catálogo
@@ -169,21 +172,25 @@ const precioItem = (i, mayorista) => {
 // ---- Mensaje de WhatsApp + registro del pedido ----
 // `intro` = encabezado configurable (según haya stock o no); el detalle se arma solo.
 export function construirMensajeWA(items, nota, cfg, mayorista = false, intro = '') {
-  const total = items.reduce((s, i) => s + precioItem(i, mayorista) * i.cantidad, 0)
+  const agotadoDe = (i) => (Number(i.stock) || 0) <= 0
+  const total = items.reduce((s, i) => s + (agotadoDe(i) ? 0 : precioItem(i, mayorista) * i.cantidad), 0)
+  const todosAgotados = items.length > 0 && items.every(agotadoDe)
   const min = mayorista ? (cfg?.mayorista_pedido_minimo || 0) : (cfg?.pedido_minimo || 0)
   const lineas = items.map(i => {
     const em = emojiCategoria(i.categoria)
     const pu = precioItem(i, mayorista)
-    const sub = fCOP(pu * i.cantidad)
-    let l = `${em} *${i.cantidad}x ${i.nombre}*\n   ${fCOP(pu)} c/u → ${sub}${notaStock(i, cfg)}`
+    const ago = agotadoDe(i)
+    let l = `${em} *${i.cantidad}x ${i.nombre}*\n   ${fCOP(pu)} c/u`
+    l += ago ? '  (agotado — sobre pedido)' : ` → ${fCOP(pu * i.cantidad)}${notaStock(i, cfg)}`
     const url = urlProducto(cfg, i)
     if (url) l += `\n   🔗 ${url}`
     return l
   }).join('\n\n')
   const cab = (intro && intro.trim())
     || (mayorista ? '¡Hola! 🌿 Soy mayorista y quiero hacer este pedido:' : '¡Hola! 🌿 Me gustaría hacer este pedido:')
-  let msg = `${cab}\n\n🛒 *MI PEDIDO${mayorista ? ' (MAYORISTA)' : ''}*\n\n${lineas}\n\n━━━━━━━━━━━━━━\n💰 *Total: ${fCOP(total)}*`
-  if (min > 0 && total < min) msg += `\n_(Pedido mínimo${mayorista ? ' mayorista' : ''} sugerido: ${fCOP(min)})_`
+  let msg = `${cab}\n\n🛒 *MI PEDIDO${mayorista ? ' (MAYORISTA)' : ''}*\n\n${lineas}\n\n━━━━━━━━━━━━━━\n`
+  msg += todosAgotados ? '💬 *Quiero consultar disponibilidad*' : `💰 *Total: ${fCOP(total)}*`
+  if (!todosAgotados && min > 0 && total < min) msg += `\n_(Pedido mínimo${mayorista ? ' mayorista' : ''} sugerido: ${fCOP(min)})_`
   if (nota?.trim()) msg += `\n\n📝 *Nota:* ${nota.trim()}`
   msg += `\n\n¡Quedo atento(a) a la confirmación! 😊`
   return msg

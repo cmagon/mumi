@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, useRef, createContext, useContext } from 'react'
 import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
 import { Search, X, ArrowLeft, ShoppingCart, MessageCircle, Plus, Minus, Send, Share2, Heart, ZoomIn, ChevronRight, Home as HomeIcon, Play } from 'lucide-react'
 import DOMPurify from 'dompurify'
@@ -9,8 +9,8 @@ import 'yet-another-react-lightbox/styles.css'
 import 'yet-another-react-lightbox/plugins/thumbnails.css'
 import { supabase } from './supabase'
 import { useStore } from './store'
-import { Card, HeroSlider, Newsletter, BannerSecundario } from './ui'
-import { fCOP, labelCategoria, getFrutos, iconoDe, iconoFruto, labelFruto, stockLabel, imgsDe, sinTildes, sinHtml, registrarVisita, confirmarPedidoWA, setSEO, compartir, rutaProducto, buscarPorSlug, abrirWA, FAVORITOS, BUSCADOR, videoEmbed, videoThumb, paginaPorSlug } from './utils'
+import { Card, HeroSlider, Newsletter, BannerSecundario, BannerGrupo } from './ui'
+import { fCOP, labelCategoria, getFrutos, iconoDe, iconoFruto, labelFruto, stockLabel, imgsDe, sinTildes, sinHtml, registrarVisita, confirmarPedidoWA, setSEO, compartir, rutaProducto, buscarPorSlug, abrirWA, FAVORITOS, BUSCADOR, videoEmbed, videoThumb, paginaPorSlug, postCanvas } from './utils'
 import FrutoIcon from './FrutoIcon'
 
 // ==================== MIGAS DE PAN ====================
@@ -90,7 +90,7 @@ export function Home() {
 
   const filtrando = cat !== 'todos' || !!q.trim() || !!fFruto || orden !== 'rel'
   const heroOn = (cfg.secciones || []).find(s => (s.tipo || s.id) === 'hero')?.on !== false
-  const bannersPrincipales = (banners || []).filter(b => !b.es_secundario)
+  const bannersPrincipales = (banners || []).filter(b => !b.es_secundario && b.activo !== false)
   const heroSlides = bannersPrincipales.length ? bannersPrincipales : destacados
   const resultados = useMemo(() => {
     let r = productos || []
@@ -164,7 +164,11 @@ export function Home() {
           switch (tipo) {
             case 'hero': return null   // el banner principal ya se muestra arriba de los filtros
             case 'banner': {
-              const b = banners.find(x => String(x.id) === String(s.bannerId))
+              // Grupo de banners secundarios activos (varias imágenes = slide; una = estático)
+              const grupoBanners = (banners || []).filter(b => b.es_secundario && b.activo !== false && ((b.grupo || '').trim() || 'General') === s.grupo)
+              if (grupoBanners.length) return <BannerGrupo key={key} banners={grupoBanners} />
+              // Compatibilidad con secciones antiguas que referencian un banner por id
+              const b = banners.find(x => String(x.id) === String(s.bannerId) && x.activo !== false)
               return b ? <BannerSecundario key={key} b={b} /> : null
             }
             case 'novedades':
@@ -308,18 +312,45 @@ export function Favoritos() {
 
 // ==================== PÁGINAS POR BLOQUES (Nosotros + páginas personalizadas) ====================
 // Renderiza un bloque: título, párrafo, imagen, botón, galería (álbum) o video.
+const anchoColPct = (a) => { const n = Number(a); return (a === 'auto' || !n) ? undefined : `${Math.max(8, Math.min(100, (n / 12) * 100))}%` }
 function BloquePagina({ b, onImg, onAlbum }) {
   const nav = useNavigate()
   // Alineación y ancho configurables (títulos centrados por defecto)
   const align = b.align || (b.tipo === 'titulo' ? 'center' : 'left')
-  const anchoMax = { narrow: 520, medio: 720 }[b.ancho]
+  // Ancho: personalizado (px, arrastrado en el lienzo) o preajuste
+  const anchoMax = (b.estilo && b.estilo.maxW) ? b.estilo.maxW : { narrow: 520, medio: 720 }[b.ancho]
   const wrapStyle = { textAlign: align }
   if (anchoMax) {
     wrapStyle.maxWidth = anchoMax
     wrapStyle.marginLeft = (align === 'right' || align === 'center') ? 'auto' : 0
     wrapStyle.marginRight = (align === 'left' || align === 'center') ? 'auto' : 0
   }
+  // Panel de estilo (como Elementor): espaciado, fondo, color, radio, tamaño de fuente
+  const est = b.estilo || {}
+  if (est.bg) wrapStyle.background = est.bg
+  if (est.color) wrapStyle.color = est.color
+  if (est.padY != null && est.padY !== '') { wrapStyle.paddingTop = Number(est.padY); wrapStyle.paddingBottom = Number(est.padY) }
+  if (est.padX != null && est.padX !== '') { wrapStyle.paddingLeft = Number(est.padX); wrapStyle.paddingRight = Number(est.padX) }
+  if (est.radio != null && est.radio !== '') wrapStyle.borderRadius = Number(est.radio)
+  if (est.fontSize != null && est.fontSize !== '') wrapStyle.fontSize = Number(est.fontSize)
   let contenido = null
+  if (b.tipo === 'fila') {
+    const cols = Array.isArray(b.columnas) ? b.columnas : []
+    contenido = <div className="blk-fila">{cols.map((c, ci) => (
+      <div className="blk-col" style={{ flexBasis: anchoColPct(c.ancho), flexGrow: anchoColPct(c.ancho) ? 0 : 1 }} key={ci}>
+        {(c.bloques || []).map((cb, bi) => <BloquePagina key={bi} b={cb} onImg={onImg} onAlbum={onAlbum} />)}
+      </div>
+    ))}</div>
+    return <div className="blk" style={wrapStyle}>{contenido}</div>
+  }
+  if (b.tipo === 'caja') {
+    const cajaStyle = { ...wrapStyle }
+    if (!cajaStyle.background) cajaStyle.background = '#fff'
+    if (cajaStyle.paddingTop == null) { cajaStyle.paddingTop = cajaStyle.paddingBottom = 18 }
+    if (cajaStyle.paddingLeft == null) { cajaStyle.paddingLeft = cajaStyle.paddingRight = 18 }
+    if (cajaStyle.borderRadius == null) cajaStyle.borderRadius = 14
+    return <div className="blk blk-caja" style={cajaStyle}>{(b.bloques || []).map((cb, bi) => <BloquePagina key={bi} b={cb} onImg={onImg} onAlbum={onAlbum} />)}</div>
+  }
   if (b.tipo === 'titulo') contenido = <h2 className="serif nos-titulo" style={{ fontSize: b.grande ? '2rem' : undefined }}>{b.texto}</h2>
   else if (b.tipo === 'parrafo') contenido = <div className="rich-content nos-parrafo" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(b.html || b.texto || '') }} />
   else if (b.tipo === 'imagen') contenido = (
@@ -380,16 +411,176 @@ function Bloques({ bloques }) {
   )
 }
 
+// ---- Edición en el lienzo (WYSIWYG) ----
+// Elemento editable sin control de React: el contenido se fija al montar y se envía al panel al terminar.
+function Editable({ tag = 'div', html = false, initial, className, style, onCommit }) {
+  const ref = useRef(null)
+  useEffect(() => { if (ref.current) { if (html) ref.current.innerHTML = initial || ''; else ref.current.textContent = initial || '' } }, []) // solo al montar
+  const Tag = tag
+  return <Tag ref={ref} className={className} style={style} contentEditable suppressContentEditableWarning
+    onBlur={() => onCommit(html ? ref.current.innerHTML : ref.current.textContent)} />
+}
+
+const WIDGETS = [['titulo', 'Título', 'T'], ['parrafo', 'Párrafo', '¶'], ['imagen', 'Imagen', '🖼'], ['boton', 'Botón', '⬛'], ['galeria', 'Galería', '▦'], ['video', 'Video', '►'], ['fila', 'Columnas', '▥'], ['caja', 'Caja', '▢']]
+export function nuevoBloqueCat(tipo) {
+  const N = {
+    titulo: { tipo: 'titulo', texto: 'Nuevo título' }, parrafo: { tipo: 'parrafo', html: 'Escribe aquí…' }, imagen: { tipo: 'imagen', url: '', pie: '' },
+    boton: { tipo: 'boton', texto: 'Botón', destino: '' }, galeria: { tipo: 'galeria', titulo: '', subtitulo: '', imagenes: [] },
+    video: { tipo: 'video', url: '', titulo: '' }, fila: { tipo: 'fila', columnas: [{ ancho: 'auto', bloques: [] }, { ancho: 'auto', bloques: [] }] },
+    caja: { tipo: 'caja', bloques: [], estilo: {} },
+  }
+  return JSON.parse(JSON.stringify(N[tipo] || N.parrafo))
+}
+
+// Manija para redimensionar el ancho de una columna arrastrando (snap a rejilla de 12)
+function ColResizer({ onSet }) {
+  const onDown = (e) => {
+    e.preventDefault(); e.stopPropagation()
+    const fila = e.currentTarget.closest('.blk-fila'); if (!fila) return
+    const rect = fila.getBoundingClientRect()
+    const izq = e.currentTarget.previousElementSibling?.getBoundingClientRect().left ?? rect.left
+    const move = (ev) => { const frac = Math.max(2, Math.min(11, Math.round(((ev.clientX - izq) / rect.width) * 12))); onSet(frac) }
+    const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.body.classList.remove('col-resizing') }
+    document.body.classList.add('col-resizing')
+    document.addEventListener('mousemove', move); document.addEventListener('mouseup', up)
+  }
+  return <div className="col-resizer" onMouseDown={onDown} title="Arrastra para ajustar el ancho"><span /></div>
+}
+
+// ---- Arrastre entre contenedores (rutas) ----
+const DnDCtx = createContext(null)
+// Navega el árbol hasta el array contenedor de la ruta y devuelve {arr, idx}
+function walkParent(tree, ruta) {
+  let arr = tree, p = 0
+  while (p < ruta.length - 1) {
+    const el = arr[ruta[p]]; const key = ruta[p + 1]
+    if (key === 'caja') arr = el.bloques || (el.bloques = [])
+    else if (key && key.col != null) arr = el.columnas[key.col].bloques || (el.columnas[key.col].bloques = [])
+    else break
+    p += 2
+  }
+  return { arr, idx: ruta[ruta.length - 1] }
+}
+const mismaRuta = (a, b) => JSON.stringify(a) === JSON.stringify(b)
+
+// Editor en el lienzo recursivo: edita bloques, columnas y cajas; permite arrastrar entre contenedores
+function BloquesEditable({ bloques, onChange, nivel = 0, ruta = [] }) {
+  const [sel, setSel] = useState(null)
+  const ctxTop = useContext(DnDCtx)
+  // El nivel 0 crea el controlador de arrastre (opera sobre el árbol completo)
+  const dnd = ctxTop || {
+    _drag: null,
+    mover(desde, hacia) {
+      const t = JSON.parse(JSON.stringify(bloques))
+      const s = walkParent(t, desde); const [blk] = s.arr.splice(s.idx, 1)
+      const d = walkParent(t, hacia); let di = d.idx
+      if (s.arr === d.arr && di > s.idx) di--
+      d.arr.splice(di, 0, blk); onChange(t)
+    },
+  }
+  const setDrag = (path) => { dnd._drag = path }
+  const soltarEn = (hacia) => { if (dnd._drag && !mismaRuta(dnd._drag, hacia)) dnd.mover(dnd._drag, hacia); dnd._drag = null }
+  const upd = (i, nb) => onChange(bloques.map((b, k) => k === i ? nb : b))
+  const updC = (i, campo, val) => upd(i, { ...bloques[i], [campo]: val })
+  const del = (i) => { onChange(bloques.filter((_, k) => k !== i)); setSel(null) }
+  const mov = (i, d) => { const a = [...bloques]; const j = i + d; if (j < 0 || j >= a.length) return;[a[i], a[j]] = [a[j], a[i]]; onChange(a) }
+  const add = (tipo) => { const a = [...bloques]; const nb = nuevoBloqueCat(tipo); if (sel == null) a.push(nb); else a.splice(sel + 1, 0, nb); onChange(a) }
+  const anchos = { auto: 'Auto', 3: '1/4', 4: '1/3', 6: '1/2', 8: '2/3', 9: '3/4' }
+  const alignActual = (b) => b.align || (b.tipo === 'titulo' ? 'center' : 'left')
+  const ciclarAlign = (i, b) => updC(i, 'align', { left: 'center', center: 'right', right: 'left' }[alignActual(b)])
+  const ciclarAncho = (i, b) => { const nx = { full: 'medio', medio: 'narrow', narrow: 'full' }[b.ancho || 'full']; const estilo = { ...(b.estilo || {}) }; delete estilo.maxW; upd(i, { ...b, ancho: nx, estilo }) }
+  // Redimensionar un bloque arrastrando su borde derecho (ancho en px → estilo.maxW)
+  const iniciarResize = (e, i, b) => {
+    e.preventDefault(); e.stopPropagation()
+    const el = e.currentTarget.closest('.edit-blk'); if (!el) return
+    const left = el.getBoundingClientRect().left
+    const move = (ev) => { const w = Math.max(120, Math.round(ev.clientX - left)); updC(i, 'estilo', { ...(bloques[i].estilo || {}), maxW: w }) }
+    const up = () => { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.body.classList.remove('col-resizing') }
+    document.body.classList.add('col-resizing'); document.addEventListener('mousemove', move); document.addEventListener('mouseup', up)
+  }
+  const cuerpo = (
+    <div>
+      {nivel === 0 && (
+        <div className="edit-palette">
+          <span className="edit-palette-lbl">Agregar:</span>
+          {WIDGETS.map(([t, label, ic]) => <button key={t} onClick={() => add(t)} title={label}><span className="edit-w-ic">{ic}</span> {label}</button>)}
+        </div>
+      )}
+      <div className={nivel === 0 ? '' : 'edit-anidado'} onClick={() => { if (nivel === 0) setSel(null) }}>
+        {(bloques || []).map((b, i) => (
+          <div key={i} className={`edit-blk ${sel === i ? 'sel' : ''}`}
+            onClick={(e) => { e.stopPropagation(); setSel(i) }}
+            onDragOver={(e) => { if (dnd._drag) { e.preventDefault(); e.currentTarget.classList.add('over') } }}
+            onDragLeave={(e) => e.currentTarget.classList.remove('over')}
+            onDrop={(e) => { e.stopPropagation(); e.currentTarget.classList.remove('over'); soltarEn([...ruta, i]) }}>
+            {sel === i && (
+              <div className="edit-tool" onClick={e => e.stopPropagation()}>
+                <span className="edit-grip" draggable onDragStart={(e) => { try { e.dataTransfer.setData('text/plain', 'mumi'); e.dataTransfer.effectAllowed = 'move' } catch { /* noop */ } setDrag([...ruta, i]) }} onDragEnd={() => { dnd._drag = null }} title="Arrastra para mover (a cajas y columnas)">⠿</span>
+                <span className="edit-tool-tipo">{b.tipo}</span>
+                <button onClick={() => ciclarAlign(i, b)} title="Alinear">{{ left: '⯇', center: '≡', right: '⯈' }[alignActual(b)]}</button>
+                <button onClick={() => ciclarAncho(i, b)} title="Ancho (estrecho/medio/completo)">⇔</button>
+                {b.tipo === 'caja' && <button onClick={() => updC(i, 'bloques', [...(b.bloques || []), nuevoBloqueCat('parrafo')])} title="Agregar dentro">＋</button>}
+                <button disabled={i === 0} onClick={() => mov(i, -1)} title="Subir">↑</button>
+                <button disabled={i === bloques.length - 1} onClick={() => mov(i, 1)} title="Bajar">↓</button>
+                <button onClick={() => del(i)} title="Borrar">🗑</button>
+              </div>
+            )}
+            {sel === i && <span className="edit-resize" onMouseDown={(e) => iniciarResize(e, i, b)} title="Arrastra para cambiar el ancho" />}
+            {b.tipo === 'titulo'
+              ? <Editable tag="h2" className="serif nos-titulo" style={{ textAlign: b.align || 'center' }} initial={b.texto} onCommit={(val) => updC(i, 'texto', val)} />
+              : b.tipo === 'parrafo'
+                ? <Editable html className="rich-content nos-parrafo" initial={b.html || b.texto} onCommit={(val) => updC(i, 'html', val)} />
+                : b.tipo === 'boton'
+                  ? <div className="nos-boton-wrap"><Editable tag="span" className="btn btn-selva nos-boton" initial={b.texto} onCommit={(val) => updC(i, 'texto', val)} /></div>
+                  : b.tipo === 'caja'
+                    ? <div className="blk-caja edit-caja"
+                        onDragOver={(e) => { if (dnd._drag) { e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.add('caja-over') } }}
+                        onDragLeave={(e) => e.currentTarget.classList.remove('caja-over')}
+                        onDrop={(e) => { e.stopPropagation(); e.currentTarget.classList.remove('caja-over'); soltarEn([...ruta, i, 'caja', (b.bloques || []).length]) }}>
+                        <div className="edit-caja-lbl">Caja — suelta elementos aquí</div>
+                        <BloquesEditable bloques={b.bloques || []} onChange={(nb) => updC(i, 'bloques', nb)} nivel={nivel + 1} ruta={[...ruta, i, 'caja']} />
+                      </div>
+                    : b.tipo === 'fila'
+                      ? <div className="blk-fila">{(b.columnas || []).map((c, ci) => (
+                          <div className="blk-col edit-col" key={ci} style={{ flexBasis: c.ancho && c.ancho !== 'auto' ? `${(Number(c.ancho) / 12) * 100}%` : undefined, flexGrow: c.ancho && c.ancho !== 'auto' ? 0 : 1 }}
+                            onDragOver={(e) => { if (dnd._drag) { e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.add('col-over') } }}
+                            onDragLeave={(e) => e.currentTarget.classList.remove('col-over')}
+                            onDrop={(e) => { e.stopPropagation(); e.currentTarget.classList.remove('col-over'); soltarEn([...ruta, i, { col: ci }, (c.bloques || []).length]) }}>
+                            <div className="edit-col-head" onClick={e => e.stopPropagation()}>
+                              <span>Col {ci + 1}</span>
+                              <select value={c.ancho || 'auto'} onChange={e => updC(i, 'columnas', b.columnas.map((x, k) => k === ci ? { ...x, ancho: e.target.value } : x))}>
+                                {Object.entries(anchos).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
+                              </select>
+                              {b.columnas.length > 1 && <button onClick={() => updC(i, 'columnas', b.columnas.filter((_, k) => k !== ci))} title="Quitar columna">✕</button>}
+                            </div>
+                            <BloquesEditable bloques={c.bloques || []} onChange={(nb) => updC(i, 'columnas', b.columnas.map((x, k) => k === ci ? { ...x, bloques: nb } : x))} nivel={nivel + 1} ruta={[...ruta, i, { col: ci }]} />
+                            {ci < b.columnas.length - 1 && <ColResizer onSet={(frac) => updC(i, 'columnas', b.columnas.map((x, k) => k === ci ? { ...x, ancho: String(frac) } : x))} />}
+                          </div>
+                        ))}
+                          {b.columnas.length < 4 && <button className="edit-addcol" onClick={(e) => { e.stopPropagation(); updC(i, 'columnas', [...b.columnas, { ancho: 'auto', bloques: [] }]) }}>＋ col</button>}
+                        </div>
+                        : <div style={{ pointerEvents: 'none' }}><BloquePagina b={b} /></div>}
+          </div>
+        ))}
+        {nivel > 0 && <button className="edit-add-inline" onClick={(e) => { e.stopPropagation(); add('parrafo') }}>＋ agregar elemento</button>}
+        {nivel === 0 && (!bloques || bloques.length === 0) && <p className="empty">Usa la barra de arriba para agregar tu primer bloque.</p>}
+      </div>
+    </div>
+  )
+  return nivel === 0 ? <DnDCtx.Provider value={dnd}>{cuerpo}</DnDCtx.Provider> : cuerpo
+}
+
 export function Nosotros() {
-  const { cfg } = useStore()
+  const { cfg, edicion } = useStore()
   useEffect(() => { setSEO({ title: 'Nosotros', desc: sinHtml(cfg.nosotros_texto).slice(0, 160) || 'Sabores artesanales de la selva.' }) }, [cfg.nosotros_texto])
+  const editando = edicion?.on && edicion.target === 'nosotros'
   const bloques = Array.isArray(cfg.nosotros_bloques) && cfg.nosotros_bloques.length
     ? cfg.nosotros_bloques
     : (cfg.nosotros_texto ? [{ tipo: 'parrafo', html: cfg.nosotros_texto }] : [])
   return (
     <div className="page">
       <Migas items={[{ label: 'Nosotros' }]} />
-      <div className="nos-cuerpo"><Bloques bloques={bloques} /></div>
+      <div className="nos-cuerpo">{editando ? <BloquesEditable bloques={bloques} onChange={(nb) => postCanvas({ type: 'mumi-canvas-set', target: 'nosotros', bloques: nb })} /> : <Bloques bloques={bloques} />}</div>
       <div className="footer-space" />
     </div>
   )
@@ -398,8 +589,9 @@ export function Nosotros() {
 // ==================== PÁGINA PERSONALIZADA (/p/:slug) ====================
 export function Pagina() {
   const { slug } = useParams()
-  const { cfg } = useStore()
+  const { cfg, edicion } = useStore()
   const pag = paginaPorSlug(cfg.paginas, slug)
+  const editando = edicion?.on && edicion.target === `pagina:${slug}`
   useEffect(() => { if (pag) setSEO({ title: pag.titulo }) }, [pag?.titulo])
   if (cfg.paginas == null) return <div className="spin" />
   if (!pag) return <div className="empty">Página no encontrada. <Link to="/tienda" className="sec-link">Volver a la tienda</Link></div>
@@ -407,7 +599,9 @@ export function Pagina() {
     <div className="page">
       <Migas items={[{ label: pag.titulo }]} />
       {pag.titulo && <div style={{ padding: '8px 16px 0' }}><h1 className="serif" style={{ fontSize: '1.7rem', color: 'var(--selva)' }}>{pag.titulo}</h1></div>}
-      <div className="nos-cuerpo"><Bloques bloques={pag.bloques || []} /></div>
+      <div className="nos-cuerpo">{editando
+        ? <BloquesEditable bloques={pag.bloques || []} onChange={(nb) => postCanvas({ type: 'mumi-canvas-set', target: `pagina:${slug}`, bloques: nb })} />
+        : <Bloques bloques={pag.bloques || []} />}</div>
       <div className="footer-space" />
     </div>
   )

@@ -109,6 +109,24 @@ export function BannerSecundario({ b }) {
   )
 }
 
+// ---- Grupo de banners secundarios: varias imágenes = slide; una = estático ----
+export function BannerGrupo({ banners }) {
+  const [i, setI] = useState(0)
+  const n = banners.length
+  useEffect(() => { if (n <= 1) return; const t = setInterval(() => setI(x => (x + 1) % n), 6000); return () => clearInterval(t) }, [n])
+  if (n === 0) return null
+  if (n === 1) return <BannerSecundario b={banners[0]} />
+  const go = (d) => setI(x => (x + d + n) % n)
+  return (
+    <div className="bsec-grupo">
+      <BannerSecundario b={banners[i]} />
+      <button className="hero-nav left" onClick={e => { e.stopPropagation(); go(-1) }} aria-label="Anterior"><ChevronLeft size={22} /></button>
+      <button className="hero-nav right" onClick={e => { e.stopPropagation(); go(1) }} aria-label="Siguiente"><ChevronRight size={22} /></button>
+      <div className="hero-dots">{banners.map((_, k) => <span key={k} className={`dot ${k === i ? 'on' : ''}`} onClick={() => setI(k)} />)}</div>
+    </div>
+  )
+}
+
 // ---- Newsletter ----
 export function Newsletter() {
   const [email, setEmail] = useState('')

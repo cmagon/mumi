@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useToast } from '../hooks/useToast'
@@ -176,10 +176,15 @@ function TabProductos({ toast, qc }) {
 const EXTRA_VACIO = (tipo) => ({ id: 'x' + Date.now() + Math.random().toString(36).slice(2, 5), tipo, nombre: '', categoria: '', descripcion: '', imagenes: [], precio_detal: '', precio_oferta: '', precio_mayor: '', stock: '', componentes: [], destacado: false, novedad: false, visible: true })
 function ProductosExtra({ toast, baseProductos = [] }) {
   const [items, setItems] = useState(null)
+  const [cats, setCats] = useState([])            // categorías creadas por el usuario
+  const [catInput, setCatInput] = useState('')
   const [saving, setSaving] = useState(false)
   const [subiendo, setSubiendo] = useState(false)
   const [comp, setComp] = useState({})   // borrador de componente por combo
-  useEffect(() => { supabase.from('config_catalogo').select('productos_extra').eq('id', 1).maybeSingle().then(({ data }) => setItems(Array.isArray(data?.productos_extra) ? data.productos_extra : [])) }, [])
+  useEffect(() => { supabase.from('config_catalogo').select('productos_extra, categorias_extra').eq('id', 1).maybeSingle().then(({ data }) => { setItems(Array.isArray(data?.productos_extra) ? data.productos_extra : []); setCats(Array.isArray(data?.categorias_extra) ? data.categorias_extra : []) }) }, [])
+  const catsConocidas = [...new Set([...baseProductos.map(p => p.categoria).filter(Boolean), ...cats, ...(items || []).map(x => x.categoria).filter(Boolean)])]
+  const addCat = () => { const v = catInput.trim(); if (v && !cats.includes(v)) setCats(c => [...c, v]); setCatInput('') }
+  const delCat = (c) => setCats(cs => cs.filter(x => x !== c))
   const upd = (i, campo, val) => setItems(a => a.map((x, k) => k === i ? { ...x, [campo]: val } : x))
   const add = (tipo) => setItems(a => [...(a || []), EXTRA_VACIO(tipo)])
   const del = (i) => setItems(a => a.filter((_, k) => k !== i))
@@ -205,7 +210,7 @@ function ProductosExtra({ toast, baseProductos = [] }) {
         ...x, precio_detal: Number(x.precio_detal) || 0, precio_oferta: Number(x.precio_oferta) || null,
         precio_mayor: Number(x.precio_mayor) || 0, stock: Number(x.stock) || 0,
       }))
-      const { error } = await supabase.from('config_catalogo').upsert({ id: 1, productos_extra: limpio, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+      const { error } = await supabase.from('config_catalogo').upsert({ id: 1, productos_extra: limpio, categorias_extra: cats, updated_at: new Date().toISOString() }, { onConflict: 'id' })
       if (error) throw error
       toast('Productos adicionales guardados ✓')
     } catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
@@ -216,6 +221,20 @@ function ProductosExtra({ toast, baseProductos = [] }) {
     <div className="card" style={{ marginTop: 16 }}>
       <div className="card-title"><Ico as={Plus} size={16} />Productos y combos adicionales</div>
       <p style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', marginTop: 0 }}>Productos que no están en Productos Terminados, o <strong>combos</strong> de productos existentes. Configura fotos, precios, oferta y stock. El stock de un combo se calcula automáticamente según sus componentes.</p>
+
+      {/* Gestión de categorías */}
+      <div style={{ background: 'var(--crema)', borderRadius: 10, padding: 10, marginBottom: 10 }}>
+        <label className="form-label">Categorías <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(crea las que necesites; se usan aquí y en las secciones del inicio)</small></label>
+        <div style={{ display: 'flex', gap: 6, marginBottom: cats.length ? 8 : 0 }}>
+          <input className="form-control" value={catInput} onChange={e => setCatInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addCat() } }} placeholder="Nueva categoría + Enter" />
+          <button type="button" className="btn btn-secondary" onClick={addCat}><Plus size={16} /></button>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+          {cats.map(c => <span key={c} className="badge badge-verde" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>{c} <button type="button" onClick={() => delCat(c)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--rojo)', display: 'inline-flex' }}><X size={12} /></button></span>)}
+        </div>
+      </div>
+      <datalist id="cats-extra">{catsConocidas.map(c => <option key={c} value={c} />)}</datalist>
+
       <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
         <button className="btn btn-sm btn-secondary" onClick={() => add('producto')}><Plus size={13} /> Producto</button>
         <button className="btn btn-sm btn-secondary" onClick={() => add('combo')}><Plus size={13} /> Combo</button>
@@ -233,7 +252,7 @@ function ProductosExtra({ toast, baseProductos = [] }) {
             </div>
             <div className="form-grid-2">
               <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Nombre</label><input className="form-control" value={x.nombre} onChange={e => upd(i, 'nombre', e.target.value)} /></div>
-              <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Categoría</label><input className="form-control" value={x.categoria} onChange={e => upd(i, 'categoria', e.target.value)} placeholder="Ej: Combos" /></div>
+              <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Categoría</label><input className="form-control" list="cats-extra" value={x.categoria} onChange={e => upd(i, 'categoria', e.target.value)} placeholder="Elige o escribe una categoría" /></div>
             </div>
             <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Descripción</label><textarea className="form-control" rows={2} value={x.descripcion} onChange={e => upd(i, 'descripcion', e.target.value)} /></div>
             <div className="form-grid-2">
@@ -836,15 +855,36 @@ function BarraItemsEditor({ items = [], onChange }) {
   )
 }
 
-// Constructor de bloques (título, párrafo, imagen, botón, galería/álbum, video)
-function EditorNosotros({ bloques = [], onChange, toast, paginas = [] }) {
+// Bloque nuevo por tipo (usado por el editor de bloques y por el editor en el lienzo)
+function nuevoBloque(tipo) {
+  const N = {
+    titulo: { tipo: 'titulo', texto: 'Nuevo título' }, parrafo: { tipo: 'parrafo', html: 'Escribe aquí…' }, imagen: { tipo: 'imagen', url: '', pie: '' },
+    boton: { tipo: 'boton', texto: 'Botón', destino: '' }, galeria: { tipo: 'galeria', titulo: '', subtitulo: '', imagenes: [] },
+    video: { tipo: 'video', url: '', titulo: '' }, fila: { tipo: 'fila', columnas: [{ ancho: 'auto', bloques: [] }, { ancho: 'auto', bloques: [] }] },
+  }
+  return JSON.parse(JSON.stringify(N[tipo] || N.parrafo))
+}
+
+// Constructor de bloques (título, párrafo, imagen, botón, galería/álbum, video, fila/columnas)
+function EditorNosotros({ bloques = [], onChange, toast, paginas = [], sinFila = false }) {
   const [cropTarget, setCropTarget] = useState(null)   // { i } imagen suelta | { i, gi } imagen de galería
   const [cropFile, setCropFile] = useState(null)
   const [dragIdx, setDragIdx] = useState(null)
   const [overIdx, setOverIdx] = useState(null)
+  const [estIdx, setEstIdx] = useState(null)           // bloque con panel de estilo abierto
   const upd = (i, campo, val) => onChange(bloques.map((b, k) => k === i ? { ...b, [campo]: val } : b))
-  const NUEVO = { titulo: { tipo: 'titulo', texto: '' }, parrafo: { tipo: 'parrafo', html: '' }, imagen: { tipo: 'imagen', url: '', pie: '' }, boton: { tipo: 'boton', texto: '', destino: '' }, galeria: { tipo: 'galeria', titulo: '', subtitulo: '', imagenes: [] }, video: { tipo: 'video', url: '', titulo: '' } }
-  const add = (tipo) => onChange([...bloques, { ...NUEVO[tipo] }])
+  const updEst = (i, campo, val) => onChange(bloques.map((b, k) => k === i ? { ...b, estilo: { ...(b.estilo || {}), [campo]: val } } : b))
+  const NUEVO = {
+    titulo: { tipo: 'titulo', texto: '' }, parrafo: { tipo: 'parrafo', html: '' }, imagen: { tipo: 'imagen', url: '', pie: '' },
+    boton: { tipo: 'boton', texto: '', destino: '' }, galeria: { tipo: 'galeria', titulo: '', subtitulo: '', imagenes: [] },
+    video: { tipo: 'video', url: '', titulo: '' }, fila: { tipo: 'fila', columnas: [{ ancho: 'auto', bloques: [] }, { ancho: 'auto', bloques: [] }] },
+    caja: { tipo: 'caja', bloques: [], estilo: {} },
+  }
+  const add = (tipo) => onChange([...bloques, JSON.parse(JSON.stringify(NUEVO[tipo]))])
+  // Columnas de una fila
+  const colUpd = (i, ci, campo, val) => upd(i, 'columnas', (bloques[i].columnas || []).map((c, k) => k === ci ? { ...c, [campo]: val } : c))
+  const colAdd = (i) => (bloques[i].columnas || []).length < 4 && upd(i, 'columnas', [...(bloques[i].columnas || []), { ancho: 'auto', bloques: [] }])
+  const colDel = (i, ci) => upd(i, 'columnas', (bloques[i].columnas || []).filter((_, k) => k !== ci))
   const del = (i) => onChange(bloques.filter((_, k) => k !== i))
   const mover = (i, d) => { const a = [...bloques]; const j = i + d; if (j < 0 || j >= a.length) return;[a[i], a[j]] = [a[j], a[i]]; onChange(a) }
   const soltar = (to) => {
@@ -871,8 +911,8 @@ function EditorNosotros({ bloques = [], onChange, toast, paginas = [] }) {
   return (
     <div style={{ marginTop: 10 }}>
       <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
-        {['titulo', 'parrafo', 'imagen', 'boton', 'galeria', 'video'].map(t =>
-          <button key={t} type="button" className="btn btn-xs btn-secondary" onClick={() => add(t)}><Plus size={12} /> {t === 'galeria' ? 'Galería' : t.charAt(0).toUpperCase() + t.slice(1)}</button>)}
+        {['titulo', 'parrafo', 'imagen', 'boton', 'galeria', 'video', 'caja', ...(sinFila ? [] : ['fila'])].map(t =>
+          <button key={t} type="button" className="btn btn-xs btn-secondary" onClick={() => add(t)}><Plus size={12} /> {t === 'galeria' ? 'Galería' : t === 'fila' ? 'Fila/columnas' : t === 'caja' ? 'Caja' : t.charAt(0).toUpperCase() + t.slice(1)}</button>)}
       </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
         {bloques.length === 0 && <small style={{ color: 'var(--texto-suave)' }}>Aún no hay bloques. Usa los botones de arriba.</small>}
@@ -885,10 +925,47 @@ function EditorNosotros({ bloques = [], onChange, toast, paginas = [] }) {
               <span draggable onDragStart={() => setDragIdx(i)} onDragEnd={() => { setDragIdx(null); setOverIdx(null) }}
                 title="Arrastra para reordenar" style={{ cursor: 'grab', color: 'var(--texto-suave)', display: 'inline-flex' }}><GripVertical size={16} /></span>
               <strong style={{ flex: 1, fontSize: '0.78rem', textTransform: 'uppercase', color: 'var(--texto-suave)' }}>{b.tipo}</strong>
+              <button type="button" className={`btn btn-xs ${estIdx === i ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setEstIdx(estIdx === i ? null : i)} title="Estilo">⚙</button>
               <button type="button" className="btn btn-xs btn-secondary" disabled={i === 0} onClick={() => mover(i, -1)}><ChevronUp size={12} /></button>
               <button type="button" className="btn btn-xs btn-secondary" disabled={i === bloques.length - 1} onClick={() => mover(i, 1)}><ChevronDown size={12} /></button>
               <button type="button" className="btn btn-xs btn-danger" onClick={() => del(i)}><Trash2 size={12} /></button>
             </div>
+            {estIdx === i && (() => { const es = b.estilo || {}; return (
+              <div style={{ background: 'var(--crema)', borderRadius: 8, padding: 8, marginBottom: 8, display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8, fontSize: '0.78rem' }}>
+                <label>Fondo<input type="color" style={{ width: '100%', height: 28 }} value={es.bg || '#ffffff'} onChange={e => updEst(i, 'bg', e.target.value)} /></label>
+                <label>Texto<input type="color" style={{ width: '100%', height: 28 }} value={es.color || '#1a1a1a'} onChange={e => updEst(i, 'color', e.target.value)} /></label>
+                <label>Radio<input type="number" className="form-control" style={{ padding: '3px 6px' }} value={es.radio ?? ''} onChange={e => updEst(i, 'radio', e.target.value)} placeholder="px" /></label>
+                <label>Esp. vert.<input type="number" className="form-control" style={{ padding: '3px 6px' }} value={es.padY ?? ''} onChange={e => updEst(i, 'padY', e.target.value)} placeholder="px" /></label>
+                <label>Esp. horiz.<input type="number" className="form-control" style={{ padding: '3px 6px' }} value={es.padX ?? ''} onChange={e => updEst(i, 'padX', e.target.value)} placeholder="px" /></label>
+                <label>Fuente<input type="number" className="form-control" style={{ padding: '3px 6px' }} value={es.fontSize ?? ''} onChange={e => updEst(i, 'fontSize', e.target.value)} placeholder="px" /></label>
+                <button type="button" className="btn btn-xs btn-secondary" style={{ gridColumn: '1 / -1' }} onClick={() => upd(i, 'estilo', {})}>Limpiar estilo</button>
+              </div>
+            ) })()}
+            {b.tipo === 'fila' && (
+              <div>
+                <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
+                  {(b.columnas || []).map((c, ci) => (
+                    <div key={ci} style={{ flex: '1 1 220px', minWidth: 200, border: '1px dashed var(--crema-oscuro)', borderRadius: 8, padding: 8 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
+                        <strong style={{ flex: 1, fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Columna {ci + 1}</strong>
+                        <select className="form-control" style={{ width: 'auto', padding: '2px 6px', fontSize: '0.74rem' }} value={c.ancho || 'auto'} onChange={e => colUpd(i, ci, 'ancho', e.target.value)}>
+                          <option value="auto">Auto</option><option value="3">1/4</option><option value="4">1/3</option><option value="6">1/2</option><option value="8">2/3</option><option value="9">3/4</option>
+                        </select>
+                        {(b.columnas || []).length > 1 && <button type="button" className="btn btn-xs btn-danger" onClick={() => colDel(i, ci)}><X size={11} /></button>}
+                      </div>
+                      <EditorNosotros bloques={c.bloques || []} onChange={(bl) => colUpd(i, ci, 'bloques', bl)} toast={toast} paginas={paginas} sinFila />
+                    </div>
+                  ))}
+                </div>
+                {(b.columnas || []).length < 4 && <button type="button" className="btn btn-xs btn-secondary" style={{ marginTop: 8 }} onClick={() => colAdd(i)}><Plus size={12} /> Agregar columna</button>}
+              </div>
+            )}
+            {b.tipo === 'caja' && (
+              <div style={{ border: '1px dashed var(--crema-oscuro)', borderRadius: 8, padding: 8 }}>
+                <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', marginBottom: 4 }}>Contenido de la caja:</div>
+                <EditorNosotros bloques={b.bloques || []} onChange={(bl) => upd(i, 'bloques', bl)} toast={toast} paginas={paginas} />
+              </div>
+            )}
             {b.tipo !== 'galeria' && (
               <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
                 <div style={{ display: 'inline-flex', border: '1px solid var(--crema-oscuro)', borderRadius: 8, overflow: 'hidden' }}>
@@ -966,7 +1043,7 @@ function EditorNosotros({ bloques = [], onChange, toast, paginas = [] }) {
 
 // Gestor de páginas personalizadas (galería, etc.). Cada página tiene sus propios bloques.
 const slugCat = (s) => (s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
-function PaginasEditor({ paginas = [], onChange, toast }) {
+function PaginasEditor({ paginas = [], onChange, toast, lienzo, onLienzo }) {
   const [edit, setEdit] = useState(null)   // índice en edición
   const upd = (i, campo, val) => onChange(paginas.map((p, k) => k === i ? { ...p, [campo]: val } : p))
   const add = () => { onChange([...paginas, { id: 'p' + Date.now(), titulo: 'Nueva página', slug: 'pagina-' + (paginas.length + 1), oculta: false, bloques: [] }]); setEdit(paginas.length) }
@@ -990,8 +1067,13 @@ function PaginasEditor({ paginas = [], onChange, toast }) {
                   <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Título</label><input className="form-control" value={p.titulo || ''} onChange={e => { const t = e.target.value; upd(i, 'titulo', t) }} /></div>
                   <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Dirección (slug)</label><input className="form-control" value={p.slug || ''} onChange={e => upd(i, 'slug', slugCat(e.target.value))} placeholder="galeria" /></div>
                 </div>
-                <label className="form-label">Contenido</label>
-                <EditorNosotros bloques={p.bloques || []} onChange={(bl) => upd(i, 'bloques', bl)} toast={toast} paginas={paginas} />
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+                  <label className="form-label" style={{ margin: 0, flex: 1 }}>Contenido</label>
+                  {onLienzo && p.slug && <button type="button" className={`btn btn-xs ${lienzo === `pagina:${p.slug}` ? 'btn-danger' : 'btn-primary'}`} onClick={() => onLienzo(`pagina:${p.slug}`)}>{lienzo === `pagina:${p.slug}` ? '✕ Salir del lienzo' : <><Pencil size={12} /> Editar en el lienzo</>}</button>}
+                </div>
+                {lienzo === `pagina:${p.slug}`
+                  ? <div style={{ background: 'color-mix(in srgb, var(--selva) 10%, #fff)', border: '1px solid var(--selva)', borderRadius: 8, padding: '10px 12px', fontSize: '0.82rem', color: 'var(--selva)' }}>✏️ <strong>Editando en el lienzo.</strong> Edita esta página directamente sobre la vista previa. Sal del lienzo para volver a la edición por panel.</div>
+                  : <EditorNosotros bloques={p.bloques || []} onChange={(bl) => upd(i, 'bloques', bl)} toast={toast} paginas={paginas} />}
               </div>
             )}
           </div>
@@ -1161,13 +1243,13 @@ function SeccionesEditor({ secciones = [], onChange, categorias = [], banners = 
                 {categorias.map(c => <option key={c} value={c}>{c}</option>)}
               </select>
             )}
-            {s.tipo === 'banner' && (() => { const secundarios = banners.filter(b => b.es_secundario); return (
+            {s.tipo === 'banner' && (() => { const grupos = [...new Set(banners.filter(b => b.es_secundario).map(b => (b.grupo || '').trim() || 'General'))]; return (
               <div>
-                <select className="form-control" style={{ marginTop: 6 }} value={s.bannerId || ''} onChange={e => upd(i, 'bannerId', e.target.value)}>
-                  <option value="">Elegir banner secundario…</option>
-                  {secundarios.map(b => <option key={b.id} value={b.id}>{b.titulo || '(sin título)'}</option>)}
+                <select className="form-control" style={{ marginTop: 6 }} value={s.grupo || ''} onChange={e => upd(i, 'grupo', e.target.value)}>
+                  <option value="">Elegir grupo de banner…</option>
+                  {grupos.map(g => <option key={g} value={g}>{g}</option>)}
                 </select>
-                {secundarios.length === 0 && <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Crea banners <strong>secundarios</strong> en la sección "Banners".</small>}
+                {grupos.length === 0 && <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Crea banners <strong>secundarios</strong> con un <strong>grupo</strong> en la sección "Banners".</small>}
               </div>
             ) })()}
             {(s.tipo === 'mosaico' || s.tipo === 'frutos' || s.tipo === 'novedades' || s.tipo === 'combos') && (
@@ -1217,13 +1299,18 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
   const [previewMayorista, setPreviewMayorista] = useState(false)
   const [dispositivo, setDispositivo] = useState('desktop')   // desktop | tablet | mobile
   const [iframeEl, setIframeEl] = useState(null)
+  const [lienzo, setLienzo] = useState(false)   // edición en el lienzo (Nosotros)
+  const stageRef = useRef(null)
+  const [stage, setStage] = useState({ w: 0, h: 0 })
+  const PC_W = 1150   // ancho lógico de escritorio para la vista previa de PC (menor = se ve más grande)
+  const escala = dispositivo === 'desktop' ? (stage.w ? Math.min(1, Math.max(0.4, (stage.w - 8) / PC_W)) : 0.5) : 1
 
   const { data: frutosCat = [] } = useQuery({ queryKey: ['frutos_catalogo'], queryFn: async () => { const { data } = await supabase.from('frutos_catalogo').select('*').order('orden'); return data || [] } })
   const { data: categorias = [] } = useQuery({
     queryKey: ['catalogo_categorias'],
     queryFn: async () => { const { data } = await supabase.from('finished_products').select('categoria_alegra_nombre').eq('catalogo_visible', true); return [...new Set((data || []).map(p => p.categoria_alegra_nombre).filter(Boolean))] },
   })
-  const { data: bannersLista = [] } = useQuery({ queryKey: ['banners_catalogo'], queryFn: async () => { const { data } = await supabase.from('banners_catalogo').select('id, titulo, es_secundario').order('orden'); return data || [] } })
+  const { data: bannersLista = [] } = useQuery({ queryKey: ['banners_catalogo'], queryFn: async () => { const { data } = await supabase.from('banners_catalogo').select('id, titulo, es_secundario, grupo').order('orden'); return data || [] } })
 
   useEffect(() => {
     supabase.from('config_catalogo').select('*').eq('id', 1).maybeSingle().then(({ data }) => {
@@ -1242,12 +1329,41 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
 
   // Envía la config al preview (iframe) para verlo en vivo
   const enviarPreview = () => { try { iframeEl?.contentWindow?.postMessage({ type: 'mumi-preview', cfg }, '*') } catch { /* noop */ } }
+  const enviarEdicion = () => { try { iframeEl?.contentWindow?.postMessage({ type: 'mumi-edit-mode', on: !!lienzo, target: lienzo }, '*') } catch { /* noop */ } }
+  // Entra/sale del editor en el lienzo para un objetivo ('nosotros' o 'pagina:slug')
+  const entrarLienzo = (target) => {
+    const on = lienzo === target ? null : target
+    setLienzo(on)
+    if (iframeEl) {
+      const base = (cfgUrl || '').replace(/\/+$/, '')
+      iframeEl.src = on === 'nosotros' ? `${base}/nosotros` : (on && on.startsWith('pagina:')) ? `${base}/p/${on.slice(7)}` : cfgUrl
+    }
+  }
   useEffect(() => { if (iframeEl && cfg) { const t = setTimeout(enviarPreview, 150); return () => clearTimeout(t) } }, [cfg, iframeEl]) // eslint-disable-line
+  useEffect(() => { enviarEdicion() }, [lienzo, iframeEl]) // eslint-disable-line
   useEffect(() => {
-    const onMsg = (e) => { if (e.data?.type === 'mumi-preview-ready') enviarPreview() }
+    const onMsg = (e) => {
+      const d = e.data
+      if (d?.type === 'mumi-preview-ready') { enviarPreview(); enviarEdicion() }
+      // Ediciones hechas en el lienzo: el lienzo envía el árbol completo
+      if (d?.type === 'mumi-canvas-set' && Array.isArray(d.bloques)) {
+        if (d.target === 'nosotros') setCfg(c => ({ ...c, nosotros_bloques: d.bloques }))
+        else if (typeof d.target === 'string' && d.target.startsWith('pagina:')) {
+          const slug = d.target.slice(7)
+          setCfg(c => ({ ...c, paginas: (c.paginas || []).map(p => p.slug === slug ? { ...p, bloques: d.bloques } : p) }))
+        }
+      }
+    }
     window.addEventListener('message', onMsg); return () => window.removeEventListener('message', onMsg)
   }) // eslint-disable-line
   useEffect(() => { try { iframeEl?.contentWindow?.postMessage({ type: 'mumi-preview-mayorista', on: previewMayorista }, '*') } catch { /* noop */ } }, [previewMayorista, iframeEl])
+  // Mide el escenario del preview para escalar la vista de PC de forma realista
+  useEffect(() => {
+    const el = stageRef.current; if (!el || typeof ResizeObserver === 'undefined') return
+    const medir = () => setStage({ w: el.clientWidth, h: el.clientHeight })
+    const ro = new ResizeObserver(medir); ro.observe(el); medir()
+    return () => ro.disconnect()
+  }, [dispositivo])
 
   const subirLogo = async (blob) => {
     setSubiendoLogo(true)
@@ -1349,7 +1465,7 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
         </PzSec>
 
         <PzSec abierto={abierto} setAbierto={setAbierto} id="secciones" titulo={<><Layout size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Secciones del inicio</>}>
-          <SeccionesEditor secciones={Array.isArray(cfg.secciones) ? cfg.secciones : SECCIONES_DEFAULT} onChange={(sx) => set('secciones', sx)} categorias={categorias} banners={bannersLista} />
+          <SeccionesEditor secciones={Array.isArray(cfg.secciones) ? cfg.secciones : SECCIONES_DEFAULT} onChange={(sx) => set('secciones', sx)} categorias={[...new Set([...categorias, ...(cfg.categorias_extra || []), ...(cfg.productos_extra || []).map(p => p.categoria).filter(Boolean)])]} banners={bannersLista} />
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: 'pointer', marginTop: 10 }}>
             <input type="checkbox" checked={!!cfg.mostrar_filtro_frutos} onChange={e => set('mostrar_filtro_frutos', e.target.checked)} /> Mostrar filtro por frutos en la tienda
           </label>
@@ -1386,8 +1502,13 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
         </PzSec>
 
         <PzSec abierto={abierto} setAbierto={setAbierto} id="nosotros" titulo={<>📖 Página "Nosotros" (bloques)</>}>
-          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Arma la página con bloques: títulos, párrafos, imágenes y mapas. Si no agregas ninguno, la pestaña "Nosotros" se oculta en el catálogo.</small>
-          <EditorNosotros bloques={Array.isArray(cfg.nosotros_bloques) ? cfg.nosotros_bloques : []} onChange={(bl) => set('nosotros_bloques', bl)} toast={toast} paginas={cfg.paginas || []} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', flex: 1 }}>Arma la página con bloques. También puedes <strong>editar el texto directamente sobre el diseño</strong> con el editor en el lienzo.</small>
+            {cfgUrl && <button className={`btn btn-sm ${lienzo === 'nosotros' ? 'btn-danger' : 'btn-primary'}`} onClick={() => entrarLienzo('nosotros')}>{lienzo === 'nosotros' ? <>✕ Salir del lienzo</> : <><Ico as={Pencil} size={13} />Editar en el lienzo</>}</button>}
+          </div>
+          {lienzo === 'nosotros'
+            ? <div style={{ background: 'color-mix(in srgb, var(--selva) 10%, #fff)', border: '1px solid var(--selva)', borderRadius: 8, padding: '10px 12px', fontSize: '0.82rem', color: 'var(--selva)' }}>✏️ <strong>Editando en el lienzo.</strong> Trabaja directamente sobre la vista previa: clic para seleccionar, escribe en textos, arrastra para mover (también dentro de cajas), y usa la barra flotante y de widgets. Sal del lienzo para volver a la edición por panel.</div>
+            : <EditorNosotros bloques={Array.isArray(cfg.nosotros_bloques) ? cfg.nosotros_bloques : []} onChange={(bl) => set('nosotros_bloques', bl)} toast={toast} paginas={cfg.paginas || []} />}
         </PzSec>
 
         <PzSec abierto={abierto} setAbierto={setAbierto} id="galeria" titulo={<>🖼️ Galería (álbumes)</>}>
@@ -1399,7 +1520,7 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
         </PzSec>
 
         <PzSec abierto={abierto} setAbierto={setAbierto} id="paginas" titulo={<>📄 Páginas personalizadas</>}>
-          <PaginasEditor paginas={Array.isArray(cfg.paginas) ? cfg.paginas : []} onChange={(pgs) => set('paginas', pgs)} toast={toast} />
+          <PaginasEditor paginas={Array.isArray(cfg.paginas) ? cfg.paginas : []} onChange={(pgs) => set('paginas', pgs)} toast={toast} lienzo={lienzo} onLienzo={cfgUrl ? entrarLienzo : null} />
         </PzSec>
 
         {cropLogo && <ImageCropper file={cropLogo} aspect={1} salidaW={400} salidaH={400} onCancel={() => setCropLogo(null)} onCropped={(blob) => { setCropLogo(null); subirLogo(blob) }} />}
@@ -1421,10 +1542,14 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
           <button className="btn btn-xs btn-secondary" onClick={() => { if (iframeEl) iframeEl.src = iframeEl.src }} title="Recargar"><RefreshCw size={13} /></button>
         </div>
         {cfgUrl
-          ? <div className={`pz-stage pz-stage-${dispositivo}`}>
-              <div className="pz-device-frame">
-                <iframe ref={setIframeEl} className="pz-frame" src={cfgUrl} title="Vista previa del catálogo" />
-              </div>
+          ? <div ref={stageRef} className={`pz-stage pz-stage-${dispositivo}`}>
+              {(() => { const H = stage.h || Math.round((typeof window !== 'undefined' ? window.innerHeight : 800) * 0.72)
+                return (
+                  <div className="pz-device-frame" style={dispositivo === 'desktop' ? { width: Math.round(PC_W * escala), height: H, overflow: 'hidden', borderRadius: 8, boxShadow: 'var(--sombra, 0 8px 30px rgba(0,0,0,0.15))' } : undefined}>
+                    <iframe ref={setIframeEl} className="pz-frame" src={cfgUrl} title="Vista previa del catálogo"
+                      style={dispositivo === 'desktop' ? { width: PC_W, height: Math.round(H / escala), transform: `scale(${escala})`, transformOrigin: 'top left', border: 0 } : undefined} />
+                  </div>
+                ) })()}
             </div>
           : <div className="pz-frame pz-frame-empty">Define la <strong>URL pública</strong> en Configuración para ver la vista previa en vivo.</div>}
       </div>
@@ -1433,7 +1558,7 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
 }
 
 // ==================== BANNERS ====================
-const BANNER_VACIO = { tipo: 'imagen', imagen_url: '', youtube: '', titulo: '', subtitulo: '', boton_texto: '', boton_link: '', orden: 0, activo: true, es_secundario: false }
+const BANNER_VACIO = { tipo: 'imagen', imagen_url: '', youtube: '', titulo: '', subtitulo: '', boton_texto: '', boton_link: '', orden: 0, activo: true, es_secundario: false, grupo: '' }
 
 function TabBanners({ toast, qc }) {
   const [edit, setEdit] = useState(null)
@@ -1518,7 +1643,21 @@ function EditorBanner({ banner, toast, qc, onClose }) {
         <div className="form-group"><label className="form-label">Orden</label><input type="number" className="form-control" value={b.orden} onChange={e => set('orden', e.target.value)} /></div>
       </div>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600, color: 'var(--selva)' }}><input type="checkbox" checked={!!b.activo} onChange={e => set('activo', e.target.checked)} /> Activo (visible en el catálogo)</label>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600, color: 'var(--selva)', marginTop: 8 }}><input type="checkbox" checked={!!b.es_secundario} onChange={e => set('es_secundario', e.target.checked)} /> Banner secundario (se coloca dentro del inicio; textos y botón centrados)</label>
+      <div className="form-group" style={{ marginTop: 10 }}>
+        <label className="form-label">Ubicación</label>
+        <select className="form-control" value={b.es_secundario ? 'sec' : 'prin'} onChange={e => set('es_secundario', e.target.value === 'sec')}>
+          <option value="prin">Banner principal (slide de arriba)</option>
+          <option value="sec">Banner secundario (dentro del inicio)</option>
+        </select>
+      </div>
+      {b.es_secundario && (
+        <div className="form-group">
+          <label className="form-label">Grupo del banner secundario</label>
+          <input className="form-control" value={b.grupo || ''} onChange={e => set('grupo', e.target.value)} placeholder="Ej: Promociones" />
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Los banners con el <strong>mismo grupo</strong> forman un solo banner. Con <strong>varias imágenes</strong> se vuelve slide; con una sola es estático. Grupos distintos no se combinan.</small>
+        </div>
+      )}
+      {!b.es_secundario && <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Los banners principales forman el carrusel de arriba (todos juntos).</small>}
     </Modal>
   )
 }

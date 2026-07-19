@@ -18,7 +18,7 @@ export const CFG_DEFAULT = {
   categorias_orden: [], secciones: SECCIONES_DEFAULT,
   nombre_tienda: null, slogan: null, logo_url: '', nosotros_texto: '', solo_logo: false, mostrar_filtro_frutos: false, mostrar_slogan: true,
   fuente_titulos: 'Playfair Display', fuente_subtitulos: 'Source Sans 3', fuente_texto: 'Source Sans 3',
-  contacto_mapa: '', paginas: [], galeria_albumes: [], galeria_titulo: '', galeria_subtitulo: '',
+  contacto_mapa: '', paginas: [], galeria_albumes: [], galeria_titulo: '', galeria_subtitulo: '', categorias_extra: [],
   mayorista_activo: true, mayorista_clave: '', mayorista_pedido_minimo: 0,
   mayorista_mensaje: '¿Eres mayorista? Accede a precios especiales por volumen.',
   mayorista_wa_texto: 'Hola Mumi Amazonia, me interesa ser mayorista. ¿Me comparten los precios al por mayor?',
@@ -31,6 +31,7 @@ export function StoreProvider({ children }) {
   const [carrito, setCarrito] = useState(() => { try { return JSON.parse(localStorage.getItem('mumi_carrito') || '[]') } catch { return [] } })
   const [favs, setFavs] = useState(() => { try { return JSON.parse(localStorage.getItem('mumi_favs') || '[]') } catch { return [] } })
   const [mayorista, setMayoristaState] = useState(() => { try { return localStorage.getItem('mumi_mayorista') === '1' } catch { return false } })
+  const [edicion, setEdicion] = useState({ on: false, target: null })   // edición en el lienzo (desde el panel)
 
   const cfg = useMemo(() => ({ ...cfgBase, ...(cfgPreview || {}) }), [cfgBase, cfgPreview])
 
@@ -78,6 +79,7 @@ export function StoreProvider({ children }) {
       const d = e.data
       if (d && d.type === 'mumi-preview' && d.cfg) setCfgPreview(d.cfg)
       if (d && d.type === 'mumi-preview-mayorista') setMayoristaState(!!d.on)
+      if (d && d.type === 'mumi-edit-mode') setEdicion({ on: !!d.on, target: d.target || null })
     }
     window.addEventListener('message', onMsg)
     // avisa al panel que el preview está listo
@@ -122,7 +124,7 @@ export function StoreProvider({ children }) {
   const value = useMemo(() => ({
     cfg, productos, banners, carrito, agregar, quitar, vaciar, enCarrito, total, nItems,
     productoPorId, favs, toggleFav, esFav, mayorista, setMayorista, precio, pedidoMinimo,
-    enOferta, descuentoPct, esPreview: cfgPreview !== null,
-  }), [cfg, productos, banners, carrito, favs, mayorista, cfgPreview])
+    enOferta, descuentoPct, edicion, esPreview: cfgPreview !== null,
+  }), [cfg, productos, banners, carrito, favs, mayorista, cfgPreview, edicion])
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }
