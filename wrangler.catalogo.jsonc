@@ -1,0 +1,16 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "catalogo",
+  "compatibility_date": "2026-06-18",
+  "main": "catalogo/worker.js",
+  "assets": {
+    "directory": "./dist-catalogo",
+    "binding": "ASSETS",
+    "not_found_handling": "single-page-application",
+    "run_worker_first": true
+  },
+  "vars": {
+    "SUPABASE_URL": "https://awjvggpeuxayvnreldvw.supabase.co",
+    "SUPABASE_ANON_KEY": "sb_publishable_dSxnLZKF7Ji7vRPFRXQQdg__8kwhoeR"
+  }
+}

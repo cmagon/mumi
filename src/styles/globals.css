@@ -2,6 +2,15 @@
 /* Catálogo de Google Fonts seleccionable desde Configuración (texto y títulos) */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto:wght@400;500;700&family=Open+Sans:wght@400;600;700&family=Lato:wght@400;700&family=Montserrat:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&family=Nunito:wght@400;600;700&family=Raleway:wght@400;600;700&family=Work+Sans:wght@400;500;600&family=DM+Sans:wght@400;500;700&family=Manrope:wght@400;500;700&family=Rubik:wght@400;500;700&family=Quicksand:wght@400;500;600;700&family=Josefin+Sans:wght@400;600&family=Oswald:wght@400;500;600&family=Bebas+Neue&family=Merriweather:wght@400;700&family=Lora:wght@400;600;700&family=PT+Serif:wght@400;700&family=Roboto+Slab:wght@400;600;700&family=Cormorant+Garamond:wght@400;600;700&display=swap');
 
+.page-loading {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  color: var(--selva);
+  background: var(--crema);
+  font: 600 1rem var(--fuente-texto, sans-serif);
+}
+
 :root {
   --selva:        #084908;
   --selva-medio:  #2d5a3d;
@@ -937,3 +946,27 @@ details.card > .card-acc-body { padding: 20px 24px; }
   .card { box-shadow: none; border: 1px solid #ddd; }
 }
 
+
+/* ==================== PERSONALIZAR (catálogo) ==================== */
+.pz-layout { display: grid; grid-template-columns: 1fr; gap: 16px; }
+@media (min-width: 1000px) { .pz-layout { grid-template-columns: minmax(320px, 460px) 1fr; align-items: start; } }
+.pz-panel { display: flex; flex-direction: column; gap: 10px; }
+.pz-sec { border: 1px solid var(--borde, #e5e5e5); border-radius: 12px; overflow: hidden; background: #fff; }
+.pz-sec-hd { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: none; border: none; cursor: pointer; font-weight: 700; font-size: 0.9rem; color: var(--selva, #1a3a2a); text-align: left; }
+.pz-sec-hd.open { border-bottom: 1px solid var(--borde, #e5e5e5); }
+.pz-sec-body { padding: 14px; }
+.pz-preview { position: sticky; top: 12px; }
+.pz-preview-bar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--selva, #1a3a2a); color: #fff; border-radius: 12px 12px 0 0; font-size: 0.82rem; font-weight: 600; }
+.pz-preview-bar > span:first-child { flex: 1; }
+.pz-devices { display: inline-flex; gap: 2px; background: rgba(255,255,255,0.14); border-radius: 999px; padding: 2px; }
+.pz-devices button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 24px; border: none; background: none; color: #fff; opacity: 0.7; border-radius: 999px; cursor: pointer; }
+.pz-devices button.on { background: #fff; color: var(--selva, #1a3a2a); opacity: 1; }
+.pz-stage { height: 78vh; min-height: 520px; border: 1px solid var(--borde, #e5e5e5); border-top: none; border-radius: 0 0 12px 12px; background: #eceae6; overflow: auto; display: flex; justify-content: center; align-items: flex-start; padding: 0; }
+.pz-stage-tablet, .pz-stage-mobile { padding: 20px 16px; }
+/* Escritorio: el iframe llena el escenario */
+.pz-stage-desktop .pz-device-frame { width: 100%; height: 100%; background: #fff; }
+/* Tablet y móvil: dimensiones fijas (proporción real de dispositivo), el escenario hace scroll */
+.pz-stage-tablet .pz-device-frame { width: 744px; max-width: 100%; height: 1000px; border-radius: 18px; box-shadow: 0 10px 34px rgba(0,0,0,0.22); overflow: hidden; border: 10px solid #1e1e1e; background: #fff; flex-shrink: 0; }
+.pz-stage-mobile .pz-device-frame { width: 375px; height: 760px; border-radius: 34px; box-shadow: 0 10px 34px rgba(0,0,0,0.22); overflow: hidden; border: 10px solid #1e1e1e; background: #fff; flex-shrink: 0; }
+.pz-frame { width: 100%; height: 100%; border: none; background: #fff; display: block; }
+.pz-frame-empty { height: 78vh; min-height: 520px; border: 1px solid var(--borde, #e5e5e5); border-top: none; border-radius: 0 0 12px 12px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 40px; color: var(--texto-suave, #666); }

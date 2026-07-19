@@ -15,8 +15,8 @@ export function subscribeDev(fn) { subs.add(fn); return () => subs.delete(fn) }
 
 // Vista de rol (solo lectura). Excluyente con impersonar.
 export function setPreviewRol(rol) { _st = { ..._st, rol: rol || null, imperson: null, permiteEdicion: false }; emitir() }
-// Impersonar un usuario real. 'origen' = credenciales del desarrollador para poder volver.
-export function setImpersonando(nombre, origen) { _st = { ..._st, imperson: nombre || null, rol: null, permiteEdicion: false, origen: origen || _st.origen }; emitir() }
+// Impersonar un usuario real. Nunca se guardan credenciales en el navegador.
+export function setImpersonando(nombre) { _st = { ..._st, imperson: nombre || null, rol: null, permiteEdicion: false, origen: null }; emitir() }
 export function setPermiteEdicion(v) { _st = { ..._st, permiteEdicion: !!v }; emitir() }
 export function limpiarDev() { _st = { rol: null, imperson: null, permiteEdicion: false, origen: null }; emitir() }
 

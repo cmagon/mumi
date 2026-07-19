@@ -31,11 +31,7 @@ export default function DevUserSwitch({ variant = 'header' }) {
       const { data } = await supabase.from('user_profiles')
         .select('id, nombre, login, rol, estado')
         .order('rol').order('nombre')
-      // Claves visibles en tabla protegida: el admin ve todas; un dev no-admin solo la suya.
-      // Si no hay clave disponible, entrarComoUsuario cae al prompt manual.
-      const { data: secrets } = await supabase.from('user_secrets').select('id, password_visible')
-      const mapPwd = Object.fromEntries((secrets || []).map(s => [s.id, s.password_visible]))
-      return (data || []).map(u => ({ ...u, password_visible: mapPwd[u.id] || null }))
+      return data || []
     },
     enabled: esDev && open,
   })
@@ -57,22 +53,13 @@ export default function DevUserSwitch({ variant = 'header' }) {
 
   const entrarComoUsuario = async (u) => {
     if (u.id === profile?.id) { setOpen(false); return }
-    // Si no hay contraseña guardada, se pide manualmente (el re-login real la necesita).
-    let pass = u.password_visible
-    if (!pass) {
-      pass = window.prompt(`No hay contraseña guardada para "${u.nombre}" (${u.login}).\nEscribe su contraseña para entrar como este usuario:`)
-      if (!pass) return
-    }
-    // Clave propia del desarrollador (para poder volver) obtenida de la tabla protegida.
-    const miPass = usuarios.find(x => x.id === profile?.id)?.password_visible
-    if (!miPass) {
-      toast('Tu usuario de desarrollador no tiene contraseña guardada, no podrías volver automáticamente. Guárdala primero (cámbiala desde tu perfil).', 'warning')
-    }
+    // Las contraseñas nunca se almacenan ni se recuperan desde la aplicación.
+    const pass = window.prompt(`Escribe la contraseña de "${u.nombre}" (${u.login}) para iniciar la sesión de prueba:`)
+    if (!pass) return
     setCambiando(true)
     try {
-      // Guarda las credenciales del desarrollador para poder volver, y marca la impersonación
-      // ANTES del re-login (así la sesión entra en modo bloqueado por defecto).
-      setImpersonando(u.nombre, { login: profile?.login, password: miPass })
+      // Marca la sesión de prueba antes del re-login. Para volver se inicia sesión de nuevo.
+      setImpersonando(u.nombre)
       await signIn(u.login, pass)   // re-login real → sesión, datos y permisos del usuario
       setOpen(false)
       toast(`Ahora estás como ${u.nombre} (${getRolLabel(u.rol)}) — edición bloqueada`)
@@ -151,12 +138,11 @@ export default function DevUserSwitch({ variant = 'header' }) {
                   ? <p style={{ fontSize: '0.82rem', color: 'var(--texto-suave)', padding: 10 }}>Cargando usuarios…</p>
                   : usuarios.map(u => {
                     const actual = u.id === profile?.id
-                    const sinPass = !u.password_visible
                     return (
                       <button key={u.id} disabled={cambiando || actual} onClick={() => entrarComoUsuario(u)}
                         style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px', marginBottom: 2, border: 'none', borderRadius: 8, cursor: actual ? 'default' : 'pointer', background: actual ? 'rgba(45,90,61,0.10)' : 'none' }}>
                         <div style={{ fontWeight: 600, fontSize: '0.86rem', color: 'var(--selva)' }}>{u.nombre} {actual && <span style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>(actual)</span>}</div>
-                        <div style={{ fontSize: '0.73rem', color: 'var(--texto-suave)' }}>{getRolLabel(u.rol)} · {u.login}{u.estado && u.estado !== 'activo' ? ` · ${u.estado}` : ''}{sinPass ? ' · pedirá contraseña' : ''}</div>
+                        <div style={{ fontSize: '0.73rem', color: 'var(--texto-suave)' }}>{getRolLabel(u.rol)} · {u.login}{u.estado && u.estado !== 'activo' ? ` · ${u.estado}` : ''}</div>
                       </button>
                     )
                   })}

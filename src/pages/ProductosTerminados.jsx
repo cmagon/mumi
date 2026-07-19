@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
 import MoneyInput from '../components/ui/MoneyInput'
 import Cargando from '../components/ui/Cargando'
+import ImageCropper from '../components/ui/ImageCropper'
 import { UNIDADES_ALEGRA, UNSPSC_ALIMENTOS } from '../lib/alegraCatalogos'
 import {
   Settings, Plug, DollarSign, ClipboardList, Shuffle, Plus, Tags, Scale, ScrollText,
@@ -59,22 +60,19 @@ export default function ProductosTerminados() {
   // Imágenes dentro del modal de edición del producto (la primera es la principal)
   const [edImgs, setEdImgs] = useState([])
   const [subiendoEdImg, setSubiendoEdImg] = useState(false)
-  const subirEdImgs = async (files) => {
-    if (!files?.length) return
+  const [cropEd, setCropEd] = useState(null)      // archivo pendiente de recortar (ficha)
+  const [cropGal, setCropGal] = useState(null)    // archivo pendiente de recortar (galería)
+  // Sube un blob JPEG ya recortado (1:1) y devuelve la URL pública
+  const subirImgProd = async (blob) => {
+    const path = `terminados/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.jpg`
+    const { error } = await supabase.storage.from('product-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
+    if (error) throw error
+    return supabase.storage.from('product-images').getPublicUrl(path).data.publicUrl
+  }
+  const subirEdBlob = async (blob) => {
     setSubiendoEdImg(true)
-    try {
-      const nuevas = []
-      for (const file of files) {
-        const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
-        const path = `terminados/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`
-        const { error } = await supabase.storage.from('product-images').upload(path, file, { upsert: true })
-        if (error) throw error
-        const { data } = supabase.storage.from('product-images').getPublicUrl(path)
-        nuevas.push(data.publicUrl)
-      }
-      setEdImgs(prev => [...prev, ...nuevas])
-    } catch (e) { toast('No se pudo subir: ' + e.message, 'error') }
-    finally { setSubiendoEdImg(false) }
+    try { const url = await subirImgProd(blob); setEdImgs(prev => [...prev, url]) }
+    catch (e) { toast('No se pudo subir: ' + e.message, 'error') } finally { setSubiendoEdImg(false) }
   }
   // Auditoría (admin): historial global de ajustes/movimientos de producto terminado
   const [modalHistAjustes, setModalHistAjustes] = useState(false)
@@ -85,22 +83,10 @@ export default function ProductosTerminados() {
   const [subiendoGal, setSubiendoGal] = useState(false)
   const imgsDe = (p) => { try { const a = Array.isArray(p.imagenes) ? p.imagenes : JSON.parse(p.imagenes || '[]'); return a.length ? a : (p.imagen_url ? [p.imagen_url] : []) } catch { return p.imagen_url ? [p.imagen_url] : [] } }
   const abrirGaleria = (p) => { setGaleriaDe(p); setGaleriaImgs(imgsDe(p)) }
-  const subirImgGaleria = async (files) => {
-    if (!files?.length) return
+  const subirGalBlob = async (blob) => {
     setSubiendoGal(true)
-    try {
-      const nuevas = []
-      for (const file of files) {
-        const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
-        const path = `terminados/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`
-        const { error } = await supabase.storage.from('product-images').upload(path, file, { upsert: true })
-        if (error) throw error
-        const { data } = supabase.storage.from('product-images').getPublicUrl(path)
-        nuevas.push(data.publicUrl)
-      }
-      setGaleriaImgs(prev => [...prev, ...nuevas])
-    } catch (e) { toast('No se pudo subir: ' + e.message, 'error') }
-    finally { setSubiendoGal(false) }
+    try { const url = await subirImgProd(blob); setGaleriaImgs(prev => [...prev, url]) }
+    catch (e) { toast('No se pudo subir: ' + e.message, 'error') } finally { setSubiendoGal(false) }
   }
   // Experimental: intenta enviar la imagen principal al ítem de Alegra (3 métodos; su API
   // pública no lo documenta — la función reporta si alguno fue aceptado).
@@ -1052,13 +1038,19 @@ export default function ProductosTerminados() {
                     {i > 0 && <button type="button" title="Hacer principal" onClick={() => setEdImgs(prev => [prev[i], ...prev.filter((_, idx) => idx !== i)])} style={{ background: 'rgba(0,0,0,0.55)', color: '#ffd54f', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.68rem', padding: '1px 4px' }}>★</button>}
                     <button type="button" title="Quitar" onClick={() => setEdImgs(prev => prev.filter((_, idx) => idx !== i))} style={{ background: 'rgba(0,0,0,0.55)', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.68rem', padding: '1px 4px' }}>✕</button>
                   </div>
+                  <div style={{ position: 'absolute', bottom: 0, left: 0, right: 0, display: 'flex', justifyContent: 'space-between', background: 'rgba(0,0,0,0.4)' }}>
+                    <button type="button" title="Mover izquierda" disabled={i === 0} onClick={() => setEdImgs(prev => { const b = [...prev];[b[i - 1], b[i]] = [b[i], b[i - 1]]; return b })} style={{ background: 'none', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '0.9rem', padding: '0 4px', opacity: i === 0 ? 0.3 : 1 }}>‹</button>
+                    <button type="button" title="Mover derecha" disabled={i === edImgs.length - 1} onClick={() => setEdImgs(prev => { const b = [...prev];[b[i + 1], b[i]] = [b[i], b[i + 1]]; return b })} style={{ background: 'none', color: '#fff', border: 'none', cursor: 'pointer', fontSize: '0.9rem', padding: '0 4px', opacity: i === edImgs.length - 1 ? 0.3 : 1 }}>›</button>
+                  </div>
                 </div>
               ))}
               <label style={{ width: 64, height: 64, border: '2px dashed var(--crema-oscuro)', borderRadius: 6, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.4rem', background: 'var(--crema)', color: 'var(--texto-suave)' }}>
                 {subiendoEdImg ? '…' : '＋'}
-                <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => { subirEdImgs([...(e.target.files || [])]); e.target.value = '' }} />
+                <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) setCropEd(f); e.target.value = '' }} />
               </label>
             </div>
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Recomendado 1000×1000 px (1:1). Podrás recortar al subir.</small>
+            {cropEd && <ImageCropper file={cropEd} aspect={1} salidaW={1000} salidaH={1000} onCancel={() => setCropEd(null)} onCropped={(blob) => { setCropEd(null); subirEdBlob(blob) }} />}
           </div>
           <div className="form-group"><label className="form-label">Tipo</label><select className="form-control" value={pForm.tipo} onChange={e => setPForm(f => ({ ...f, tipo: e.target.value }))}><option value="base">Base</option><option value="surtido">Surtido</option></select></div>
           <div className="form-group"><label className="form-label">SKU / Referencia (Alegra)</label><input className="form-control" value={pForm.sku} onChange={e => setPForm(f => ({ ...f, sku: e.target.value }))} /></div>
@@ -1444,12 +1436,17 @@ export default function ProductosTerminados() {
                 <button type="button" title="Quitar" onClick={() => setGaleriaImgs(prev => prev.filter((_, idx) => idx !== i))} style={{ background: 'rgba(0,0,0,0.55)', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.78rem', padding: '1px 5px' }}>✕</button>
               </div>
               {i === 0 && <span style={{ position: 'absolute', bottom: 3, left: 3, background: 'var(--dorado)', color: '#2b1c04', fontSize: '0.6rem', fontWeight: 700, borderRadius: 3, padding: '0 5px' }}>PRINCIPAL</span>}
+              <div style={{ position: 'absolute', bottom: 3, right: 3, display: 'flex', gap: 2 }}>
+                <button type="button" title="Mover izquierda" disabled={i === 0} onClick={() => setGaleriaImgs(prev => { const b = [...prev];[b[i - 1], b[i]] = [b[i], b[i - 1]]; return b })} style={{ background: 'rgba(0,0,0,0.55)', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem', padding: '0 5px', opacity: i === 0 ? 0.3 : 1 }}>‹</button>
+                <button type="button" title="Mover derecha" disabled={i === galeriaImgs.length - 1} onClick={() => setGaleriaImgs(prev => { const b = [...prev];[b[i + 1], b[i]] = [b[i], b[i + 1]]; return b })} style={{ background: 'rgba(0,0,0,0.55)', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.8rem', padding: '0 5px', opacity: i === galeriaImgs.length - 1 ? 0.3 : 1 }}>›</button>
+              </div>
             </div>
           ))}
           <label style={{ width: 96, height: 96, border: '2px dashed var(--crema-oscuro)', borderRadius: 8, cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '1.6rem', background: 'var(--crema)', color: 'var(--texto-suave)' }}>
             {subiendoGal ? '…' : '＋'}
-            <input type="file" accept="image/*" multiple style={{ display: 'none' }} onChange={e => { subirImgGaleria([...(e.target.files || [])]); e.target.value = '' }} />
+            <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) setCropGal(f); e.target.value = '' }} />
           </label>
+          {cropGal && <ImageCropper file={cropGal} aspect={1} salidaW={1000} salidaH={1000} onCancel={() => setCropGal(null)} onCropped={(blob) => { setCropGal(null); subirGalBlob(blob) }} />}
         </div>
       </Modal>
 

@@ -3,7 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Calculator, Package, Tags, ClipboardList, Factory, Users, Handshake,
   Camera, FolderOpen, NotebookText, AlertTriangle, GraduationCap,
-  Clock, Leaf, Recycle, ChevronDown,
+  Clock, Leaf, Recycle, ChevronDown, Store,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { puedeVer, RUTA_MODULO } from '../../lib/permisos'
@@ -25,6 +25,7 @@ const NAV_ITEMS = [
   { to: '/nomina',     icon: Users, label: 'Asistencia & Nómina' },
   { section: 'Comercial' },
   { to: '/clientes',   icon: Handshake, label: 'Clientes' },
+  { to: '/catalogo',   icon: Store, label: 'Catálogo público' },
   { section: 'Registros' },
   { to: '/galeria',    icon: Camera, label: 'Galería Fotográfica' },
   { to: '/documentos', icon: FolderOpen, label: 'Gestión Documental' },

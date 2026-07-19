@@ -3,6 +3,7 @@ import { useAuth } from '../context/AuthContext'
 import { useToast } from '../hooks/useToast'
 import { supabase, uploadFile } from '../lib/supabase'
 import Modal from './ui/Modal'
+import ImageCropper from './ui/ImageCropper'
 import { User, Camera } from 'lucide-react'
 
 // "Mi perfil" — CUALQUIER usuario edita sus datos básicos y/o su contraseña.
@@ -16,6 +17,7 @@ export default function ProfileModal({ open, onClose, modo = 'todo' }) {
   const [form, setForm] = useState({ telefono: '', correo: '', direccion: '', fecha_nacimiento: '', foto_url: '' })
   const [fotoFile, setFotoFile] = useState(null)
   const [fotoPrev, setFotoPrev] = useState('')
+  const [cropFoto, setCropFoto] = useState(null)
   const [p1, setP1] = useState('')
   const [p2, setP2] = useState('')
 
@@ -47,7 +49,7 @@ export default function ProfileModal({ open, onClose, modo = 'todo' }) {
       if (verDatos) {
         let foto_url = form.foto_url
         if (fotoFile) {
-          const ext = fotoFile.name.split('.').pop()
+          const ext = fotoFile.name ? fotoFile.name.split('.').pop() : 'jpg'
           foto_url = await uploadFile('documentos', `usuarios/foto_${profile.id}_${Date.now()}.${ext}`, fotoFile)
         }
         const { error } = await supabase.from('user_profiles').update({
@@ -97,8 +99,9 @@ export default function ProfileModal({ open, onClose, modo = 'todo' }) {
                 </div>
                 <div>
                   <input id="perfil-foto" type="file" accept="image/*" style={{ display: 'none' }}
-                    onChange={e => { const f = e.target.files?.[0]; if (f) { setFotoFile(f); setFotoPrev(URL.createObjectURL(f)) } }} />
+                    onChange={e => { const f = e.target.files?.[0]; if (f) setCropFoto(f); e.target.value = '' }} />
                   <label htmlFor="perfil-foto" className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}><Camera size={14} aria-hidden="true" /> Cambiar foto</label>
+                  {cropFoto && <ImageCropper file={cropFoto} aspect={1} salidaW={600} salidaH={600} onCancel={() => setCropFoto(null)} onCropped={(blob) => { setCropFoto(null); setFotoFile(blob); setFotoPrev(URL.createObjectURL(blob)) }} />}
                 </div>
               </div>
 

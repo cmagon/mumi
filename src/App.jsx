@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { lazy, Suspense, useState, useEffect } from 'react'
 import { Routes, Route, Navigate, Outlet, useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from './context/AuthContext'
@@ -12,26 +12,34 @@ import ConnStatus from './components/ConnStatus'
 import SavingOverlay from './components/ui/SavingOverlay'
 import DownloadProgress from './components/ui/DownloadProgress'
 import DevModeBanner from './components/DevModeBanner'
-import Login from './pages/Login'
-import Compartido from './pages/Compartido'
 import ErrorBoundary from './components/ErrorBoundary'
-import Dashboard from './pages/Dashboard'
-import Costos from './pages/Costos'
-import Receta from './pages/Receta'
-import Inventario from './pages/Inventario'
-import ProductosTerminados from './pages/ProductosTerminados'
-import ProductosPorEmpacar from './pages/ProductosPorEmpacar'
-import Produccion from './pages/Produccion'
-import OrdenesProduccion from './pages/OrdenesProduccion'
-import Nomina from './pages/Nomina'
-import Clientes from './pages/Clientes'
-import Galeria from './pages/Galeria'
-import Documentos from './pages/Documentos'
-import Registros from './pages/Registros'
-import Calidad from './pages/Calidad'
-import Capacitacion from './pages/Capacitacion'
-import Configuracion from './pages/Configuracion'
-import Usuarios from './pages/Usuarios'
+
+// Cada módulo se descarga al abrirlo: las herramientas pesadas (PDF, Excel y gráficas) no
+// bloquean el primer render del tablero ni la pantalla de inicio de sesión.
+const Login = lazy(() => import('./pages/Login'))
+const Compartido = lazy(() => import('./pages/Compartido'))
+const Dashboard = lazy(() => import('./pages/Dashboard'))
+const Costos = lazy(() => import('./pages/Costos'))
+const Receta = lazy(() => import('./pages/Receta'))
+const Inventario = lazy(() => import('./pages/Inventario'))
+const ProductosTerminados = lazy(() => import('./pages/ProductosTerminados'))
+const ProductosPorEmpacar = lazy(() => import('./pages/ProductosPorEmpacar'))
+const Produccion = lazy(() => import('./pages/Produccion'))
+const OrdenesProduccion = lazy(() => import('./pages/OrdenesProduccion'))
+const Nomina = lazy(() => import('./pages/Nomina'))
+const Clientes = lazy(() => import('./pages/Clientes'))
+const Catalogo = lazy(() => import('./pages/Catalogo'))
+const Galeria = lazy(() => import('./pages/Galeria'))
+const Documentos = lazy(() => import('./pages/Documentos'))
+const Registros = lazy(() => import('./pages/Registros'))
+const Calidad = lazy(() => import('./pages/Calidad'))
+const Capacitacion = lazy(() => import('./pages/Capacitacion'))
+const Configuracion = lazy(() => import('./pages/Configuracion'))
+const Usuarios = lazy(() => import('./pages/Usuarios'))
+
+function PageFallback() {
+  return <div className="page-loading" role="status">Cargando módulo…</div>
+}
 
 // Etiqueta automáticamente cada celda de tabla con el texto de su encabezado (data-label),
 // para que en móvil las tablas se vean como tarjetas legibles. No requiere tocar cada tabla.
@@ -151,6 +159,7 @@ function ModRoute({ modulo, children }) {
 
 export default function App() {
   return (
+    <Suspense fallback={<PageFallback />}>
     <Routes>
       <Route path="/login" element={<Login />} />
       <Route path="/compartido/:token" element={<ErrorBoundary><Compartido /></ErrorBoundary>} />
@@ -166,6 +175,7 @@ export default function App() {
         <Route path="/ordenes"     element={<ModRoute modulo="ordenes"><OrdenesProduccion /></ModRoute>} />
         <Route path="/nomina"      element={<ModRoute modulo="nomina"><Nomina /></ModRoute>} />
         <Route path="/clientes"    element={<ModRoute modulo="clientes"><Clientes /></ModRoute>} />
+        <Route path="/catalogo"    element={<ModRoute modulo="catalogo"><Catalogo /></ModRoute>} />
         <Route path="/galeria"     element={<ModRoute modulo="galeria"><Galeria /></ModRoute>} />
         <Route path="/documentos"  element={<ModRoute modulo="documentos"><Documentos /></ModRoute>} />
         <Route path="/registros"   element={<ModRoute modulo="registros"><Registros /></ModRoute>} />
@@ -176,5 +186,6 @@ export default function App() {
       </Route>
       <Route path="*" element={<Navigate to="/dashboard" replace />} />
     </Routes>
+    </Suspense>
   )
 }

@@ -10,6 +10,7 @@ import { useConfirm } from '../context/ConfirmContext'
 import { useReorder } from '../hooks/useReorder'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
+import ImageCropper from '../components/ui/ImageCropper'
 import BuscadorSelect from '../components/ui/BuscadorSelect'
 
 export default function Receta({ embedded = false, productos = [], onConvertir }) {
@@ -53,6 +54,7 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
   }))
   const delParamCalidad = (i) => setParamsCalidad(p => p.filter((_, idx) => idx !== i))
   const [imgData, setImgData]         = useState('')
+  const [cropRec, setCropRec]         = useState(null)   // archivo pendiente de recortar
   const [fichaFile, setFichaFile]         = useState(null)
   const [fichaNombre, setFichaNombre]     = useState('')
   const [fichaStoragePath, setFichaStoragePath] = useState('')
@@ -276,12 +278,8 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
   const totalPctNormales = ingredientes.filter(r => r.tipo === 'normal').reduce((s, r) => s + (parseFloat(r.pct) || 0), 0)
 
   // Imagen
-  const handleImg = (e) => {
-    const file = e.target.files[0]; if (!file) return
-    const reader = new FileReader()
-    reader.onload = ev => setImgData(ev.target.result)
-    reader.readAsDataURL(file)
-  }
+  const handleImg = (e) => { const file = e.target.files[0]; e.target.value = ''; if (file) setCropRec(file) }
+  const recortada = (blob) => { setCropRec(null); const r = new FileReader(); r.onload = ev => setImgData(ev.target.result); r.readAsDataURL(blob) }
 
   // Ficha técnica
   const handleFicha = (e) => {
@@ -454,6 +452,7 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
               {imgData ? <img src={imgData} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="receta" /> : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: '1.4rem' }}>📷</div>}
               {!esBase && <input type="file" accept="image/*" ref={imgInputRef} onChange={handleImg} style={{ display: 'none' }} />}
             </div>
+            {cropRec && <ImageCropper file={cropRec} aspect={1} salidaW={1000} salidaH={1000} onCancel={() => setCropRec(null)} onCropped={recortada} />}
           </div>
         </div>
 

@@ -2,7 +2,7 @@
 // Se llama DESPUÉS de que el cliente verificó el OTP (supabase.auth.verifyOtp), por lo que la
 // cabecera Authorization trae una sesión cuyo user.email es el correo REAL ya verificado.
 //   { login, password } -> si ese correo verificado coincide con el email_recuperacion del admin
-//   'login', cambia su contraseña (admin.auth) y actualiza user_secrets.
+//   'login', cambia su contraseña mediante Supabase Auth.
 //
 // Despliegue:  supabase functions deploy password-reset-confirm   (con verify_jwt por defecto)
 
@@ -47,8 +47,6 @@ Deno.serve(async (req) => {
 
     const { error: uErr } = await admin.auth.admin.updateUserById(perfil.id, { password })
     if (uErr) return json({ error: uErr.message }, 400)
-    await admin.from('user_secrets').upsert({ id: perfil.id, password_visible: password, updated_at: new Date().toISOString() }, { onConflict: 'id' })
-
     return json({ ok: true })
   } catch (e) {
     console.error('password-reset-confirm:', String((e as Error)?.message || e))

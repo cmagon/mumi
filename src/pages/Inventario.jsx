@@ -506,7 +506,7 @@ export default function Inventario() {
                           {esAdmin && <button className="btn btn-xs btn-danger"
                             disabled={(m.stock || 0) !== 0}
                             title={(m.stock || 0) !== 0 ? 'Tiene stock — no se puede eliminar' : 'Eliminar'}
-                            onClick={() => confirmar(`¿Eliminar la materia prima "${m.nombre}"?\nEsta acción no se puede deshacer.`).then(ok => ok && deleteMP.mutate(m))} title="Eliminar"><X size={13} aria-hidden="true" /></button>}
+                            onClick={() => confirmar(`¿Eliminar la materia prima "${m.nombre}"?\nEsta acción no se puede deshacer.`).then(ok => ok && deleteMP.mutate(m))}><X size={13} aria-hidden="true" /></button>}
                         </div>
                       </td>
                     </tr>

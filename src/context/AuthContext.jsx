@@ -166,8 +166,6 @@ export function AuthProvider({ children }) {
         id: data.user.id, nombre, login: loginLimpio, rol, estado: 'activo'
       })
       if (pErr) throw pErr
-      // La clave visible se guarda aparte, en tabla protegida (solo admin la lee)
-      await supabase.from('user_secrets').insert({ id: data.user.id, password_visible: password })
     }
     return data
   }
@@ -177,8 +175,6 @@ export function AuthProvider({ children }) {
     if (!nuevaPassword || nuevaPassword.length < 8) throw new Error('La contraseña debe tener al menos 8 caracteres')
     const { error } = await supabase.auth.updateUser({ password: nuevaPassword })
     if (error) throw error
-    // Copia visible para que el admin pueda consultarla (tabla protegida, solo admin)
-    if (user?.id) await supabase.from('user_secrets').upsert({ id: user.id, password_visible: nuevaPassword, updated_at: new Date().toISOString() }, { onConflict: 'id' })
   }
 
   // Restablecer la contraseña de OTRO usuario (solo admin) — requiere la Edge Function
@@ -188,7 +184,6 @@ export function AuthProvider({ children }) {
       body: { user_id: userId, password: nuevaPassword },
     })
     if (error) throw new Error('No se pudo restablecer la contraseña. Verifica que la función admin-set-password esté desplegada en Supabase.')
-    await supabase.from('user_secrets').upsert({ id: userId, password_visible: nuevaPassword, updated_at: new Date().toISOString() }, { onConflict: 'id' })
     return data
   }
 

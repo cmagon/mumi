@@ -33,7 +33,6 @@ export default function Usuarios() {
   // Reset de contraseña por el admin
   const [pwdUser, setPwdUser] = useState(null)
   const [pwdValue, setPwdValue] = useState('')
-  const [verPwd, setVerPwd] = useState({})   // { [id]: true } para mostrar la contraseña
 
   // Solicitudes de recuperación de contraseña (desde el login)
   const { data: solicitudes = [] } = useQuery({
@@ -46,10 +45,7 @@ export default function Usuarios() {
     queryKey: ['user_profiles'],
     queryFn: async () => {
       const { data } = await supabase.from('user_profiles').select('*').order('nombre')
-      // Las claves visibles viven en user_secrets (solo el admin puede leerlas)
-      const { data: secrets } = await supabase.from('user_secrets').select('id, password_visible')
-      const mapPwd = Object.fromEntries((secrets || []).map(s => [s.id, s.password_visible]))
-      return (data || []).map(u => ({ ...u, password_visible: mapPwd[u.id] || null }))
+      return data || []
     },
   })
 
@@ -177,18 +173,14 @@ export default function Usuarios() {
             </div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Nombre</th><th>Cédula (usuario)</th><th>Contraseña</th><th>Rol</th><th>Estado</th><th>Último Acceso</th><th>Acciones</th></tr></thead>
+                <thead><tr><th>Nombre</th><th>Cédula (usuario)</th><th>Rol</th><th>Estado</th><th>Último Acceso</th><th>Acciones</th></tr></thead>
                 <tbody>
                   {activos.length === 0
-                    ? <tr><td colSpan={7} className="empty-table">Sin usuarios registrados</td></tr>
+                    ? <tr><td colSpan={6} className="empty-table">Sin usuarios registrados</td></tr>
                     : activos.map(u => (
                       <tr key={u.id}>
                         <td><strong>{u.nombre}</strong></td>
                         <td>{u.login}</td>
-                        <td style={{ whiteSpace: 'nowrap' }}>
-                          {verPwd[u.id] ? <code>{u.password_visible || '— (sin registrar)'}</code> : '••••••'}
-                          <button className="btn btn-xs btn-secondary" style={{ marginLeft: 6 }} title="Mostrar/ocultar" onClick={() => setVerPwd(v => ({ ...v, [u.id]: !v[u.id] }))}>{verPwd[u.id] ? '🙈' : '👁'}</button>
-                        </td>
                         <td><span className={`badge ${u.rol === 'admin' ? 'badge-dorado' : 'badge-azul'}`}>{getRolLabel(u.rol)}</span></td>
                         <td><span className={`badge ${u.estado === 'activo' ? 'badge-verde' : 'badge-rojo'}`}>{u.estado}</span></td>
                         <td>{u.ultimo_acceso ? fFecha(u.ultimo_acceso.split('T')[0]) : 'Nunca'}</td>

@@ -1,0 +1,14 @@
+.rich-editor { border: 1.5px solid var(--crema-oscuro); border-radius: var(--radio); overflow: hidden; background: #fff; }
+.re-toolbar { display: flex; flex-wrap: wrap; gap: 2px; padding: 6px 8px; border-bottom: 1px solid var(--crema-oscuro); background: var(--crema); }
+.re-btn { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; border: none; background: none; border-radius: 6px; cursor: pointer; color: var(--texto-suave); }
+.re-btn:hover { background: rgba(45,90,61,0.08); color: var(--selva); }
+.re-btn.on { background: var(--selva); color: var(--crema); }
+.re-sep { width: 1px; background: var(--crema-oscuro); margin: 2px 4px; }
+.rich-content { padding: 12px 14px; min-height: 160px; outline: none; font-size: 0.95rem; line-height: 1.55; }
+.rich-content:focus { outline: none; }
+.rich-content h1 { font-family: var(--fuente-titulos, 'Playfair Display'), serif; font-size: 1.5rem; color: var(--selva); margin: 8px 0 4px; }
+.rich-content h2 { font-family: var(--fuente-titulos, 'Playfair Display'), serif; font-size: 1.2rem; color: var(--selva); margin: 8px 0 4px; }
+.rich-content p { margin: 6px 0; }
+.rich-content ul, .rich-content ol { margin: 6px 0 6px 22px; }
+.rich-content blockquote { border-left: 3px solid var(--dorado); padding-left: 12px; color: var(--texto-suave); font-style: italic; margin: 8px 0; }
+.rich-content p.is-editor-empty:first-child::before { content: attr(data-placeholder); color: var(--texto-suave); opacity: 0.6; float: left; pointer-events: none; height: 0; }

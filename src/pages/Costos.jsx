@@ -11,6 +11,7 @@ import { useToast } from '../hooks/useToast'
 import { useReorder } from '../hooks/useReorder'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
+import ImageCropper from '../components/ui/ImageCropper'
 import BuscadorSelect from '../components/ui/BuscadorSelect'
 import MoneyInput from '../components/ui/MoneyInput'
 import { useConfirm } from '../context/ConfirmContext'
@@ -61,6 +62,7 @@ export default function Costos() {
   // ---- Imágenes del producto (galería): la PRIMERA es la principal (imagen_url) ----
   const [imagenes, setImagenes] = useState([])   // array de URLs públicas
   const [subiendoImg, setSubiendoImg] = useState(false)
+  const [cropImg, setCropImg] = useState(null)   // archivo pendiente de recortar (ficha)
 
   // ---- Parámetros de producción (para ancla + guardar) ----
   const [rendimiento, setRendimiento] = useState(62)
@@ -642,7 +644,8 @@ export default function Costos() {
           recetasAfectadas.push(p.nombre)
         }
       }
-      return { recetasAfectadas }
+      const mpSelf = (cambiosMP || []).find(c => c.esSelf)
+      return { recetasAfectadas, mpSelf }
     },
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['products_costing'] })
@@ -651,6 +654,7 @@ export default function Costos() {
       qc.invalidateQueries({ queryKey: ['finished_products'] })
       const n = res?.recetasAfectadas?.length || 0
       toast(editingId ? 'Producto actualizado ✓' : 'Producto guardado ✓')
+      if (res?.mpSelf) toast(`Costo de "${res.mpSelf.nombre}" guardado en Inventario MP: $${fNum(res.mpSelf.nuevo)}/${res.mpSelf.unidad || 'u'}`, 'success')
       if (n > 0) toast(`Precio replicado a ${n} receta(s): ${res.recetasAfectadas.join(', ')}`, 'success')
       limpiarForm(); setTab('lista')
     },
@@ -664,6 +668,16 @@ export default function Costos() {
       .filter(i => i.mpId && i.precioOverride)
       .map(i => { const mp = mps.find(m => String(m.id) === String(i.mpId)); return mp ? { mpId: mp.id, nombre: mp.nombre, nuevo: parseFloat(i.precio) || 0, actual: mp.precio || 0 } : null })
       .filter(c => c && Math.round(c.nuevo) !== Math.round(c.actual))
+    // Si esta ficha ES de una MP (vendible o interna fabricada): su COSTO CALCULADO pasa a ser el
+    // precio de esa MP en el inventario, y se propaga a todas las recetas que la usan como ingrediente.
+    // (1 unidad de la ficha = 1 unidad de la MP en el inventario; la presentación viene preajustada.)
+    if (formProd.tipo === 'mp' && formProd.mp_id) {
+      const mp = mps.find(m => String(m.id) === String(formProd.mp_id))
+      const costo = Math.round(calcResult?.costoFinal || 0)
+      if (mp && costo > 0 && Math.round(mp.precio || 0) !== costo && !cambiosMP.some(c => String(c.mpId) === String(mp.id))) {
+        cambiosMP.push({ mpId: mp.id, nombre: mp.nombre, nuevo: costo, actual: mp.precio || 0, esSelf: true, unidad: mp.unidad })
+      }
+    }
     saveProducto.mutate({ actualizarMP: cambiosMP.length > 0, cambiosMP })
   }
 
@@ -900,25 +914,17 @@ export default function Costos() {
     } catch (err) { toast('Error: ' + err.message, 'error') }
   }
 
-  // Imágenes del producto: sube al bucket de inmediato y agrega la URL a la galería.
-  // Acepta varias a la vez. Se guardan con la ficha al presionar Guardar.
-  const handleImg = async (e) => {
-    const files = [...(e.target.files || [])]
-    e.target.value = ''
-    if (!files.length) return
+  // Imágenes del producto: selección → recorte 1:1 → sube el blob al bucket → galería.
+  const handleImg = (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setCropImg(f) }
+  const subirImgBlob = async (blob) => {
     setSubiendoImg(true)
     try {
-      const nuevas = []
-      for (const file of files) {
-        const ext = (file.name.split('.').pop() || 'jpg').toLowerCase()
-        const path = `productos/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`
-        const { error } = await supabase.storage.from('product-images').upload(path, file, { upsert: true })
-        if (error) throw error
-        const { data } = supabase.storage.from('product-images').getPublicUrl(path)
-        nuevas.push(data.publicUrl)
-      }
-      setImagenes(prev => [...prev, ...nuevas])
-      toast(`${nuevas.length} imagen(es) cargada(s) ✓ — recuerda guardar la ficha`)
+      const path = `productos/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.jpg`
+      const { error } = await supabase.storage.from('product-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
+      if (error) throw error
+      const { data } = supabase.storage.from('product-images').getPublicUrl(path)
+      setImagenes(prev => [...prev, data.publicUrl])
+      toast('Imagen cargada ✓ — recuerda guardar la ficha')
     } catch (err) { toast('No se pudo subir la imagen: ' + err.message, 'error') }
     finally { setSubiendoImg(false) }
   }
@@ -1110,28 +1116,30 @@ export default function Costos() {
             </div>
           </div>
 
-          {/* Calcular costos de una MP vendible (marcada en Inventario) */}
+          {/* Calcular costos de una MP fabricada internamente (vendible O interna no vendible) */}
           {!editingId && (
             <div className="card" style={{ padding:'14px 20px', marginBottom:16, background:'rgba(124,179,66,0.06)', border:'1px solid rgba(124,179,66,0.3)' }}>
               <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', fontWeight:600, color:'var(--selva)' }}>
                 <input type="checkbox" checked={modoMpVend} onChange={e => setModoMpVend(e.target.checked)} />
-                <FlaskConical size={15} aria-hidden="true" /> Calcular costos de una materia prima vendible
+                <FlaskConical size={15} aria-hidden="true" /> Calcular costos de una materia prima que fabricas
               </label>
               {modoMpVend && (() => {
-                const mpVendibles = mps.filter(m => m.vendible && !productos.some(p => p.tipo === 'mp' && String(p.mp_id) === String(m.id)))
+                // Candidatas: MP vendibles (se venden) O internas/fabricadas (tipo 'interno', para uso propio),
+                // que aún no tengan ficha de costos. Las compradas NO — su costo es su precio de compra.
+                const mpFabricadas = mps.filter(m => (m.vendible || m.tipo === 'interno') && !productos.some(p => p.tipo === 'mp' && String(p.mp_id) === String(m.id)))
                 return (
                   <div style={{ marginTop: 10 }}>
-                    <label style={{ fontSize:'0.72rem', color:'var(--texto-suave)' }}>MP vendible (marcada en Inventario MP)</label>
-                    <select className="form-control" style={{ maxWidth: 340 }} value="" onChange={e => {
+                    <label style={{ fontSize:'0.72rem', color:'var(--texto-suave)' }}>MP vendible o interna (fabricada) — marcada en Inventario MP</label>
+                    <select className="form-control" style={{ maxWidth: 380 }} value="" onChange={e => {
                       const m = mps.find(x => String(x.id) === e.target.value); if (!m) return
                       setIngredientes([]); setProcesos([]); setEmpaque([]); setEditingId(null); setSelFuente('')
-                      setFormProd({ ...EMPTY_PROD, nombre: m.nombre, tipo: 'mp', mp_id: String(m.id), presentacion: m.unidad || 'Unidad' })
+                      setFormProd({ ...EMPTY_PROD, nombre: m.nombre, tipo: 'mp', mp_id: String(m.id), presentacion: m.unidad || 'Unidad', activo: !!m.vendible })
                     }}>
                       <option value="">Seleccionar MP...</option>
-                      {mpVendibles.map(m => <option key={m.id} value={m.id}>{m.nombre} · {m.unidad}</option>)}
+                      {mpFabricadas.map(m => <option key={m.id} value={m.id}>{m.nombre} · {m.unidad}{m.vendible ? ' · vendible' : ' · interna'}</option>)}
                     </select>
-                    {mpVendibles.length === 0 && <small style={{ display:'block', marginTop:6, color:'var(--texto-suave)' }}>No hay MP vendibles pendientes. Márcalas en <strong>Inventario MP</strong> (check "Se puede vender").</small>}
-                    {formProd.tipo === 'mp' && formProd.mp_id && <small style={{ display:'block', marginTop:6, color:'var(--selva)' }}>✓ Ficha de MP vendible: <strong>{formProd.nombre}</strong>. Agrega sus ingredientes/procesos y guarda para calcular su costo.</small>}
+                    {mpFabricadas.length === 0 && <small style={{ display:'block', marginTop:6, color:'var(--texto-suave)' }}>No hay MP pendientes. En <strong>Inventario MP</strong> marca la MP como "Se puede vender" (vendible) o créala con tipo <strong>Fabricada/interna</strong>.</small>}
+                    {formProd.tipo === 'mp' && formProd.mp_id && <small style={{ display:'block', marginTop:6, color:'var(--selva)' }}>✓ Ficha de MP: <strong>{formProd.nombre}</strong>. Agrega sus ingredientes/procesos y guarda: el costo calculado se guardará como su precio en Inventario MP y se propagará a las recetas que la usan.</small>}
                   </div>
                 )
               })()}
@@ -1154,14 +1162,19 @@ export default function Costos() {
                       <button type="button" title="Quitar imagen" onClick={() => quitarImagen(i)} style={{ background:'rgba(0,0,0,0.55)', color:'#fff', border:'none', borderRadius:4, cursor:'pointer', fontSize:'0.7rem', padding:'1px 4px' }}>✕</button>
                     </div>
                     {i === 0 && <span style={{ position:'absolute', bottom:2, left:2, background:'var(--dorado)', color:'#2b1c04', fontSize:'0.58rem', fontWeight:700, borderRadius:3, padding:'0 4px' }}>PRINCIPAL</span>}
+                    <div style={{ position:'absolute', bottom:2, right:2, display:'flex', gap:2 }}>
+                      <button type="button" title="Mover izquierda" disabled={i === 0} onClick={() => setImagenes(prev => { const b=[...prev];[b[i-1],b[i]]=[b[i],b[i-1]];return b })} style={{ background:'rgba(0,0,0,0.55)', color:'#fff', border:'none', borderRadius:4, cursor:'pointer', fontSize:'0.75rem', padding:'0 5px', opacity:i===0?0.3:1 }}>‹</button>
+                      <button type="button" title="Mover derecha" disabled={i === imagenes.length - 1} onClick={() => setImagenes(prev => { const b=[...prev];[b[i+1],b[i]]=[b[i],b[i+1]];return b })} style={{ background:'rgba(0,0,0,0.55)', color:'#fff', border:'none', borderRadius:4, cursor:'pointer', fontSize:'0.75rem', padding:'0 5px', opacity:i===imagenes.length-1?0.3:1 }}>›</button>
+                    </div>
                   </div>
                 ))}
                 <div onClick={() => !subiendoImg && imgInputRef.current?.click()}
                   style={{ width:72, height:72, border:'2px dashed var(--crema-oscuro)', borderRadius:'var(--radio)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'1.6rem', background:'var(--crema)', color:'var(--texto-suave)' }}>
                   {subiendoImg ? '…' : '＋'}
-                  <input type="file" accept="image/*" multiple ref={imgInputRef} onChange={handleImg} style={{ display:'none' }} />
+                  <input type="file" accept="image/*" ref={imgInputRef} onChange={handleImg} style={{ display:'none' }} />
                 </div>
               </div>
+              {cropImg && <ImageCropper file={cropImg} aspect={1} salidaW={1000} salidaH={1000} onCancel={() => setCropImg(null)} onCropped={(blob) => { setCropImg(null); subirImgBlob(blob) }} />}
             </div>
 
             {/* Campos */}

@@ -43,6 +43,11 @@ export const CATALOGO_MODULOS = [
   ] },
   { modulo: 'porempacar', label: 'Productos por Empacar',    secciones: [] },
   { modulo: 'clientes',   label: 'Clientes',                secciones: [] },
+  { modulo: 'catalogo',   label: 'Catálogo público',        secciones: [
+      { id: 'productos',  label: 'Publicar productos' },
+      { id: 'config',     label: 'Configuración del catálogo' },
+      { id: 'metricas',   label: 'Métricas / pedidos' },
+  ] },
   { modulo: 'galeria',    label: 'Galería Fotográfica',     secciones: [] },
   { modulo: 'documentos', label: 'Gestión Documental',      secciones: [] },
   { modulo: 'registros',  label: 'Libros de Registro (BPM)', secciones: [] },
@@ -54,7 +59,7 @@ export const CATALOGO_MODULOS = [
 
 // Módulos visibles por rol — valores por defecto (si no hay override en BD)
 export const MODULOS_POR_ROL = {
-  admin:    ['dashboard', 'costos', 'inventario', 'terminados', 'porempacar', 'ordenes', 'produccion', 'nomina', 'clientes', 'galeria', 'documentos', 'registros', 'calidad', 'capacitacion', 'configuracion', 'usuarios'],
+  admin:    ['dashboard', 'costos', 'inventario', 'terminados', 'porempacar', 'ordenes', 'produccion', 'nomina', 'clientes', 'catalogo', 'galeria', 'documentos', 'registros', 'calidad', 'capacitacion', 'configuracion', 'usuarios'],
   operario: ['dashboard', 'costos', 'inventario', 'porempacar', 'ordenes', 'produccion', 'nomina', 'documentos', 'registros', 'calidad', 'capacitacion'],
   auxiliar: ['dashboard', 'costos', 'inventario', 'ordenes', 'nomina', 'documentos', 'registros', 'calidad', 'capacitacion'],
 }
@@ -70,6 +75,7 @@ export const RUTA_MODULO = {
   '/produccion': 'produccion',
   '/nomina':     'nomina',
   '/clientes':   'clientes',
+  '/catalogo':   'catalogo',
   '/galeria':    'galeria',
   '/documentos': 'documentos',
   '/registros':  'registros',
