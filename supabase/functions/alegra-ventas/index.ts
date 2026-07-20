@@ -1,9 +1,12 @@
 // Edge Function: agrega el HISTÓRICO DE VENTAS desde las FACTURAS + REMISIONES de Alegra (todos los años).
 // Las remisiones (producto que ya salió del stock y está reservado = casi vendido) se cuentan también,
 // pero solo las que aún no se facturaron, para no duplicar la venta cuando la remisión se convierte en factura.
-// Devuelve, por referencia (SKU) de producto, la cantidad vendida por mes/año:
-//   { ok, ventas: { "<sku>": { "2026-01": 12, "2026-02": 8, ... } }, facturas }
-// Se usa para el Análisis mensual y las proyecciones de Producto Terminado.
+// Devuelve, por referencia (SKU) de producto, la cantidad vendida por mes/año, y el valor
+// ($) vendido total por mes:
+//   { ok, ventas: { "<sku>": { "2026-01": 12, "2026-02": 8, ... } },
+//     ventasValor: { "2026-01": 4500000, ... }, facturas }
+// Se usa para el Análisis mensual y las proyecciones de Producto Terminado, y para el
+// Estado de Resultados del Dashboard (ventas reales).
 //
 // Despliegue:  supabase functions deploy alegra-ventas
 
@@ -72,6 +75,8 @@ Deno.serve(async (req) => {
   const authHeader = 'Basic ' + btoa(`${email}:${token}`)
   try {
     const ventas: Record<string, Record<string, number>> = {}
+    // Valor ($) vendido por mes — para el Estado de Resultados del Dashboard.
+    const ventasValor: Record<string, number> = {}
     let facturas = 0, remisiones = 0
     // Ids de remisiones que YA se facturaron: no se cuentan otra vez desde /remissions.
     const remisionesFacturadas = new Set<string>()
@@ -86,6 +91,17 @@ Deno.serve(async (req) => {
         for (const k of claves) { ventas[k] = ventas[k] || {}; ventas[k][fecha] = (ventas[k][fecha] || 0) + cant }
       }
     }
+    // Valor de los ítems (precio × cantidad, neto de descuento). Se usa cuando el
+    // documento no trae un total confiable (remisiones) o como respaldo.
+    const valorItems = (items: any[]) => (items || []).reduce((s, it) => {
+      const cant = Number(it?.quantity ?? it?.qty ?? 0)
+      const precio = Number(it?.price ?? 0)
+      if (!(cant > 0) || !(precio > 0)) return s
+      const desc = Number(it?.discount ?? 0)
+      const totalItem = it?.total != null ? Number(it.total) : precio * cant * (1 - desc / 100)
+      return s + (Number.isFinite(totalItem) ? totalItem : 0)
+    }, 0)
+    const acumValor = (fecha: string, valor: number) => { ventasValor[fecha] = (ventasValor[fecha] || 0) + (Number.isFinite(valor) ? valor : 0) }
     // Detecta remisiones vinculadas a una factura (para no duplicar la venta).
     const idsRemisionDe = (doc: any): string[] => {
       const out: string[] = []
@@ -107,6 +123,7 @@ Deno.serve(async (req) => {
       const fecha = String(inv?.date || inv?.datetime || '').slice(0, 7)   // YYYY-MM
       if (!/^\d{4}-\d{2}$/.test(fecha)) continue
       acumItems(inv?.items, fecha)
+      acumValor(fecha, Number(inv?.total) || valorItems(inv?.items))
       facturas++
     }
 
@@ -123,10 +140,11 @@ Deno.serve(async (req) => {
       const fecha = String(rem?.date || rem?.datetime || '').slice(0, 7)
       if (!/^\d{4}-\d{2}$/.test(fecha)) continue
       acumItems(rem?.items, fecha)
+      acumValor(fecha, valorItems(rem?.items))
       remisiones++
     }
 
-    return json({ ok: true, ventas, facturas, remisiones })
+    return json({ ok: true, ventas, ventasValor, facturas, remisiones })
   } catch (e) {
     return json({ error: String((e as Error)?.message || e) })
   }

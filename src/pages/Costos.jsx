@@ -4,8 +4,9 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import {
   fCOP, fNum, fFecha, getCIFTotalMensual, getCIFMensual, getCostoMinuto,
-  calcularCostosProducto, getCIFDistribucion, calcularReceta, getPEqMultiproducto,
-  getCostoNominaMensual, PARAMS_NOMINA_DEFAULT,
+  calcularCostosProducto, calcularReceta, getPEqMultiproducto,
+  getCostoNominaMensual, PARAMS_NOMINA_DEFAULT, GRUPOS_CIF, getGastosOperacionales,
+  getTasaGastosOper, getPrecioSugerido, getPEqCaja, getCIFAbsorcion, presDeUnidad,
 } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
 import { useReorder } from '../hooks/useReorder'
@@ -18,7 +19,7 @@ import { useConfirm } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import Receta from './Receta'
 import { CATALOGO_PARAMS, PARAM_UNIDAD, PRESENTACIONES } from '../lib/calidad'
-import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Settings, ShoppingCart, Tag, Trash2, Undo2, X, ChevronUp, ChevronDown, Plus } from 'lucide-react'
+import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Settings, ShoppingCart, Tag, Trash2, TrendingUp, Undo2, X, ChevronUp, ChevronDown, Plus } from 'lucide-react'
 import { descargarFichaExcel } from '../lib/fichaExcel'
 import { getConfig } from '../lib/appConfig'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
@@ -198,7 +199,10 @@ export default function Costos() {
         operacion: { ...PARAMS_NOMINA_DEFAULT.operacion, ...(nominaParams.operacion || {}) } }
     : PARAMS_NOMINA_DEFAULT
   const op = paramsNom.operacion || PARAMS_NOMINA_DEFAULT.operacion
-  const costoNomina = getCostoNominaMensual(empleados, paramsNom)
+  // Solo la nómina de PRODUCCIÓN entra al CIF/costo-minuto; administración y ventas
+  // van al gasto operacional (ver bloque de Gastos abajo y AUDITORIA_COSTOS.md).
+  const costoNomina = getCostoNominaMensual(empleados, paramsNom, 'produccion')
+  const gastosOp = getGastosOperacionales(cifItems, empleados, paramsNom)
   const esAdmin = profile?.rol === 'admin'
 
   // Márgenes de precios sugeridos (configurables por el admin)
@@ -216,6 +220,30 @@ export default function Costos() {
     const { error } = await supabase.from('costing_settings').upsert({ id: 1, margenes: arr, updated_at: new Date().toISOString() }, { onConflict: 'id' })
     if (error) { toast(error.message, 'error'); return }
     qc.invalidateQueries({ queryKey: ['costing_settings'] }); setEditMargenes(false); toast('Márgenes guardados ✓')
+  }
+  // Parámetros del precio sugerido (utilidad objetivo, tarifa de ICA) — consulta aparte y
+  // tolerante: las columnas son de la migración v125 y puede no estar aplicada aún.
+  const { data: precioParams } = useQuery({
+    queryKey: ['costing_precio_params'],
+    queryFn: async () => {
+      try {
+        const { data } = await supabase.from('costing_settings').select('utilidad_objetivo, ica_por_mil').eq('id', 1).maybeSingle()
+        return data || null
+      } catch { return null }
+    },
+  })
+  const utilidadObjetivo = precioParams?.utilidad_objetivo != null ? parseFloat(precioParams.utilidad_objetivo) : 30
+  // ICA en POR MIL sobre ventas brutas (ej. 7 = 0,7%). 0 = no aplicar.
+  const icaPorMil = precioParams?.ica_por_mil != null ? parseFloat(precioParams.ica_por_mil) : 0
+  const icaPct = icaPorMil / 10   // por mil → porcentaje
+  const guardarPrecioParam = async (campo, val, max = 99) => {
+    const n = parseFloat(val)
+    if (isNaN(n) || n < 0 || n >= max) { toast('Valor inválido', 'warning'); return }
+    const actual = campo === 'utilidad_objetivo' ? utilidadObjetivo : icaPorMil
+    if (n === actual) return
+    const { error } = await supabase.from('costing_settings').upsert({ id: 1, [campo]: n, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+    if (error) { toast('No se pudo guardar (¿falta la migración v125?): ' + error.message, 'error'); return }
+    qc.invalidateQueries({ queryKey: ['costing_precio_params'] }); toast('Parámetro actualizado ✓')
   }
   const { data: tiposProducto = [] } = useQuery({
     queryKey: ['product_types'],
@@ -242,17 +270,20 @@ export default function Costos() {
   }
 
   // ---- CIF helpers ----
-  // El CIF total = ítems manuales (arriendo, servicios, préstamo...) + nómina automática del personal.
-  const cifManual = getCIFTotalMensual(cifItems)
+  // El CIF total = solo ítems clasificados como 'cif' (arriendo planta, servicios de producción...)
+  // + nómina automática del personal de PRODUCCIÓN. Gastos admin/ventas/financieros/impuestos y
+  // pasivos NO entran aquí — se ven en el bloque de Gastos operacionales más abajo.
+  const cifItemsCIF = cifItems.filter(c => (c.grupo || 'cif') === 'cif')
+  const cifManual = getCIFTotalMensual(cifItemsCIF)
   const cifTotal = cifManual + costoNomina.total
-  const operariosActivos = (parseFloat(op.numOperarios) || 0) > 0 ? parseFloat(op.numOperarios) : (empleados.length || 3)
+  const empleadosProduccion = empleados.filter(e => (e.area_costeo || 'produccion') === 'produccion')
+  const operariosActivos = (parseFloat(op.numOperarios) || 0) > 0 ? parseFloat(op.numOperarios) : (empleadosProduccion.length || 3)
   const costoMin = getCostoMinuto(cifTotal, operariosActivos, op.dias, op.jornadaHoras, op.improductividad)
   // Minutos productivos disponibles al mes (denominador del costo/minuto)
   const minsDisponibles = operariosActivos * (parseFloat(op.dias) || 0) * (parseFloat(op.jornadaHoras) || 0) * 60 * (1 - (parseFloat(op.improductividad) || 0))
   // Solo los productos ACTIVOS participan en la distribución del CIF (los inactivos no producen,
   // así no desacomodan el costo/CIF de los demás).
   const productosActivos = productos.filter(p => p.activo !== false)
-  const cifDist  = getCIFDistribucion(cifTotal, productosActivos)
 
   // Unidades/mes totales del portafolio activo (para % CIF en vivo)
   const totalUnidsPortafolio = productosActivos.reduce((s, p) => s + (p.bache * p.baches_mes * (1 - (p.merma||0)/100)), 0)
@@ -292,12 +323,38 @@ export default function Costos() {
   const peqMultiproducto = useMemo(() => {
     const items = productosActivos.map(p => ({
       nombre: p.nombre, precio_mayor: parseFloat(p.precio_mayor) || 0,
-      cvu: recomputeProducto(p).costoTotalUnit,
+      // Margen de contribución = precio − costo VARIABLE (MP + empaque). Usar el costo total
+      // (que ya incluye los fijos repartidos) descontaría los costos fijos dos veces y
+      // sobreestimaría el punto de equilibrio.
+      cvu: recomputeProducto(p).cvu,
       bache: parseFloat(p.bache) || 0, baches_mes: parseFloat(p.baches_mes) || 0, merma: parseFloat(p.merma) || 0,
     }))
     return getPEqMultiproducto(items, cifTotal)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productos, cifTotal, mps])
+
+  // ---- Base para el PRECIO sugerido (costeo por absorción) ----
+  // Los gastos FIJOS del período (admin, ventas, financieros) no encarecen el COSTO del
+  // producto, pero el PRECIO sí debe recuperarlos: se prorratean sobre el costo de producción
+  // mensual del portafolio activo. El ICA NO va aquí: es un porcentaje de la venta, así que
+  // entra en el divisor del precio (junto con la comisión y la utilidad).
+  const gastosFijosOper = gastosOp.administracion.total + gastosOp.ventas.total + gastosOp.financiero.total
+  const costoProduccionPortafolio = useMemo(() => productosActivos.reduce((s, p) => {
+    const unidsMes = (parseFloat(p.bache) || 0) * (parseFloat(p.baches_mes) || 0) * (1 - (parseFloat(p.merma) || 0) / 100)
+    return s + recomputeProducto(p).costoTotalUnit * unidsMes
+  }, 0)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  , [productos, cifTotal, mps])
+  const tasaGastosOper = getTasaGastosOper(gastosFijosOper, costoProduccionPortafolio)
+
+  // ---- Absorción REAL del CIF (por tiempo de proceso, que es como se costea) ----
+  const cifAbsorcion = useMemo(() => getCIFAbsorcion(
+    productosActivos.map(p => {
+      const rc = recomputeProducto(p)
+      return { nombre: p.nombre, tipo: p.tipo, minutosBache: rc.totalMinutos || 0, bachesMes: parseFloat(p.baches_mes) || 0, unidsMes: rc.unidsMesTot || 0 }
+    }), costoMin, cifTotal, minsDisponibles)
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  , [productos, cifTotal, mps, costoMin, minsDisponibles])
 
   // ---- Ingredientes con cantidad y precio resueltos ----
   // Las filas "relativo a" calculan su g/bache = (g/bache de la base) × (% / 100)
@@ -306,20 +363,25 @@ export default function Costos() {
     // g/bache de un NORMAL: directo (modo gramos) o derivado de su % × peso total del bache (modo %)
     const pesoTot = parseFloat(pesoBacheTotal) || 0
     const gNormal = (r) => modoIng === 'porcentaje' ? ((parseFloat(r.pct)||0)/100) * pesoTot : (parseFloat(r.cantidad)||0)
+    // g/bache de un RELATIVO: su % aplicado sobre la suma de sus bases (que siempre son normales)
+    const gRelativo = (r) => {
+      const bases = Array.isArray(r.base) ? r.base.filter(Boolean) : (r.base ? [r.base] : [])
+      const baseCant = bases.reduce((s, bn) => {
+        const br = ingredientes.find(x => x.nombre === bn && x.tipo !== 'relativo')
+        return s + (br ? gNormal(br) : 0)
+      }, 0)
+      return baseCant * (parseFloat(r.pct)||0) / 100
+    }
+    // El % de receta se mide contra el TOTAL de la mezcla (normales + TODOS los relativos).
+    // Antes cada fila usaba un denominador distinto (los normales ignoraban a los relativos y
+    // cada relativo solo se sumaba a sí mismo), así que los % no sumaban 100 y el escalado
+    // desde el ingrediente ancla subestimaba el tamaño del bache.
     const normalTotal = ingredientes.reduce((s, r) => r.tipo === 'relativo' ? s : s + gNormal(r), 0)
+    const totalReceta = normalTotal + ingredientes.reduce((s, r) => r.tipo === 'relativo' ? s + gRelativo(r) : s, 0)
     return ingredientes.map(r => {
       const precio = precioActualIng(r)
-      if (r.tipo === 'relativo') {
-        const bases = Array.isArray(r.base) ? r.base.filter(Boolean) : (r.base ? [r.base] : [])
-        const baseCant = bases.reduce((s, bn) => {
-          const br = ingredientes.find(x => x.nombre === bn && x.tipo !== 'relativo')
-          return s + (br ? gNormal(br) : 0)
-        }, 0)
-        const cant = baseCant * (parseFloat(r.pct)||0) / 100
-        return { ...r, precio, cantidad: cant, pctReceta: normalTotal+cant > 0 ? cant/(normalTotal+cant)*100 : 0 }
-      }
-      const cant = gNormal(r)
-      return { ...r, precio, cantidad: cant, pctReceta: normalTotal > 0 ? cant/normalTotal*100 : 0 }
+      const cant = r.tipo === 'relativo' ? gRelativo(r) : gNormal(r)
+      return { ...r, precio, cantidad: cant, pctReceta: totalReceta > 0 ? cant / totalReceta * 100 : 0 }
     })
   }, [ingredientes, mps, modoIng, pesoBacheTotal])
 
@@ -788,6 +850,44 @@ export default function Costos() {
     onError: (e) => toast('No se pudo sincronizar con Alegra: ' + e.message, 'error'),
   })
 
+  // Recalcula TODAS las fichas con el CIF/nómina VIGENTES y guarda el resultado en la base.
+  // Necesario tras reclasificar costos o cambiar la nómina: Producto Terminado, Órdenes de
+  // Producción y el Dashboard leen el costo GUARDADO (products_costing.costo_final), no el
+  // cálculo en vivo de esta pantalla — sin esto seguirían usando el costo viejo.
+  const recalcularFichas = useMutation({
+    meta: { label: 'Recalculando costos de todas las fichas…' },
+    mutationFn: async () => {
+      let n = 0
+      const calcPor = {}
+      for (const p of productos) {
+        const calc = recomputeProducto(p)
+        calcPor[p.id] = calc
+        const { error } = await supabase.from('products_costing').update({
+          costo_final: calc.costoFinal || 0, costo_variable: calc.cvu || 0, cif_unit: calc.cifUnit || 0,
+          util_mayor: calc.utilMayor || 0, util_detal: calc.utilDetal || 0, pe: calc.pe || 0,
+        }).eq('id', p.id)
+        if (error) throw error
+        n++
+      }
+      // Réplica del costo al catálogo de Producto Terminado (solo fichas ya enlazadas)
+      try {
+        const { data: fps } = await supabase.from('finished_products').select('id, product_id').not('product_id', 'is', null)
+        for (const fp of (fps || [])) {
+          const calc = calcPor[fp.product_id]
+          if (!calc) continue
+          await supabase.from('finished_products').update({ costo_unitario: Math.round(calc.costoFinal || 0) }).eq('id', fp.id)
+        }
+      } catch { /* tolerante: el catálogo de terminados puede sincronizarse después */ }
+      return n
+    },
+    onSuccess: (n) => {
+      qc.invalidateQueries({ queryKey: ['products_costing'] })
+      qc.invalidateQueries({ queryKey: ['finished_products'] })
+      toast(`Costos recalculados y guardados en ${n} ficha(s) ✓`)
+    },
+    onError: (e) => toast(e.message, 'error'),
+  })
+
   // ---- CIF CRUD ----
   // Guarda el N° de operarios de capacidad en los parámetros de operación (sin perder los demás)
   const guardarNumOperarios = async (val) => {
@@ -799,7 +899,7 @@ export default function Costos() {
     if (error) { toast(error.message, 'error'); return }
     qc.invalidateQueries({ queryKey: ['payroll_settings'] }); toast('N° de operarios actualizado ✓')
   }
-  const addCIF = async () =>{ await supabase.from('cif_items').insert({ descripcion: 'Nuevo ítem', categoria: 'General', frecuencia: 'mensual', valor: 0 }); refetchCIF(); toast('Ítem CIF agregado') }
+  const addCIF = async (grupo = 'cif') =>{ await supabase.from('cif_items').insert({ descripcion: 'Nuevo ítem', categoria: 'General', grupo, frecuencia: 'mensual', valor: 0 }); refetchCIF(); toast('Ítem agregado') }
   const updateCIF = async (id, field, val) => { await supabase.from('cif_items').update({ [field]: val }).eq('id', id); refetchCIF() }
   const deleteCIF = async (id) => { await supabase.from('cif_items').delete().eq('id', id); refetchCIF(); toast('Ítem eliminado') }
 
@@ -820,7 +920,6 @@ export default function Costos() {
 
   // Presentación (g/ml equivalentes por unidad de compra): Kg/Litro = 1000; Gramo/Mililitro = 1.
   // Así el costo por gramo del ingrediente = precio ÷ presentación queda correcto según la unidad de la MP.
-  const presDeUnidad = (u) => (u === 'Gramo' || u === 'Mililitro') ? 1 : 1000
   // Seleccionar MP de la lista → autocompleta nombre y precio
   const handleSelectMP = (id, mpId) => {
     const mp = mps.find(m => String(m.id) === String(mpId))
@@ -895,7 +994,9 @@ export default function Costos() {
   const mpsIngredientes = mps.filter(m => !/empaque|envase/i.test(m.categoria || ''))
   const handleSelectEmpaqueMP = (id, mpId) => {
     const mp = mps.find(m => String(m.id) === String(mpId))
-    setEmpaque(p => p.map(r => r._id === id ? { ...r, mpId, nombre: mp?.nombre||'', precio: mp?String(mp.precio):'', presentacion: 1 } : r))
+    // La presentación sale de la unidad de la MP (igual que en ingredientes): un empaque
+    // comprado por Kg (film, cinta) se digita en gramos, así que su presentación es 1000.
+    setEmpaque(p => p.map(r => r._id === id ? { ...r, mpId, nombre: mp?.nombre||'', precio: mp?String(mp.precio):'', presentacion: presDeUnidad(mp?.unidad) } : r))
   }
   const toggleModoEmpaque = (id, modo) => {
     setEmpaque(p => p.map(r => r._id === id ? { ...r, modo, mpId: '', nombre: modo==='lista'?'':r.nombre, precio: '' } : r))
@@ -989,7 +1090,7 @@ export default function Costos() {
       <div className="tabs">
         {(soloReceta
           ? [['receta','🧪 Recetas Rápidas / Prueba']]
-          : [['lista','Productos'],['nuevo','📝 Ficha de Producto'],['receta','🧪 Recetas Rápidas / Prueba'],['cif','Costos Fijos (CIF)'],['mps','Materias Primas']]
+          : [['lista','Productos'],['nuevo','📝 Ficha de Producto'],['receta','🧪 Recetas Rápidas / Prueba'],['cif','💰 Costos y Gastos'],['mps','Materias Primas']]
         ).map(([id, lbl]) => (
           <button key={id} className={`tab-btn ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>{lbl}</button>
         ))}
@@ -1000,9 +1101,9 @@ export default function Costos() {
         <div className="card">
           <div className="card-title"><Ico as={Package} size={14} />Fichas de Productos</div>
           <div className="alert alert-info" style={{ fontSize:'0.82rem' }}>
-            ℹ El <strong>CIF/unidad</strong> y el <strong>% CIF</strong> se recalculan en vivo según el portafolio actual.
-            Al agregar un producto, la participación de cada uno se ajusta automáticamente. Los valores guardados se
-            actualizan en disco la próxima vez que edites y guardes cada ficha.
+            ℹ El <strong>CIF/unidad</strong> y el <strong>% CIF</strong> que ves aquí se recalculan en vivo según el portafolio actual.
+            Los valores <strong>guardados</strong> (los que usan Producto Terminado, Órdenes de Producción y el Tablero) solo cambian
+            al guardar cada ficha o con el botón <strong>"↻ Aplicar a las fichas"</strong> de la pestaña Costos y Gastos.
           </div>
           {/* ===== Versión móvil: acordeón ===== */}
           <div className="solo-movil">
@@ -1595,6 +1696,13 @@ export default function Costos() {
             {adicOpen && (
               <div>
                 <small style={{ color:'var(--texto-suave)', display:'block', marginBottom:8 }}>Costos extra personalizados (depreciación de máquinas, arriendo específico, etc.). Suman al <strong>costo final por unidad</strong> según su base.</small>
+                <div className="alert alert-warning" style={{ fontSize:'0.8rem' }}>
+                  ⚠ <strong>Úsalo solo para lo que sea exclusivo de este producto.</strong> Si una máquina la usan varios productos,
+                  su depreciación va como ítem en <strong>Costos y Gastos → Costos de producción (CIF)</strong> (valor mensual) y se
+                  reparte sola entre todos. Si la registras en los dos lados, el costo queda inflado: se cuenta dos veces.
+                  La depreciación de equipos <em>administrativos</em> (computador de oficina, muebles) no es costo de producción: va como
+                  gasto administrativo.
+                </div>
                 {adicionales.map((a, i) => {
                   const updA = (campos) => setAdicionales(arr => arr.map((x,idx) => idx===i ? { ...x, ...campos } : x))
                   if (a.dep) {
@@ -1666,6 +1774,67 @@ export default function Costos() {
           <div className="grid-resp" style={{ gridTemplateColumns:'1fr 1fr', gap:20 }}>
             <div className="card">
               <div className="card-title"><Ico as={DollarSign} size={14} />Precios de Venta</div>
+
+              {/* ── Precio sugerido por la norma de costeo por absorción ── */}
+              {calcResult && calcResult.costoTotalUnit > 0 && (() => {
+                const sug = getPrecioSugerido({
+                  costoProduccionUnit: calcResult.costoTotalUnit, tasaGastosOper,
+                  comisionPct: parseFloat(formProd.comision) || 0, icaPct, utilidadPct: utilidadObjetivo,
+                })
+                const precioActual = parseFloat(formProd.precio_mayor) || 0
+                const bajoMinimo = precioActual > 0 && precioActual < sug.precioMinimo
+                const bajoObjetivo = precioActual > 0 && precioActual < sug.precioObjetivo && !bajoMinimo
+                const color = bajoMinimo ? 'var(--rojo)' : bajoObjetivo ? 'var(--dorado)' : 'var(--selva)'
+                return (
+                  <div style={{ background:'#fff8e8', border:`1px solid ${color}`, borderRadius:'var(--radio)', padding:'12px', marginBottom:14 }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:8 }}>
+                      <strong style={{ color:'var(--selva)', fontSize:'0.88rem' }}><Ico as={TrendingUp} size={14} />Precio sugerido</strong>
+                      <span style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>utilidad objetivo</span>
+                      <input type="number" className="form-control" style={{ width:64, textAlign:'right', padding:'2px 6px' }}
+                        defaultValue={utilidadObjetivo} min={0} max={99} step={1}
+                        onBlur={e => guardarPrecioParam('utilidad_objetivo', e.target.value)} disabled={!esAdmin} title={esAdmin ? 'Se guarda para todas las fichas' : 'Solo el admin puede cambiarla'} />
+                      <span style={{ fontSize:'0.8rem' }}>%</span>
+                      <span style={{ fontSize:'0.75rem', color:'var(--texto-suave)', marginLeft:6 }}>ICA</span>
+                      <input type="number" className="form-control" style={{ width:64, textAlign:'right', padding:'2px 6px' }}
+                        defaultValue={icaPorMil} min={0} max={99} step={0.1}
+                        onBlur={e => guardarPrecioParam('ica_por_mil', e.target.value)} disabled={!esAdmin}
+                        title="Tarifa de ICA de tu municipio y actividad, en POR MIL sobre ventas brutas. Ej: 7 = 0,7%. Déjalo en 0 si no aplica o no lo conoces." />
+                      <span style={{ fontSize:'0.8rem' }} title="por mil sobre ventas">‰</span>
+                    </div>
+                    {!sug.viable
+                      ? <div className="alert alert-warning" style={{ fontSize:'0.8rem' }}>La comisión ({formProd.comision}%), el ICA ({icaPct.toFixed(2)}%) y la utilidad objetivo ({utilidadObjetivo}%) suman 100% o más: no existe un precio que los cubra. Baja alguno.</div>
+                      : <>
+                          <table style={{ fontSize:'0.84rem', width:'100%' }}>
+                            <tbody>
+                              <tr><td>Costo de producción/u <small style={{ color:'var(--texto-suave)' }}>(MP + empaque + CIF)</small></td><td className="td-number">{fCOP(calcResult.costoTotalUnit)}</td></tr>
+                              <tr><td>(+) Gastos admin/ventas/financieros por u <small style={{ color:'var(--texto-suave)' }}>({(tasaGastosOper*100).toFixed(1)}% del costo)</small></td><td className="td-number">{fCOP(sug.gastosOperUnit)}</td></tr>
+                              <tr style={{ fontWeight:600, borderTop:'1px solid var(--crema-oscuro)' }}><td>= Costo pleno/u</td><td className="td-number">{fCOP(sug.costoPleno)}</td></tr>
+                              <tr style={{ color:'var(--tierra)' }}><td><strong>Precio mínimo</strong> <small>(cubre costo + comisión{icaPct > 0 ? ' + ICA' : ''}, sin utilidad)</small></td><td className="td-number"><strong>{fCOP(sug.precioMinimo)}</strong></td></tr>
+                              <tr style={{ color:'var(--selva)' }}><td><strong>Precio objetivo</strong> <small>(con {utilidadObjetivo}% de utilidad)</small></td><td className="td-number"><strong style={{ fontSize:'1.05rem' }}>{fCOP(sug.precioObjetivo)}</strong></td></tr>
+                            </tbody>
+                          </table>
+                          <div style={{ marginTop:8, display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
+                            <button type="button" className="btn btn-xs btn-dorado" onClick={() => setFormProd(f => ({ ...f, precio_mayor: Math.ceil(sug.precioObjetivo / 50) * 50 }))}>
+                              Usar precio objetivo ({fCOP(Math.ceil(sug.precioObjetivo / 50) * 50)})
+                            </button>
+                            {precioActual > 0 && (
+                              <span style={{ fontSize:'0.8rem', color, fontWeight:600 }}>
+                                {bajoMinimo ? `⚠ Tu precio (${fCOP(precioActual)}) está por debajo del mínimo: pierdes ${fCOP(sug.precioMinimo - precioActual)} por unidad`
+                                  : bajoObjetivo ? `Tu precio cubre los costos pero queda ${fCOP(sug.precioObjetivo - precioActual)} bajo el objetivo`
+                                  : `✓ Tu precio supera el objetivo`}
+                              </span>
+                            )}
+                          </div>
+                          <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem', display:'block', marginTop:6 }}>
+                            Precio = costo pleno ÷ (1 − {formProd.comision || 0}% comisión {icaPct > 0 ? `− ${icaPct.toFixed(2)}% ICA ` : ''}− {utilidadObjetivo}% utilidad). Se <strong>divide</strong>: son porcentajes del precio,
+                            no del costo (multiplicar por 1+margen deja menos utilidad de la que crees).
+                            {icaPorMil === 0 && <> El ICA está en 0: si conoces la tarifa de tu municipio, escríbela en ‰ para que el precio la contemple.</>}
+                          </small>
+                        </>}
+                  </div>
+                )
+              })()}
+
               <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:10 }}>
                 <div className="form-group"><label className="form-label">Precio de venta por mayor <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(tu precio de lista)</small></label><MoneyInput value={formProd.precio_mayor} onChange={v => setFormProd(f=>({...f,precio_mayor:v}))} /></div>
                 <div className="form-group"><label className="form-label">% Comisión <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(vendedor)</small></label><input type="number" className="form-control" value={formProd.comision} onChange={e => setFormProd(f=>({...f,comision:e.target.value}))} min={0} max={100} step={0.5} /></div>
@@ -1892,72 +2061,149 @@ export default function Costos() {
         </>
       )}
 
-      {/* ===== CIF ===== */}
-      {tab === 'cif' && (
-        <div className="card">
-          <div className="card-title">
-            🏢 Costos Fijos Mensuales (CIF)
-            <button className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={addCIF}>+ Agregar ítem</button>
+      {/* ===== COSTOS Y GASTOS (una caja por grupo contable) ===== */}
+      {tab === 'cif' && (() => {
+        const GRUPOS_CORTOS = { cif:'CIF', administracion:'Admin', ventas:'Ventas', financiero:'Financ.', impuesto:'Impuesto', pasivo:'Pasivo' }
+        // Fila editable de un ítem (compartida por todas las cajas). El selector "Grupo"
+        // mueve el ítem a otra caja al cambiarlo.
+        const filaItem = (c) => {
+          const mensual = getCIFMensual(c)
+          const esProrrateo = c.frecuencia && c.frecuencia !== 'mensual'
+          return (
+            <tr key={c.id}>
+              <td><input className="form-control" defaultValue={c.descripcion} onBlur={e => updateCIF(c.id,'descripcion',e.target.value)} style={{ border:'none', background:'transparent', padding:'4px 0' }} /></td>
+              <td><input className="form-control" defaultValue={c.categoria||''} onBlur={e => updateCIF(c.id,'categoria',e.target.value)} placeholder="Categoría" style={{ border:'none', background:'transparent', padding:'4px 0', fontSize:'0.85rem' }} /></td>
+              <td>
+                <select className="form-control" value={c.frecuencia} onChange={e => updateCIF(c.id,'frecuencia',e.target.value)} style={{ fontSize:'0.85rem' }}>
+                  <option value="mensual">Mensual</option><option value="trimestral">Trimestral</option>
+                  <option value="semestral">Semestral</option><option value="anual">Anual</option>
+                </select>
+              </td>
+              <td>
+                <input type="number" className="form-control" defaultValue={c.valor} onBlur={e => updateCIF(c.id,'valor',parseFloat(e.target.value)||0)} style={{ textAlign:'right', width:130 }} />
+                {esProrrateo && <div style={{ fontSize:'0.75rem', color:'var(--tierra)', marginTop:3 }}>÷ {c.frecuencia==='anual'?12:c.frecuencia==='semestral'?6:3} = {fCOP(mensual)}/mes</div>}
+              </td>
+              <td>
+                <select className="form-control" value={c.grupo || 'cif'} onChange={e => updateCIF(c.id,'grupo',e.target.value)} title="Mover este ítem a otro grupo" style={{ fontSize:'0.78rem' }}>
+                  {GRUPOS_CIF.map(g => <option key={g.value} value={g.value}>{GRUPOS_CORTOS[g.value] || g.label}</option>)}
+                </select>
+              </td>
+              <td><button className="btn btn-xs btn-danger" onClick={() => deleteCIF(c.id)}><X size={13} aria-hidden="true" /></button></td>
+            </tr>
+          )
+        }
+        const CAJAS = [
+          { g:'cif', icono:'🏭', titulo:'Costos de producción (CIF)', afecta:true,
+            desc:'Existen porque hay producción: arriendo/energía/agua de la planta, mantenimiento de equipos, dotación de operarias, insumos de aseo de producción. Se reparten entre los productos vía costo/minuto.',
+            nomina: costoNomina.total, nominaLbl:'Nómina de producción (automática)',
+            nominaDet:`Salarios ${fCOP(costoNomina.salarios)} · Auxilio ${fCOP(costoNomina.auxilios)} · Prestaciones ${fCOP(costoNomina.prestaciones)} · Parafiscales ${fCOP(costoNomina.parafiscales)}${costoNomina.honorarios > 0 ? ` · Honorarios ${fCOP(costoNomina.honorarios)}` : ''} — no agregues salarios como ítem manual (se duplicarían)`,
+            total: cifTotal },
+          { g:'administracion', icono:'🗂', titulo:'Gastos administrativos',
+            desc:'Gestionar la empresa: honorarios del contador, papelería, celular, software, registro mercantil, seguros, mantenimiento del inmueble, cafetería/bienestar.',
+            nomina: gastosOp.administracion.nomina, nominaLbl:'Nómina de administración (automática)', total: gastosOp.administracion.total },
+          { g:'ventas', icono:'🛒', titulo:'Gastos de ventas',
+            desc:'Vender los productos: publicidad y redes, transporte de entregas de pedidos, comisiones de vendedores, ferias y eventos.',
+            nomina: gastosOp.ventas.nomina, nominaLbl:'Nómina de ventas (automática)', total: gastosOp.ventas.total },
+          { g:'financiero', icono:'🏦', titulo:'Gastos financieros',
+            desc:'Financiar la operación: intereses de préstamos y comisiones bancarias.', total: gastosOp.financiero.total },
+          { g:'impuesto', icono:'🧾', titulo:'Impuestos sobre ingresos',
+            desc:'ICA y similares sobre las ventas brutas. Van en línea separada del estado de resultados — no son un gasto administrativo.', total: gastosOp.impuestos.total },
+          { g:'pasivo', icono:'📉', titulo:'Abono a deuda (salida de caja)',
+            desc:'Capital de los préstamos. No es gasto (reduce la deuda, no la utilidad) y por eso no entra al costo del producto ni al estado de resultados — solo el interés es gasto financiero. Pero sí sale de la caja cada mes: mira abajo el punto de equilibrio de caja.', total: gastosOp.pasivo.total },
+        ]
+        const gastosOperTotal = gastosOp.administracion.total + gastosOp.ventas.total + gastosOp.financiero.total + gastosOp.impuestos.total
+        return (
+        <>
+          <div className="card">
+            <div className="card-title">
+              💰 Costos y Gastos del mes
+              <button className="btn btn-sm btn-dorado" style={{ marginLeft:'auto' }} disabled={recalcularFichas.isPending}
+                title="Guarda en cada ficha el costo calculado con el CIF y la nómina vigentes. Producto Terminado, Órdenes y el Tablero usan ese valor guardado."
+                onClick={() => confirmar(`Se recalcularán y guardarán los costos de ${productos.length} ficha(s) con el CIF y la nómina actuales. ¿Continuar?`).then(ok => ok && recalcularFichas.mutate())}>
+                {recalcularFichas.isPending ? 'Recalculando…' : '↻ Aplicar a las fichas'}
+              </button>
+            </div>
+            <div className="alert alert-info" style={{ fontSize:'0.83rem' }}>
+              ℹ Cada ítem vive en la caja de su clasificación contable. Solo los <strong>Costos de producción (CIF)</strong> se
+              reparten entre los productos y definen el costo/minuto; los demás grupos alimentan el estado de resultados del
+              Tablero pero <strong>no</strong> encarecen el producto. Con el selector "Grupo" de cada fila mueves el ítem a otra caja.
+              Tras reclasificar ítems o cambiar la nómina, usa <strong>"Aplicar a las fichas"</strong> para que el costo guardado
+              de cada producto (el que usan Producto Terminado, Órdenes y el Tablero) refleje los valores nuevos.
+            </div>
+            <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
+              <div style={{ flex:1, minWidth:170, textAlign:'center', background:'rgba(45,90,61,0.08)', borderRadius:8, padding:'10px' }}>
+                <div style={{ fontSize:'1.15rem', fontWeight:700, color:'var(--selva)' }}>{fCOP(cifTotal)}</div>
+                <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>Costos de producción (CIF)</div>
+              </div>
+              <div style={{ flex:1, minWidth:170, textAlign:'center', background:'rgba(200,169,74,0.12)', borderRadius:8, padding:'10px' }}>
+                <div style={{ fontSize:'1.15rem', fontWeight:700, color:'var(--dorado)' }}>{fCOP(gastosOperTotal)}</div>
+                <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>Gastos admin + ventas + financiero + impuestos</div>
+              </div>
+              <div style={{ flex:1, minWidth:170, textAlign:'center', background:'var(--crema)', borderRadius:8, padding:'10px' }}>
+                <div style={{ fontSize:'1.15rem', fontWeight:700, color:'var(--tierra)' }}>{fCOP(gastosOp.pasivo.total)}</div>
+                <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>Pasivo (solo flujo de caja)</div>
+              </div>
+              <div style={{ flex:1, minWidth:170, textAlign:'center', background:'#fff8e8', borderRadius:8, padding:'10px', border:'1px solid var(--dorado)' }}>
+                <div style={{ fontSize:'1.15rem', fontWeight:700, color:'var(--dorado)' }}>{fCOP(costoMin)}/min</div>
+                <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>Costo por minuto de producción</div>
+              </div>
+            </div>
           </div>
-          <div className="table-wrap">
-            <table>
-              <thead><tr><th>Descripción</th><th>Categoría</th><th>Frecuencia</th><th>Valor ($)</th><th></th></tr></thead>
-              <tbody>
-                {cifItems.map(c => {
-                  const mensual = getCIFMensual(c)
-                  const esProrrateo = c.frecuencia && c.frecuencia !== 'mensual'
-                  return (
-                    <tr key={c.id}>
-                      <td><input className="form-control" defaultValue={c.descripcion} onBlur={e => updateCIF(c.id,'descripcion',e.target.value)} style={{ border:'none', background:'transparent', padding:'4px 0' }} /></td>
-                      <td><input className="form-control" defaultValue={c.categoria||''} onBlur={e => updateCIF(c.id,'categoria',e.target.value)} style={{ border:'none', background:'transparent', padding:'4px 0', fontSize:'0.85rem' }} /></td>
-                      <td>
-                        <select className="form-control" value={c.frecuencia} onChange={e => updateCIF(c.id,'frecuencia',e.target.value)} style={{ fontSize:'0.85rem' }}>
-                          <option value="mensual">Mensual</option><option value="trimestral">Trimestral</option>
-                          <option value="semestral">Semestral</option><option value="anual">Anual</option>
-                        </select>
-                      </td>
-                      <td>
-                        <input type="number" className="form-control" defaultValue={c.valor} onBlur={e => updateCIF(c.id,'valor',parseFloat(e.target.value)||0)} style={{ textAlign:'right', width:140 }} />
-                        {esProrrateo && <div style={{ fontSize:'0.75rem', color:'var(--tierra)', marginTop:3 }}>÷ {c.frecuencia==='anual'?12:c.frecuencia==='semestral'?6:3} = {fCOP(mensual)}/mes</div>}
-                      </td>
-                      <td><button className="btn btn-xs btn-danger" onClick={() => deleteCIF(c.id)}><X size={13} aria-hidden="true" /></button></td>
-                    </tr>
-                  )
-                })}
-                <tr>
-                  <td colSpan={5}><button className="btn btn-xs btn-secondary" onClick={addCIF}>+ Agregar ítem</button></td>
-                </tr>
-                <tr style={{ background:'rgba(124,179,66,0.10)' }}>
-                  <td colSpan={2}><strong>🧑‍🤝‍🧑 Nómina del personal (automática)</strong><div style={{ fontSize:'0.72rem', color:'var(--texto-suave)' }}>Salarios + auxilio + prestaciones + parafiscales · según empleados activos</div></td>
-                  <td style={{ fontSize:'0.72rem', color:'var(--texto-suave)' }} title="Calculado desde Empleados">automático</td>
-                  <td className="td-number"><strong>{fCOP(costoNomina.total)}</strong></td>
-                  <td></td>
-                </tr>
-                <tr style={{ background:'var(--crema)' }}>
-                  <td colSpan={2}><strong>TOTAL CIF MENSUAL</strong> <small style={{ fontWeight:400, color:'var(--texto-suave)' }}>(manuales {fCOP(cifManual)} + nómina {fCOP(costoNomina.total)})</small></td>
-                  <td className="td-number" colSpan={2}><strong>{fCOP(cifTotal)}</strong></td>
-                  <td></td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <div className="alert alert-info" style={{ fontSize:'0.83rem', marginTop:10 }}>
-            ℹ La <strong>nómina se suma automáticamente</strong> al CIF a partir de los empleados activos (igual que la "Planta de Personal" del Excel).
-            <strong> No agregues los salarios como ítem manual</strong> para no duplicar. Detalle de la nómina:
-            Salarios {fCOP(costoNomina.salarios)} · Auxilio {fCOP(costoNomina.auxilios)} · Prestaciones {fCOP(costoNomina.prestaciones)} · Parafiscales {fCOP(costoNomina.parafiscales)}{costoNomina.honorarios > 0 ? ` · Honorarios (CPS) ${fCOP(costoNomina.honorarios)}` : ''}.
-          </div>
+
+          {CAJAS.map(caja => {
+            const items = cifItems.filter(c => (c.grupo || 'cif') === caja.g)
+            return (
+              <div key={caja.g} className="card" style={{ borderLeft: caja.afecta ? '4px solid var(--selva)' : '4px solid var(--crema-oscuro)' }}>
+                <div className="card-title">
+                  {caja.icono} {caja.titulo}
+                  {caja.afecta
+                    ? <span className="badge badge-verde" style={{ marginLeft:8, fontSize:'0.66rem' }}>afecta el costo del producto</span>
+                    : <span className="badge badge-gris" style={{ marginLeft:8, fontSize:'0.66rem' }}>no afecta el costo del producto</span>}
+                  <button className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={() => addCIF(caja.g)}>+ Agregar ítem</button>
+                </div>
+                <div style={{ fontSize:'0.8rem', color:'var(--texto-suave)', marginBottom:8 }}>{caja.desc}</div>
+                <div className="table-wrap">
+                  <table>
+                    <thead><tr><th>Descripción</th><th>Categoría</th><th>Frecuencia</th><th>Valor ($)</th><th title="Mover a otro grupo">Grupo</th><th></th></tr></thead>
+                    <tbody>
+                      {items.length === 0 && !(caja.nomina > 0)
+                        ? <tr><td colSpan={6} className="empty-table">Sin ítems — usa "+ Agregar ítem"</td></tr>
+                        : items.map(filaItem)}
+                      {caja.nomina > 0 && (
+                        <tr style={{ background:'rgba(124,179,66,0.10)' }}>
+                          <td colSpan={3}><strong>🧑‍🤝‍🧑 {caja.nominaLbl}</strong><div style={{ fontSize:'0.72rem', color:'var(--texto-suave)' }}>{caja.nominaDet || 'Según empleados activos de esta área — el área se asigna en Nómina'}</div></td>
+                          <td className="td-number"><strong>{fCOP(caja.nomina)}</strong></td>
+                          <td colSpan={2} style={{ fontSize:'0.72rem', color:'var(--texto-suave)' }} title="Calculado desde Empleados">automático</td>
+                        </tr>
+                      )}
+                    </tbody>
+                    <tfoot>
+                      <tr style={{ background:'var(--crema)' }}>
+                        <td colSpan={3}><strong>TOTAL MENSUAL</strong></td>
+                        <td className="td-number"><strong>{fCOP(caja.total)}</strong></td>
+                        <td colSpan={2}></td>
+                      </tr>
+                    </tfoot>
+                  </table>
+                </div>
+              </div>
+            )
+          })}
+
+          <div className="card">
+          <div className="card-title">⏱ Cálculo y reparto del CIF</div>
           {/* Desglose y simulador del costo por minuto de mano de obra */}
           <div style={{ marginTop:16, padding:16, background:'#fff8e8', border:'1px solid var(--dorado)', borderRadius:'var(--radio)' }}>
-            <strong style={{ color:'var(--selva)' }}><Ico as={Clock} size={14} />Costo por minuto de mano de obra</strong>
+            <strong style={{ color:'var(--selva)' }}><Ico as={Clock} size={14} />Costo por minuto de mano de obra (producción)</strong>
             <div style={{ fontSize:'0.85rem', marginTop:8, display:'grid', gap:4 }}>
-              <div>CIF total mensual: <strong>{fCOP(cifTotal)}</strong> <small style={{ color:'var(--texto-suave)' }}>(manuales {fCOP(cifManual)} + nómina {fCOP(costoNomina.total)})</small></div>
+              <div>Costos de producción (CIF) del mes: <strong>{fCOP(cifTotal)}</strong> <small style={{ color:'var(--texto-suave)' }}>(ítems CIF {fCOP(cifManual)} + nómina producción {fCOP(costoNomina.total)})</small></div>
               <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
-                <span>N° de operarios de capacidad:</span>
+                <span>Operarios que aportan capacidad:</span>
                 {(() => {
-                  const empActivos = empleados.filter(e => (e.estado || 'activo') === 'activo' && !e.archivado).length
+                  const empActivos = empleadosProduccion.filter(e => (e.estado || 'activo') === 'activo' && !e.archivado).length
                   return (
-                    <select className="form-control" style={{ width:'auto' }} value={parseInt(op.numOperarios || 0)} onChange={e => guardarNumOperarios(e.target.value)} title="Se guarda en los parámetros de operación">
-                      <option value={0}>todos los activos ({empActivos})</option>
+                    <select className="form-control" style={{ width:'auto' }} value={parseInt(op.numOperarios || 0)} onChange={e => guardarNumOperarios(e.target.value)} title="Se guarda en los parámetros de operación (visible también en Nómina → Parámetros)">
+                      <option value={0}>todos los de producción ({empActivos})</option>
                       {Array.from({ length: empActivos }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n}</option>)}
                     </select>
                   )
@@ -1969,49 +2215,73 @@ export default function Costos() {
             </div>
 
             <div className="alert alert-info" style={{ fontSize:'0.8rem', marginTop:10 }}>
-              ⚠ La <strong>nómina</strong> del CIF incluye a <strong>todos</strong> los empleados ({empleados.length}), pero los <strong>“operarios de capacidad” ({operariosActivos})</strong> deben ser solo quienes producen. Si subes operarios sin que tengan su salario cargado, el costo/minuto baja artificialmente (el cuadro de arriba mantiene el CIF fijo a propósito, para que veas solo el efecto de la capacidad).
+              ℹ Normalmente déjalo en <strong>"todos los de producción"</strong>: se toma solo de quienes tienen área Producción en Nómina.
+              El campo existe para cuando la <em>capacidad</em> no coincide con la <em>plantilla</em> — por ejemplo si alguien de producción es
+              supervisor y no trabaja en los baches, o si quieres calcular a capacidad normal en un mes atípico. Ojo: si eliges un número
+              distinto a {empleadosProduccion.length}, el costo/minuto usa el salario de {empleadosProduccion.length} persona(s) repartido entre la capacidad de {operariosActivos}.
             </div>
           </div>
 
           <div style={{ marginTop:16, padding:16, background:'var(--crema)', borderRadius:'var(--radio)' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, flexWrap:'wrap', gap:8 }}>
-              <strong style={{ color:'var(--selva)' }}><Ico as={BarChart3} size={14} />Distribución CIF por línea de producto</strong>
-              <div style={{ fontSize:'1.05rem', fontWeight:600, color:'var(--selva)' }}>Total: <span style={{ color:'var(--dorado)' }}>{fCOP(cifTotal)}</span></div>
+              <strong style={{ color:'var(--selva)' }}><Ico as={BarChart3} size={14} />Absorción del CIF por producto</strong>
+              <div style={{ fontSize:'1.05rem', fontWeight:600, color:'var(--selva)' }}>CIF del mes: <span style={{ color:'var(--dorado)' }}>{fCOP(cifTotal)}</span></div>
             </div>
             <div className="alert alert-info" style={{ fontSize:'0.85rem', marginBottom:12 }}>
-              ℹ Método <strong>Punto de Equilibrio Multiproducto</strong>: CIF distribuido proporcional a unidades/mes de cada producto.
+              ℹ El CIF se reparte por <strong>tiempo de proceso</strong>: cada producto absorbe los minutos que usa × {fCOP(costoMin)}/min.
+              Por eso solo se absorbe la parte del CIF correspondiente a la capacidad que realmente usas; el resto es <strong>capacidad ociosa</strong>.
             </div>
-            {cifDist.length === 0
-              ? <p style={{ color:'var(--texto-suave)', fontSize:'0.9rem' }}>Agrega fichas de costos para ver la distribución</p>
+            {cifAbsorcion.items.length === 0
+              ? <p style={{ color:'var(--texto-suave)', fontSize:'0.9rem' }}>Agrega fichas de costos para ver la absorción</p>
               : <div className="table-wrap">
                   <table>
-                    <thead><tr><th>Producto</th><th>Unid/mes</th><th>% Participación</th><th>CIF asignado/mes</th><th>CIF por unidad</th></tr></thead>
+                    <thead><tr><th>Producto</th><th>Unid/mes</th><th>Minutos/mes</th><th>% del CIF</th><th>CIF absorbido/mes</th><th>CIF por unidad</th></tr></thead>
                     <tbody>
-                      {cifDist.map((i, idx) => (
-                        <tr key={idx}>
-                          <td><strong>{i.nombre}</strong> <span className="badge badge-gris" style={{ fontSize:'0.7rem' }}>{i.tipo||''}</span></td>
-                          <td className="td-number">{fNum(i.unidsMes)}</td>
-                          <td className="td-number">
-                            <div style={{ display:'flex', alignItems:'center', gap:6, justifyContent:'flex-end' }}>
-                              <div className="progress" style={{ width:80 }}><div className="progress-bar" style={{ width:(i.pct*100).toFixed(1)+'%' }} /></div>
-                              {(i.pct*100).toFixed(1)}%
-                            </div>
-                          </td>
-                          <td className="td-number">{fCOP(i.cifAsig)}</td>
-                          <td className="td-number text-dorado"><strong>{fCOP(i.cifUnit)}</strong></td>
+                      {cifAbsorcion.items.map((i, idx) => {
+                        const pct = cifTotal > 0 ? i.absorbido / cifTotal * 100 : 0
+                        return (
+                          <tr key={idx}>
+                            <td><strong>{i.nombre}</strong> <span className="badge badge-gris" style={{ fontSize:'0.7rem' }}>{i.tipo||''}</span></td>
+                            <td className="td-number">{fNum(i.unidsMes)}</td>
+                            <td className="td-number">{fNum(i.minutosMes)}</td>
+                            <td className="td-number">
+                              <div style={{ display:'flex', alignItems:'center', gap:6, justifyContent:'flex-end' }}>
+                                <div className="progress" style={{ width:70 }}><div className="progress-bar" style={{ width:Math.min(100,pct).toFixed(1)+'%' }} /></div>
+                                {pct.toFixed(1)}%
+                              </div>
+                            </td>
+                            <td className="td-number">{fCOP(i.absorbido)}</td>
+                            <td className="td-number text-dorado"><strong>{fCOP(i.cifUnit)}</strong></td>
+                          </tr>
+                        )
+                      })}
+                      {cifAbsorcion.ocioso > 1 && (
+                        <tr style={{ background:'rgba(192,57,43,0.08)' }}>
+                          <td><strong>⚠ Capacidad ociosa</strong><div style={{ fontSize:'0.72rem', color:'var(--texto-suave)' }}>CIF que ningún producto absorbe porque la planta no opera a tope. Según NIC 2 no se puede cargar al inventario: va al resultado del mes.</div></td>
+                          <td className="td-number">—</td>
+                          <td className="td-number">{fNum(minsDisponibles - cifAbsorcion.minutosUsados)}</td>
+                          <td className="td-number">{cifTotal > 0 ? (cifAbsorcion.ocioso / cifTotal * 100).toFixed(1) : '0'}%</td>
+                          <td className="td-number" style={{ color:'var(--rojo)' }}><strong>{fCOP(cifAbsorcion.ocioso)}</strong></td>
+                          <td>—</td>
                         </tr>
-                      ))}
+                      )}
                     </tbody>
                     <tfoot>
                       <tr style={{ background:'var(--selva)', color:'var(--crema)' }}>
                         <td><strong>TOTAL</strong></td>
-                        <td className="td-number">{fNum(cifDist.reduce((s,i)=>s+i.unidsMes,0))}</td>
+                        <td className="td-number">{fNum(cifAbsorcion.items.reduce((s,i)=>s+i.unidsMes,0))}</td>
+                        <td className="td-number">{fNum(minsDisponibles)}</td>
                         <td className="td-number">100%</td>
                         <td className="td-number">{fCOP(cifTotal)}</td>
                         <td>—</td>
                       </tr>
                     </tfoot>
                   </table>
+                  <div style={{ fontSize:'0.8rem', color:'var(--texto-suave)', marginTop:8 }}>
+                    Uso de capacidad: <strong style={{ color: cifAbsorcion.usoCapacidadPct >= 80 ? 'var(--selva)' : cifAbsorcion.usoCapacidadPct >= 50 ? 'var(--dorado)' : 'var(--rojo)' }}>{cifAbsorcion.usoCapacidadPct.toFixed(1)}%</strong>
+                    {' '}({fNum(cifAbsorcion.minutosUsados)} de {fNum(minsDisponibles)} minutos disponibles al mes).
+                    {cifAbsorcion.ocioso > 1 && <> Si produjeras a capacidad plena, ese {fCOP(cifAbsorcion.ocioso)}/mes se repartiría entre más unidades y cada producto costaría menos.</>}
+                  </div>
                 </div>
             }
             {productos.length === 0 && (
@@ -2023,8 +2293,47 @@ export default function Costos() {
               </div>
             )}
           </div>
+
+          {/* Punto de equilibrio de CAJA: el abono a deuda no es gasto pero sí hay que generarlo */}
+          {(() => {
+            const mcTotalMes = peqMultiproducto.reduce((s, i) => s + i.mcu * i.q, 0)
+            const unidsMesTot = peqMultiproducto.reduce((s, i) => s + i.q, 0)
+            const mcuProm = unidsMesTot > 0 ? mcTotalMes / unidsMesTot : 0
+            const fijosTot = cifTotal + gastosOperMensuales
+            const peContable = getPEqCaja(fijosTot, 0, mcuProm)
+            const peCaja = getPEqCaja(fijosTot, gastosOp.pasivo.total, mcuProm)
+            return (
+              <div style={{ marginTop:16, padding:16, background:'var(--crema)', borderRadius:'var(--radio)' }}>
+                <strong style={{ color:'var(--selva)' }}><Ico as={DollarSign} size={14} />Punto de equilibrio: contable vs. de caja</strong>
+                {mcuProm <= 0
+                  ? <p style={{ fontSize:'0.85rem', color:'var(--texto-suave)', marginTop:8 }}>Necesitas fichas con precio y costo variable para calcularlo.</p>
+                  : <>
+                      <div style={{ display:'flex', gap:10, flexWrap:'wrap', marginTop:10 }}>
+                        <div style={{ flex:1, minWidth:180, textAlign:'center', background:'#fff', borderRadius:8, padding:'10px', border:'1px solid var(--crema-oscuro)' }}>
+                          <div style={{ fontSize:'1.15rem', fontWeight:700, color:'var(--selva)' }}>{fNum(peContable)}</div>
+                          <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>unid/mes para no dar pérdida</div>
+                        </div>
+                        <div style={{ flex:1, minWidth:180, textAlign:'center', background:'#fff', borderRadius:8, padding:'10px', border:'1px solid var(--dorado)' }}>
+                          <div style={{ fontSize:'1.15rem', fontWeight:700, color:'var(--dorado)' }}>{fNum(peCaja)}</div>
+                          <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>unid/mes para además pagar la deuda</div>
+                        </div>
+                        <div style={{ flex:1, minWidth:180, textAlign:'center', background:'#fff', borderRadius:8, padding:'10px', border:'1px solid var(--crema-oscuro)' }}>
+                          <div style={{ fontSize:'1.15rem', fontWeight:700, color:'var(--tierra)' }}>{fNum(unidsMesTot)}</div>
+                          <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>unid/mes que produces hoy</div>
+                        </div>
+                      </div>
+                      <div style={{ fontSize:'0.78rem', color:'var(--texto-suave)', marginTop:10 }}>
+                        Costos fijos {fCOP(fijosTot)} (producción {fCOP(cifTotal)} + gastos {fCOP(gastosOperMensuales)}) ÷ margen de contribución promedio {fCOP(mcuProm)}/u.
+                        {gastosOp.pasivo.total > 0 && <> El abono a deuda de {fCOP(gastosOp.pasivo.total)}/mes no es gasto, pero exige vender <strong>{fNum(peCaja - peContable)} unidades más</strong> para no quedarte sin caja.</>}
+                      </div>
+                    </>}
+              </div>
+            )
+          })()}
         </div>
-      )}
+        </>
+        )
+      })()}
 
       {/* ===== MPs ===== */}
       {tab === 'mps' && (
@@ -2114,6 +2423,9 @@ export default function Costos() {
           const unidsMes = verProd.bache * verProd.baches_mes * (1 - (verProd.merma||0)/100)
           const pctCIF = totalUnidsPortafolio > 0 ? unidsMes/totalUnidsPortafolio*100 : 0
           const peq = peqMultiproducto.find(x => x.nombre === verProd.nombre)
+          const cifAsigProd = cifAbsorcion.items.find(x => x.nombre === verProd.nombre)?.absorbido || 0
+          const pctComponente = (v) => (rc.costoTotalUnit > 0 ? (v / rc.costoTotalUnit * 100).toFixed(1) + '%' : '—')
+          const rentabilidadSobreCosto = rc.costoTotalUnit > 0 ? (rc.utilMayor / rc.costoTotalUnit * 100) : 0
           const vIngs = parseJSON(verProd.ingredientes, [])
           const vProcs = parseJSON(verProd.procesos, [])
           const vEmps = parseJSON(verProd.empaque, [])
@@ -2199,6 +2511,19 @@ export default function Costos() {
                 <tr style={{ color:'var(--selva)' }}><td>Precio Detal → Ganancia/u</td><td className="td-number">{fCOP(verProd.precio_detal)} → {fCOP(rc.utilDetal)}</td></tr>
                 <tr style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}><td>Punto de equilibrio (calculado)</td><td className="td-number">{peq && peq.pe>0 ? fNum(peq.pe)+' unid/mes' : '—'}</td></tr>
                 <tr style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}><td>% participación CIF (unid/mes del portafolio)</td><td className="td-number">{pctCIF > 0 ? pctCIF.toFixed(1) + '%' : '—'}</td></tr>
+              </tbody>
+            </table>
+
+            <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', margin:'16px 0 6px' }}><Ico as={BarChart3} size={14} />Rentabilidad</div>
+            <table>
+              <tbody>
+                <tr><td>% MP+empaque / costo total</td><td className="td-number">{pctComponente(rc.cvu)}</td></tr>
+                <tr><td>% Mano de obra + overhead (CIF) / costo total</td><td className="td-number">{pctComponente(rc.moUnit)}</td></tr>
+                {(rc.adicUnit || 0) > 0 && <tr><td>% Costos adicionales / costo total</td><td className="td-number">{pctComponente(rc.adicUnit)}</td></tr>}
+                <tr><td>Margen bruto Mayor (%)</td><td className="td-number">{verProd.precio_mayor > 0 ? (rc.utilMayor / verProd.precio_mayor * 100).toFixed(1) + '%' : '—'}</td></tr>
+                <tr><td>Margen bruto Detal (%)</td><td className="td-number">{verProd.precio_detal > 0 ? (rc.utilDetal / verProd.precio_detal * 100).toFixed(1) + '%' : '—'}</td></tr>
+                <tr><td>Rentabilidad sobre costo (utilidad ÷ costo)</td><td className="td-number">{rentabilidadSobreCosto.toFixed(1)}%</td></tr>
+                <tr><td>CIF absorbido por este producto (mensual)</td><td className="td-number">{fCOP(cifAsigProd)}</td></tr>
               </tbody>
             </table>
           </>

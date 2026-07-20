@@ -955,13 +955,15 @@ details.card > .card-acc-body { padding: 20px 24px; }
 .pz-sec-hd { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: none; border: none; cursor: pointer; font-weight: 700; font-size: 0.9rem; color: var(--selva, #1a3a2a); text-align: left; }
 .pz-sec-hd.open { border-bottom: 1px solid var(--borde, #e5e5e5); }
 .pz-sec-body { padding: 14px; }
-.pz-preview { position: sticky; top: 12px; min-width: 0; max-width: 100%; overflow: hidden; }
+/* La vista previa queda fija justo debajo del header de la app */
+.pz-preview { position: sticky; top: calc(var(--header-h, 64px) + 10px); min-width: 0; max-width: 100%; overflow: hidden; }
 .pz-preview-bar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--selva, #1a3a2a); color: #fff; border-radius: 12px 12px 0 0; font-size: 0.82rem; font-weight: 600; }
 .pz-preview-bar > span:first-child { flex: 1; }
 .pz-devices { display: inline-flex; gap: 2px; background: rgba(255,255,255,0.14); border-radius: 999px; padding: 2px; }
 .pz-devices button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 24px; border: none; background: none; color: #fff; opacity: 0.7; border-radius: 999px; cursor: pointer; }
 .pz-devices button.on { background: #fff; color: var(--selva, #1a3a2a); opacity: 1; }
-.pz-stage { height: 78vh; min-height: 520px; max-width: 100%; border: 1px solid var(--borde, #e5e5e5); border-top: none; border-radius: 0 0 12px 12px; background: #eceae6; overflow: auto; display: flex; justify-content: center; align-items: flex-start; padding: 0; }
+/* Alto ajustado al viewport restando header + barra del preview, para que quepa completo */
+.pz-stage { height: calc(100vh - var(--header-h, 64px) - 96px); min-height: 460px; max-width: 100%; border: 1px solid var(--borde, #e5e5e5); border-top: none; border-radius: 0 0 12px 12px; background: #eceae6; overflow: auto; display: flex; justify-content: center; align-items: flex-start; padding: 0; }
 .pz-stage-desktop .pz-device-frame { max-width: 100%; }
 .pz-stage-tablet, .pz-stage-mobile { padding: 20px 16px; }
 /* Escritorio: el iframe llena el escenario */
@@ -970,4 +972,22 @@ details.card > .card-acc-body { padding: 20px 24px; }
 .pz-stage-tablet .pz-device-frame { width: 744px; max-width: 100%; height: 1000px; border-radius: 18px; box-shadow: 0 10px 34px rgba(0,0,0,0.22); overflow: hidden; border: 10px solid #1e1e1e; background: #fff; flex-shrink: 0; }
 .pz-stage-mobile .pz-device-frame { width: 375px; height: 760px; border-radius: 34px; box-shadow: 0 10px 34px rgba(0,0,0,0.22); overflow: hidden; border: 10px solid #1e1e1e; background: #fff; flex-shrink: 0; }
 .pz-frame { width: 100%; height: 100%; border: none; background: #fff; display: block; }
-.pz-frame-empty { height: 78vh; min-height: 520px; border: 1px solid var(--borde, #e5e5e5); border-top: none; border-radius: 0 0 12px 12px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 40px; color: var(--texto-suave, #666); }
+.pz-frame-empty { height: calc(100vh - var(--header-h, 64px) - 96px); min-height: 460px; border: 1px solid var(--borde, #e5e5e5); border-top: none; border-radius: 0 0 12px 12px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 40px; color: var(--texto-suave, #666); }
+
+/* Guía del área visible en móvil dentro del recorte (ImageCropper) */
+.crop-guia .cropper-crop-box::after {
+  content: 'Área visible en móvil';
+  position: absolute; left: 0; right: 0; top: 50%; transform: translateY(-50%);
+  height: var(--guia-h, 70%);
+  border: 2px dashed rgba(255,255,255,0.95);
+  color: #fff; font-size: 10px; font-weight: 700; letter-spacing: .3px;
+  display: flex; align-items: flex-start; justify-content: center; padding-top: 2px;
+  text-shadow: 0 1px 3px rgba(0,0,0,.8); pointer-events: none; z-index: 5;
+}
+
+/* El editor en el lienzo requiere escritorio: en móvil/tablet se oculta el botón y se avisa */
+.pz-aviso-movil { display: none; font-size: 0.72rem; color: var(--texto-suave); }
+@media (max-width: 900px) {
+  .pz-solo-pc { display: none !important; }
+  .pz-aviso-movil { display: inline-block; }
+}

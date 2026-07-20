@@ -50,6 +50,19 @@ export const getCIFMensual = (item) => {
 export const getCIFTotalMensual = (cifItems = []) =>
   cifItems.reduce((s, c) => s + getCIFMensual(c), 0)
 
+// Clasificación contable de los ítems de CIF (ver AUDITORIA_COSTOS.md — Paso 3/4).
+// Solo el grupo 'cif' se reparte entre productos; los demás son gasto operacional/
+// financiero/impuesto o pasivo y no deben afectar el costo unitario.
+export const GRUPOS_CIF = [
+  { value: 'cif',            label: 'CIF — Costo de fabricación' },
+  { value: 'administracion', label: 'Gasto administrativo' },
+  { value: 'ventas',         label: 'Gasto de ventas' },
+  { value: 'financiero',     label: 'Gasto financiero' },
+  { value: 'impuesto',       label: 'Impuesto sobre ingresos' },
+  { value: 'pasivo',         label: 'Pasivo (no es gasto)' },
+]
+export const getGrupoCIFLabel = (g) => (GRUPOS_CIF.find(x => x.value === g)?.label || g)
+
 // Costo por minuto de mano de obra
 // Fórmula: CIF_total / (operarios × 22días × 8h × 60min × (1 - 15% improductividad))
 export const getCostoMinuto = (cifTotal, operarios = 3, dias = 22, jornadaHoras = 8, improductividad = 0.15) => {
@@ -125,14 +138,25 @@ export const calcularCostosProducto = ({
   // El overhead (costos fijos + nómina) se reparte por TIEMPO: costo/minuto = CF ÷ minutos disponibles.
   // Costo unitario = (materias primas + empaque + minutos × costo/minuto) ÷ unidades por bache.
   // Costos adicionales personalizados (depreciación, etc.), convertidos a POR UNIDAD según su base.
-  const adicUnit = (Array.isArray(adicionales) ? adicionales : []).reduce((s, a) => {
+  // Se separan según su naturaleza: los de base 'unidad'/'bache' crecen con la producción
+  // (son VARIABLES y por tanto entran al margen de contribución); los de base 'mes' son un
+  // monto fijo prorrateado, así que no varían con el volumen.
+  const porBase = (bases) => (Array.isArray(adicionales) ? adicionales : []).reduce((s, a) => {
+    const base = a?.base || 'unidad'
+    if (!bases.includes(base)) return s
     const v = parseFloat(a?.valor) || 0
-    if ((a?.base) === 'mes')   return s + (unidsMesTot > 0 ? v / unidsMesTot : 0)
-    if ((a?.base) === 'bache') return s + (unidsBache > 0 ? v / unidsBache : 0)
-    return s + v   // 'unidad' (por defecto): valor directo por unidad
+    if (base === 'mes')   return s + (unidsMesTot > 0 ? v / unidsMesTot : 0)
+    if (base === 'bache') return s + (unidsBache > 0 ? v / unidsBache : 0)
+    return s + v   // 'unidad': valor directo por unidad
   }, 0)
+  const adicUnitVar  = porBase(['unidad', 'bache'])   // variables con la producción
+  const adicUnitFijo = porBase(['mes'])               // fijos prorrateados
+  const adicUnit     = adicUnitVar + adicUnitFijo
 
-  const cvu = mpUnit + empUnit                             // solo insumos (materiales), referencia
+  // Costo VARIABLE unitario: lo que realmente crece con cada unidad producida. Es la base del
+  // margen de contribución y del punto de equilibrio, así que incluye los adicionales variables
+  // (ej. depreciación por horas de máquina) pero no el overhead ni los adicionales mensuales.
+  const cvu = mpUnit + empUnit + adicUnitVar
   const costoTotalUnit = mpUnit + empUnit + moUnit + adicUnit  // costo unitario CON overhead por tiempo + adicionales
   const costoFinal = costoTotalUnit
   // Ganancia por unidad = Precio − Costo unitario (igual que la hoja 05 del Excel)
@@ -156,7 +180,7 @@ export const calcularCostosProducto = ({
 
   return {
     totalMPBache, totalMOBache, totalEmpBache, totalMinutos,
-    mpUnit, moUnit, empUnit, cifUnit, adicUnit,
+    mpUnit, moUnit, empUnit, cifUnit, adicUnit, adicUnitVar, adicUnitFijo,
     cvu, costoTotalUnit, comUnit, costoFinal, utilMayorNeto,
     margenMayor, margenDetal, utilMayor, utilDetal, pe,
     unidsMesTot, pctCIF, costoMin,
@@ -196,6 +220,64 @@ export const getCIFDistribucion = (cifTotal, productos = []) => {
     return { ...i, pct, cifAsig, cifUnit, totalUnids }
   })
 }
+
+// ==================== PRECIO DE VENTA (costeo por absorción) ====================
+// El COSTO del producto (NIC 2) solo lleva costos de producción: MP + MO + CIF. Pero el
+// PRECIO debe recuperar además los gastos del período (administración, ventas, financieros,
+// impuestos) y dejar la utilidad. Son dos números distintos y ambos correctos en su terreno.
+
+// Tasa de absorción: cuánto gasto operacional debe recuperar cada peso de costo de producción.
+export const getTasaGastosOper = (gastosOperMensuales = 0, costoProduccionMensual = 0) =>
+  costoProduccionMensual > 0 ? gastosOperMensuales / costoProduccionMensual : 0
+
+// Precio de venta según la norma:
+//   Costo pleno = costo de producción × (1 + tasa de gastos operacionales)
+//   Precio      = Costo pleno ÷ (1 − %comisión − %ICA − %utilidad)
+// Se DIVIDE porque comisión, ICA y utilidad son porcentajes del PRECIO, no del costo:
+//   Precio = Costo + Precio×com + Precio×ica + Precio×util  →  Precio × (1 − com − ica − util) = Costo
+// Multiplicar por (1 + margen) es el error clásico: "30% sobre el costo" deja solo 23% sobre
+// el precio.
+export const getPrecioSugerido = ({ costoProduccionUnit = 0, tasaGastosOper = 0, comisionPct = 0, icaPct = 0, utilidadPct = 0 }) => {
+  const costoPleno = costoProduccionUnit * (1 + tasaGastosOper)
+  const com  = (comisionPct || 0) / 100
+  const ica  = (icaPct      || 0) / 100
+  const util = (utilidadPct || 0) / 100
+  const divMin = 1 - com - ica, divObj = 1 - com - ica - util
+  return {
+    costoPleno,
+    gastosOperUnit: costoPleno - costoProduccionUnit,
+    // Precio mínimo: cubre costo + gastos + comisión + ICA, sin utilidad. Por debajo, se pierde plata.
+    precioMinimo:   divMin > 0 ? costoPleno / divMin : 0,
+    precioObjetivo: divObj > 0 ? costoPleno / divObj : 0,
+    viable: divObj > 0,   // false si comisión + ICA + utilidad ≥ 100% (no hay precio posible)
+  }
+}
+
+// Absorción REAL del CIF por producto. El costeo reparte el CIF por TIEMPO (minutos de proceso
+// × costo/minuto), así que un producto solo absorbe el CIF correspondiente a los minutos que
+// realmente usa. Si la planta no opera al 100% de su capacidad, queda CIF SIN ABSORBER
+// (costo de capacidad ociosa) que —según NIC 2— no puede cargarse al inventario: va directo
+// al resultado del período.
+export const getCIFAbsorcion = (productos = [], costoMinuto = 0, cifTotal = 0, minutosDisponibles = 0) => {
+  const items = productos.map(p => {
+    const minutosMes = (p.minutosBache || 0) * (p.bachesMes || 0)
+    const absorbido  = minutosMes * costoMinuto
+    return { ...p, minutosMes, absorbido, cifUnit: p.unidsMes > 0 ? absorbido / p.unidsMes : 0 }
+  })
+  const minutosUsados  = items.reduce((s, i) => s + i.minutosMes, 0)
+  const totalAbsorbido = items.reduce((s, i) => s + i.absorbido, 0)
+  return {
+    items, minutosUsados, totalAbsorbido,
+    ocioso: cifTotal - totalAbsorbido,
+    usoCapacidadPct: minutosDisponibles > 0 ? (minutosUsados / minutosDisponibles) * 100 : 0,
+  }
+}
+
+// Punto de equilibrio de CAJA: además de cubrir los costos fijos hay que generar margen para
+// abonar el capital de los préstamos, que no es gasto pero sí sale de la caja. Por eso una
+// empresa puede mostrar utilidad contable y aun así quedarse sin plata.
+export const getPEqCaja = (costosFijosMensuales = 0, abonoCapitalMensual = 0, margenContribUnit = 0) =>
+  margenContribUnit > 0 ? (costosFijosMensuales + abonoCapitalMensual) / margenContribUnit : 0
 
 // ==================== NÓMINA ====================
 export const SMV = 1750905
@@ -242,30 +324,95 @@ export const TIPOS_PAGO = [
 ]
 export const getTipoPagoLabel = (t) => (TIPOS_PAGO.find(x => x.value === t)?.label || t)
 
+// Área de costeo del empleado — determina si su nómina entra al CIF (Producción) o al
+// gasto operacional (Administración/Ventas). Ver AUDITORIA_COSTOS.md.
+export const AREAS_COSTEO = [
+  { value: 'produccion',     label: 'Producción' },
+  { value: 'administracion', label: 'Administración' },
+  { value: 'ventas',         label: 'Ventas' },
+]
+export const getAreaCosteoLabel = (a) => (AREAS_COSTEO.find(x => x.value === a)?.label || a || 'Producción')
+
+// Costo mensual TOTAL para el empleador de UN empleado: salario + auxilio + provisión
+// de prestaciones + parafiscales. CPS y destajo por hora informal entran con su valor
+// base como honorarios (sin prestaciones ni parafiscales).
+const costoEmpleadoMensual = (e, P) => {
+  const sal = parseFloat(e.salario) || 0
+  if (sal <= 0) return { salario: 0, auxilio: 0, prestaciones: 0, parafiscales: 0, honorarios: 0 }
+  if (e.tipo_pago === 'cps' || e.tipo_pago === 'destajo_hora') {
+    return { salario: 0, auxilio: 0, prestaciones: 0, parafiscales: 0, honorarios: sal }
+  }
+  const incluyeAux = sal <= P.topeAuxSMLMV * P.smlmv
+  const auxilio = incluyeAux ? P.auxTransporte : 0
+  const ces = sal * P.prestaciones.cesantias
+  // Intereses sobre cesantías: 12% ANUAL sobre el saldo de cesantías ≈ 1% MENSUAL sobre el
+  // salario (intCesantias = 0.01 se aplica sobre el salario, no sobre la cesantía del mes).
+  const prestaciones = ces + sal * P.prestaciones.intCesantias + sal * P.prestaciones.prima + sal * P.prestaciones.vacaciones
+  const exime = P.exoneraParafiscales && sal < 10 * P.smlmv
+  const parafiscales = (exime ? 0 : sal * P.empleador.salud) + sal * P.empleador.pension + sal * P.empleador.arl
+    + sal * P.empleador.caja + (exime ? 0 : sal * P.empleador.icbf) + (exime ? 0 : sal * P.empleador.sena)
+  return { salario: sal, auxilio, prestaciones, parafiscales, honorarios: 0 }
+}
+
 // Costo mensual TOTAL de la nómina para el empleador (para incluirlo en los costos fijos / CIF).
 // Suma, por cada empleado activo: salario + auxilio + provisión de prestaciones + parafiscales.
 // Los CPS se cuentan como honorarios (sin prestaciones ni parafiscales). Igual que la "Planta de Personal" del Excel.
-export const getCostoNominaMensual = (empleados = [], params = PARAMS_NOMINA_DEFAULT) => {
+// `area`: si se pasa ('produccion'|'administracion'|'ventas'), solo suma empleados de esa área
+// (ver AUDITORIA_COSTOS.md — el CIF/costo-minuto solo debe incluir personal de PRODUCCIÓN;
+// administración y ventas van al gasto operacional, ver getGastosOperacionales).
+export const getCostoNominaMensual = (empleados = [], params = PARAMS_NOMINA_DEFAULT, area = null) => {
   const P = params || PARAMS_NOMINA_DEFAULT
   let salarios = 0, auxilios = 0, prestaciones = 0, parafiscales = 0, honorarios = 0
   for (const e of empleados) {
     if (e.estado && e.estado !== 'activo') continue
-    const sal = parseFloat(e.salario) || 0
-    if (sal <= 0) continue
-    // CPS y pago por hora informal entran al CIF con su SALARIO BASE establecido (sin prestaciones ni parafiscales).
-    // En la liquidación de nómina, el destajo_hora se paga por horas asistidas (ver calcularNomina); aquí es solo el costo fijo del CIF.
-    if (e.tipo_pago === 'cps' || e.tipo_pago === 'destajo_hora') { honorarios += sal; continue }
-    salarios += sal
-    const incluyeAux = sal <= P.topeAuxSMLMV * P.smlmv
-    auxilios += incluyeAux ? P.auxTransporte : 0
-    const ces = sal * P.prestaciones.cesantias
-    prestaciones += ces + ces * P.prestaciones.intCesantias + sal * P.prestaciones.prima + sal * P.prestaciones.vacaciones
-    const exime = P.exoneraParafiscales && sal < 10 * P.smlmv
-    parafiscales += (exime ? 0 : sal * P.empleador.salud) + sal * P.empleador.pension + sal * P.empleador.arl
-      + sal * P.empleador.caja + (exime ? 0 : sal * P.empleador.icbf) + (exime ? 0 : sal * P.empleador.sena)
+    if (e.archivado) continue
+    if (area && (e.area_costeo || 'produccion') !== area) continue
+    const c = costoEmpleadoMensual(e, P)
+    salarios += c.salario; auxilios += c.auxilio; prestaciones += c.prestaciones
+    parafiscales += c.parafiscales; honorarios += c.honorarios
   }
   const total = salarios + auxilios + prestaciones + parafiscales + honorarios
   return { salarios, auxilios, prestaciones, parafiscales, honorarios, total }
+}
+
+// Gastos operacionales/financieros/impuestos/pasivo del mes: ítems de CIF no-productivos
+// (clasificados por 'grupo') + la nómina del área correspondiente. Estos NO se reparten
+// entre productos — alimentan el estado de resultados (Grupos C y D de AUDITORIA_COSTOS.md).
+export const getGastosOperacionales = (cifItems = [], empleados = [], params = PARAMS_NOMINA_DEFAULT) => {
+  const itemsDe = (g) => getCIFTotalMensual(cifItems.filter(c => c.grupo === g))
+  const bloque = (g, area) => {
+    const items = itemsDe(g)
+    const nomina = area ? getCostoNominaMensual(empleados, params, area).total : 0
+    return { items, nomina, total: items + nomina }
+  }
+  return {
+    administracion: bloque('administracion', 'administracion'),
+    ventas:         bloque('ventas', 'ventas'),
+    financiero:     bloque('financiero', null),
+    impuestos:      bloque('impuesto', null),
+    pasivo:         bloque('pasivo', null),
+  }
+}
+
+// Estado de resultados mensual (ver Paso 7 de AUDITORIA_COSTOS.md).
+export const getEstadoResultados = ({ ventasNetas = 0, costoProduccion = 0, gastosAdmin = 0, gastosVentas = 0, gastosFinancieros = 0, impuestos = 0 }) => {
+  const utilidadBruta = ventasNetas - costoProduccion
+  const utilidadOperacional = utilidadBruta - gastosAdmin - gastosVentas
+  const utilidadAntesImpuestos = utilidadOperacional - gastosFinancieros
+  const utilidadNeta = utilidadAntesImpuestos - impuestos
+  const pct = (v) => (ventasNetas > 0 ? (v / ventasNetas) * 100 : 0)
+  return {
+    ventasNetas, costoProduccion, utilidadBruta, gastosAdmin, gastosVentas,
+    utilidadOperacional, gastosFinancieros, utilidadAntesImpuestos, impuestos, utilidadNeta,
+    margenBrutoPct: pct(utilidadBruta), margenOperacionalPct: pct(utilidadOperacional), margenNetoPct: pct(utilidadNeta),
+  }
+}
+
+// Semáforo de salud financiera — toma el peor de los dos indicadores (umbrales del Paso 9).
+export const getSemaforoFinanciero = (margenBrutoPct = 0, margenNetoPct = 0) => {
+  const banda = (v, alto, medio) => (v > alto ? 3 : v >= medio ? 2 : 1)
+  const banda_ = Math.min(banda(margenBrutoPct, 40, 25), banda(margenNetoPct, 10, 5))
+  return banda_ === 3 ? 'verde' : banda_ === 2 ? 'amarillo' : 'rojo'
 }
 
 // Formatea horas decimales a "HH:MM" (horas:minutos). Ej: 8.5 → "8:30".
@@ -413,7 +560,8 @@ export const calcularNomina = (empleado, asistencia = [], periodo = 'mensual', m
 
   // Provisión de prestaciones
   const cesantias  = salBase * P.prestaciones.cesantias
-  const intCes     = cesantias * P.prestaciones.intCesantias
+  // Intereses cesantías: 12% anual sobre cesantías ≈ 1% mensual sobre lo devengado
+  const intCes     = salBase * P.prestaciones.intCesantias
   const prima      = salBase * P.prestaciones.prima
   const vacaciones = salBase * P.prestaciones.vacaciones
   const totalPrestaciones = cesantias + intCes + prima + vacaciones
@@ -451,6 +599,12 @@ export const calcularNomina = (empleado, asistencia = [], periodo = 'mensual', m
 }
 
 // ==================== CALCULADORA DE RECETA ====================
+
+// Cuántas unidades base cubre el precio de una MP. El costo es (precio ÷ presentación) × cantidad:
+//   $/Kg o $/Litro → 1000, porque la cantidad se digita en gramos/mililitros.
+//   $/Gramo, $/Mililitro, $/Unidad → 1, porque la cantidad va en la misma unidad del precio.
+// Si no se conoce la unidad se asume 1000 (Kg), que es el caso más común en materias primas.
+export const presDeUnidad = (u) => (u === 'Gramo' || u === 'Mililitro' || u === 'Unidad') ? 1 : 1000
 
 // Calcula el batch completo a partir de un ingrediente ancla
 // ingredientes: [{ nombre, pct, precio, tipo ('normal'|'relativo'), base }]
@@ -498,14 +652,19 @@ export const calcularReceta = ({ ingredientes = [], ancla, cantidadAncla = 0, re
   })
 
   const totalCostoMP = calculados.reduce((s, r) => s + r.costoTotal, 0)
-  const pesoEsperado = totalMezcla * (rendimiento / 100)
+  // Masa real de la mezcla = suma de TODOS los ingredientes ya resueltos. No se usa `totalMezcla`
+  // (que sale de despejar el ancla sobre los % de los normales) porque los ingredientes RELATIVOS
+  // aportan masa por encima de ese total: contarla de menos subestimaba las unidades del bache y
+  // por tanto inflaba el costo por unidad. Sin relativos y con % sumando 100, ambos coinciden.
+  const masaTotal    = calculados.reduce((s, r) => s + (r.cantidad || 0), 0)
+  const pesoEsperado = masaTotal * (rendimiento / 100)
   const pesoDesp     = pesoEsperado * (desperdicio / 100)
   const pesoFinal    = pesoEsperado - pesoDesp
   const unidades     = pesoUnidad > 0 ? pesoFinal / pesoUnidad : 0
   const costoMPkilo  = pesoFinal > 0 ? (totalCostoMP / pesoFinal) * 1000 : 0
   const costoMPcaja  = unidades > 0 ? totalCostoMP / unidades : 0
 
-  return { calculados, totalMezcla, totalCostoMP, pesoEsperado, pesoDesp, pesoFinal, unidades, costoMPkilo, costoMPcaja }
+  return { calculados, totalMezcla, masaTotal, totalCostoMP, pesoEsperado, pesoDesp, pesoFinal, unidades, costoMPkilo, costoMPcaja }
 }
 
 // ==================== INVENTARIO ====================

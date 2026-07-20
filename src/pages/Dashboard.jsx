@@ -6,9 +6,9 @@ import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement,
   ArcElement, Tooltip, Legend,
 } from 'chart.js'
-import { Factory, Users, Package, Handshake, Lightbulb, TrendingUp, PieChart as PieIcon, ClipboardList, BookOpen, Bell, AlertTriangle, Clock, CheckCircle2, GraduationCap, Pin, Download, Settings, GripVertical, Plus, EyeOff, RotateCcw } from 'lucide-react'
+import { Factory, Users, Package, Handshake, Lightbulb, TrendingUp, PieChart as PieIcon, ClipboardList, BookOpen, Bell, AlertTriangle, Clock, CheckCircle2, GraduationCap, Pin, Download, Settings, GripVertical, Plus, EyeOff, RotateCcw, DollarSign } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { fNum, fFecha, getRolLabel } from '../lib/businessLogic'
+import { fNum, fCOP, fFecha, getRolLabel, PARAMS_NOMINA_DEFAULT, getGastosOperacionales, getEstadoResultados, getSemaforoFinanciero } from '../lib/businessLogic'
 import { fraseDelDia } from '../lib/frases'
 import { notificarVencimientosRegistros } from '../lib/notificaciones'
 import { useAuth } from '../context/AuthContext'
@@ -23,9 +23,10 @@ const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov'
 const COLORS = ['#2d5a3d','#7CB342','#C8A94A','#8B5E3C','#3d7a52','#a87450']
 
 // Orden por defecto de los módulos del tablero (pendientes y alertas primero)
-const ORDEN_DEFAULT = ['frase', 'pendientes', 'kpis', 'inventario', 'produccion_mensual', 'distribucion', 'ultimas', 'sgc_cumplimiento', 'vencimientos', 'calidad_kpis', 'nc_severidad', 'resumen_calidad']
+const ORDEN_DEFAULT = ['frase', 'pendientes', 'kpis', 'financiero', 'inventario', 'produccion_mensual', 'distribucion', 'ultimas', 'sgc_cumplimiento', 'vencimientos', 'calidad_kpis', 'nc_severidad', 'resumen_calidad']
 const TITULOS = {
   frase: 'Frase del día', pendientes: 'Pendientes y alertas', kpis: 'Indicadores generales',
+  financiero: 'Análisis financiero del mes',
   inventario: 'Inventario de materias primas', produccion_mensual: 'Producción mensual por categoría',
   distribucion: 'Distribución por producto', ultimas: 'Últimas producciones',
   sgc_cumplimiento: 'Cumplimiento de registros SGC', vencimientos: 'Vencimientos de programas',
@@ -37,19 +38,25 @@ export default function Dashboard() {
   const { profile } = useAuth()
   const navigate = useNavigate()
   const frase = fraseDelDia()
+  const [devRole, setDevRoleState] = useState(getDevRole())
+  useEffect(() => subscribeDevRole(setDevRoleState), [])
+  // El módulo financiero es sensible — solo se ofrece a admins (ni siquiera como oculto/personalizable).
+  // Si un admin está previsualizando la vista de OTRO rol (devRole), se evalúa como ese rol —
+  // así el módulo financiero no se filtra sin querer al layout guardado de un rol no-admin.
+  const rolEfectivoDash = devRole || profile?.rol
+  const esAdminDash = rolEfectivoDash === 'admin'
+  const ORDEN_DEFAULT_ROL = esAdminDash ? ORDEN_DEFAULT : ORDEN_DEFAULT.filter(k => k !== 'financiero')
 
   // ----- Personalización del tablero (orden + módulos ocultos), guardada en la NUBE -----
   // Efectivo = personalización del usuario → vista por defecto del rol → orden por código.
   // El desarrollador puede "editar la vista de un rol": entonces se guarda como default del rol.
-  const [orden, setOrden] = useState(ORDEN_DEFAULT)
+  const [orden, setOrden] = useState(ORDEN_DEFAULT_ROL)
   const [ocultos, setOcultos] = useState([])
   const [editando, setEditando] = useState(false)
-  const [devRole, setDevRoleState] = useState(getDevRole())
   const cargadoRef = useRef(false)
   const ord = useReorder(setOrden)
-  useEffect(() => subscribeDevRole(setDevRoleState), [])
 
-  const restablecer = () => { setOrden(ORDEN_DEFAULT); setOcultos([]) }
+  const restablecer = () => { setOrden(ORDEN_DEFAULT_ROL); setOcultos([]) }
   const ocultar = (key) => setOcultos(o => o.includes(key) ? o : [...o, key])
   const mostrar = (key) => setOcultos(o => o.filter(k => k !== key))
 
@@ -91,6 +98,64 @@ export default function Dashboard() {
     queryKey: ['capacitaciones'],
     queryFn: async () => { const { data } = await supabase.from('capacitaciones').select('id, fecha, duracion_horas, asistentes'); return data || [] },
   })
+
+  // ----- Análisis financiero del mes (solo admin) -----
+  const mesActual = new Date().toISOString().slice(0, 7)   // YYYY-MM
+  const { data: cifItemsFin = [] } = useQuery({
+    queryKey: ['cif_items'],
+    queryFn: async () => { const { data } = await supabase.from('cif_items').select('*'); return data || [] },
+    enabled: esAdminDash,
+  })
+  const { data: nominaParamsFin } = useQuery({
+    queryKey: ['payroll_settings'],
+    queryFn: async () => { const { data } = await supabase.from('payroll_settings').select('params').eq('id', 1).maybeSingle(); return data?.params || null },
+    enabled: esAdminDash,
+  })
+  const { data: finishedProdsFin = [] } = useQuery({
+    queryKey: ['finished_products_fin'],
+    queryFn: async () => { const { data } = await supabase.from('finished_products').select('id, alegra_item_id, product_id, activo'); return data || [] },
+    enabled: esAdminDash,
+  })
+  const { data: costoFinalPorProducto = {} } = useQuery({
+    queryKey: ['products_costing_costo_final'],
+    queryFn: async () => {
+      const { data } = await supabase.from('products_costing').select('id, costo_final')
+      return Object.fromEntries((data || []).map(p => [p.id, p.costo_final || 0]))
+    },
+    enabled: esAdminDash,
+  })
+  // Histórico de ventas reales de Alegra (mismo query que Producto Terminado — se comparte la caché)
+  const { data: alegraVentasFin, isFetching: cargandoFin } = useQuery({
+    queryKey: ['alegra_ventas_hist'],
+    queryFn: async () => { const { data } = await supabase.functions.invoke('alegra-ventas', { body: {} }); return data || { ventas: {}, ventasValor: {} } },
+    enabled: esAdminDash, retry: false, staleTime: 30 * 60 * 1000,
+  })
+  const paramsNomFin = nominaParamsFin && Object.keys(nominaParamsFin).length
+    ? { ...PARAMS_NOMINA_DEFAULT, ...nominaParamsFin,
+        prestaciones: { ...PARAMS_NOMINA_DEFAULT.prestaciones, ...(nominaParamsFin.prestaciones || {}) },
+        empleador: { ...PARAMS_NOMINA_DEFAULT.empleador, ...(nominaParamsFin.empleador || {}) } }
+    : PARAMS_NOMINA_DEFAULT
+  // Costo de producción real de un mes: unidades vendidas × costo unitario vigente de su ficha
+  // (products_costing.costo_final, ya calculado con el CIF corregido — mismo valor que usa
+  // Producto Terminado/Órdenes de Producción, no se recalcula aquí para no duplicar lógica).
+  const costoProduccionDe = (mes) => finishedProdsFin.reduce((s, fp) => {
+    if (fp.activo === false || !fp.alegra_item_id || !fp.product_id) return s
+    const qty = alegraVentasFin?.ventas?.[String(fp.alegra_item_id)]?.[mes] || 0
+    if (!qty) return s
+    return s + qty * (costoFinalPorProducto[fp.product_id] || 0)
+  }, 0)
+  const gastosOpFin = getGastosOperacionales(cifItemsFin, empleados, paramsNomFin)
+  // Estado de resultados de un mes: ventas reales de Alegra − costo de lo vendido − gastos
+  // mensuales estimados vigentes (los gastos no son históricos por mes).
+  const estadoDe = (mes) => getEstadoResultados({
+    ventasNetas: alegraVentasFin?.ventasValor?.[mes] || 0, costoProduccion: costoProduccionDe(mes),
+    gastosAdmin: gastosOpFin.administracion.total, gastosVentas: gastosOpFin.ventas.total,
+    gastosFinancieros: gastosOpFin.financiero.total, impuestos: gastosOpFin.impuestos.total,
+  })
+  const mesAnterior = (() => { const [y, m] = mesActual.split('-').map(Number); const d = new Date(y, m - 2, 15); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}` })()
+  const estadoResultados = estadoDe(mesActual)
+  const estadoMesAnterior = estadoDe(mesAnterior)
+  const semaforoFin = getSemaforoFinanciero(estadoResultados.margenBrutoPct, estadoResultados.margenNetoPct)
   // Vistas por defecto del tablero por rol (nube)
   const { data: roleRows = [], refetch: refetchRoleLayouts } = useQuery({
     queryKey: ['role_layouts'],
@@ -100,9 +165,9 @@ export default function Dashboard() {
 
   // Normaliza una vista guardada {orden, ocultos} completando módulos nuevos
   const normalizarLayout = (raw) => {
-    if (!raw || !Array.isArray(raw.orden)) return { orden: ORDEN_DEFAULT, ocultos: [] }
-    const merged = [...raw.orden.filter(k => ORDEN_DEFAULT.includes(k)), ...ORDEN_DEFAULT.filter(k => !raw.orden.includes(k))]
-    return { orden: merged, ocultos: Array.isArray(raw.ocultos) ? raw.ocultos.filter(k => ORDEN_DEFAULT.includes(k)) : [] }
+    if (!raw || !Array.isArray(raw.orden)) return { orden: ORDEN_DEFAULT_ROL, ocultos: [] }
+    const merged = [...raw.orden.filter(k => ORDEN_DEFAULT_ROL.includes(k)), ...ORDEN_DEFAULT_ROL.filter(k => !raw.orden.includes(k))]
+    return { orden: merged, ocultos: Array.isArray(raw.ocultos) ? raw.ocultos.filter(k => ORDEN_DEFAULT_ROL.includes(k)) : [] }
   }
 
   // Carga la vista efectiva: si el dev edita un rol → la del rol; si no → usuario → rol → código.
@@ -272,6 +337,54 @@ export default function Dashboard() {
       <div className="kpi-card dorado"><div className="kpi-icon"><Users aria-hidden="true" /></div><div className="kpi-label">Empleados activos</div><div className="kpi-value">{empleadosActivos}</div><div className="kpi-sub">personas</div></div>
       <div className="kpi-card tierra"><div className="kpi-icon"><Package aria-hidden="true" /></div><div className="kpi-label">Materias primas</div><div className="kpi-value">{mps.length}</div><div className="kpi-sub">ítems registrados</div></div>
       <div className="kpi-card lima"><div className="kpi-icon"><Handshake aria-hidden="true" /></div><div className="kpi-label">Clientes registrados</div><div className="kpi-value">{clientes.length}</div><div className="kpi-sub">activos</div></div>
+    </div>
+  )
+  const fMesLabel = (ym) => { const [y, m] = String(ym || '').split('-').map(Number); return (MESES[m - 1] || '') + ' ' + (y || '') }
+  const semaforoBadge = semaforoFin === 'verde' ? 'badge-verde' : semaforoFin === 'amarillo' ? 'badge-dorado' : 'badge-rojo'
+  const semaforoTxt = semaforoFin === 'verde' ? '● Saludable' : semaforoFin === 'amarillo' ? '● Atención' : '● Crítico'
+  W.financiero = (
+    <div className="card">
+      <div className="card-title" style={{ display: 'flex', alignItems: 'center' }}>
+        <Ico as={DollarSign} size={18} />Análisis financiero — {fMesLabel(mesActual)}
+        {!cargandoFin && !alegraVentasFin?.error && <span className={`badge ${semaforoBadge}`} style={{ marginLeft: 'auto' }}>{semaforoTxt}</span>}
+      </div>
+      {cargandoFin
+        ? <p className="empty-table">Calculando…</p>
+        : alegraVentasFin?.error
+          ? <div className="alert alert-info" style={{ fontSize: '0.85rem' }}>ℹ {alegraVentasFin.error}</div>
+          : (
+            <>
+              <div className="table-wrap">
+                <table>
+                  <tbody>
+                    <tr><td>Ventas netas (Alegra)</td><td className="td-number">{fCOP(estadoResultados.ventasNetas)}</td><td className="td-number">100%</td></tr>
+                    <tr><td>(−) Costo de producción</td><td className="td-number">{fCOP(estadoResultados.costoProduccion)}</td><td className="td-number">{estadoResultados.ventasNetas > 0 ? (estadoResultados.costoProduccion / estadoResultados.ventasNetas * 100).toFixed(1) + '%' : '—'}</td></tr>
+                    <tr style={{ fontWeight: 700, borderTop: '2px solid var(--crema-oscuro)' }}><td>= Utilidad bruta</td><td className="td-number">{fCOP(estadoResultados.utilidadBruta)}</td><td className="td-number">{estadoResultados.margenBrutoPct.toFixed(1)}%</td></tr>
+                    <tr><td>(−) Gastos de administración</td><td className="td-number">{fCOP(estadoResultados.gastosAdmin)}</td><td></td></tr>
+                    <tr><td>(−) Gastos de ventas</td><td className="td-number">{fCOP(estadoResultados.gastosVentas)}</td><td></td></tr>
+                    <tr style={{ fontWeight: 700, borderTop: '2px solid var(--crema-oscuro)' }}><td>= Utilidad operacional</td><td className="td-number">{fCOP(estadoResultados.utilidadOperacional)}</td><td className="td-number">{estadoResultados.margenOperacionalPct.toFixed(1)}%</td></tr>
+                    <tr><td>(−) Gastos financieros</td><td className="td-number">{fCOP(estadoResultados.gastosFinancieros)}</td><td></td></tr>
+                    <tr style={{ fontWeight: 700 }}><td>= Utilidad antes de impuestos</td><td className="td-number">{fCOP(estadoResultados.utilidadAntesImpuestos)}</td><td></td></tr>
+                    <tr><td>(−) Impuestos sobre ingresos (ICA)</td><td className="td-number">{fCOP(estadoResultados.impuestos)}</td><td></td></tr>
+                    <tr style={{ fontWeight: 700, borderTop: '2px solid var(--selva)', color: 'var(--selva)' }}><td>= Utilidad neta</td><td className="td-number">{fCOP(estadoResultados.utilidadNeta)}</td><td className="td-number">{estadoResultados.margenNetoPct.toFixed(1)}%</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              {estadoMesAnterior.ventasNetas > 0 && (
+                <div style={{ marginTop: 10, padding: '8px 12px', background: 'var(--crema)', borderRadius: 8, fontSize: '0.82rem', display: 'flex', gap: 16, flexWrap: 'wrap' }}>
+                  <span><strong>{fMesLabel(mesAnterior)}</strong> (comparativo):</span>
+                  <span>Ventas {fCOP(estadoMesAnterior.ventasNetas)}
+                    {' '}<strong style={{ color: estadoResultados.ventasNetas >= estadoMesAnterior.ventasNetas ? 'var(--selva)' : 'var(--rojo)' }}>
+                      ({estadoMesAnterior.ventasNetas > 0 ? ((estadoResultados.ventasNetas / estadoMesAnterior.ventasNetas - 1) * 100).toFixed(1) : '—'}% este mes)
+                    </strong></span>
+                  <span>Utilidad neta {fCOP(estadoMesAnterior.utilidadNeta)} ({estadoMesAnterior.margenNetoPct.toFixed(1)}%)</span>
+                </div>
+              )}
+              <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)', marginTop: 8 }}>
+                Ventas reales del mes (facturas + remisiones de Alegra) vs. gastos operacionales <strong>mensuales estimados actuales</strong> (Costos → Costos y Gastos, y Nómina), no un histórico de gasto de ese mes específico.
+              </div>
+            </>
+          )}
     </div>
   )
   W.inventario = (

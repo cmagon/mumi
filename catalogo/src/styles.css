@@ -104,7 +104,8 @@ html { scroll-behavior: smooth; }
 /* Edición en el lienzo (WYSIWYG) */
 .edit-blk { position: relative; border: 2px dashed transparent; border-radius: 8px; margin: 4px 0; transition: border-color .12s ease; }
 .edit-blk:hover { border-color: color-mix(in srgb, var(--selva) 35%, transparent); }
-.edit-blk.sel { border-color: var(--selva); background: color-mix(in srgb, var(--selva) 5%, transparent); }
+.edit-blk.sel { border-color: var(--selva); background: color-mix(in srgb, var(--selva) 5%, transparent); cursor: grab; }
+.edit-blk.sel:active { cursor: grabbing; }
 .edit-blk [contenteditable] { outline: none; cursor: text; }
 .edit-blk [contenteditable]:focus { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--selva) 30%, transparent); border-radius: 6px; }
 .edit-tool { position: absolute; top: -14px; right: 8px; z-index: 5; display: flex; align-items: center; gap: 2px; background: var(--selva); color: #fff; border-radius: 999px; padding: 3px 4px; box-shadow: var(--sombra); }
@@ -113,6 +114,9 @@ html { scroll-behavior: smooth; }
 .edit-tool button:hover { background: rgba(255,255,255,0.3); }
 .edit-tool button:disabled { opacity: 0.35; cursor: default; }
 .edit-grip { cursor: grab; padding: 0 4px; font-size: 0.95rem; user-select: none; }
+/* Mientras se arrastra, los textos editables no capturan el drop (si no, el navegador pega texto) */
+body.arrastrando [contenteditable] { pointer-events: none; }
+body.arrastrando .edit-blk { transition: none; }
 .edit-blk.over { border-color: var(--dorado); box-shadow: 0 -3px 0 var(--dorado); }
 /* Paleta de widgets */
 .edit-palette { position: sticky; top: 0; z-index: 20; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; padding: 8px 10px; margin: -12px -16px 10px; background: var(--selva); box-shadow: 0 3px 12px rgba(0,0,0,0.2); }
@@ -159,6 +163,9 @@ body.col-resizing { user-select: none; cursor: col-resize; }
 /* Video */
 .nos-video { position: relative; width: 100%; aspect-ratio: 16 / 9; border-radius: var(--radio); overflow: hidden; box-shadow: var(--sombra-sm); background: #000; }
 .nos-video iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+/* Verticales (TikTok / Reels): se limitan y centran para que no ocupen toda la pantalla */
+.nos-video-vert { max-width: 380px; margin-left: auto; margin-right: auto; background: transparent; }
+@media (max-width: 480px) { .nos-video-vert { max-width: 100%; } }
 /* Galería / álbum */
 .nos-galeria { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 @media (min-width: 640px) { .nos-galeria { grid-template-columns: repeat(3, 1fr); } }
@@ -254,14 +261,17 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 .hero-dots .dot.on { background: var(--dorado); width: 22px; border-radius: 4px; }
 
 /* ==================== BANNER SECUNDARIO (centrado + contraste) ==================== */
-.bsec { position: relative; margin: 14px 16px; border-radius: var(--radio); overflow: hidden; box-shadow: var(--sombra); background: linear-gradient(135deg, var(--selva), var(--selva-medio)); min-height: 180px; display: flex; }
-.bsec-media { width: 100%; height: 220px; object-fit: cover; display: block; border: 0; pointer-events: none; filter: brightness(0.78) saturate(1.05); }
+.bsec { position: relative; margin: 14px 16px; border-radius: var(--radio); overflow: hidden; box-shadow: var(--sombra); background: linear-gradient(135deg, var(--selva), var(--selva-medio)); display: flex; }
+/* Conserva la proporción del recorte del banner secundario (320×100) */
+.bsec-media { width: 100%; aspect-ratio: 320 / 100; height: auto; object-fit: cover; display: block; border: 0; pointer-events: none; filter: brightness(0.78) saturate(1.05); }
 .bsec-ph { background: linear-gradient(135deg, var(--selva), var(--selva-medio)); }
+/* Banner sin textos: imagen a full color (sin oscurecer) */
+.bsec-limpio .bsec-media { filter: none; }
 .bsec-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 8px; padding: 24px; background: radial-gradient(120% 120% at 50% 45%, rgba(0,0,0,0.28), rgba(0,0,0,0.62)); color: #fff; }
 .bsec-title { font-size: 1.8rem; line-height: 1.1; text-shadow: 0 2px 16px rgba(0,0,0,0.7); }
 .bsec-sub { font-size: 1rem; opacity: 0.96; max-width: 34ch; text-shadow: 0 1px 12px rgba(0,0,0,0.65); }
 .bsec-btn { margin-top: 6px; display: inline-block; background: var(--dorado); color: var(--selva); font-weight: 800; padding: 10px 22px; border-radius: 999px; box-shadow: var(--sombra-sm); }
-@media (min-width: 1024px) { .bsec { margin-left: 28px; margin-right: 28px; } .bsec-media { height: 300px; } .bsec-title { font-size: 2.3rem; } }
+@media (min-width: 1024px) { .bsec { margin-left: 28px; margin-right: 28px; } .bsec-title { font-size: 2.3rem; } }
 .bsec-grupo { position: relative; }
 .bsec-grupo .hero-dots { bottom: 14px; }
 
@@ -272,7 +282,8 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
   .hero-price { font-size: 0.92rem; }
   .hero-cat { font-size: 0.6rem; letter-spacing: 1px; }
   .hero-cta { margin-top: 8px; font-size: 0.7rem; padding: 6px 13px; }
-  .bsec-media { height: 170px; }
+  /* En móvil el banner secundario se recorta un poco más (320×70) */
+  .bsec-media { aspect-ratio: 320 / 70; }
   .bsec-overlay { padding: 14px; gap: 4px; }
   .bsec-title { font-size: 1.1rem; }
   .bsec-sub { font-size: 0.76rem; }
@@ -362,6 +373,14 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 
 .det-media { position: relative; aspect-ratio: 1 / 1; max-height: 60vh; background: var(--crema-oscuro); display: flex; align-items: center; justify-content: center; font-size: 5rem; overflow: hidden; }
 .det-media img { width: 100%; height: 100%; object-fit: cover; }
+/* Tira deslizante de la galería del producto */
+.det-track { display: flex; width: 100%; height: 100%; flex: 0 0 100%; align-self: stretch; will-change: transform; backface-visibility: hidden; }
+.det-slide { flex: 0 0 100%; width: 100%; height: 100%; overflow: hidden; }
+.det-slide img { width: 100%; height: 100%; object-fit: cover; display: block; user-select: none; -webkit-user-drag: none; }
+/* Puntos de la galería del producto (deslizar en táctiles) */
+.det-dots { position: absolute; bottom: 12px; left: 0; right: 0; display: flex; gap: 6px; justify-content: center; z-index: 2; }
+.det-dots .dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.65); box-shadow: 0 1px 4px rgba(0,0,0,0.35); cursor: pointer; transition: all .2s ease; }
+.det-dots .dot.on { background: var(--dorado); width: 22px; border-radius: 4px; }
 .zoom-hint { position: absolute; bottom: 12px; right: 12px; background: rgba(0,0,0,0.55); color: #fff; font-size: 0.72rem; font-weight: 600; padding: 5px 11px; border-radius: 999px; display: inline-flex; align-items: center; gap: 5px; }
 .det-thumbs { display: flex; gap: 8px; overflow-x: auto; padding: 10px 16px 0; scrollbar-width: none; }
 .det-thumbs::-webkit-scrollbar { display: none; }

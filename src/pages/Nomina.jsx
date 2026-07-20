@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
-import { fFecha, fCOP, fNum, calcularNomina, calcHoras, fmtHoras, SMV, getRolLabel, PARAMS_NOMINA_DEFAULT, TIPOS_PAGO, getTipoPagoLabel } from '../lib/businessLogic'
+import { fFecha, fCOP, fNum, calcularNomina, calcHoras, fmtHoras, SMV, getRolLabel, PARAMS_NOMINA_DEFAULT, TIPOS_PAGO, getTipoPagoLabel, AREAS_COSTEO, getAreaCosteoLabel } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
 import { useAuth } from '../context/AuthContext'
 import { withBusy } from '../lib/busy'
@@ -18,7 +18,7 @@ const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline',
 const MESES_LABELS = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
 const EMPTY_EMP = {
   nombre: '', cargo: 'Operario', tipo_pago: 'nomina', salario: SMV, tarifa_destajo: '', valor_hora: '',
-  cedula: '', telefono: '', estado: 'activo',
+  cedula: '', telefono: '', estado: 'activo', area_costeo: 'produccion',
   correo: '', direccion: '', fecha_nacimiento: '', fecha_ingreso: '', eps: '', contacto_emergencia: '',
 }
 
@@ -301,7 +301,7 @@ export default function Nomina() {
 
   // Abre el formulario de edición de un empleado (solo admin)
   const abrirEditarEmp = (e) => {
-    setFormEmp({ ...EMPTY_EMP, nombre: e.nombre, cargo: e.cargo, tipo_pago: e.tipo_pago, salario: e.salario, tarifa_destajo: e.tarifa_destajo ?? '', valor_hora: e.valor_hora ?? '', cedula: e.cedula || '', telefono: e.telefono || '', estado: e.estado, correo: e.correo || '', direccion: e.direccion || '', fecha_nacimiento: e.fecha_nacimiento || '', fecha_ingreso: e.fecha_ingreso || '', eps: e.eps || '', contacto_emergencia: e.contacto_emergencia || '' })
+    setFormEmp({ ...EMPTY_EMP, nombre: e.nombre, cargo: e.cargo, tipo_pago: e.tipo_pago, salario: e.salario, tarifa_destajo: e.tarifa_destajo ?? '', valor_hora: e.valor_hora ?? '', cedula: e.cedula || '', telefono: e.telefono || '', estado: e.estado, area_costeo: e.area_costeo || 'produccion', correo: e.correo || '', direccion: e.direccion || '', fecha_nacimiento: e.fecha_nacimiento || '', fecha_ingreso: e.fecha_ingreso || '', eps: e.eps || '', contacto_emergencia: e.contacto_emergencia || '' })
     setEmpEsUsuario(usuarios.some(u => u.login === e.cedula))
     setEditEmpId(e.id); setModalEmp(true)
   }
@@ -371,7 +371,7 @@ export default function Nomina() {
       </div>
 
       {tab === 'parametros' && esAdmin && (
-        <ParametrosNomina params={params} empleadosActivos={empleados.filter(e => (e.estado || 'activo') === 'activo' && !e.archivado).length} onSaved={() => qc.invalidateQueries({ queryKey: ['payroll_settings'] })} />
+        <ParametrosNomina params={params} empleadosActivos={empleados.filter(e => (e.estado || 'activo') === 'activo' && !e.archivado && (e.area_costeo || 'produccion') === 'produccion').length} onSaved={() => qc.invalidateQueries({ queryKey: ['payroll_settings'] })} />
       )}
 
       {/* LIQUIDACIÓN NÓMINA */}
@@ -597,14 +597,15 @@ export default function Nomina() {
 
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Nombre</th><th>Rol</th>{esAdmin && <th>Salario Base</th>}<th>Estado</th><th></th></tr></thead>
+              <thead><tr><th>Nombre</th><th>Rol</th><th>Área</th>{esAdmin && <th>Salario Base</th>}<th>Estado</th><th></th></tr></thead>
               <tbody>
                 {empleadosVisibles.length === 0
-                  ? <tr><td colSpan={esAdmin ? 5 : 4} className="empty-table">Sin empleados</td></tr>
+                  ? <tr><td colSpan={esAdmin ? 6 : 5} className="empty-table">Sin empleados</td></tr>
                   : empleadosVisibles.map(e => (
                     <tr key={e.id}>
                       <td><button className="btn-link-emp" onClick={() => setDetalleEmp(e)}><strong>{e.nombre}</strong></button></td>
                       <td>{rolDeEmpleado(e)}</td>
+                      <td><span className="badge badge-gris">{getAreaCosteoLabel(e.area_costeo)}</span></td>
                       {esAdmin && <td className="td-number">{fCOP(e.salario)}</td>}
                       <td><span className={`badge ${e.estado === 'activo' ? 'badge-verde' : 'badge-rojo'}`}>{e.estado}</span></td>
                       <td className="celda-acciones">
@@ -614,7 +615,7 @@ export default function Nomina() {
                           {esAdmin && (
                             <>
                               <button className="btn btn-xs btn-secondary" title="Editar empleado" onClick={() => {
-                                setFormEmp({ ...EMPTY_EMP, nombre: e.nombre, cargo: e.cargo, tipo_pago: e.tipo_pago, salario: e.salario, tarifa_destajo: e.tarifa_destajo ?? '', valor_hora: e.valor_hora ?? '', cedula: e.cedula || '', telefono: e.telefono || '', estado: e.estado, correo: e.correo || '', direccion: e.direccion || '', fecha_nacimiento: e.fecha_nacimiento || '', fecha_ingreso: e.fecha_ingreso || '', eps: e.eps || '', contacto_emergencia: e.contacto_emergencia || '' })
+                                setFormEmp({ ...EMPTY_EMP, nombre: e.nombre, cargo: e.cargo, tipo_pago: e.tipo_pago, salario: e.salario, tarifa_destajo: e.tarifa_destajo ?? '', valor_hora: e.valor_hora ?? '', cedula: e.cedula || '', telefono: e.telefono || '', estado: e.estado, area_costeo: e.area_costeo || 'produccion', correo: e.correo || '', direccion: e.direccion || '', fecha_nacimiento: e.fecha_nacimiento || '', fecha_ingreso: e.fecha_ingreso || '', eps: e.eps || '', contacto_emergencia: e.contacto_emergencia || '' })
                                 setEmpEsUsuario(usuarios.some(u => u.login === e.cedula))
                                 setEditEmpId(e.id); setModalEmp(true)
                               }}><Pencil size={13} aria-hidden="true" /></button>
@@ -871,6 +872,15 @@ export default function Nomina() {
         </div>
         <div className="form-grid-2">
           <div className="form-group">
+            <label className="form-label">Área <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(para el costeo — ver Costos → CIF)</small></label>
+            <select className="form-control" value={formEmp.area_costeo || 'produccion'} onChange={e => setFormEmp(f => ({ ...f, area_costeo: e.target.value }))}>
+              {AREAS_COSTEO.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
+            </select>
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Solo la nómina de <strong>Producción</strong> entra al costo/minuto de los productos; Administración y Ventas van al gasto operacional.</small>
+          </div>
+        </div>
+        <div className="form-grid-2">
+          <div className="form-group">
             <label className="form-label">Tipo de pago</label>
             <select className="form-control" value={formEmp.tipo_pago} onChange={e => setFormEmp(f => ({ ...f, tipo_pago: e.target.value }))}>
               {TIPOS_PAGO.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
@@ -993,9 +1003,9 @@ function ParametrosNomina({ params, empleadosActivos = 0, onSaved }) {
       <div className="card-title" style={{ fontSize: '0.95rem' }}>Tiempo de operación <small style={{ fontWeight: 400, color: 'var(--texto-suave)' }}>— para el costo fijo por minuto del costeo de productos</small></div>
       <div className="form-grid-2">
         <div className="form-group">
-          <label className="form-label">N° de operarios</label>
-          <input className="form-control" value={(p.operacion?.numOperarios ?? 0) === 0 ? `Todos los activos (${empleadosActivos})` : `${p.operacion?.numOperarios}`} disabled readOnly />
-          <small style={{ color: 'var(--texto-suave)', fontSize: '0.75rem' }}>Se configura en <strong>Costos → Costos Fijos (CIF)</strong>, junto al simulador de costo/minuto.</small>
+          <label className="form-label">N° de operarios (capacidad)</label>
+          <input className="form-control" value={(p.operacion?.numOperarios ?? 0) === 0 ? `Todos los de producción (${empleadosActivos})` : `${p.operacion?.numOperarios}`} disabled readOnly />
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.75rem' }}>Se configura en <strong>Costos → Costos y Gastos</strong>, junto al cálculo de costo/minuto. Cuenta solo empleados con área <strong>Producción</strong>.</small>
         </div>
         <NumField label="Días hábiles al mes" value={p.operacion?.dias ?? 22} onChange={v => setSub('operacion', 'dias', v)} />
         <NumField label="Jornada (horas/día)" value={p.operacion?.jornadaHoras ?? 8} onChange={v => setSub('operacion', 'jornadaHoras', v)} />
@@ -1049,7 +1059,7 @@ function ParametrosNomina({ params, empleadosActivos = 0, onSaved }) {
       <div className="card-title" style={{ fontSize: '0.95rem' }}>Prestaciones sociales</div>
       <div className="form-grid-2">
         <NumField label="Cesantías" pct value={p.prestaciones.cesantias} onChange={v => setSub('prestaciones', 'cesantias', v)} />
-        <NumField label="Intereses cesantías (mensual)" pct value={p.prestaciones.intCesantias} onChange={v => setSub('prestaciones', 'intCesantias', v)} />
+        <NumField label="Intereses cesantías (% mensual sobre salario — 12% anual s/ cesantías ≈ 1%)" pct value={p.prestaciones.intCesantias} onChange={v => setSub('prestaciones', 'intCesantias', v)} />
         <NumField label="Prima de servicios" pct value={p.prestaciones.prima} onChange={v => setSub('prestaciones', 'prima', v)} />
         <NumField label="Vacaciones" pct value={p.prestaciones.vacaciones} onChange={v => setSub('prestaciones', 'vacaciones', v)} />
       </div>

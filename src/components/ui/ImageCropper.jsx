@@ -6,7 +6,8 @@ import { RotateCw, Check } from 'lucide-react'
 
 // Recorta una imagen a una relación de aspecto y tamaño objetivo, y devuelve un Blob (JPEG).
 // aspect: 1 (cuadrada) | 16/9 (banner). salidaW/salidaH: tamaño final recomendado.
-export default function ImageCropper({ file, aspect = 1, salidaW = 1000, salidaH = 1000, onCancel, onCropped }) {
+// `guia`: % de alto (centrado) que marca el área que se verá en móvil (opcional).
+export default function ImageCropper({ file, aspect = 1, salidaW = 1000, salidaH = 1000, guia = 0, onCancel, onCropped }) {
   const imgRef = useRef(null)
   const cropperRef = useRef(null)
   const [src, setSrc] = useState('')
@@ -48,9 +49,10 @@ export default function ImageCropper({ file, aspect = 1, salidaW = 1000, salidaH
         <button className="btn btn-primary" onClick={usar} disabled={procesando}><Check size={14} /> {procesando ? 'Recortando…' : 'Recortar y usar'}</button>
       </>}>
       <p style={{ fontSize: '0.82rem', color: 'var(--texto-suave)', marginBottom: 10 }}>
-        Arrastra y haz zoom para encuadrar. Se recorta a la proporción recomendada ({aspect === 1 ? '1:1 cuadrada' : '16:9'}).
+        Arrastra y haz zoom para encuadrar. Se recorta a {salidaW}×{salidaH}.
+        {guia > 0 && <> El marco punteado indica lo que se verá en <strong>móvil</strong>: deja ahí lo importante.</>}
       </p>
-      <div style={{ maxHeight: '60vh', background: '#f0ece2' }}>
+      <div className={guia > 0 ? 'crop-guia' : ''} style={{ maxHeight: '60vh', background: '#f0ece2', ...(guia > 0 ? { ['--guia-h']: `${guia}%` } : {}) }}>
         {src && <img ref={imgRef} src={src} alt="" style={{ maxWidth: '100%', display: 'block' }} />}
       </div>
     </Modal>

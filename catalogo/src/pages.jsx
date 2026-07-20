@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, useRef, createContext, useContext } from 
 import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
 import { Search, X, ArrowLeft, ShoppingCart, MessageCircle, Plus, Minus, Send, Share2, Heart, ZoomIn, ChevronRight, Home as HomeIcon, Play } from 'lucide-react'
 import DOMPurify from 'dompurify'
+import { useSwipeable } from 'react-swipeable'
 import Lightbox from 'yet-another-react-lightbox'
 import Zoom from 'yet-another-react-lightbox/plugins/zoom'
 import Thumbnails from 'yet-another-react-lightbox/plugins/thumbnails'
@@ -10,7 +11,7 @@ import 'yet-another-react-lightbox/plugins/thumbnails.css'
 import { supabase } from './supabase'
 import { useStore } from './store'
 import { Card, HeroSlider, Newsletter, BannerSecundario, BannerGrupo } from './ui'
-import { fCOP, labelCategoria, getFrutos, iconoDe, iconoFruto, labelFruto, stockLabel, imgsDe, sinTildes, sinHtml, registrarVisita, confirmarPedidoWA, setSEO, compartir, rutaProducto, buscarPorSlug, abrirWA, FAVORITOS, BUSCADOR, videoEmbed, videoThumb, paginaPorSlug, postCanvas } from './utils'
+import { fCOP, labelCategoria, getFrutos, iconoDe, iconoFruto, labelFruto, stockLabel, imgsDe, sinTildes, sinHtml, registrarVisita, confirmarPedidoWA, setSEO, compartir, rutaProducto, buscarPorSlug, abrirWA, FAVORITOS, BUSCADOR, videoEmbed, videoThumb, detectRed, formatoRed, paginaPorSlug, postCanvas } from './utils'
 import FrutoIcon from './FrutoIcon'
 
 // ==================== MIGAS DE PAN ====================
@@ -79,6 +80,8 @@ export function Home() {
   const setQ = (v) => setParam('q', v, '')
   const setOrden = (v) => setParam('orden', v, 'rel')
   const setFFruto = (v) => setParam('fruto', v, '')
+  // Limpia todos los filtros en UNA sola actualización (si no, cada set parte del estado original)
+  const limpiarFiltros = () => setSp(prev => { const n = new URLSearchParams(prev); ['cat', 'q', 'orden', 'fruto'].forEach(k => n.delete(k)); return n }, { replace: true })
   useEffect(() => { registrarVisita(null); setSEO({ title: '', desc: cfg.subtitulo }) }, [cfg.subtitulo])
 
   const [buscando, setBuscando] = useState(!!q)
@@ -144,7 +147,7 @@ export function Home() {
           <Migas items={[{ label: cat !== 'todos' ? labelCategoria(cat) : (q ? `Búsqueda: "${q}"` : 'Resultados') }]} />
           <div className="sec-head">
             <h2 className="sec-title serif">{resultados.length} resultado{resultados.length === 1 ? '' : 's'}</h2>
-            <button className="sec-link" onClick={() => { setCat('todos'); setQ(''); setFFruto(''); setOrden('rel') }}>Limpiar filtros ✕</button>
+            <button className="sec-link" onClick={() => { limpiarFiltros(); setBuscando(false) }}>Limpiar filtros ✕</button>
           </div>
           <div className="grid">
             {resultados.length ? resultados.map(p => <Card key={p.id} {...cardProps(p)} />)
@@ -164,12 +167,14 @@ export function Home() {
           switch (tipo) {
             case 'hero': return null   // el banner principal ya se muestra arriba de los filtros
             case 'banner': {
-              // Grupo de banners secundarios activos (varias imágenes = slide; una = estático)
+              // Un banner individual seleccionado: se muestra solo ese
+              if (s.bannerId) {
+                const b = (banners || []).find(x => String(x.id) === String(s.bannerId) && x.activo !== false)
+                return b ? <BannerSecundario key={key} b={b} /> : null
+              }
+              // Un grupo completo: sus imágenes como slide (una sola = estático)
               const grupoBanners = (banners || []).filter(b => b.es_secundario && b.activo !== false && ((b.grupo || '').trim() || 'General') === s.grupo)
-              if (grupoBanners.length) return <BannerGrupo key={key} banners={grupoBanners} />
-              // Compatibilidad con secciones antiguas que referencian un banner por id
-              const b = banners.find(x => String(x.id) === String(s.bannerId) && x.activo !== false)
-              return b ? <BannerSecundario key={key} b={b} /> : null
+              return grupoBanners.length ? <BannerGrupo key={key} banners={grupoBanners} /> : null
             }
             case 'novedades':
               return novedades.length > 0 ? (
@@ -213,13 +218,29 @@ export function Producto() {
   const { cfg, productos, enCarrito, agregar, esFav, toggleFav, precio, mayorista, enOferta, descuentoPct } = useStore()
   const p = buscarPorSlug(productos, param)
   const [img, setImg] = useState(0)
+  const [drag, setDrag] = useState(0)   // desplazamiento en px mientras se desliza
   const [lightbox, setLightbox] = useState(false)
   useEffect(() => { setImg(0); if (p) { registrarVisita(p.nombre); setSEO({ title: p.nombre, desc: sinHtml(p.descripcion).slice(0, 160), image: p.imagen_url }) } }, [param, p?.nombre])
+
+  // OJO: los hooks deben ir siempre antes de cualquier return temprano.
+  const galeria = p ? imgsDe(p) : []
+  const pasar = (d) => { if (galeria.length > 1) setImg(k => Math.max(0, Math.min(galeria.length - 1, k + d))) }
+  const swipe = useSwipeable({
+    onSwiping: (e) => {
+      if (galeria.length <= 1) return
+      let d = e.deltaX   // positivo al deslizar hacia la izquierda
+      if ((img === 0 && d < 0) || (img === galeria.length - 1 && d > 0)) d /= 3   // resistencia en los extremos
+      setDrag(d)
+    },
+    onSwipedLeft: () => pasar(1),
+    onSwipedRight: () => pasar(-1),
+    onSwiped: () => setDrag(0),
+    preventScrollOnSwipe: true, trackTouch: true, trackMouse: false, delta: 30,
+  })
 
   if (productos === null) return <div className="spin" />
   if (!p) return <div className="empty">Producto no encontrado. <Link to="/tienda" className="sec-link">Volver a la tienda</Link></div>
 
-  const galeria = imgsDe(p)
   const n = enCarrito(p.id)
   const agotado = (p.stock ?? 0) <= 0
   const st = stockLabel(p.stock, cfg)
@@ -240,9 +261,14 @@ export function Producto() {
       </div>
       <div className="prod-grid">
        <div className="prod-media-col">
-        <div className="det-media" onClick={() => galeria.length && setLightbox(true)} style={{ cursor: galeria.length ? 'zoom-in' : 'default' }}>
-          {galeria.length ? <img src={galeria[img] || galeria[0]} alt={p.nombre} /> : <span className="ph-fruto"><FrutoIcon name={iconoDe(p.frutos)} size={72} /></span>}
+        <div className="det-media" {...swipe} onClick={() => galeria.length && setLightbox(true)} style={{ cursor: galeria.length ? 'zoom-in' : 'default', touchAction: galeria.length > 1 ? 'pan-y' : undefined }}>
+          {galeria.length
+            ? <div className="det-track" style={{ transform: `translate3d(calc(${-img * 100}% - ${drag}px), 0, 0)`, transition: drag ? 'none' : 'transform .38s cubic-bezier(.22,.61,.36,1)' }}>
+                {galeria.map((u, k) => <div className="det-slide" key={u}><img src={u} alt={k === img ? p.nombre : ''} draggable={false} loading={k === 0 ? 'eager' : 'lazy'} /></div>)}
+              </div>
+            : <span className="ph-fruto"><FrutoIcon name={iconoDe(p.frutos)} size={72} /></span>}
           {galeria.length > 0 && <span className="zoom-hint"><ZoomIn size={16} /> Ampliar</span>}
+          {galeria.length > 1 && <div className="det-dots" onClick={e => e.stopPropagation()}>{galeria.map((_, k) => <span key={k} className={`dot ${k === img ? 'on' : ''}`} onClick={() => setImg(k)} />)}</div>}
         </div>
         {galeria.length > 1 && <div className="det-thumbs">{galeria.map((u, k) => <button key={u} className={`det-thumb ${k === img ? 'on' : ''}`} onClick={() => setImg(k)}><img src={u} alt="" /></button>)}</div>}
        </div>
@@ -371,11 +397,16 @@ function BloquePagina({ b, onImg, onAlbum }) {
     </div>
   }
   else if (b.tipo === 'video') {
-    const src = videoEmbed(b.url)
+    const red = b.red || detectRed(b.url)
+    const src = videoEmbed(b.url, red)
     if (!src) return null
+    const ratio = b.formato || formatoRed(red)
+    const vertical = ratio === '9 / 16' || ratio === '4 / 5'
     contenido = <div className="nos-video-wrap">
       {b.titulo && <h3 className="serif nos-subtitulo">{b.titulo}</h3>}
-      <div className="nos-video"><iframe src={src} title={b.titulo || 'video'} loading="lazy" allow="autoplay; encrypted-media; picture-in-picture" allowFullScreen referrerPolicy="no-referrer-when-downgrade" /></div>
+      <div className={`nos-video ${vertical ? 'nos-video-vert' : ''}`} style={{ aspectRatio: ratio }}>
+        <iframe src={src} title={b.titulo || 'video'} loading="lazy" allow="autoplay; encrypted-media; picture-in-picture; clipboard-write" allowFullScreen scrolling="no" referrerPolicy="no-referrer-when-downgrade" />
+      </div>
     </div>
   }
   else if (b.tipo === 'galeria') {
@@ -448,6 +479,8 @@ function ColResizer({ onSet }) {
 }
 
 // ---- Arrastre entre contenedores (rutas) ----
+// La ruta arrastrada vive a nivel de módulo: React recrea objetos en cada render y se perdía.
+let DRAG_PATH = null
 const DnDCtx = createContext(null)
 // Navega el árbol hasta el array contenedor de la ruta y devuelve {arr, idx}
 function walkParent(tree, ruta) {
@@ -464,12 +497,13 @@ function walkParent(tree, ruta) {
 const mismaRuta = (a, b) => JSON.stringify(a) === JSON.stringify(b)
 
 // Editor en el lienzo recursivo: edita bloques, columnas y cajas; permite arrastrar entre contenedores
-function BloquesEditable({ bloques, onChange, nivel = 0, ruta = [] }) {
+// Bloques que se configuran en un modal del panel (no se pueden editar solo en el lienzo)
+const NECESITA_MODAL = ['imagen', 'video', 'boton', 'galeria']
+function BloquesEditable({ bloques, onChange, nivel = 0, ruta = [], target }) {
   const [sel, setSel] = useState(null)
   const ctxTop = useContext(DnDCtx)
   // El nivel 0 crea el controlador de arrastre (opera sobre el árbol completo)
   const dnd = ctxTop || {
-    _drag: null,
     mover(desde, hacia) {
       const t = JSON.parse(JSON.stringify(bloques))
       const s = walkParent(t, desde); const [blk] = s.arr.splice(s.idx, 1)
@@ -478,16 +512,26 @@ function BloquesEditable({ bloques, onChange, nivel = 0, ruta = [] }) {
       d.arr.splice(di, 0, blk); onChange(t)
     },
   }
-  const setDrag = (path) => { dnd._drag = path }
-  const soltarEn = (hacia) => { if (dnd._drag && !mismaRuta(dnd._drag, hacia)) dnd.mover(dnd._drag, hacia); dnd._drag = null }
+  const setDrag = (path) => { DRAG_PATH = path }
+  const soltarEn = (hacia) => { if (DRAG_PATH && !mismaRuta(DRAG_PATH, hacia)) dnd.mover(DRAG_PATH, hacia); DRAG_PATH = null }
   const upd = (i, nb) => onChange(bloques.map((b, k) => k === i ? nb : b))
   const updC = (i, campo, val) => upd(i, { ...bloques[i], [campo]: val })
   const del = (i) => { onChange(bloques.filter((_, k) => k !== i)); setSel(null) }
   const mov = (i, d) => { const a = [...bloques]; const j = i + d; if (j < 0 || j >= a.length) return;[a[i], a[j]] = [a[j], a[i]]; onChange(a) }
-  const add = (tipo) => { const a = [...bloques]; const nb = nuevoBloqueCat(tipo); if (sel == null) a.push(nb); else a.splice(sel + 1, 0, nb); onChange(a) }
+  const pedirModal = (i) => postCanvas({ type: 'mumi-canvas-editar', target, ruta: [...ruta, i] })
+  const add = (tipo) => {
+    const a = [...bloques]; const nb = nuevoBloqueCat(tipo)
+    const at = sel == null ? a.length : sel + 1
+    a.splice(at, 0, nb); onChange(a); setSel(at)
+    // Los que necesitan datos (imagen, video, botón, galería) abren su modal en el panel
+    if (NECESITA_MODAL.includes(tipo)) setTimeout(() => pedirModal(at), 80)
+  }
   const anchos = { auto: 'Auto', 3: '1/4', 4: '1/3', 6: '1/2', 8: '2/3', 9: '3/4' }
   const alignActual = (b) => b.align || (b.tipo === 'titulo' ? 'center' : 'left')
-  const ciclarAlign = (i, b) => updC(i, 'align', { left: 'center', center: 'right', right: 'left' }[alignActual(b)])
+  // Los párrafos además admiten "justificado"
+  const ordenAlign = (b) => b.tipo === 'parrafo' ? ['left', 'center', 'right', 'justify'] : ['left', 'center', 'right']
+  const ciclarAlign = (i, b) => { const o = ordenAlign(b); upd(i, { ...b, align: o[(o.indexOf(alignActual(b)) + 1) % o.length] }) }
+  const ICONO_ALIGN = { left: '⯇', center: '≡', right: '⯈', justify: '☰' }
   const ciclarAncho = (i, b) => { const nx = { full: 'medio', medio: 'narrow', narrow: 'full' }[b.ancho || 'full']; const estilo = { ...(b.estilo || {}) }; delete estilo.maxW; upd(i, { ...b, ancho: nx, estilo }) }
   // Redimensionar un bloque arrastrando su borde derecho (ancho en px → estilo.maxW)
   const iniciarResize = (e, i, b) => {
@@ -509,15 +553,23 @@ function BloquesEditable({ bloques, onChange, nivel = 0, ruta = [] }) {
       <div className={nivel === 0 ? '' : 'edit-anidado'} onClick={() => { if (nivel === 0) setSel(null) }}>
         {(bloques || []).map((b, i) => (
           <div key={i} className={`edit-blk ${sel === i ? 'sel' : ''}`}
+            draggable={sel === i}
+            onDragStart={(e) => {
+              e.stopPropagation()
+              try { e.dataTransfer.setData('text/plain', ''); e.dataTransfer.effectAllowed = 'move' } catch { /* noop */ }
+              setDrag([...ruta, i]); document.body.classList.add('arrastrando')
+            }}
+            onDragEnd={() => { DRAG_PATH = null; document.body.classList.remove('arrastrando') }}
             onClick={(e) => { e.stopPropagation(); setSel(i) }}
-            onDragOver={(e) => { if (dnd._drag) { e.preventDefault(); e.currentTarget.classList.add('over') } }}
+            onDragOver={(e) => { if (DRAG_PATH) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; e.currentTarget.classList.add('over') } }}
             onDragLeave={(e) => e.currentTarget.classList.remove('over')}
-            onDrop={(e) => { e.stopPropagation(); e.currentTarget.classList.remove('over'); soltarEn([...ruta, i]) }}>
+            onDrop={(e) => { if (!DRAG_PATH) return; e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.remove('over'); soltarEn([...ruta, i]) }}>
             {sel === i && (
               <div className="edit-tool" onClick={e => e.stopPropagation()}>
-                <span className="edit-grip" draggable onDragStart={(e) => { try { e.dataTransfer.setData('text/plain', 'mumi'); e.dataTransfer.effectAllowed = 'move' } catch { /* noop */ } setDrag([...ruta, i]) }} onDragEnd={() => { dnd._drag = null }} title="Arrastra para mover (a cajas y columnas)">⠿</span>
+                <span className="edit-grip" title="Arrastra el bloque para moverlo (a cajas y columnas)">⠿</span>
                 <span className="edit-tool-tipo">{b.tipo}</span>
-                <button onClick={() => ciclarAlign(i, b)} title="Alinear">{{ left: '⯇', center: '≡', right: '⯈' }[alignActual(b)]}</button>
+                <button onClick={() => pedirModal(i)} title="Configurar este bloque">✎</button>
+                <button onClick={() => ciclarAlign(i, b)} title={`Alinear (${alignActual(b)})`}>{ICONO_ALIGN[alignActual(b)]}</button>
                 <button onClick={() => ciclarAncho(i, b)} title="Ancho (estrecho/medio/completo)">⇔</button>
                 {b.tipo === 'caja' && <button onClick={() => updC(i, 'bloques', [...(b.bloques || []), nuevoBloqueCat('parrafo')])} title="Agregar dentro">＋</button>}
                 <button disabled={i === 0} onClick={() => mov(i, -1)} title="Subir">↑</button>
@@ -529,23 +581,23 @@ function BloquesEditable({ bloques, onChange, nivel = 0, ruta = [] }) {
             {b.tipo === 'titulo'
               ? <Editable tag="h2" className="serif nos-titulo" style={{ textAlign: b.align || 'center' }} initial={b.texto} onCommit={(val) => updC(i, 'texto', val)} />
               : b.tipo === 'parrafo'
-                ? <Editable html className="rich-content nos-parrafo" initial={b.html || b.texto} onCommit={(val) => updC(i, 'html', val)} />
+                ? <Editable html className="rich-content nos-parrafo" style={{ textAlign: alignActual(b) }} initial={b.html || b.texto} onCommit={(val) => updC(i, 'html', val)} />
                 : b.tipo === 'boton'
                   ? <div className="nos-boton-wrap"><Editable tag="span" className="btn btn-selva nos-boton" initial={b.texto} onCommit={(val) => updC(i, 'texto', val)} /></div>
                   : b.tipo === 'caja'
                     ? <div className="blk-caja edit-caja"
-                        onDragOver={(e) => { if (dnd._drag) { e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.add('caja-over') } }}
+                        onDragOver={(e) => { if (DRAG_PATH) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; e.currentTarget.classList.add('caja-over') } }}
                         onDragLeave={(e) => e.currentTarget.classList.remove('caja-over')}
-                        onDrop={(e) => { e.stopPropagation(); e.currentTarget.classList.remove('caja-over'); soltarEn([...ruta, i, 'caja', (b.bloques || []).length]) }}>
+                        onDrop={(e) => { if (!DRAG_PATH) return; e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.remove('caja-over'); soltarEn([...ruta, i, 'caja', (b.bloques || []).length]) }}>
                         <div className="edit-caja-lbl">Caja — suelta elementos aquí</div>
-                        <BloquesEditable bloques={b.bloques || []} onChange={(nb) => updC(i, 'bloques', nb)} nivel={nivel + 1} ruta={[...ruta, i, 'caja']} />
+                        <BloquesEditable bloques={b.bloques || []} onChange={(nb) => updC(i, 'bloques', nb)} nivel={nivel + 1} ruta={[...ruta, i, 'caja']} target={target} />
                       </div>
                     : b.tipo === 'fila'
                       ? <div className="blk-fila">{(b.columnas || []).map((c, ci) => (
                           <div className="blk-col edit-col" key={ci} style={{ flexBasis: c.ancho && c.ancho !== 'auto' ? `${(Number(c.ancho) / 12) * 100}%` : undefined, flexGrow: c.ancho && c.ancho !== 'auto' ? 0 : 1 }}
-                            onDragOver={(e) => { if (dnd._drag) { e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.add('col-over') } }}
+                            onDragOver={(e) => { if (DRAG_PATH) { e.preventDefault(); e.stopPropagation(); e.dataTransfer.dropEffect = 'move'; e.currentTarget.classList.add('col-over') } }}
                             onDragLeave={(e) => e.currentTarget.classList.remove('col-over')}
-                            onDrop={(e) => { e.stopPropagation(); e.currentTarget.classList.remove('col-over'); soltarEn([...ruta, i, { col: ci }, (c.bloques || []).length]) }}>
+                            onDrop={(e) => { if (!DRAG_PATH) return; e.preventDefault(); e.stopPropagation(); e.currentTarget.classList.remove('col-over'); soltarEn([...ruta, i, { col: ci }, (c.bloques || []).length]) }}>
                             <div className="edit-col-head" onClick={e => e.stopPropagation()}>
                               <span>Col {ci + 1}</span>
                               <select value={c.ancho || 'auto'} onChange={e => updC(i, 'columnas', b.columnas.map((x, k) => k === ci ? { ...x, ancho: e.target.value } : x))}>
@@ -553,7 +605,7 @@ function BloquesEditable({ bloques, onChange, nivel = 0, ruta = [] }) {
                               </select>
                               {b.columnas.length > 1 && <button onClick={() => updC(i, 'columnas', b.columnas.filter((_, k) => k !== ci))} title="Quitar columna">✕</button>}
                             </div>
-                            <BloquesEditable bloques={c.bloques || []} onChange={(nb) => updC(i, 'columnas', b.columnas.map((x, k) => k === ci ? { ...x, bloques: nb } : x))} nivel={nivel + 1} ruta={[...ruta, i, { col: ci }]} />
+                            <BloquesEditable bloques={c.bloques || []} onChange={(nb) => updC(i, 'columnas', b.columnas.map((x, k) => k === ci ? { ...x, bloques: nb } : x))} nivel={nivel + 1} ruta={[...ruta, i, { col: ci }]} target={target} />
                             {ci < b.columnas.length - 1 && <ColResizer onSet={(frac) => updC(i, 'columnas', b.columnas.map((x, k) => k === ci ? { ...x, ancho: String(frac) } : x))} />}
                           </div>
                         ))}
@@ -580,7 +632,7 @@ export function Nosotros() {
   return (
     <div className="page">
       <Migas items={[{ label: 'Nosotros' }]} />
-      <div className="nos-cuerpo">{editando ? <BloquesEditable bloques={bloques} onChange={(nb) => postCanvas({ type: 'mumi-canvas-set', target: 'nosotros', bloques: nb })} /> : <Bloques bloques={bloques} />}</div>
+      <div className="nos-cuerpo">{editando ? <BloquesEditable bloques={bloques} target="nosotros" onChange={(nb) => postCanvas({ type: 'mumi-canvas-set', target: 'nosotros', bloques: nb })} /> : <Bloques bloques={bloques} />}</div>
       <div className="footer-space" />
     </div>
   )
@@ -600,7 +652,7 @@ export function Pagina() {
       <Migas items={[{ label: pag.titulo }]} />
       {pag.titulo && <div style={{ padding: '8px 16px 0' }}><h1 className="serif" style={{ fontSize: '1.7rem', color: 'var(--selva)' }}>{pag.titulo}</h1></div>}
       <div className="nos-cuerpo">{editando
-        ? <BloquesEditable bloques={pag.bloques || []} onChange={(nb) => postCanvas({ type: 'mumi-canvas-set', target: `pagina:${slug}`, bloques: nb })} />
+        ? <BloquesEditable bloques={pag.bloques || []} target={`pagina:${slug}`} onChange={(nb) => postCanvas({ type: 'mumi-canvas-set', target: `pagina:${slug}`, bloques: nb })} />
         : <Bloques bloques={pag.bloques || []} />}</div>
       <div className="footer-space" />
     </div>

@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
+import { useSwipeable } from 'react-swipeable'
 import { Plus, ChevronLeft, ChevronRight, Send, Heart } from 'lucide-react'
 import { fCOP, labelCategoria, iconoDe, stockLabel, suscribir, FAVORITOS } from './utils'
 import FrutoIcon from './FrutoIcon'
@@ -41,8 +42,16 @@ export function Card({ p, cfg, n = 0, onOpen, onAdd }) {
 }
 
 // ---- Hero slider (soporta BANNERS [imagen/YouTube] y productos destacados) ----
+// Abre el enlace de un banner: interno → navegación SPA; externo → nueva pestaña
+export function irEnlace(nav, link) {
+  const l = (link || '').trim(); if (!l) return
+  if (/^https?:\/\//i.test(l)) window.open(l, '_blank')
+  else nav(l.startsWith('/') ? l : `/${l}`)
+}
+
 export function HeroSlider({ slides, onOpen }) {
   const { precio } = useStore()
+  const nav = useNavigate()
   const [i, setI] = useState(0)
   const n = slides.length
   useEffect(() => { if (n <= 1) return; const t = setInterval(() => setI(x => (x + 1) % n), 6000); return () => clearInterval(t) }, [n])
@@ -76,10 +85,12 @@ export function HeroSlider({ slides, onOpen }) {
     </>
   )
 
-  const onClick = () => { if (esBanner) { if (s.boton_link) window.location.href = s.boton_link } else onOpen(s) }
+  const onClick = () => { if (esBanner) irEnlace(nav, s.boton_link); else onOpen(s) }
+  // Deslizar en pantallas táctiles para cambiar de slide
+  const swipe = useSwipeable({ onSwipedLeft: () => n > 1 && go(1), onSwipedRight: () => n > 1 && go(-1), preventScrollOnSwipe: true, trackTouch: true, trackMouse: false, delta: 30 })
 
   return (
-    <div className="hero" onClick={onClick} style={{ cursor: (esBanner && !s.boton_link) ? 'default' : 'pointer' }}>
+    <div className="hero" {...swipe} onClick={onClick} style={{ cursor: (esBanner && !s.boton_link) ? 'default' : 'pointer', touchAction: n > 1 ? 'pan-y' : undefined }}>
       {contenido}
       {n > 1 && <>
         <button className="hero-nav left" onClick={e => { e.stopPropagation(); go(-1) }} aria-label="Anterior"><ChevronLeft size={22} /></button>
@@ -92,19 +103,24 @@ export function HeroSlider({ slides, onOpen }) {
 
 // ---- Banner secundario (textos y botón centrados, con overlay de contraste) ----
 export function BannerSecundario({ b }) {
+  const nav = useNavigate()
   const yt = b.tipo === 'youtube' ? ytId(b.youtube) : ''
   const clickable = !!b.boton_link
-  const onClick = () => { if (b.boton_link) window.location.href = b.boton_link }
+  const onClick = () => irEnlace(nav, b.boton_link)
+  // Sin textos ni botón: la imagen se muestra a full color, sin oscurecer ni overlay
+  const conTexto = !!(b.titulo || b.subtitulo || b.boton_texto)
   return (
-    <div className="bsec" onClick={onClick} style={{ cursor: clickable ? 'pointer' : 'default' }}>
+    <div className={`bsec ${conTexto ? '' : 'bsec-limpio'}`} onClick={onClick} style={{ cursor: clickable ? 'pointer' : 'default' }}>
       {yt
         ? <iframe className="bsec-media" src={`https://www.youtube.com/embed/${yt}?autoplay=1&mute=1&loop=1&playlist=${yt}&controls=0&modestbranding=1&playsinline=1`} title={b.titulo || 'video'} allow="autoplay; encrypted-media" frameBorder="0" />
         : (b.imagen_url ? <img className="bsec-media" src={b.imagen_url} alt={b.titulo || ''} /> : <div className="bsec-media bsec-ph" />)}
-      <div className="bsec-overlay">
-        {b.titulo && <div className="bsec-title serif">{b.titulo}</div>}
-        {b.subtitulo && <div className="bsec-sub">{b.subtitulo}</div>}
-        {b.boton_texto && <span className="bsec-btn">{b.boton_texto}</span>}
-      </div>
+      {conTexto && (
+        <div className="bsec-overlay">
+          {b.titulo && <div className="bsec-title serif">{b.titulo}</div>}
+          {b.subtitulo && <div className="bsec-sub">{b.subtitulo}</div>}
+          {b.boton_texto && <span className="bsec-btn">{b.boton_texto}</span>}
+        </div>
+      )}
     </div>
   )
 }
@@ -114,11 +130,12 @@ export function BannerGrupo({ banners }) {
   const [i, setI] = useState(0)
   const n = banners.length
   useEffect(() => { if (n <= 1) return; const t = setInterval(() => setI(x => (x + 1) % n), 6000); return () => clearInterval(t) }, [n])
+  const swipe = useSwipeable({ onSwipedLeft: () => setI(x => (x + 1) % n), onSwipedRight: () => setI(x => (x - 1 + n) % n), preventScrollOnSwipe: true, trackTouch: true, trackMouse: false, delta: 30 })
   if (n === 0) return null
   if (n === 1) return <BannerSecundario b={banners[0]} />
   const go = (d) => setI(x => (x + d + n) % n)
   return (
-    <div className="bsec-grupo">
+    <div className="bsec-grupo" {...swipe} style={{ touchAction: 'pan-y' }}>
       <BannerSecundario b={banners[i]} />
       <button className="hero-nav left" onClick={e => { e.stopPropagation(); go(-1) }} aria-label="Anterior"><ChevronLeft size={22} /></button>
       <button className="hero-nav right" onClick={e => { e.stopPropagation(); go(1) }} aria-label="Siguiente"><ChevronRight size={22} /></button>

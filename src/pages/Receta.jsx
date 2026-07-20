@@ -2,7 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase, uploadFile } from '../lib/supabase'
-import { fCOP, fNum, fFecha, calcularReceta } from '../lib/businessLogic'
+import { fCOP, fNum, fFecha, calcularReceta, presDeUnidad } from '../lib/businessLogic'
 import MoneyInput from '../components/ui/MoneyInput'
 import { CATALOGO_PARAMS, PARAM_UNIDAD } from '../lib/calidad'
 import { useToast } from '../hooks/useToast'
@@ -86,17 +86,31 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
     let anclaEf = ancla
     let cantAnclaEf = parseFloat(cantidadAncla) || 0
 
-    // Modo "por unidades": calcula la mezcla total necesaria para fabricar N unidades
-    // totalMezcla = (unidades × peso_unidad) / (rendimiento% × (1 − desperdicio%))
+    // Modo "por unidades": calcula la mezcla necesaria para fabricar N unidades.
+    //   masa_total = base × Σfracciones   y   masa_total × rendimiento% × (1 − desperdicio%) = U × peso_unidad
+    // Σfracciones incluye a los RELATIVOS, que aportan masa por encima del 100% de los normales:
+    // sin ese factor se pedirían más unidades de las necesarias.
     if (modoCalc === 'unidades') {
       const U = parseFloat(unidadesObj) || 0
       const denom = (rend / 100) * (1 - desp / 100)
-      const totalMezcla = denom > 0 ? (U * pu) / denom : 0
+      // Fracción de la mezcla que aporta cada ingrediente (los relativos, sobre la suma de sus bases)
+      const fraccionDe = (r) => {
+        const p = (parseFloat(r.pct) || 0) / 100
+        if (r.tipo !== 'relativo') return p
+        const bases = Array.isArray(r.base) ? r.base.filter(Boolean) : (r.base ? [r.base] : [])
+        const baseFrac = bases.reduce((s, bn) => {
+          const br = ingredientes.find(x => x.nombre === bn)
+          return s + (br ? (parseFloat(br.pct) || 0) / 100 : 0)
+        }, 0)
+        return baseFrac * p
+      }
+      const sumaFrac = ingredientes.reduce((s, r) => s + fraccionDe(r), 0)
+      const base = (denom > 0 && sumaFrac > 0) ? (U * pu) / (denom * sumaFrac) : 0
       // ancla efectiva: la elegida (si tiene %) o el primer ingrediente normal con %
       const anclaRow = ingredientes.find(i => i.nombre === ancla && (parseFloat(i.pct) || 0) > 0)
         || ingredientes.find(i => i.tipo !== 'relativo' && (parseFloat(i.pct) || 0) > 0 && (i.nombre || '').trim())
       anclaEf = anclaRow?.nombre || ''
-      cantAnclaEf = anclaRow ? totalMezcla * ((parseFloat(anclaRow.pct) || 0) / 100) : 0
+      cantAnclaEf = anclaRow ? base * ((parseFloat(anclaRow.pct) || 0) / 100) : 0
     }
 
     const res = calcularReceta({
@@ -152,6 +166,8 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
         nombre,
         pct: i.pct || '',
         precio: i.precio || (mp ? String(mp.precio) : ''),
+        // Presentación guardada; si la ficha es antigua y no la trae, se deduce de la unidad de la MP
+        presentacion: i.presentacion || (mp ? presDeUnidad(mp.unidad) : 1000),
         // los productos almacenan "cantidad" (g/bache); las recetas rápidas usan "gramos"
         gramos: i.gramos || i.cantidad || '',
         mpId: mpIdEf,
@@ -194,7 +210,7 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
         const nom = (i.nombre || '').trim().toLowerCase()
         if (!nom) return i
         const mp = mps.find(m => (m.nombre || '').trim().toLowerCase() === nom)
-        if (mp) { changed = true; return { ...i, mpId: mp.id, modo: 'lista', precio: mp.precio } }
+        if (mp) { changed = true; return { ...i, mpId: mp.id, modo: 'lista', precio: mp.precio, presentacion: presDeUnidad(mp.unidad) } }
         return i
       })
       return changed ? next : prev
@@ -206,7 +222,9 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
     const mp = mps.find(m => String(m.id) === String(mpId))
     setIngredientes(prev => prev.map(r =>
       r._id === id
-        ? { ...r, mpId, nombre: mp ? mp.nombre : '', precio: mp ? String(mp.precio) : '' }
+        // La presentación sale de la unidad de la MP: sin ella el costeo asume $/Kg y una MP
+        // comprada por unidad o por gramo quedaría costando la milésima parte de lo real.
+        ? { ...r, mpId, nombre: mp ? mp.nombre : '', precio: mp ? String(mp.precio) : '', presentacion: presDeUnidad(mp?.unidad) }
         : r
     ))
   }

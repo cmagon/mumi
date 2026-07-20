@@ -3,7 +3,7 @@ import { Routes, Route, Link, NavLink, useNavigate, useLocation } from 'react-ro
 import { Leaf, Truck, ShieldCheck, MessageCircle, ShoppingCart, ArrowLeft, Plus, Minus, Trash2, Instagram, Facebook, Youtube, Twitter, Music2, Heart, Send, X, Menu } from 'lucide-react'
 import { useStore } from './store'
 import { Home, Producto, Nosotros, Contacto, Favoritos, Mayorista, Pagina, Galeria } from './pages'
-import { fCOP, iconoDe, confirmarPedidoWA, suscribir, abrirWA, FAVORITOS, cargarGoogleFonts } from './utils'
+import { fCOP, iconoDe, confirmarPedidoWA, suscribir, abrirWA, FAVORITOS, cargarGoogleFonts, getCliente, setCliente } from './utils'
 import FrutoIcon from './FrutoIcon'
 import Logo from './Logo'
 import BenefitIcon from './BenefitIcon'
@@ -187,6 +187,8 @@ function InvitacionMayorista({ cfg }) {
 function CartDrawer({ onClose }) {
   const { cfg, carrito, agregar, quitar, total, precio, mayorista, pedidoMinimo } = useStore()
   const [nota, setNota] = useState('')
+  const [nombre, setNombre] = useState(() => getCliente())
+  const nombreOk = nombre.trim().length >= 2
   useBodyLock(true)
   return (
     <div className="overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
@@ -204,13 +206,22 @@ function CartDrawer({ onClose }) {
               </div>
             ))}
             <div style={{ padding: '14px 16px' }}>
-              <label style={{ fontSize: '0.82rem', color: 'var(--texto-suave)', fontWeight: 600 }}>Nota para el pedido</label>
-              <textarea rows={2} value={nota} onChange={e => setNota(e.target.value)} placeholder="Ej: entregar en la tarde…" style={{ width: '100%', marginTop: 6, padding: 10, borderRadius: 10, border: '1.5px solid var(--crema-oscuro)', font: 'inherit', resize: 'vertical' }} />
+              <label style={{ fontSize: '0.82rem', color: 'var(--selva)', fontWeight: 700 }}>Tu nombre *</label>
+              <input value={nombre} onChange={e => { setNombre(e.target.value); setCliente(e.target.value.trim()) }} placeholder="¿Con quién tenemos el gusto?"
+                style={{ width: '100%', marginTop: 6, padding: 11, borderRadius: 10, border: `1.5px solid ${nombreOk ? 'var(--crema-oscuro)' : 'var(--dorado)'}`, font: 'inherit' }} />
+              {!nombreOk && <div style={{ fontSize: '0.76rem', color: 'var(--tierra)', marginTop: 4 }}>Escribe tu nombre para que sepamos quién hace el pedido.</div>}
+              <label style={{ fontSize: '0.82rem', color: 'var(--texto-suave)', fontWeight: 600, display: 'block', marginTop: 12 }}>Nota (opcional)</label>
+              <textarea rows={2} value={nota} onChange={e => setNota(e.target.value)} placeholder="Indicaciones adicionales para tu pedido" style={{ width: '100%', marginTop: 6, padding: 10, borderRadius: 10, border: '1.5px solid var(--crema-oscuro)', font: 'inherit', resize: 'vertical' }} />
             </div>
             {mayorista && <div style={{ padding: '0 16px', color: 'var(--selva)', fontSize: '0.8rem', fontWeight: 700 }}>Precios de mayorista aplicados 🏷️</div>}
             <div style={{ padding: '4px 16px 8px', display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: '1.1rem', color: 'var(--selva)' }}><span>Total</span><span>{fCOP(total)}</span></div>
             {pedidoMinimo > 0 && total < pedidoMinimo && <p style={{ padding: '0 16px 8px', color: 'var(--tierra)', fontSize: '0.82rem' }}>Pedido mínimo{mayorista ? ' mayorista' : ''} sugerido: {fCOP(pedidoMinimo)}</p>}
-            <div style={{ padding: '4px 16px 16px' }}><button className="btn btn-wa" onClick={() => confirmarPedidoWA(carrito, nota, cfg, mayorista, cfg.wa_texto_stock)}><MessageCircle size={18} /> Confirmar por WhatsApp</button></div>
+            <div style={{ padding: '4px 16px 16px' }}>
+              <button className="btn btn-wa" disabled={!nombreOk} style={!nombreOk ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}
+                onClick={() => nombreOk && confirmarPedidoWA(carrito, nota, cfg, mayorista, cfg.wa_texto_stock, nombre.trim())}>
+                <MessageCircle size={18} /> Confirmar por WhatsApp
+              </button>
+            </div>
             <div className="trust">🔒 Seguro · 🌿 Natural · 🚚 Envío nacional</div>
           </>}
       </div>
