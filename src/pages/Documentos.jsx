@@ -344,7 +344,8 @@ export default function Documentos() {
     if (!await confirmar(`¿Eliminar el proceso vacío "${proceso}"?`, { title: 'Eliminar proceso' })) return
     const nuevoOrden = ordenProcesos.filter(p => p !== proceso)
     await persistirOrden(nuevoOrden); setOrdenProcesos(nuevoOrden)
-    if (carpetaAbierta === proceso) setCarpetaAbierta(null)
+    // Si estabas parado dentro de la carpeta que se eliminó, vuelve a la raíz
+    if (ruta === proceso || ruta.startsWith(proceso + '/')) setRuta('')
     toast('Proceso eliminado')
   }
 
@@ -362,7 +363,8 @@ export default function Documentos() {
       for (const d of docs) { const { error } = await supabase.from('documentos').update({ eliminado_at: ahora }).eq('id', d.id); if (error) throw error }
       const nuevoOrden = ordenProcesos.filter(p => p !== proceso && !p.startsWith(proceso + '/'))
       await persistirOrden(nuevoOrden); setOrdenProcesos(nuevoOrden)
-      if (carpetaAbierta === proceso) setCarpetaAbierta(null)
+      // Si estabas parado dentro del grupo eliminado (o en una de sus subcarpetas), vuelve a la raíz
+      if (ruta === proceso || ruta.startsWith(proceso + '/')) setRuta('')
       qc.invalidateQueries({ queryKey: ['documentos'] }); qc.invalidateQueries({ queryKey: ['documentos_papelera'] })
       toast(`Grupo "${nombreSeg(proceso)}" eliminado — ${docs.length} documento(s) en la papelera`)
     } catch (e) { toast(e.message, 'error'); qc.invalidateQueries({ queryKey: ['documentos'] }) }
@@ -671,7 +673,7 @@ export default function Documentos() {
         <h1 className="page-title"><Ico as={FolderOpen} size={14} />Gestión Documental</h1>
         <div className="page-actions" style={{ display: 'flex', gap: 8 }}>
           <div style={{ display: 'flex', gap: 2 }}>
-            <button className={`btn btn-sm ${vista === 'carpetas' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { cambiarVista('carpetas'); setCarpetaAbierta(null) }} title="Vista de carpetas"><FolderOpen size={13} aria-hidden="true" /></button>
+            <button className={`btn btn-sm ${vista === 'carpetas' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => { cambiarVista('carpetas'); setRuta('') }} title="Vista de carpetas"><FolderOpen size={13} aria-hidden="true" /></button>
             <button className={`btn btn-sm ${vista === 'grupos' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => cambiarVista('grupos')} title="Vista por grupos">▦</button>
             <button className={`btn btn-sm ${vista === 'lista' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => cambiarVista('lista')} title="Vista de lista">☰</button>
           </div>

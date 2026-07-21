@@ -110,22 +110,28 @@ export const calcularCostosProducto = ({
   const costoMin = getCostoMinuto(cifTotal, operariosActivos, diasHabiles, jornadaHoras, improductividad)
   const mermaFrac = merma / 100
 
+  // Los valores de la ficha vienen del formulario y se guardan como TEXTO dentro del JSON
+  // (ingredientes, procesos, empaque). Hay que convertirlos siempre: en una multiplicación
+  // JavaScript los convierte solo, pero en una SUMA concatena ("0" + "180" + "240" = "0180240"),
+  // que fue justo lo que disparaba totales absurdos en la absorción del CIF.
+  const num = (v) => parseFloat(v) || 0
+
   // Costo MP por bache: Σ (precio/presentacion × cantidad)
   const totalMPBache = ingredientes.reduce(
-    (s, i) => s + ((i.precio || 0) / (i.presentacion || 1000)) * (i.cantidad || 0), 0
+    (s, i) => s + (num(i.precio) / (num(i.presentacion) || 1000)) * num(i.cantidad), 0
   )
 
   // Costo MO por bache: Σ (minutos × costo/minuto)
   const totalMOBache = procesos.reduce(
-    (s, p) => s + (p.minutos || 0) * costoMin, 0
+    (s, p) => s + num(p.minutos) * costoMin, 0
   )
 
   // Costo empaque por bache: Σ (precio/presentacion × cantidad)
   const totalEmpBache = empaque.reduce(
-    (s, e) => s + ((e.precio || 0) / (e.presentacion || 1)) * (e.cantidad || 0), 0
+    (s, e) => s + (num(e.precio) / (num(e.presentacion) || 1)) * num(e.cantidad), 0
   )
 
-  const totalMinutos = procesos.reduce((s, p) => s + (p.minutos || 0), 0)
+  const totalMinutos = procesos.reduce((s, p) => s + num(p.minutos), 0)
   const unidsBache = bache * (1 - mermaFrac)
   const unidsMesTot = unidsBache * bachesMes
 
@@ -259,10 +265,12 @@ export const getPrecioSugerido = ({ costoProduccionUnit = 0, tasaGastosOper = 0,
 // (costo de capacidad ociosa) que —según NIC 2— no puede cargarse al inventario: va directo
 // al resultado del período.
 export const getCIFAbsorcion = (productos = [], costoMinuto = 0, cifTotal = 0, minutosDisponibles = 0) => {
+  const num = (v) => parseFloat(v) || 0
   const items = productos.map(p => {
-    const minutosMes = (p.minutosBache || 0) * (p.bachesMes || 0)
-    const absorbido  = minutosMes * costoMinuto
-    return { ...p, minutosMes, absorbido, cifUnit: p.unidsMes > 0 ? absorbido / p.unidsMes : 0 }
+    const unidsMes   = num(p.unidsMes)
+    const minutosMes = num(p.minutosBache) * num(p.bachesMes)
+    const absorbido  = minutosMes * num(costoMinuto)
+    return { ...p, unidsMes, minutosMes, absorbido, cifUnit: unidsMes > 0 ? absorbido / unidsMes : 0 }
   })
   const minutosUsados  = items.reduce((s, i) => s + i.minutosMes, 0)
   const totalAbsorbido = items.reduce((s, i) => s + i.absorbido, 0)
@@ -395,14 +403,18 @@ export const getGastosOperacionales = (cifItems = [], empleados = [], params = P
 }
 
 // Estado de resultados mensual (ver Paso 7 de AUDITORIA_COSTOS.md).
-export const getEstadoResultados = ({ ventasNetas = 0, costoProduccion = 0, gastosAdmin = 0, gastosVentas = 0, gastosFinancieros = 0, impuestos = 0 }) => {
-  const utilidadBruta = ventasNetas - costoProduccion
+// `cifNoAbsorbido`: costo de capacidad ociosa. El CIF del mes se causa completo, pero solo la
+// parte que la producción real absorbió queda en el costo de los productos. Lo no absorbido no
+// puede quedarse en el inventario (NIC 2): se reconoce como gasto del período dentro del costo
+// de ventas, y por eso baja la utilidad bruta.
+export const getEstadoResultados = ({ ventasNetas = 0, costoProduccion = 0, cifNoAbsorbido = 0, gastosAdmin = 0, gastosVentas = 0, gastosFinancieros = 0, impuestos = 0 }) => {
+  const utilidadBruta = ventasNetas - costoProduccion - cifNoAbsorbido
   const utilidadOperacional = utilidadBruta - gastosAdmin - gastosVentas
   const utilidadAntesImpuestos = utilidadOperacional - gastosFinancieros
   const utilidadNeta = utilidadAntesImpuestos - impuestos
   const pct = (v) => (ventasNetas > 0 ? (v / ventasNetas) * 100 : 0)
   return {
-    ventasNetas, costoProduccion, utilidadBruta, gastosAdmin, gastosVentas,
+    ventasNetas, costoProduccion, cifNoAbsorbido, utilidadBruta, gastosAdmin, gastosVentas,
     utilidadOperacional, gastosFinancieros, utilidadAntesImpuestos, impuestos, utilidadNeta,
     margenBrutoPct: pct(utilidadBruta), margenOperacionalPct: pct(utilidadOperacional), margenNetoPct: pct(utilidadNeta),
   }

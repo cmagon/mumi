@@ -198,6 +198,39 @@ const precioItem = (i, mayorista) => {
 export const getCliente = () => { try { return localStorage.getItem('mumi_cliente') || '' } catch { return '' } }
 export const setCliente = (v) => { try { v ? localStorage.setItem('mumi_cliente', v) : localStorage.removeItem('mumi_cliente') } catch { /* noop */ } }
 
+// ---- Plantillas de WhatsApp: fichas insertables por el administrador ----
+export const TOKENS_WA = [
+  { t: 'saludo', d: 'Saludo' }, { t: 'cliente', d: 'Nombre del cliente' }, { t: 'pedido', d: 'Detalle del pedido' },
+  { t: 'total', d: 'Total' }, { t: 'envio', d: 'Envío' }, { t: 'nota', d: 'Nota del cliente' },
+  { t: 'cierre', d: 'Frase de cierre' }, { t: 'tienda', d: 'Nombre de la tienda' },
+]
+export const tienePlantilla = (s) => /\{\s*(saludo|cliente|pedido|total|envio|nota|cierre|tienda)\s*\}/i.test(s || '')
+// Texto de envío: solo si el administrador lo configuró
+export function textoEnvio(cfg) {
+  const msg = (cfg?.envio_mensaje || '').trim()
+  const tarifa = Number(cfg?.envio_tarifa) || 0
+  if (!msg && !tarifa) return ''
+  if (msg && tarifa) return `🚚 ${msg} (${fCOP(tarifa)})`
+  return msg ? `🚚 ${msg}` : `🚚 Envío: ${fCOP(tarifa)}`
+}
+// Reemplaza las fichas y limpia líneas que quedaron vacías
+export function aplicarPlantilla(tpl, vars) {
+  let s = String(tpl || '')
+  Object.entries(vars).forEach(([k, v]) => { s = s.replace(new RegExp(`\\{\\s*${k}\\s*\\}`, 'gi'), v ?? '') })
+  return s.split('\n').filter((l, i, a) => !(l.trim() === '' && a[i - 1]?.trim() === '')).join('\n')
+    .replace(/[ \t]+$/gm, '').replace(/\n{3,}/g, '\n\n').trim()
+}
+
+// Mensaje para solicitar acceso mayorista (usa su propia plantilla y el nombre del cliente)
+export function mensajeSolicitudMayorista(cfg, nombre = null) {
+  const cliente = (nombre == null ? getCliente() : nombre).trim()
+  const vars = { saludo: '¡Hola! 🌿', cliente, pedido: '', total: '', nota: '', cierre: '¡Quedo atento(a) a su respuesta! 😊', tienda: cfg?.nombre_tienda || 'Mumi Amazonia' }
+  const tpl = (cfg?.mayorista_wa_texto || '').trim()
+  if (tienePlantilla(tpl)) return aplicarPlantilla(tpl, vars)
+  const soy = cliente ? `Soy *${cliente}* y ` : ''
+  return `${vars.saludo}\n${soy}estoy interesado(a) en ser mayorista. ¿Me comparten los precios al por mayor?${tpl ? `\n\n${tpl}` : ''}`
+}
+
 export function construirMensajeWA(items, nota, cfg, mayorista = false, intro = '', nombre = null) {
   const agotadoDe = (i) => (Number(i.stock) || 0) <= 0
   const total = items.reduce((s, i) => s + (agotadoDe(i) ? 0 : precioItem(i, mayorista) * i.cantidad), 0)
@@ -213,16 +246,34 @@ export function construirMensajeWA(items, nota, cfg, mayorista = false, intro = 
       ? `${em} *${i.nombre}*\n   ${fCOP(pu)} c/u  (agotado — sobre pedido)`
       : `${em} *${i.cantidad}x ${i.nombre}*\n   ${fCOP(pu)} c/u → ${fCOP(pu * i.cantidad)}${notaStock(i, cfg)}`
   }).join('\n\n')
-  const cab = (intro && intro.trim())
-    || (todosAgotados ? '¡Hola! 🌿 Quisiera consultar la disponibilidad de:'
-      : mayorista ? '¡Hola! 🌿 Soy mayorista y quiero hacer este pedido:' : '¡Hola! 🌿 Me gustaría hacer este pedido:')
+  // En consultas de disponibilidad no se incluye el nombre del cliente
+  const clienteVar = todosAgotados ? '' : cliente
+  const vars = {
+    saludo: '¡Hola! 🌿',
+    cliente: clienteVar,
+    pedido: lineas,
+    total: fCOP(total),
+    envio: todosAgotados ? '' : textoEnvio(cfg),
+    nota: nota?.trim() ? `📝 *Nota:* ${nota.trim()}` : '',
+    cierre: '¡Quedo atento(a) a la confirmación! 😊',
+    tienda: cfg?.nombre_tienda || 'Mumi Amazonia',
+  }
+  const tpl = (intro || '').trim()
+  // Si el administrador escribió una plantilla con fichas, manda ella
+  if (tienePlantilla(tpl)) return aplicarPlantilla(tpl, vars)
+
+  // Orden por defecto (si hay texto sin fichas, se usa como saludo/encabezado)
+  const saludo = tpl || (todosAgotados
+    ? '¡Hola! 🌿 Quisiera consultar la disponibilidad de:'
+    : mayorista ? '¡Hola! 🌿 Soy mayorista y quiero hacer este pedido:' : '¡Hola! 🌿 Me gustaría hacer este pedido:')
   const titulo = todosAgotados ? '📋 *CONSULTA DE DISPONIBILIDAD*' : `🛒 *MI PEDIDO${mayorista ? ' (MAYORISTA)' : ''}*`
-  let msg = cab
-  if (cliente) msg += `\n👤 *Soy ${cliente}*`
+  let msg = saludo
+  if (clienteVar) msg += `\nSoy *${clienteVar}*`
   msg += `\n\n${titulo}\n\n${lineas}\n\n━━━━━━━━━━━━━━\n`
-  msg += todosAgotados ? '💬 *¿Cuándo estará disponible?*' : `💰 *Total: ${fCOP(total)}*`
-  if (nota?.trim()) msg += `\n\n📝 *Nota:* ${nota.trim()}`
-  msg += `\n\n¡Quedo atento(a) a la confirmación! 😊`
+  msg += todosAgotados ? '💬 *¿Cuándo estará disponible?*' : `💰 *Total: ${vars.total}*`
+  // El envío NO se incluye por defecto: solo aparece si el administrador pone la ficha {envio}
+  if (vars.nota) msg += `\n\n${vars.nota}`
+  msg += `\n\n${vars.cierre}`
   return msg
 }
 

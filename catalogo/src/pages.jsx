@@ -10,8 +10,8 @@ import 'yet-another-react-lightbox/styles.css'
 import 'yet-another-react-lightbox/plugins/thumbnails.css'
 import { supabase } from './supabase'
 import { useStore } from './store'
-import { Card, HeroSlider, Newsletter, BannerSecundario, BannerGrupo } from './ui'
-import { fCOP, labelCategoria, getFrutos, iconoDe, iconoFruto, labelFruto, stockLabel, imgsDe, sinTildes, sinHtml, registrarVisita, confirmarPedidoWA, setSEO, compartir, rutaProducto, buscarPorSlug, abrirWA, FAVORITOS, BUSCADOR, videoEmbed, videoThumb, detectRed, formatoRed, paginaPorSlug, postCanvas } from './utils'
+import { Card, HeroSlider, Newsletter, BannerSecundario, BannerGrupo, ModalNombre } from './ui'
+import { fCOP, labelCategoria, getFrutos, iconoDe, iconoFruto, labelFruto, stockLabel, imgsDe, sinTildes, sinHtml, registrarVisita, confirmarPedidoWA, setSEO, compartir, rutaProducto, buscarPorSlug, abrirWA, mensajeSolicitudMayorista, getCliente, setCliente, FAVORITOS, BUSCADOR, videoEmbed, videoThumb, detectRed, formatoRed, paginaPorSlug, postCanvas } from './utils'
 import FrutoIcon from './FrutoIcon'
 
 // ==================== MIGAS DE PAN ====================
@@ -82,7 +82,16 @@ export function Home() {
   const setFFruto = (v) => setParam('fruto', v, '')
   // Limpia todos los filtros en UNA sola actualización (si no, cada set parte del estado original)
   const limpiarFiltros = () => setSp(prev => { const n = new URLSearchParams(prev); ['cat', 'q', 'orden', 'fruto'].forEach(k => n.delete(k)); return n }, { replace: true })
-  useEffect(() => { registrarVisita(null); setSEO({ title: '', desc: cfg.subtitulo }) }, [cfg.subtitulo])
+  // SEO del sitio: si no se configura, se usa el nombre de la tienda + slogan
+  useEffect(() => {
+    registrarVisita(null)
+    const marca = cfg.nombre_tienda || 'Mumi Amazonia'
+    setSEO({
+      title: cfg.seo_titulo || '',
+      desc: cfg.seo_descripcion || [marca, cfg.slogan || cfg.subtitulo].filter(Boolean).join(' — '),
+      image: cfg.seo_imagen || cfg.logo_url,
+    })
+  }, [cfg.seo_titulo, cfg.seo_descripcion, cfg.seo_imagen, cfg.nombre_tienda, cfg.slogan])
 
   const [buscando, setBuscando] = useState(!!q)
   const abrir = (p) => nav(rutaProducto(p))
@@ -220,7 +229,14 @@ export function Producto() {
   const [img, setImg] = useState(0)
   const [drag, setDrag] = useState(0)   // desplazamiento en px mientras se desliza
   const [lightbox, setLightbox] = useState(false)
-  useEffect(() => { setImg(0); if (p) { registrarVisita(p.nombre); setSEO({ title: p.nombre, desc: sinHtml(p.descripcion).slice(0, 160), image: p.imagen_url }) } }, [param, p?.nombre])
+  // SEO del producto: usa el configurado y si no, el nombre y la descripción
+  useEffect(() => {
+    setImg(0)
+    if (p) {
+      registrarVisita(p.nombre)
+      setSEO({ title: p.seo_titulo || p.nombre, desc: p.seo_desc || sinHtml(p.descripcion).slice(0, 160), image: p.imagen_url })
+    }
+  }, [param, p?.nombre])
 
   // OJO: los hooks deben ir siempre antes de cualquier return temprano.
   const galeria = p ? imgsDe(p) : []
@@ -228,14 +244,18 @@ export function Producto() {
   const swipe = useSwipeable({
     onSwiping: (e) => {
       if (galeria.length <= 1) return
-      let d = e.deltaX   // positivo al deslizar hacia la izquierda
+      // Se usa la dirección del gesto (no el signo de deltaX, que varía según la versión):
+      // dedo hacia la izquierda → la tira se mueve a la izquierda (siguiente imagen).
+      const signo = e.dir === 'Left' ? 1 : e.dir === 'Right' ? -1 : 0
+      if (!signo) return                       // gesto vertical: no mover la tira
+      let d = signo * Math.abs(e.deltaX)
       if ((img === 0 && d < 0) || (img === galeria.length - 1 && d > 0)) d /= 3   // resistencia en los extremos
       setDrag(d)
     },
-    onSwipedLeft: () => pasar(1),
-    onSwipedRight: () => pasar(-1),
+    onSwipedLeft: () => { pasar(1); setDrag(0) },
+    onSwipedRight: () => { pasar(-1); setDrag(0) },
     onSwiped: () => setDrag(0),
-    preventScrollOnSwipe: true, trackTouch: true, trackMouse: false, delta: 30,
+    preventScrollOnSwipe: true, trackTouch: true, trackMouse: false, delta: 12,
   })
 
   if (productos === null) return <div className="spin" />
@@ -245,7 +265,8 @@ export function Producto() {
   const agotado = (p.stock ?? 0) <= 0
   const st = stockLabel(p.stock, cfg)
   const relacionados = (productos || []).filter(x => x.id !== p.id && x.categoria === p.categoria).slice(0, 8)
-  const pedir = () => confirmarPedidoWA([{ ...p, cantidad: Math.max(1, n) }], '', cfg, mayorista, agotado ? cfg.wa_texto_sin_stock : cfg.wa_texto_stock)
+  const pedir = () => confirmarPedidoWA([{ ...p, cantidad: Math.max(1, n) }], '', cfg, mayorista,
+    agotado ? cfg.wa_texto_sin_stock : (mayorista ? (cfg.wa_texto_mayorista || cfg.wa_texto_stock) : cfg.wa_texto_stock))
   const compartirProd = () => compartir({ title: p.nombre, text: `${p.nombre} — ${fCOP(precio(p))}`, url: window.location.href })
   const fav = esFav(p.id)
 
@@ -665,6 +686,7 @@ export function Mayorista() {
   const nav = useNavigate()
   const [clave, setClave] = useState('')
   const [err, setErr] = useState('')
+  const [pidiendo, setPidiendo] = useState(false)   // modal que pide el nombre
   useEffect(() => { setSEO({ title: 'Acceso mayorista' }) }, [])
   const entrar = (e) => {
     e?.preventDefault()
@@ -686,9 +708,15 @@ export function Mayorista() {
               {(cfg.mayorista_clave || '').trim() && <input className="cf" type="password" placeholder="Clave de mayorista" value={clave} onChange={e => { setClave(e.target.value); setErr('') }} autoFocus />}
               <button className="btn btn-selva" type="submit">Entrar</button>
               {err && <div className="news-err" style={{ color: 'var(--rojo)' }}>{err}</div>}
-              <button type="button" className="btn btn-wa" onClick={() => abrirWA(cfg, cfg.mayorista_wa_texto || 'Hola, quiero acceder a la zona mayorista.')}><MessageCircle size={18} /> Solicitar acceso por WhatsApp</button>
+              <button type="button" className="btn btn-wa" onClick={() => setPidiendo(true)}><MessageCircle size={18} /> Solicitar acceso por WhatsApp</button>
             </form>}
       </div>
+      {pidiendo && (
+        <ModalNombre inicial={getCliente()} titulo="¿Cómo te llamas?"
+          texto="Así sabemos con quién hablamos al darte acceso mayorista."
+          onClose={() => setPidiendo(false)}
+          onConfirmar={(n) => { setCliente(n); setPidiendo(false); abrirWA(cfg, mensajeSolicitudMayorista(cfg, n)) }} />
+      )}
       <div className="footer-space" />
     </div>
   )

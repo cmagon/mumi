@@ -33,6 +33,25 @@ html { scroll-behavior: smooth; }
 .serif { font-family: var(--fuente-titulos, 'Playfair Display'), serif; }
 .wrap { max-width: 720px; margin: 0 auto; background: var(--crema); min-height: 100vh; box-shadow: 0 0 0 1px rgba(0,0,0,0.05), 0 8px 50px rgba(0,0,0,0.14); }
 
+/* ==================== AVISO SUPERIOR (rotativo sobre el header) ==================== */
+.aviso-top { background: var(--dorado); color: var(--selva); font-size: 0.78rem; font-weight: 700; padding: 6px 12px; overflow: hidden; text-align: center; }
+.aviso-track { animation: avisoIn .5s ease; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+@keyframes avisoIn { from { opacity: 0; transform: translateX(14px); } to { opacity: 1; transform: none; } }
+/* Si el texto no cabe, se desplaza hacia la izquierda */
+@media (max-width: 560px) {
+  .aviso-track { animation: avisoIn .5s ease, avisoMarquee 12s linear 1s infinite; text-overflow: clip; }
+  @keyframes avisoMarquee { 0%, 12% { transform: translateX(0); } 88%, 100% { transform: translateX(calc(-100% + 90vw)); } }
+}
+
+/* ==================== MÉTODOS DE PAGO (carrito) ==================== */
+.pagos { padding: 4px 16px 10px; }
+.pagos-tit { font-size: 0.74rem; font-weight: 700; color: var(--texto-suave); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 6px; }
+.pagos-lista { display: flex; flex-wrap: wrap; gap: 6px; }
+.pago { display: inline-flex; align-items: center; gap: 5px; background: #fff; border: 1px solid var(--crema-oscuro); border-radius: 999px; padding: 5px 11px; font-size: 0.78rem; font-weight: 600; color: var(--selva); }
+
+/* ==================== MODO MANTENIMIENTO ==================== */
+.mantenimiento { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 32px 20px; }
+
 /* ==================== HEADER ==================== */
 .hdr { background: var(--selva); color: var(--crema); padding: 14px 16px; position: sticky; top: 0; z-index: 30; box-shadow: 0 2px 14px rgba(0,0,0,0.18); }
 .hdr-brand { display: flex; align-items: center; gap: 12px; }

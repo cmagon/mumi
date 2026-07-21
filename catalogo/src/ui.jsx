@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useSwipeable } from 'react-swipeable'
-import { Plus, ChevronLeft, ChevronRight, Send, Heart } from 'lucide-react'
+import { Plus, ChevronLeft, ChevronRight, Send, Heart, X, MessageCircle } from 'lucide-react'
 import { fCOP, labelCategoria, iconoDe, stockLabel, suscribir, FAVORITOS } from './utils'
 import FrutoIcon from './FrutoIcon'
 import { useStore } from './store'
@@ -140,6 +140,27 @@ export function BannerGrupo({ banners }) {
       <button className="hero-nav left" onClick={e => { e.stopPropagation(); go(-1) }} aria-label="Anterior"><ChevronLeft size={22} /></button>
       <button className="hero-nav right" onClick={e => { e.stopPropagation(); go(1) }} aria-label="Siguiente"><ChevronRight size={22} /></button>
       <div className="hero-dots">{banners.map((_, k) => <span key={k} className={`dot ${k === i ? 'on' : ''}`} onClick={() => setI(k)} />)}</div>
+    </div>
+  )
+}
+
+// ---- Modal que pide el nombre antes de abrir WhatsApp ----
+export function ModalNombre({ titulo = '¿Cuál es tu nombre?', texto, inicial = '', onConfirmar, onClose }) {
+  const [v, setV] = useState(inicial)
+  const ok = v.trim().length >= 2
+  return (
+    <div className="overlay" style={{ alignItems: 'center' }} onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="popup" style={{ textAlign: 'left' }}>
+        <button className="popup-x" onClick={onClose} aria-label="Cerrar"><X size={20} /></button>
+        <h2 className="serif" style={{ color: 'var(--selva)', fontSize: '1.3rem' }}>{titulo}</h2>
+        {texto && <p style={{ color: 'var(--texto-suave)', margin: '6px 0 12px', fontSize: '0.9rem' }}>{texto}</p>}
+        <form onSubmit={(e) => { e.preventDefault(); if (ok) onConfirmar(v.trim()) }} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <input className="cf" autoFocus value={v} onChange={e => setV(e.target.value)} placeholder="Tu nombre" />
+          <button className="btn btn-wa" type="submit" disabled={!ok} style={!ok ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}>
+            <MessageCircle size={18} /> Continuar por WhatsApp
+          </button>
+        </form>
+      </div>
     </div>
   )
 }

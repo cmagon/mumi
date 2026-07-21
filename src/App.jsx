@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState, useEffect } from 'react'
-import { Routes, Route, Navigate, Outlet, useNavigate } from 'react-router-dom'
+import { Routes, Route, Navigate, Outlet, useNavigate, useLocation } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { useAuth } from './context/AuthContext'
 import { supabase } from './lib/supabase'
@@ -69,6 +69,7 @@ function useResponsiveTableLabels() {
 function ProtectedLayout() {
   const { user, profile, loading, signOut, rolEfectivo, esDevPreview } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [asistModo, setAsistModo] = useState(null)   // null | 'login' | 'logout'
   useEffect(() => { loadConfig() }, [])
@@ -126,7 +127,8 @@ function ProtectedLayout() {
       <MobileHeader onMenuClick={() => setSidebarOpen(true)} onLogout={pedirCierre} />
       <main className="main-content">
         <DevModeBanner />
-        <ErrorBoundary><Outlet /></ErrorBoundary>
+        {/* resetKey = ruta: si un módulo falla, al elegir otro en el menú el error se limpia solo */}
+        <ErrorBoundary resetKey={location.pathname}><Outlet /></ErrorBoundary>
       </main>
       <div id="toast-container" role="status" aria-live="polite" aria-atomic="false" />
       <ConnStatus />

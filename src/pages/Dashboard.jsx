@@ -8,7 +8,7 @@ import {
 } from 'chart.js'
 import { Factory, Users, Package, Handshake, Lightbulb, TrendingUp, PieChart as PieIcon, ClipboardList, BookOpen, Bell, AlertTriangle, Clock, CheckCircle2, GraduationCap, Pin, Download, Settings, GripVertical, Plus, EyeOff, RotateCcw, DollarSign } from 'lucide-react'
 import { supabase } from '../lib/supabase'
-import { fNum, fCOP, fFecha, getRolLabel, PARAMS_NOMINA_DEFAULT, getGastosOperacionales, getEstadoResultados, getSemaforoFinanciero } from '../lib/businessLogic'
+import { fNum, fCOP, fFecha, getRolLabel, PARAMS_NOMINA_DEFAULT, getGastosOperacionales, getEstadoResultados, getSemaforoFinanciero, getCIFTotalMensual, getCostoNominaMensual } from '../lib/businessLogic'
 import { fraseDelDia } from '../lib/frases'
 import { notificarVencimientosRegistros } from '../lib/notificaciones'
 import { useAuth } from '../context/AuthContext'
@@ -99,6 +99,10 @@ export default function Dashboard() {
     queryFn: async () => { const { data } = await supabase.from('capacitaciones').select('id, fecha, duracion_horas, asistentes'); return data || [] },
   })
 
+  // Producción aprobada: base tanto de las gráficas como del cálculo de absorción del CIF.
+  // Se declara ANTES del bloque financiero porque éste la usa al calcular el estado de resultados.
+  const produccionAprob = produccion.filter(p => p.aprobado !== false)
+
   // ----- Análisis financiero del mes (solo admin) -----
   const mesActual = new Date().toISOString().slice(0, 7)   // YYYY-MM
   const { data: cifItemsFin = [] } = useQuery({
@@ -116,14 +120,25 @@ export default function Dashboard() {
     queryFn: async () => { const { data } = await supabase.from('finished_products').select('id, alegra_item_id, product_id, activo'); return data || [] },
     enabled: esAdminDash,
   })
-  const { data: costoFinalPorProducto = {} } = useQuery({
-    queryKey: ['products_costing_costo_final'],
+  const { data: fichasFin = [] } = useQuery({
+    queryKey: ['products_costing_fin'],
     queryFn: async () => {
-      const { data } = await supabase.from('products_costing').select('id, costo_final')
-      return Object.fromEntries((data || []).map(p => [p.id, p.costo_final || 0]))
+      const { data } = await supabase.from('products_costing').select('id, nombre, costo_final, costo_variable')
+      return data || []
     },
     enabled: esAdminDash,
   })
+  const costoFinalPorProducto = Object.fromEntries(fichasFin.map(p => [p.id, p.costo_final || 0]))
+  // Saldos de mezcla: inventario de PRODUCTO EN PROCESO (activo, no gasto del período)
+  const { data: saldosFin = [] } = useQuery({
+    queryKey: ['mezcla_saldos_valor'],
+    queryFn: async () => {
+      const { data } = await supabase.from('mezcla_saldos').select('peso, costo_unitario').eq('estado', 'disponible').gt('peso', 0)
+      return data || []
+    },
+    enabled: esAdminDash,
+  })
+  const valorEnProceso = saldosFin.reduce((s, x) => s + (Number(x.peso) || 0) * (Number(x.costo_unitario) || 0), 0)
   // Histórico de ventas reales de Alegra (mismo query que Producto Terminado — se comparte la caché)
   const { data: alegraVentasFin, isFetching: cargandoFin } = useQuery({
     queryKey: ['alegra_ventas_hist'],
@@ -145,10 +160,29 @@ export default function Dashboard() {
     return s + qty * (costoFinalPorProducto[fp.product_id] || 0)
   }, 0)
   const gastosOpFin = getGastosOperacionales(cifItemsFin, empleados, paramsNomFin)
+  // ---- CIF no absorbido (capacidad ociosa) ----
+  // El CIF del mes se causa completo, pero solo entra al costo de los productos la parte que la
+  // producción real alcanzó a absorber. Lo que sobra es costo de capacidad ociosa y, según NIC 2,
+  // NO puede quedarse en el inventario: va directo al resultado del período. Sin esta línea ese
+  // dinero no aparecía en ningún lado del estado de resultados.
+  const cifMensual = getCIFTotalMensual(cifItemsFin.filter(c => (c.grupo || 'cif') === 'cif'))
+    + getCostoNominaMensual(empleados, paramsNomFin, 'produccion').total
+  // Absorción unitaria de cada ficha = costo total − costo variable (es la parte de mano de obra/CIF)
+  const conversionPorNombre = Object.fromEntries(
+    fichasFin.map(p => [(p.nombre || '').trim().toLowerCase(), Math.max(0, (p.costo_final || 0) - (p.costo_variable || 0))])
+  )
+  const cifAbsorbidoDe = (mes) => produccionAprob.reduce((s, r) => {
+    if (String(r.fecha || '').slice(0, 7) !== mes) return s
+    const conv = conversionPorNombre[(r.producto || '').trim().toLowerCase()]
+    return s + (conv ? conv * (Number(r.cantidad) || 0) : 0)
+  }, 0)
   // Estado de resultados de un mes: ventas reales de Alegra − costo de lo vendido − gastos
   // mensuales estimados vigentes (los gastos no son históricos por mes).
   const estadoDe = (mes) => getEstadoResultados({
     ventasNetas: alegraVentasFin?.ventasValor?.[mes] || 0, costoProduccion: costoProduccionDe(mes),
+    // Solo se lleva a resultados la SUB-absorción. Si la producción absorbió más CIF del causado
+    // (sobre-absorción), no se abona aquí: se corrige revisando el costo/minuto de las fichas.
+    cifNoAbsorbido: Math.max(0, cifMensual - cifAbsorbidoDe(mes)),
     gastosAdmin: gastosOpFin.administracion.total, gastosVentas: gastosOpFin.ventas.total,
     gastosFinancieros: gastosOpFin.financiero.total, impuestos: gastosOpFin.impuestos.total,
   })
@@ -201,7 +235,6 @@ export default function Dashboard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [orden, ocultos, devRole])
 
-  const produccionAprob = produccion.filter(p => p.aprobado !== false)
   const pendientesAprob = produccion.filter(p => p.aprobado === false).length
   const añosDisp = [...new Set([
     new Date().getFullYear(),
@@ -358,7 +391,16 @@ export default function Dashboard() {
                 <table>
                   <tbody>
                     <tr><td>Ventas netas (Alegra)</td><td className="td-number">{fCOP(estadoResultados.ventasNetas)}</td><td className="td-number">100%</td></tr>
-                    <tr><td>(−) Costo de producción</td><td className="td-number">{fCOP(estadoResultados.costoProduccion)}</td><td className="td-number">{estadoResultados.ventasNetas > 0 ? (estadoResultados.costoProduccion / estadoResultados.ventasNetas * 100).toFixed(1) + '%' : '—'}</td></tr>
+                    <tr><td>(−) Costo de lo vendido</td><td className="td-number">{fCOP(estadoResultados.costoProduccion)}</td><td className="td-number">{estadoResultados.ventasNetas > 0 ? (estadoResultados.costoProduccion / estadoResultados.ventasNetas * 100).toFixed(1) + '%' : '—'}</td></tr>
+                    {estadoResultados.cifNoAbsorbido > 0 && (
+                      <tr style={{ color: 'var(--rojo)' }}>
+                        <td title="El CIF del mes se paga completo, pero solo la parte que la producción real alcanzó a absorber queda en el costo de los productos. Lo demás es capacidad instalada que no se usó y, según NIC 2, va directo al resultado del período.">
+                          (−) CIF no absorbido <small>(capacidad ociosa) ⓘ</small>
+                        </td>
+                        <td className="td-number">{fCOP(estadoResultados.cifNoAbsorbido)}</td>
+                        <td className="td-number">{estadoResultados.ventasNetas > 0 ? (estadoResultados.cifNoAbsorbido / estadoResultados.ventasNetas * 100).toFixed(1) + '%' : '—'}</td>
+                      </tr>
+                    )}
                     <tr style={{ fontWeight: 700, borderTop: '2px solid var(--crema-oscuro)' }}><td>= Utilidad bruta</td><td className="td-number">{fCOP(estadoResultados.utilidadBruta)}</td><td className="td-number">{estadoResultados.margenBrutoPct.toFixed(1)}%</td></tr>
                     <tr><td>(−) Gastos de administración</td><td className="td-number">{fCOP(estadoResultados.gastosAdmin)}</td><td></td></tr>
                     <tr><td>(−) Gastos de ventas</td><td className="td-number">{fCOP(estadoResultados.gastosVentas)}</td><td></td></tr>
@@ -378,6 +420,12 @@ export default function Dashboard() {
                       ({estadoMesAnterior.ventasNetas > 0 ? ((estadoResultados.ventasNetas / estadoMesAnterior.ventasNetas - 1) * 100).toFixed(1) : '—'}% este mes)
                     </strong></span>
                   <span>Utilidad neta {fCOP(estadoMesAnterior.utilidadNeta)} ({estadoMesAnterior.margenNetoPct.toFixed(1)}%)</span>
+                </div>
+              )}
+              {valorEnProceso > 0 && (
+                <div style={{ marginTop: 10, padding: '8px 12px', background: 'rgba(200,169,74,0.10)', borderRadius: 8, fontSize: '0.82rem' }}>
+                  📦 <strong>Inventario de producto en proceso: {fCOP(valorEnProceso)}</strong>
+                  <span style={{ color: 'var(--texto-suave)' }}> — mezcla fabricada pendiente de empacar. No es gasto del mes: es un activo tuyo hasta que se empaque o se dé de baja.</span>
                 </div>
               )}
               <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)', marginTop: 8 }}>

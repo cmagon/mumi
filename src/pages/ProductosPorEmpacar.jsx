@@ -1,7 +1,7 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
-import { fFecha } from '../lib/businessLogic'
+import { fFecha, fCOP } from '../lib/businessLogic'
 import { estadoLote } from '../lib/lotes'
 import { useToast } from '../hooks/useToast'
 import { useAuth } from '../context/AuthContext'
@@ -39,6 +39,12 @@ export default function ProductosPorEmpacar() {
 
   const totalItems = saldos.length
   const porVencer = saldos.filter(s => estadoLote(s.vencimiento) !== 'ok').length
+  // Valor del inventario de PRODUCTO EN PROCESO: mezcla ya fabricada (absorbió materia prima,
+  // mano de obra y CIF) pendiente de empacar. Los saldos anteriores a la migración v128 no
+  // tienen costo guardado y no suman.
+  const valorSaldo = (s) => (Number(s.peso) || 0) * (Number(s.costo_unitario) || 0)
+  const valorTotal = saldos.reduce((acc, s) => acc + valorSaldo(s), 0)
+  const sinValorar = saldos.filter(s => !(Number(s.costo_unitario) > 0)).length
 
   const abrirBaja = (s) => { setModalBaja(s); setBForm({ cantidad: String(s.peso), motivo: '' }) }
   const darDeBaja = useMutation({
@@ -81,11 +87,17 @@ export default function ProductosPorEmpacar() {
 
       <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>
         Semielaborados pendientes de empacar (sobrantes de mezcla y subporciones). Se empacan al diligenciar una orden del mismo producto (bloque "♻ Empacar saldo"). Aquí puedes <strong>darlos de baja</strong> si no se van a empacar.
+        {' '}Es tu <strong>inventario de producto en proceso</strong>: ya consumió materia prima, mano de obra y CIF, así que su valor todavía es tuyo — al darlo de baja, esa plata se pierde.
       </div>
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
         <div className="card" style={{ flex: '1 1 160px' }}><div style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>Productos por empacar</div><div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--selva)' }}>{totalItems}</div></div>
         <div className="card" style={{ flex: '1 1 160px' }}><div style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>Por vencer / vencidos</div><div style={{ fontSize: '1.4rem', fontWeight: 700, color: porVencer ? 'var(--rojo)' : 'var(--selva)' }}>{porVencer}</div></div>
+        <div className="card" style={{ flex: '1 1 200px' }}>
+          <div style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }} title="Mezcla ya fabricada que aún no se empaca. Contablemente es inventario de producto en proceso.">Valor en proceso</div>
+          <div style={{ fontSize: '1.4rem', fontWeight: 700, color: 'var(--dorado)' }}>{fCOP(valorTotal)}</div>
+          {sinValorar > 0 && <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>{sinValorar} saldo(s) sin costo registrado</div>}
+        </div>
       </div>
 
       <div className="tabs" style={{ marginBottom: 12 }}>
@@ -101,10 +113,10 @@ export default function ProductosPorEmpacar() {
           </div>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Producto</th><th>Lote</th><th className="td-number">Disponible</th><th className="col-opcional">Vence</th><th className="col-opcional-2">Origen</th><th></th></tr></thead>
+              <thead><tr><th>Producto</th><th>Lote</th><th className="td-number">Disponible</th><th className="td-number">Valor</th><th className="col-opcional">Vence</th><th className="col-opcional-2">Origen</th><th></th></tr></thead>
               <tbody>
                 {filtrados.length === 0
-                  ? <tr><td colSpan={6} className="empty-table">No hay productos por empacar.</td></tr>
+                  ? <tr><td colSpan={7} className="empty-table">No hay productos por empacar.</td></tr>
                   : filtrados.map(s => {
                       const est = estadoLote(s.vencimiento)
                       return (
@@ -112,6 +124,9 @@ export default function ProductosPorEmpacar() {
                           <td><strong>{s.producto}</strong></td>
                           <td>{s.lote || '(s/n)'}</td>
                           <td className="td-number">{fCant(s.peso)} {s.unidad}</td>
+                          <td className="td-number" title={Number(s.costo_unitario) > 0 ? `${fCOP(s.costo_unitario)} por ${s.unidad}` : 'Saldo creado antes de valorar el producto en proceso'}>
+                            {Number(s.costo_unitario) > 0 ? fCOP(valorSaldo(s)) : '—'}
+                          </td>
                           <td className="col-opcional" style={{ color: est === 'vencido' ? 'var(--rojo)' : est === 'por_vencer' ? 'var(--tierra)' : undefined }}>{fmtV(s.vencimiento)} {est === 'vencido' ? '⛔' : est === 'por_vencer' ? '⚠' : ''}</td>
                           <td className="col-opcional-2" style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>{s.created_at ? fFecha(s.created_at.slice(0, 10)) : '—'}</td>
                           <td style={{ whiteSpace: 'nowrap' }}>
@@ -179,6 +194,12 @@ export default function ProductosPorEmpacar() {
             <p style={{ fontSize: '0.85rem' }}>Lote <strong>{modalBaja.lote || '(s/n)'}</strong> · Disponible: <strong>{fCant(modalBaja.peso)} {modalBaja.unidad}</strong></p>
             <div className="form-group"><label className="form-label">Cantidad a dar de baja ({modalBaja.unidad})</label><input type="number" className="form-control" value={bForm.cantidad} onChange={e => setBForm(f => ({ ...f, cantidad: e.target.value }))} min={0} max={modalBaja.peso} step="any" /></div>
             <div className="form-group"><label className="form-label">Motivo</label><input className="form-control" value={bForm.motivo} onChange={e => setBForm(f => ({ ...f, motivo: e.target.value }))} placeholder="Ej: vencido, dañado, no se empacó..." /></div>
+            {Number(modalBaja.costo_unitario) > 0 && (parseFloat(bForm.cantidad) || 0) > 0 && (
+              <div className="alert alert-warning" style={{ fontSize: '0.82rem' }}>
+                ⚠ Esta baja es una <strong>pérdida real de {fCOP((parseFloat(bForm.cantidad) || 0) * Number(modalBaja.costo_unitario))}</strong>:
+                esa mezcla ya consumió materia prima, mano de obra y CIF que no vas a recuperar.
+              </div>
+            )}
             <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>La baja descuenta del saldo y queda en el historial.</small>
           </div>
         )}

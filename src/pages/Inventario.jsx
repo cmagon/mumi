@@ -9,7 +9,7 @@ import Modal from '../components/ui/Modal'
 import MoneyInput from '../components/ui/MoneyInput'
 import { useConfirm, usePrompt } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
-import { crearLoteEntrada, consumirPEPS, consumirLote, estadoLote } from '../lib/lotes'
+import { crearLoteEntrada, consumirPEPS, consumirLote, estadoLote, costoPEPS } from '../lib/lotes'
 import * as XLSX from 'xlsx'
 import { Download, Tags, Tag, Plus, Pencil, X, Package, ClipboardList, FileText, AlertTriangle } from 'lucide-react'
 
@@ -256,6 +256,9 @@ export default function Inventario() {
       const d = new Date()
       const fechaHoy = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
       const extra = { ...(formMov.extra || {}) }
+      // Costo unitario del movimiento: en entradas el de compra/fabricación; en salidas el
+      // costo PEPS real de los lotes consumidos (se calcula más abajo).
+      let costoMovimiento = formMov.costo !== '' && formMov.costo != null ? (parseFloat(formMov.costo) || 0) : (mp?.precio || 0)
       // PEPS: entrada crea lote; salida consume del lote más antiguo/próximo a vencer
       if ((formMov.tipo === 'entrada' || (formMov.tipo === 'ajuste' && cantidad > 0)) && !esEmpaque(mp?.categoria)) {
         // Ajuste positivo también crea lote — si no, ese sobrante queda contabilizado en el stock
@@ -279,15 +282,26 @@ export default function Inventario() {
         if (consumidos.length) extra.lotes_consumidos = consumidos
         if (faltante > 0) extra.faltante_sin_lote = faltante
         extra.motivo = formMov.motivo
+        // Costo REAL de la salida: cada lote a su propio costo de entrada (PEPS). Lo que no
+        // tenga lote se valora al precio promedio de la MP, que es la única referencia posible.
+        const cp = costoPEPS(consumidos, faltante, mp?.precio || 0)
+        costoMovimiento = cp.costoUnitario
+        extra.costo_peps_total = Math.round(cp.costoTotal)
       }
       const obsFinal = (formMov.tipo === 'salida' || (formMov.tipo === 'ajuste' && cantidad < 0))
         ? `[${motivoLabel(formMov.motivo)}] ${formMov.obs || ''}`.trim()
         : formMov.obs
-      const { error: movErr } = await supabase.from('inventory_movements').insert({
+      const movBase = {
         mp_id: mpId, tipo: formMov.tipo, cantidad, fecha: fechaHoy,
         responsable: formMov.responsable, obs: obsFinal,
         lote: formMov.lote || '', vencimiento: formMov.vencimiento || null, extra,
-      })
+      }
+      let { error: movErr } = await supabase.from('inventory_movements').insert({ ...movBase, costo_unitario: costoMovimiento })
+      // La columna costo_unitario es de la migración v126; si no está, se guarda sin ella
+      // (el costo queda igualmente dentro de `extra`) para no bloquear el movimiento.
+      if (movErr && /costo_unitario/i.test(movErr.message || '')) {
+        ;({ error: movErr } = await supabase.from('inventory_movements').insert(movBase))
+      }
       if (movErr) throw movErr
       if (mp) {
         // Ajuste atómico en BD (evita condición de carrera con otro movimiento/reserva simultánea)
@@ -302,9 +316,15 @@ export default function Inventario() {
           if (formMov.vencimiento) upd.vencimiento = formMov.vencimiento
           if (formMov.costo !== '' && formMov.costo != null) {
             const costoNuevo = parseFloat(formMov.costo) || 0
-            const stockPrevio = Math.max(0, mp.stock || 0)
+            // El stock/precio se releen de la BASE, no de la caché del navegador: si otra
+            // persona movió esta MP mientras el formulario estaba abierto, ponderar contra un
+            // stock viejo distorsionaría el precio. `ajustar_stock_mp` ya sumó esta entrada,
+            // así que se descuenta para obtener el stock anterior real.
+            const { data: fresco } = await supabase.from('raw_materials').select('stock, precio').eq('id', mpId).single()
+            const stockPrevio = Math.max(0, (Number(fresco?.stock) || 0) - cantidad)
+            const precioPrevio = Number(fresco?.precio) || 0
             upd.precio = (stockPrevio + cantidad) > 0
-              ? (stockPrevio * (mp.precio || 0) + cantidad * costoNuevo) / (stockPrevio + cantidad)
+              ? (stockPrevio * precioPrevio + cantidad * costoNuevo) / (stockPrevio + cantidad)
               : costoNuevo
           }
         }

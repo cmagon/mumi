@@ -5,6 +5,7 @@ import { useToast } from '../hooks/useToast'
 import { fNum } from '../lib/businessLogic'
 import { Store, Eye, EyeOff, Star, Save, Settings, BarChart3, ExternalLink, Pencil, X, Plus, Upload, Trash2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Palette, Image as ImageIcon, Layout, Users, RefreshCw, Monitor, Tablet, Smartphone } from 'lucide-react'
 import { Truck, ShieldCheck, MessageCircle, Package, CreditCard, Heart, Clock, Gift, Award, Sprout, BadgeCheck, Sparkles, MapPin, Phone, Percent, ThumbsUp, Recycle, HandCoins, Leaf } from 'lucide-react'
+import { Banknote, Wallet, QrCode, Landmark, Coins, Receipt, PiggyBank, BadgeDollarSign, Megaphone } from 'lucide-react'
 
 // Iconos disponibles para la barra de beneficios (deben coincidir con catalogo/src/BenefitIcon.jsx)
 const BENEFIT_ICONS = [
@@ -101,7 +102,7 @@ function TabProductos({ toast, qc }) {
     queryKey: ['catalogo_admin_productos'],
     queryFn: async () => {
       const { data } = await supabase.from('finished_products')
-        .select('id, nombre, product_id, precio_detal, precio_mayor, imagen_url, imagenes, descripcion, catalogo_descripcion, categoria_alegra_nombre, catalogo_visible, catalogo_frutos, catalogo_beneficios, catalogo_destacado, catalogo_novedad, catalogo_precio_oferta, stock, activo')
+        .select('id, nombre, product_id, precio_detal, precio_mayor, imagen_url, imagenes, descripcion, catalogo_descripcion, categoria_alegra_nombre, catalogo_visible, catalogo_frutos, catalogo_beneficios, catalogo_destacado, catalogo_novedad, catalogo_precio_oferta, catalogo_seo_titulo, catalogo_seo_desc, stock, activo')
         .order('nombre')
       const prods = (data || []).filter(p => p.activo !== false)
       // Categoría = la de Alegra; si no, el tipo de la ficha (products_costing)
@@ -349,6 +350,8 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose }) {
   const [novedad, setNovedad] = useState(!!producto.catalogo_novedad)
   const [descripcion, setDescripcion] = useState(producto.catalogo_descripcion || '')   // HTML enriquecido del catálogo
   const [precioOferta, setPrecioOferta] = useState(producto.catalogo_precio_oferta ?? '')
+  const [seoTitulo, setSeoTitulo] = useState(producto.catalogo_seo_titulo || '')
+  const [seoDesc, setSeoDesc] = useState(producto.catalogo_seo_desc || '')
   const [imgs, setImgs] = useState(imgsDe(producto))
   const [subiendo, setSubiendo] = useState(false)
   const [cropFile, setCropFile] = useState(null)   // archivo pendiente de recortar
@@ -380,6 +383,7 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose }) {
       const { error } = await supabase.from('finished_products').update({
         catalogo_frutos: frutos, catalogo_beneficios: beneficios, catalogo_destacado: destacado, catalogo_novedad: novedad,
         catalogo_descripcion: descripcion || null, catalogo_precio_oferta: (precioOferta === '' || Number(precioOferta) <= 0) ? null : Number(precioOferta),
+        catalogo_seo_titulo: seoTitulo.trim() || null, catalogo_seo_desc: seoDesc.trim() || null,
         imagen_url: imgs[0] || null, imagenes: imgs,
       }).eq('id', producto.id)
       if (error) throw error
@@ -424,6 +428,14 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose }) {
           ? <span className="badge badge-rojo" style={{ marginBottom: 6 }}>-{Math.round((1 - Number(precioOferta) / producto.precio_detal) * 100)}% · antes {fCOP(producto.precio_detal)}</span>
           : <span style={{ fontSize: '0.76rem', color: 'var(--texto-suave)', marginBottom: 8 }}>Debe ser menor al precio ({fCOP(producto.precio_detal)}). Vacío = sin oferta.</span>}
       </div>
+
+      {/* SEO del producto */}
+      <div className="card-title" style={{ fontSize: '0.95rem' }}>🔎 SEO (al compartir el enlace)</div>
+      <div className="form-grid-2">
+        <div className="form-group"><label className="form-label">Título SEO</label><input className="form-control" value={seoTitulo} onChange={e => setSeoTitulo(e.target.value)} placeholder={producto.nombre} /></div>
+        <div className="form-group"><label className="form-label">Descripción SEO</label><input className="form-control" value={seoDesc} onChange={e => setSeoDesc(e.target.value)} placeholder="Se toma de la descripción del producto" /></div>
+      </div>
+      <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginBottom: 12 }}>Si los dejas vacíos se usan el <strong>nombre</strong> y la <strong>descripción</strong> del producto.</small>
 
       {/* Imágenes */}
       <div className="card-title" style={{ fontSize: '0.95rem' }}>🖼️ Imágenes <span style={{ fontWeight: 400, fontSize: '0.78rem', color: 'var(--texto-suave)' }}>(las mismas de la ficha)</span></div>
@@ -724,10 +736,166 @@ function ChipEditor({ label, chips = [], input, setInput, onAdd, onDel, placehol
   )
 }
 
+// ---- Campo de plantilla de WhatsApp con fichas insertables ----
+const TOKENS_WA = [
+  { t: 'saludo', d: 'Saludo' }, { t: 'cliente', d: 'Nombre del cliente' }, { t: 'pedido', d: 'Detalle del pedido' },
+  { t: 'total', d: 'Total' }, { t: 'envio', d: 'Envío' }, { t: 'nota', d: 'Nota del cliente' },
+  { t: 'cierre', d: 'Frase de cierre' }, { t: 'tienda', d: 'Nombre de la tienda' },
+]
+function CampoPlantillaWA({ label, ayuda, value, onChange, tokens = TOKENS_WA, placeholder, rows = 5 }) {
+  const ref = useRef(null)
+  const insertar = (tok) => {
+    const el = ref.current; const ficha = `{${tok}}`
+    if (!el) return onChange((value || '') + ficha)
+    const ini = el.selectionStart ?? (value || '').length
+    const fin = el.selectionEnd ?? ini
+    const nuevo = (value || '').slice(0, ini) + ficha + (value || '').slice(fin)
+    onChange(nuevo)
+    requestAnimationFrame(() => { el.focus(); const p = ini + ficha.length; el.setSelectionRange(p, p) })
+  }
+  return (
+    <div className="form-group">
+      <label className="form-label">{label}</label>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5, marginBottom: 6 }}>
+        {tokens.map(k => (
+          <button key={k.t} type="button" onClick={() => insertar(k.t)} title={`Insertar ${k.d}`}
+            style={{ background: 'var(--crema)', border: '1px solid var(--crema-oscuro)', borderRadius: 999, padding: '3px 10px', fontSize: '0.72rem', fontWeight: 600, color: 'var(--selva)', cursor: 'pointer' }}>
+            + {k.d}
+          </button>
+        ))}
+      </div>
+      <textarea ref={ref} className="form-control" rows={rows} value={value || ''} onChange={e => onChange(e.target.value)} placeholder={placeholder} style={{ fontFamily: 'monospace', fontSize: '0.82rem' }} />
+      {ayuda && <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>{ayuda}</small>}
+    </div>
+  )
+}
+
+// ---- Aviso superior: hasta 3 mensajes cortos ----
+function AvisosEditor({ avisos = [], onChange }) {
+  const lista = avisos.map(a => (typeof a === 'string' ? a : a?.texto || ''))
+  const upd = (i, v) => onChange(lista.map((t, k) => k === i ? v : t))
+  const add = () => lista.length < 3 && onChange([...lista, ''])
+  const del = (i) => onChange(lista.filter((_, k) => k !== i))
+  const mover = (i, d) => { const a = [...lista]; const j = i + d; if (j < 0 || j >= a.length) return;[a[i], a[j]] = [a[j], a[i]]; onChange(a) }
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {lista.map((t, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <input className="form-control" style={{ flex: 1 }} maxLength={90} value={t} onChange={e => upd(i, e.target.value)} placeholder="🎉 10% de descuento por temporada" />
+            <button type="button" className="btn btn-xs btn-secondary" disabled={i === 0} onClick={() => mover(i, -1)}><ChevronUp size={12} /></button>
+            <button type="button" className="btn btn-xs btn-secondary" disabled={i === lista.length - 1} onClick={() => mover(i, 1)}><ChevronDown size={12} /></button>
+            <button type="button" className="btn btn-xs btn-danger" onClick={() => del(i)}><X size={12} /></button>
+          </div>
+        ))}
+      </div>
+      {lista.length < 3 && <button type="button" className="btn btn-xs btn-secondary" style={{ marginTop: 8 }} onClick={add}><Plus size={12} /> Agregar aviso ({lista.length}/3)</button>}
+      {lista.filter(t => t.trim()).length > 0 && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)', marginBottom: 4 }}>Vista previa:</div>
+          <div style={{ background: 'var(--dorado)', color: 'var(--selva)', fontSize: '0.78rem', fontWeight: 700, padding: '6px 12px', textAlign: 'center', borderRadius: 6 }}>{lista.find(t => t.trim())}</div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ---- Métodos de pago: icono + nombre (se muestran en el carrito) ----
+const PAGO_ICONOS = [
+  { n: 'CreditCard', l: 'Tarjeta' }, { n: 'Banknote', l: 'Efectivo' }, { n: 'Wallet', l: 'Billetera' },
+  { n: 'Smartphone', l: 'Pago móvil' }, { n: 'QrCode', l: 'Código QR' }, { n: 'Landmark', l: 'Banco' },
+  { n: 'HandCoins', l: 'Contra entrega' }, { n: 'Coins', l: 'Monedas' }, { n: 'Receipt', l: 'Recibo' },
+  { n: 'ShieldCheck', l: 'Pago seguro' }, { n: 'Truck', l: 'Al recibir' }, { n: 'Gift', l: 'Bono' },
+  { n: 'PiggyBank', l: 'Ahorro' }, { n: 'BadgeDollarSign', l: 'Transferencia' },
+]
+const PAGO_MAP = { CreditCard, Banknote, Wallet, Smartphone, QrCode, Landmark, HandCoins, Coins, Receipt, ShieldCheck, Truck, Gift, PiggyBank, BadgeDollarSign }
+const PagoIco = ({ name, size = 16 }) => { const C = PAGO_MAP[name] || CreditCard; return <C size={size} /> }
+
+function PagosEditor({ pagos = [], onChange }) {
+  const upd = (i, campo, val) => onChange(pagos.map((p, k) => k === i ? { ...p, [campo]: val } : p))
+  const add = () => onChange([...pagos, { icono: 'CreditCard', nombre: '' }])
+  const del = (i) => onChange(pagos.filter((_, k) => k !== i))
+  const mover = (i, d) => { const a = [...pagos]; const j = i + d; if (j < 0 || j >= a.length) return;[a[i], a[j]] = [a[j], a[i]]; onChange(a) }
+  return (
+    <div style={{ marginTop: 8 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+        {pagos.map((p, i) => (
+          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <span style={{ width: 30, height: 32, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--selva)', flexShrink: 0 }}><PagoIco name={p.icono} /></span>
+            <select className="form-control" style={{ width: 150, flexShrink: 0 }} value={p.icono || 'CreditCard'} onChange={e => upd(i, 'icono', e.target.value)}>
+              {PAGO_ICONOS.map(o => <option key={o.n} value={o.n}>{o.l}</option>)}
+            </select>
+            <input className="form-control" style={{ flex: 1 }} value={p.nombre || ''} onChange={e => upd(i, 'nombre', e.target.value)} placeholder="Ej: Nequi, Bancolombia, Efectivo…" />
+            <button type="button" className="btn btn-xs btn-secondary" disabled={i === 0} onClick={() => mover(i, -1)}><ChevronUp size={12} /></button>
+            <button type="button" className="btn btn-xs btn-secondary" disabled={i === pagos.length - 1} onClick={() => mover(i, 1)}><ChevronDown size={12} /></button>
+            <button type="button" className="btn btn-xs btn-danger" onClick={() => del(i)}><X size={12} /></button>
+          </div>
+        ))}
+      </div>
+      <button type="button" className="btn btn-xs btn-secondary" style={{ marginTop: 8 }} onClick={add}><Plus size={12} /> Agregar método</button>
+    </div>
+  )
+}
+
+// ---- Vista previa de los mensajes de WhatsApp (usa un pedido de ejemplo) ----
+const EJ_OK = '🍵 *2x Infusión Cocona y Limonaria caja x 12 Unid*\n   $22.000 c/u → $44.000'
+const EJ_AGO = '🍵 *Infusión Cocona y Limonaria caja x 12 Unid*\n   $22.000 c/u  (agotado — sobre pedido)'
+const tieneFichas = (s) => /\{\s*(saludo|cliente|pedido|total|envio|nota|cierre|tienda)\s*\}/i.test(s || '')
+function aplicarFichas(tpl, vars) {
+  let s = String(tpl || '')
+  Object.entries(vars).forEach(([k, v]) => { s = s.replace(new RegExp(`\\{\\s*${k}\\s*\\}`, 'gi'), v ?? '') })
+  return s.split('\n').filter((l, i, a) => !(l.trim() === '' && a[i - 1]?.trim() === '')).join('\n').replace(/\n{3,}/g, '\n\n').trim()
+}
+const WA_TIPOS = [
+  { id: 'stock', label: 'Pedido' }, { id: 'sinstock', label: 'Agotado' },
+  { id: 'mayorista', label: 'Mayorista' }, { id: 'solicitud', label: 'Solicitud' },
+]
+function mensajeEjemplo(tipo, cfg) {
+  const esAgo = tipo === 'sinstock'
+  const vars = {
+    saludo: '¡Hola! 🌿', cliente: esAgo ? '' : 'Ana Gómez',
+    pedido: esAgo ? EJ_AGO : EJ_OK, total: '$44.000',
+    envio: esAgo ? '' : ((cfg.envio_mensaje || '').trim() || cfg.envio_tarifa
+      ? `🚚 ${[(cfg.envio_mensaje || '').trim(), Number(cfg.envio_tarifa) ? `(${fCOP(cfg.envio_tarifa)})` : ''].filter(Boolean).join(' ')}`.trim()
+      : ''),
+    nota: '📝 *Nota:* Entregar en la tarde',
+    cierre: tipo === 'solicitud' ? '¡Quedo atento(a) a su respuesta! 😊' : '¡Quedo atento(a) a la confirmación! 😊',
+    tienda: cfg.nombre_tienda || 'Mumi Amazonia',
+  }
+  const tpl = (tipo === 'stock' ? cfg.wa_texto_stock : esAgo ? cfg.wa_texto_sin_stock : tipo === 'mayorista' ? cfg.wa_texto_mayorista : cfg.mayorista_wa_texto) || ''
+  if (tieneFichas(tpl)) return aplicarFichas(tpl, vars)
+  if (tipo === 'solicitud') {
+    const soy = vars.cliente ? `Soy *${vars.cliente}* y ` : ''
+    return `${vars.saludo}\n${soy}estoy interesado(a) en ser mayorista. ¿Me comparten los precios al por mayor?${tpl ? `\n\n${tpl}` : ''}`
+  }
+  const saludo = tpl || (esAgo ? '¡Hola! 🌿 Quisiera consultar la disponibilidad de:'
+    : tipo === 'mayorista' ? '¡Hola! 🌿 Soy mayorista y quiero hacer este pedido:' : '¡Hola! 🌿 Me gustaría hacer este pedido:')
+  const titulo = esAgo ? '📋 *CONSULTA DE DISPONIBILIDAD*' : `🛒 *MI PEDIDO${tipo === 'mayorista' ? ' (MAYORISTA)' : ''}*`
+  let m = saludo
+  if (vars.cliente) m += `\nSoy *${vars.cliente}*`
+  m += `\n\n${titulo}\n\n${vars.pedido}\n\n━━━━━━━━━━━━━━\n`
+  m += esAgo ? '💬 *¿Cuándo estará disponible?*' : `💰 *Total: ${vars.total}*`
+  // El envío no va por defecto: solo si se inserta la ficha {envio}
+  m += `\n\n${vars.cierre}`
+  return m
+}
+// Burbuja de chat estilo WhatsApp (interpreta *negrita* y _cursiva_)
+function BurbujaWA({ texto }) {
+  const html = (texto || '').replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/\*([^*\n]+)\*/g, '<strong>$1</strong>').replace(/_([^_\n]+)_/g, '<em>$1</em>')
+  return (
+    <div className="wa-chat">
+      <div className="wa-bubble"><div dangerouslySetInnerHTML={{ __html: html }} /><span className="wa-hora">12:30 ✓✓</span></div>
+    </div>
+  )
+}
+
 // ==================== CONFIGURACIÓN ====================
 function TabConfig({ toast }) {
   const [cfg, setCfg] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [sec, setSec] = useState('general')     // sección abierta del acordeón
+  const [waSel, setWaSel] = useState('stock')   // mensaje que se previsualiza
   useEffect(() => {
     supabase.from('config_catalogo').select('*').eq('id', 1).maybeSingle()
       .then(({ data }) => setCfg(data || { id: 1 }))
@@ -742,62 +910,196 @@ function TabConfig({ toast }) {
     } catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
   }
   if (!cfg) return <div className="card"><p className="empty-table">Cargando…</p></div>
+  const base = (cfg.url_publica || '').replace(/\/+$/, '')
   return (
-    <div className="card" style={{ maxWidth: 620 }}>
-      <div className="card-title"><Ico as={Settings} size={16} />Configuración del catálogo</div>
-      <p style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', marginTop: 0 }}>La apariencia (logo, colores, secciones, Nosotros, frutos) se edita en la pestaña <strong>Personalizar</strong>.</p>
+    <div className="pz-layout">
+      {/* Panel de ajustes en acordeón */}
+      <div className="pz-panel">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+          <button className="btn btn-primary btn-sm" onClick={guardar} disabled={saving}><Ico as={Save} size={13} />{saving ? 'Guardando…' : 'Guardar configuración'}</button>
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>La apariencia se edita en <strong>Personalizar</strong>.</small>
+        </div>
 
-      <div className="form-group"><label className="form-label">URL pública del catálogo</label><input className="form-control" value={cfg.url_publica || ''} onChange={e => set('url_publica', e.target.value)} placeholder="https://catalogo.tu-cuenta.workers.dev" /><small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>La que te dé Cloudflare al desplegar (o tu dominio propio). Se usa para los enlaces de los productos en WhatsApp.</small></div>
-      <div className="form-grid-2">
-        <div className="form-group"><label className="form-label">WhatsApp (con indicativo)</label><input className="form-control" value={cfg.whatsapp || ''} onChange={e => set('whatsapp', e.target.value)} placeholder="+573157702180" /></div>
-        <div className="form-group"><label className="form-label">Pedido mínimo (COP)</label><MoneyInput value={cfg.pedido_minimo ?? 0} onChange={v => set('pedido_minimo', v || 0)} /></div>
-        <div className="form-group"><label className="form-label">País <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(para el copyright)</small></label><input className="form-control" value={cfg.pais || ''} onChange={e => set('pais', e.target.value)} placeholder="Colombia" /></div>
+        <PzSec abierto={sec} setAbierto={setSec} id="general" titulo={<><Ico as={Settings} size={14} />Datos generales</>}>
+          <div className="form-group"><label className="form-label">URL pública del catálogo</label><input className="form-control" value={cfg.url_publica || ''} onChange={e => set('url_publica', e.target.value)} placeholder="https://catalogo.tu-cuenta.workers.dev" /><small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>La que te dé Cloudflare al desplegar (o tu dominio propio).</small></div>
+          <div className="form-grid-2">
+            <div className="form-group"><label className="form-label">WhatsApp (con indicativo)</label><input className="form-control" value={cfg.whatsapp || ''} onChange={e => set('whatsapp', e.target.value)} placeholder="+573157702180" /></div>
+            <div className="form-group"><label className="form-label">País <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(para el copyright)</small></label><input className="form-control" value={cfg.pais || ''} onChange={e => set('pais', e.target.value)} placeholder="Colombia" /></div>
+          </div>
+          <div className="form-group" style={{ maxWidth: 240 }}><label className="form-label">Pedido mínimo al detal (COP)</label><MoneyInput value={cfg.pedido_minimo ?? 0} onChange={v => set('pedido_minimo', v || 0)} /></div>
+        </PzSec>
+
+        <PzSec abierto={sec} setAbierto={setSec} id="envio" titulo={<>🚚 Envío</>}>
+          <div className="form-grid-2">
+            <div className="form-group"><label className="form-label">Tarifa fija de envío (opcional)</label><MoneyInput value={cfg.envio_tarifa ?? ''} onChange={v => set('envio_tarifa', v || null)} /></div>
+            <div className="form-group"><label className="form-label">Mensaje de envío (opcional)</label><input className="form-control" value={cfg.envio_mensaje || ''} onChange={e => set('envio_mensaje', e.target.value)} placeholder="Envío a todo el país en 2–4 días" /></div>
+          </div>
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Si dejas ambos vacíos, el envío <strong>no se muestra</strong> en ningún lado. Se muestra en el <strong>carrito</strong>, pero <strong>no se envía por WhatsApp</strong> salvo que insertes la ficha <strong>{'{envio}'}</strong> en una plantilla.</small>
+        </PzSec>
+
+        <PzSec abierto={sec} setAbierto={setSec} id="pagos" titulo={<>💳 Métodos de pago</>}>
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Se muestran en el <strong>carrito</strong> (no se envían por WhatsApp).</small>
+          <PagosEditor pagos={Array.isArray(cfg.pagos) ? cfg.pagos : []} onChange={v => set('pagos', v)} />
+        </PzSec>
+
+        <PzSec abierto={sec} setAbierto={setSec} id="seo" titulo={<>🔎 SEO del sitio</>}>
+          <div className="form-group"><label className="form-label">Título</label><input className="form-control" value={cfg.seo_titulo || ''} onChange={e => set('seo_titulo', e.target.value)} placeholder={cfg.nombre_tienda || 'Mumi Amazonia'} /></div>
+          <div className="form-group"><label className="form-label">Descripción</label><textarea className="form-control" rows={2} value={cfg.seo_descripcion || ''} onChange={e => set('seo_descripcion', e.target.value)} placeholder={[cfg.nombre_tienda || 'Mumi Amazonia', cfg.slogan].filter(Boolean).join(' — ')} /></div>
+          <div className="form-group"><label className="form-label">Imagen para compartir (URL)</label><input className="form-control" value={cfg.seo_imagen || ''} onChange={e => set('seo_imagen', e.target.value)} placeholder="https://…/imagen.jpg" /></div>
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Si lo dejas vacío se usa <strong>nombre de la tienda + slogan</strong> y el logo. El SEO de cada producto se edita en <strong>Productos</strong>.</small>
+        </PzSec>
+
+        <PzSec abierto={sec} setAbierto={setSec} id="terminos" titulo={<>📄 Términos y política de datos</>}>
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Si escribes algo, aparece un enlace en el footer que abre este texto en un modal.</small>
+          <div style={{ marginTop: 8 }}><RichEditor value={cfg.terminos_texto || ''} onChange={(html) => set('terminos_texto', html)} /></div>
+        </PzSec>
+
+        <PzSec abierto={sec} setAbierto={setSec} id="mantenimiento" titulo={<>🛠️ Modo mantenimiento</>}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem', cursor: 'pointer', margin: '2px 0 10px' }}>
+            <input type="checkbox" checked={!!cfg.mantenimiento_activo} onChange={e => set('mantenimiento_activo', e.target.checked)} /> Activar modo mantenimiento (oculta el catálogo)
+          </label>
+          <div className="form-group"><label className="form-label">Mensaje</label><textarea className="form-control" rows={2} value={cfg.mantenimiento_mensaje || ''} onChange={e => set('mantenimiento_mensaje', e.target.value)} placeholder="Estamos haciendo mejoras en la tienda. Volvemos muy pronto 🌿" /></div>
+          {cfg.mantenimiento_activo && <div style={{ background: 'rgba(192,57,43,0.1)', border: '1px solid var(--rojo)', color: 'var(--rojo)', borderRadius: 8, padding: '8px 10px', fontSize: '0.78rem', fontWeight: 700 }}>⚠️ El catálogo está oculto para los visitantes.</div>}
+        </PzSec>
+
+        <PzSec abierto={sec} setAbierto={setSec} id="whatsapp" titulo={<>💬 Mensajes de WhatsApp</>}>
+          <p style={{ fontSize: '0.75rem', color: 'var(--texto-suave)', marginTop: 0 }}>
+            Arma el mensaje con las <strong>fichas</strong>: haz clic en una y se inserta donde tengas el cursor. Mira el resultado en la vista previa ➡
+            Si dejas un campo vacío se usa el orden por defecto.
+          </p>
+          <div onFocus={() => setWaSel('stock')}>
+            <CampoPlantillaWA label="1) Pedido al detal (con stock)" value={cfg.wa_texto_stock} onChange={v => set('wa_texto_stock', v)}
+              placeholder={'{saludo}\nSoy *{cliente}*\n\n🛒 *MI PEDIDO*\n\n{pedido}\n━━━━━━━━━━━━━━\n💰 *Total: {total}*\n\n{nota}\n\n{cierre}'}
+              ayuda="Por defecto: saludo → Soy [cliente] → pedido → total → cierre." />
+          </div>
+          <div onFocus={() => setWaSel('sinstock')}>
+            <CampoPlantillaWA label="2) Consulta de disponibilidad (agotado)" value={cfg.wa_texto_sin_stock} onChange={v => set('wa_texto_sin_stock', v)}
+              tokens={TOKENS_WA.filter(k => k.t !== 'cliente' && k.t !== 'total')}
+              placeholder={'{saludo} Quisiera consultar la disponibilidad de:\n\n{pedido}\n\n💬 *¿Cuándo estará disponible?*\n\n{cierre}'}
+              ayuda="No incluye nombre del cliente ni total (es una consulta)." />
+          </div>
+          <div onFocus={() => setWaSel('mayorista')}>
+            <CampoPlantillaWA label="3) Pedido mayorista" value={cfg.wa_texto_mayorista} onChange={v => set('wa_texto_mayorista', v)}
+              placeholder={'{saludo}\nSoy *{cliente}*, mayorista, y quiero hacer este pedido:\n\n{pedido}\n━━━━━━━━━━━━━━\n💰 *Total: {total}*\n\n{cierre}'}
+              ayuda="Se usa cuando el cliente pide desde la zona mayorista." />
+          </div>
+          <div onFocus={() => setWaSel('solicitud')}>
+            <CampoPlantillaWA label="4) Solicitud para ser mayorista" value={cfg.mayorista_wa_texto} onChange={v => set('mayorista_wa_texto', v)}
+              tokens={TOKENS_WA.filter(k => ['saludo', 'cliente', 'tienda', 'cierre'].includes(k.t))} rows={4}
+              placeholder={'{saludo}\nSoy *{cliente}* y estoy interesado(a) en ser mayorista. ¿Me comparten los precios al por mayor?'}
+              ayuda="Antes de abrir WhatsApp se le pide el nombre al cliente." />
+          </div>
+        </PzSec>
+
+        <PzSec abierto={sec} setAbierto={setSec} id="mayorista" titulo={<>🏷️ Zona mayorista</>}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem', cursor: 'pointer', margin: '2px 0 10px' }}>
+            <input type="checkbox" checked={cfg.mayorista_activo !== false} onChange={e => set('mayorista_activo', e.target.checked)} /> Mostrar invitación a mayoristas
+          </label>
+          <div className="form-group"><label className="form-label">Mensaje de la barra de invitación</label><input className="form-control" value={cfg.mayorista_mensaje || ''} onChange={e => set('mayorista_mensaje', e.target.value)} placeholder="¿Eres mayorista? Accede a precios especiales por volumen." /></div>
+          <div className="form-grid-2">
+            <div className="form-group"><label className="form-label">Clave de acceso <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(vacío = sin clave)</small></label><input className="form-control" value={cfg.mayorista_clave || ''} onChange={e => set('mayorista_clave', e.target.value)} placeholder="Ej: Mum1Mayor2026" /></div>
+            <div className="form-group"><label className="form-label">Pedido mínimo mayorista (COP)</label><MoneyInput value={cfg.mayorista_pedido_minimo ?? 0} onChange={v => set('mayorista_pedido_minimo', v || 0)} /></div>
+          </div>
+          {base && <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Enlace para mayoristas: <strong>{base}/mayorista</strong></small>}
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 6 }}>El mensaje que se envía por WhatsApp se edita en <strong>Mensajes de WhatsApp → 4)</strong>.</small>
+        </PzSec>
+
+        <PzSec abierto={sec} setAbierto={setSec} id="stock" titulo={<>📦 Avisos de stock</>}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem', cursor: 'pointer', margin: '2px 0 10px' }}>
+            <input type="checkbox" checked={cfg.mostrar_stock !== false} onChange={e => set('mostrar_stock', e.target.checked)} /> Mostrar avisos de urgencia por stock
+          </label>
+          <div className="form-grid-2">
+            <div className="form-group"><label className="form-label">"Quedan menos de…" si el stock es ≤</label><input type="number" className="form-control" value={cfg.umbral_pocas ?? 10} onChange={e => set('umbral_pocas', parseInt(e.target.value) || 0)} /></div>
+            <div className="form-group"><label className="form-label">"¡Solo N disponibles!" si el stock es ≤</label><input type="number" className="form-control" value={cfg.umbral_ultimas ?? 3} onChange={e => set('umbral_ultimas', parseInt(e.target.value) || 0)} /></div>
+          </div>
+        </PzSec>
+
+        <PzSec abierto={sec} setAbierto={setSec} id="popup" titulo={<>🎁 Popup de bienvenida</>}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem', cursor: 'pointer', margin: '2px 0 10px' }}>
+            <input type="checkbox" checked={!!cfg.popup_activo} onChange={e => set('popup_activo', e.target.checked)} /> Mostrar popup (captura de correo)
+          </label>
+          <div className="form-group"><label className="form-label">Título</label><input className="form-control" value={cfg.popup_titulo || ''} onChange={e => set('popup_titulo', e.target.value)} placeholder="¡Bienvenido a Mumi!" /></div>
+          <div className="form-group"><label className="form-label">Texto</label><input className="form-control" value={cfg.popup_texto || ''} onChange={e => set('popup_texto', e.target.value)} placeholder="Suscríbete y recibe una sorpresa en tu primer pedido." /></div>
+        </PzSec>
+
+        <PzSec abierto={sec} setAbierto={setSec} id="redes" titulo={<>🔗 Redes sociales</>}>
+          <div className="form-grid-2">
+            <div className="form-group"><label className="form-label">Instagram</label><input className="form-control" value={cfg.instagram_url || ''} onChange={e => set('instagram_url', e.target.value)} placeholder="https://instagram.com/…" /></div>
+            <div className="form-group"><label className="form-label">Facebook</label><input className="form-control" value={cfg.facebook_url || ''} onChange={e => set('facebook_url', e.target.value)} placeholder="https://facebook.com/…" /></div>
+            <div className="form-group"><label className="form-label">TikTok</label><input className="form-control" value={cfg.tiktok_url || ''} onChange={e => set('tiktok_url', e.target.value)} placeholder="https://tiktok.com/@…" /></div>
+            <div className="form-group"><label className="form-label">YouTube</label><input className="form-control" value={cfg.youtube_url || ''} onChange={e => set('youtube_url', e.target.value)} placeholder="https://youtube.com/@…" /></div>
+            <div className="form-group"><label className="form-label">X (Twitter)</label><input className="form-control" value={cfg.x_url || ''} onChange={e => set('x_url', e.target.value)} placeholder="https://x.com/…" /></div>
+          </div>
+        </PzSec>
+
+        <PzSec abierto={sec} setAbierto={setSec} id="contacto" titulo={<>📍 Página de Contacto</>}>
+          <div className="form-group"><label className="form-label">Mapa (src del iframe de Google Maps)</label><input className="form-control" value={cfg.contacto_mapa || ''} onChange={e => set('contacto_mapa', e.target.value)} placeholder="https://www.google.com/maps/embed?pb=…" /><small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>En Google Maps → Compartir → Insertar un mapa → copia el valor de <strong>src</strong>.</small></div>
+        </PzSec>
       </div>
 
-      <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 8 }}>💬 Mensajes de WhatsApp</div>
-      <p style={{ fontSize: '0.75rem', color: 'var(--texto-suave)', marginTop: 0 }}>Escribe solo el saludo/encabezado. El detalle (producto, precio y enlace) se agrega automáticamente. En productos <strong>con stock</strong> se incluyen cantidades y total; en <strong>agotados</strong> no se pide cantidad, se consulta disponibilidad.</p>
-      <div className="form-group"><label className="form-label">Cuando el producto tiene stock</label><textarea className="form-control" rows={2} value={cfg.wa_texto_stock || ''} onChange={e => set('wa_texto_stock', e.target.value)} placeholder="¡Hola! 🌿 Me gustaría hacer este pedido:" /></div>
-      <div className="form-group"><label className="form-label">Cuando el producto está agotado</label><textarea className="form-control" rows={2} value={cfg.wa_texto_sin_stock || ''} onChange={e => set('wa_texto_sin_stock', e.target.value)} placeholder="¡Hola! 🌿 Quisiera consultar la disponibilidad de:" /></div>
+      {/* Vista previa contextual */}
+      <div className="pz-preview">
+        <div className="pz-preview-bar"><span><Eye size={14} style={{ verticalAlign: '-2px' }} /> Vista previa</span></div>
+        <div className="cfg-preview">
+          {sec === 'whatsapp' && <>
+            <div className="cfg-tabs">
+              {WA_TIPOS.map(t => <button key={t.id} className={waSel === t.id ? 'on' : ''} onClick={() => setWaSel(t.id)}>{t.label}</button>)}
+            </div>
+            <BurbujaWA texto={mensajeEjemplo(waSel, cfg)} />
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Ejemplo con un pedido de muestra. Así lo verá el cliente en WhatsApp.</small>
+          </>}
 
-      <div className="form-group"><label className="form-label">Mapa de la página Contacto <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(src del iframe de Google Maps)</small></label><input className="form-control" value={cfg.contacto_mapa || ''} onChange={e => set('contacto_mapa', e.target.value)} placeholder="https://www.google.com/maps/embed?pb=…" /><small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>En Google Maps → Compartir → Insertar un mapa → copia el valor de <strong>src</strong>.</small></div>
+          {sec === 'popup' && (cfg.popup_activo
+            ? <div className="cfg-popup">
+                <div style={{ fontSize: '2.4rem' }}>🌿</div>
+                <h3 style={{ color: 'var(--selva)', fontSize: '1.25rem', margin: '4px 0' }}>{cfg.popup_titulo || '¡Bienvenido a Mumi!'}</h3>
+                <p style={{ color: 'var(--texto-suave)', fontSize: '0.85rem', margin: '0 0 12px' }}>{cfg.popup_texto || 'Suscríbete y recibe una sorpresa en tu primer pedido.'}</p>
+                <input className="form-control" placeholder="Tu correo" readOnly />
+                <button className="btn btn-primary btn-sm" style={{ marginTop: 8, width: '100%' }}>Quiero mi descuento</button>
+                <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)', marginTop: 8, textDecoration: 'underline' }}>No, gracias</div>
+              </div>
+            : <p className="empty-table">El popup está desactivado.</p>)}
 
-      <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 8 }}>🔗 Redes sociales</div>
-      <div className="form-grid-2">
-        <div className="form-group"><label className="form-label">Instagram</label><input className="form-control" value={cfg.instagram_url || ''} onChange={e => set('instagram_url', e.target.value)} placeholder="https://instagram.com/…" /></div>
-        <div className="form-group"><label className="form-label">Facebook</label><input className="form-control" value={cfg.facebook_url || ''} onChange={e => set('facebook_url', e.target.value)} placeholder="https://facebook.com/…" /></div>
-        <div className="form-group"><label className="form-label">TikTok</label><input className="form-control" value={cfg.tiktok_url || ''} onChange={e => set('tiktok_url', e.target.value)} placeholder="https://tiktok.com/@…" /></div>
-        <div className="form-group"><label className="form-label">YouTube</label><input className="form-control" value={cfg.youtube_url || ''} onChange={e => set('youtube_url', e.target.value)} placeholder="https://youtube.com/@…" /></div>
-        <div className="form-group"><label className="form-label">X (Twitter)</label><input className="form-control" value={cfg.x_url || ''} onChange={e => set('x_url', e.target.value)} placeholder="https://x.com/…" /></div>
+          {sec === 'mayorista' && (cfg.mayorista_activo !== false
+            ? <div>
+                <div className="cfg-mayo-barra">
+                  <span>{cfg.mayorista_mensaje || '¿Eres mayorista? Accede a precios especiales por volumen.'}</span>
+                  <span className="cfg-mayo-btn">Quiero ser mayorista</span>
+                </div>
+                <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 8 }}>Así se ve la barra fija bajo el menú. {cfg.mayorista_clave ? 'El acceso pedirá clave.' : 'El acceso no pedirá clave.'}</small>
+              </div>
+            : <p className="empty-table">La invitación a mayoristas está desactivada.</p>)}
+
+          {sec === 'stock' && (cfg.mostrar_stock !== false
+            ? <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <div><span className="cfg-badge rojo">🔥 ¡Solo {cfg.umbral_ultimas ?? 3} disponibles!</span> <small style={{ color: 'var(--texto-suave)' }}>stock ≤ {cfg.umbral_ultimas ?? 3}</small></div>
+                <div><span className="cfg-badge ambar">🔥 Quedan menos de {cfg.umbral_pocas ?? 10}</span> <small style={{ color: 'var(--texto-suave)' }}>stock ≤ {cfg.umbral_pocas ?? 10}</small></div>
+                <div><span className="cfg-badge gris">Agotado</span> <small style={{ color: 'var(--texto-suave)' }}>stock 0</small></div>
+              </div>
+            : <p className="empty-table">Los avisos de stock están ocultos.</p>)}
+
+          {sec === 'redes' && (() => {
+            const redes = [['Instagram', cfg.instagram_url], ['Facebook', cfg.facebook_url], ['TikTok', cfg.tiktok_url], ['YouTube', cfg.youtube_url], ['X', cfg.x_url]].filter(([, u]) => u)
+            return redes.length
+              ? <div><div className="cfg-footer-demo">{redes.map(([n]) => <span key={n}>{n}</span>)}</div><small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Solo se muestran las redes con enlace.</small></div>
+              : <p className="empty-table">Aún no has agregado redes sociales.</p>
+          })()}
+
+          {sec === 'contacto' && (cfg.contacto_mapa
+            ? <div style={{ aspectRatio: '16/9', borderRadius: 10, overflow: 'hidden' }}><iframe src={cfg.contacto_mapa} title="Mapa" style={{ width: '100%', height: '100%', border: 0 }} /></div>
+            : <p className="empty-table">Sin mapa configurado.</p>)}
+
+          {(sec === 'general' || !sec) && (
+            <div style={{ fontSize: '0.85rem', color: 'var(--texto-suave)', lineHeight: 1.7 }}>
+              <div><strong>Catálogo:</strong> {base || '— sin URL —'}</div>
+              <div><strong>WhatsApp:</strong> {cfg.whatsapp || '—'}</div>
+              <div><strong>Pedido mínimo:</strong> {fCOP(cfg.pedido_minimo || 0)}</div>
+              <div><strong>País:</strong> {cfg.pais || '—'}</div>
+              <p style={{ marginTop: 10 }}>Abre una sección para ver su vista previa.</p>
+            </div>
+          )}
+        </div>
       </div>
-
-      <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 4 }}>📦 Stock (urgencia relativa)</div>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem', cursor: 'pointer', margin: '4px 0 10px' }}>
-        <input type="checkbox" checked={cfg.mostrar_stock !== false} onChange={e => set('mostrar_stock', e.target.checked)} /> Mostrar avisos de stock ("quedan pocas", "¡últimas!")
-      </label>
-      <div className="form-grid-2">
-        <div className="form-group"><label className="form-label">"Quedan pocas" cuando el stock es ≤</label><input type="number" className="form-control" value={cfg.umbral_pocas ?? 10} onChange={e => set('umbral_pocas', parseInt(e.target.value) || 0)} /></div>
-        <div className="form-group"><label className="form-label">"¡Últimas!" cuando el stock es ≤</label><input type="number" className="form-control" value={cfg.umbral_ultimas ?? 3} onChange={e => set('umbral_ultimas', parseInt(e.target.value) || 0)} /></div>
-      </div>
-      <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 8 }}>🎁 Popup de bienvenida</div>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem', cursor: 'pointer', margin: '4px 0 10px' }}>
-        <input type="checkbox" checked={!!cfg.popup_activo} onChange={e => set('popup_activo', e.target.checked)} /> Mostrar popup de bienvenida (captura de correo)
-      </label>
-      <div className="form-group"><label className="form-label">Título del popup</label><input className="form-control" value={cfg.popup_titulo || ''} onChange={e => set('popup_titulo', e.target.value)} /></div>
-      <div className="form-group"><label className="form-label">Texto del popup</label><input className="form-control" value={cfg.popup_texto || ''} onChange={e => set('popup_texto', e.target.value)} /></div>
-
-      <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 8 }}>🏷️ Mayorista</div>
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem', cursor: 'pointer', margin: '4px 0 10px' }}>
-        <input type="checkbox" checked={cfg.mayorista_activo !== false} onChange={e => set('mayorista_activo', e.target.checked)} /> Mostrar invitación a mayoristas (barra fija + botones)
-      </label>
-      <div className="form-group"><label className="form-label">Mensaje de invitación</label><input className="form-control" value={cfg.mayorista_mensaje || ''} onChange={e => set('mayorista_mensaje', e.target.value)} placeholder="¿Eres mayorista? Accede a precios especiales por volumen." /></div>
-      <div className="form-group"><label className="form-label">Mensaje que se envía a WhatsApp</label><textarea className="form-control" rows={2} value={cfg.mayorista_wa_texto || ''} onChange={e => set('mayorista_wa_texto', e.target.value)} placeholder="Hola Mumi Amazonia, me interesa ser mayorista…" /></div>
-      <div className="form-grid-2">
-        <div className="form-group"><label className="form-label">Clave de acceso a /mayorista <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(vacío = sin clave)</small></label><input className="form-control" value={cfg.mayorista_clave || ''} onChange={e => set('mayorista_clave', e.target.value)} placeholder="Ej: Mum1Mayor2026" /></div>
-        <div className="form-group"><label className="form-label">Pedido mínimo mayorista (COP)</label><MoneyInput value={cfg.mayorista_pedido_minimo ?? 0} onChange={v => set('mayorista_pedido_minimo', v || 0)} /></div>
-      </div>
-      {cfg.url_publica && <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginBottom: 8 }}>Enlace para mayoristas: <strong>{cfg.url_publica.replace(/\/+$/, '')}/mayorista</strong> — compártelo por WhatsApp cuando apruebes a un mayorista.</small>}
-
-      <button className="btn btn-primary" onClick={guardar} disabled={saving}><Ico as={Save} size={14} />{saving ? 'Guardando…' : 'Guardar configuración'}</button>
     </div>
   )
 }
@@ -1685,6 +1987,13 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: 'pointer', marginTop: 10 }}>
             <input type="checkbox" checked={!!cfg.mostrar_filtro_frutos} onChange={e => set('mostrar_filtro_frutos', e.target.checked)} /> Mostrar filtro por frutos en la tienda
           </label>
+        </PzSec>
+
+        <PzSec abierto={abierto} setAbierto={setAbierto} id="aviso" titulo={<><Megaphone size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Aviso superior</>}>
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
+            Franja sobre el encabezado para anuncios breves (ej. <em>“🎉 10% de descuento por temporada”</em>). Puedes poner hasta <strong>3</strong> mensajes que van rotando. Si no configuras ninguno, no se muestra.
+          </small>
+          <AvisosEditor avisos={Array.isArray(cfg.avisos) ? cfg.avisos : []} onChange={v => set('avisos', v)} />
         </PzSec>
 
         <PzSec abierto={abierto} setAbierto={setAbierto} id="barra" titulo={<>📣 Barra de beneficios</>}>

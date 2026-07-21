@@ -32,11 +32,11 @@ async function getProducto(env, param) {
   // Enlace antiguo <slug>--<uuid>: resolver directo por id
   if (param.includes('--')) {
     const id = param.split('--').pop()
-    const r = await fetch(`${base}/rest/v1/catalogo_productos?id=eq.${encodeURIComponent(id)}&select=nombre,descripcion,precio_detal,imagen_url&limit=1`, { headers })
+    const r = await fetch(`${base}/rest/v1/catalogo_productos?id=eq.${encodeURIComponent(id)}&select=nombre,descripcion,precio_detal,imagen_url,seo_titulo,seo_desc&limit=1`, { headers })
     if (r.ok) { const rows = await r.json(); if (rows[0]) return rows[0] }
   }
   // URL corta por slug: el nombre es único, así que buscamos por slug del nombre
-  const r = await fetch(`${base}/rest/v1/catalogo_productos?select=nombre,descripcion,precio_detal,imagen_url`, { headers })
+  const r = await fetch(`${base}/rest/v1/catalogo_productos?select=nombre,descripcion,precio_detal,imagen_url,seo_titulo,seo_desc`, { headers })
   if (!r.ok) return null
   const rows = await r.json()
   return rows.find(p => slugify(p.nombre) === param) || null
@@ -45,8 +45,9 @@ async function getProducto(env, param) {
 const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 
 function inyectar(html, p, url) {
-  const title = `${p.nombre} · Mumi Amazonia`
-  const limpio = String(p.descripcion || '').replace(/<[^>]*>/g, ' ').replace(/&[a-z]+;/gi, ' ').replace(/\s+/g, ' ').trim()
+  // Usa el SEO configurado del producto; si no, su nombre y descripción
+  const title = `${p.seo_titulo || p.nombre} · Mumi Amazonia`
+  const limpio = String(p.seo_desc || p.descripcion || '').replace(/<[^>]*>/g, ' ').replace(/&[a-z]+;/gi, ' ').replace(/\s+/g, ' ').trim()
   const desc = (limpio || 'Sabores de la selva del Guaviare. 100% natural.').slice(0, 180)
   const img = p.imagen_url || ''
   const tags = [

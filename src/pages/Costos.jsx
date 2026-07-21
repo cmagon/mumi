@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
@@ -19,7 +19,7 @@ import { useConfirm } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import Receta from './Receta'
 import { CATALOGO_PARAMS, PARAM_UNIDAD, PRESENTACIONES } from '../lib/calidad'
-import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Settings, ShoppingCart, Tag, Trash2, TrendingUp, Undo2, X, ChevronUp, ChevronDown, Plus } from 'lucide-react'
+import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Printer, Settings, ShoppingCart, Tag, Trash2, TrendingUp, Undo2, X, ChevronUp, ChevronDown, Plus } from 'lucide-react'
 import { descargarFichaExcel } from '../lib/fichaExcel'
 import { getConfig } from '../lib/appConfig'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
@@ -29,6 +29,9 @@ const EMPTY_PROD = {
   merma: 0, comision: 3, precio_mayor: 10000, precio_detal: 15000,
   presentacion: 'Unidad', activo: true, mp_id: '',
   vida_util_valor: '', vida_util_unidad: 'meses', descripcion: '',
+  // Precio: utilidad objetivo propia de este producto (vacío = usa la global) e impuestos
+  // INDIRECTOS que se cobran al cliente sobre el precio (no son costo ni salen de tu utilidad).
+  utilidad_objetivo: '', iva_pct: '', imp_saludable_pct: '',
 }
 const EMPTY_ING = { mpId: '', nombre: '', modo: 'lista', precio: '', presentacion: 1000, pct: '', cantidad: '', tipo: 'normal', base: '' }
 
@@ -62,6 +65,10 @@ export default function Costos() {
 
   // ---- Imágenes del producto (galería): la PRIMERA es la principal (imagen_url) ----
   const [imagenes, setImagenes] = useState([])   // array de URLs públicas
+  // Imprimibles: PDFs (etiquetas, rótulos) que el operario imprime al ejecutar una orden.
+  // [{ nombre, path, size }] — el archivo vive en el bucket privado 'ficha-imprimibles'.
+  const [imprimibles, setImprimibles] = useState([])
+  const [subiendoImp, setSubiendoImp] = useState(false)
   const [subiendoImg, setSubiendoImg] = useState(false)
   const [cropImg, setCropImg] = useState(null)   // archivo pendiente de recortar (ficha)
 
@@ -108,6 +115,11 @@ export default function Costos() {
   // ---- Modales de lista ----
   const [verModal, setVerModal] = useState(false)
   const [verProd, setVerProd]   = useState(null)
+  // Filas del listado con el detalle desplegado (solo aplica en anchos donde se ocultan columnas)
+  const [filasAbiertas, setFilasAbiertas] = useState(() => new Set())
+  const toggleFila = (id) => setFilasAbiertas(prev => {
+    const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s
+  })
 
   // ---- Queries ----
   const { data: mps = [] } = useQuery({
@@ -319,6 +331,12 @@ export default function Costos() {
     })
   }
 
+  // Gastos FIJOS del período (admin, ventas, financieros). No encarecen el COSTO del producto,
+  // pero sí deben recuperarse en el precio y cubrirse en el punto de equilibrio. El ICA no va
+  // aquí: es un porcentaje de la venta y entra en el divisor del precio.
+  // Se declara antes de los cálculos que lo usan (punto de equilibrio y precio sugerido).
+  const gastosFijosOper = gastosOp.administracion.total + gastosOp.ventas.total + gastosOp.financiero.total
+
   // Punto de equilibrio multiproducto (CF / MCPT × participación) sobre el portafolio activo
   const peqMultiproducto = useMemo(() => {
     const items = productosActivos.map(p => ({
@@ -329,16 +347,32 @@ export default function Costos() {
       cvu: recomputeProducto(p).cvu,
       bache: parseFloat(p.bache) || 0, baches_mes: parseFloat(p.baches_mes) || 0, merma: parseFloat(p.merma) || 0,
     }))
-    return getPEqMultiproducto(items, cifTotal)
+    // El punto de equilibrio debe cubrir TODOS los costos fijos, no solo el CIF: si se omiten
+    // los gastos de administración, ventas y financieros, sale un mínimo de venta que en
+    // realidad deja pérdida.
+    return getPEqMultiproducto(items, cifTotal + gastosFijosOper)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productos, cifTotal, mps])
+  }, [productos, cifTotal, mps, gastosFijosOper])
+
+  // Indicadores REALES de un producto guardado: costo pleno (producción + gastos del período) y
+  // utilidad neta (tras comisión e ICA). Es la misma cadena que muestra el Resumen de la ficha;
+  // se calcula aquí una sola vez para que el listado y la ficha nunca discrepen.
+  const indicadoresProducto = (p, rc) => {
+    const pMayor = parseFloat(p.precio_mayor) || 0
+    const cPleno = rc.costoTotalUnit * (1 + tasaGastosOper)
+    const comU = pMayor * ((parseFloat(p.comision) || 0) / 100)
+    const icaU = pMayor * (icaPct / 100)
+    const utilNeta = pMayor - comU - icaU - cPleno
+    const unidsMes = (parseFloat(p.bache) || 0) * (parseFloat(p.baches_mes) || 0) * (1 - (parseFloat(p.merma) || 0) / 100)
+    return {
+      pMayor, cPleno, utilNeta, unidsMes,
+      utilNetaPct: pMayor > 0 ? (utilNeta / pMayor) * 100 : null,
+      utilMes: utilNeta * unidsMes,
+    }
+  }
 
   // ---- Base para el PRECIO sugerido (costeo por absorción) ----
-  // Los gastos FIJOS del período (admin, ventas, financieros) no encarecen el COSTO del
-  // producto, pero el PRECIO sí debe recuperarlos: se prorratean sobre el costo de producción
-  // mensual del portafolio activo. El ICA NO va aquí: es un porcentaje de la venta, así que
-  // entra en el divisor del precio (junto con la comisión y la utilidad).
-  const gastosFijosOper = gastosOp.administracion.total + gastosOp.ventas.total + gastosOp.financiero.total
+  // Los gastos fijos se prorratean sobre el costo de producción mensual del portafolio activo.
   const costoProduccionPortafolio = useMemo(() => productosActivos.reduce((s, p) => {
     const unidsMes = (parseFloat(p.bache) || 0) * (parseFloat(p.baches_mes) || 0) * (1 - (parseFloat(p.merma) || 0) / 100)
     return s + recomputeProducto(p).costoTotalUnit * unidsMes
@@ -436,7 +470,7 @@ export default function Costos() {
     setImagenes([]); setRendimiento(62); setDesperdicio(2); setPesoUnidad(1000)
     setPorciona(false); setPesoSubporcion(''); setModoIng('gramos'); setPesoBacheTotal('')
     setBrix(75); setBrixAplica(false); setParamsCalidad([]); setCamposExtra([])
-    setCategorias([]); setAdicionales([]); setAdicOpen(false)
+    setCategorias([]); setAdicionales([]); setAdicOpen(false); setImprimibles([])
     setFichaFile(null); setFichaNombre(''); setFichaPath('')
     setEditingId(null); setSelFuente('')
   }
@@ -500,7 +534,8 @@ export default function Costos() {
     if (!p) return
     setEditingId(p.id)
     setSelFuente(`prod-${p.id}`)
-    setFormProd({ nombre: p.nombre, tipo: p.tipo, bache: p.bache, baches_mes: p.baches_mes, merma: p.merma, comision: p.comision, precio_mayor: p.precio_mayor, precio_detal: p.precio_detal, presentacion: p.presentacion || 'Unidad', activo: p.activo !== false, mp_id: p.mp_id || '', vida_util_valor: p.vida_util_valor || '', vida_util_unidad: p.vida_util_unidad || 'meses', descripcion: p.descripcion || '' })
+    setFormProd({ nombre: p.nombre, tipo: p.tipo, bache: p.bache, baches_mes: p.baches_mes, merma: p.merma, comision: p.comision, precio_mayor: p.precio_mayor, precio_detal: p.precio_detal, presentacion: p.presentacion || 'Unidad', activo: p.activo !== false, mp_id: p.mp_id || '', vida_util_valor: p.vida_util_valor || '', vida_util_unidad: p.vida_util_unidad || 'meses', descripcion: p.descripcion || '',
+      utilidad_objetivo: p.utilidad_objetivo ?? '', iva_pct: p.iva_pct ?? '', imp_saludable_pct: p.imp_saludable_pct ?? '' })
     setCamposExtra(parseJSON(p.campos_personalizados, []))
     setCategorias(parseJSON(p.categorias, []))
     const adic = parseJSON(p.costos_adicionales, [])
@@ -514,6 +549,7 @@ export default function Costos() {
     setBrix(p.brix || 75); setBrixAplica(!!p.brix_aplica)
     setParamsCalidad(parseJSON(p.parametros_calidad, []))
     setImagenes((() => { try { const a = Array.isArray(p.imagenes) ? p.imagenes : JSON.parse(p.imagenes || '[]'); return a.length ? a : (p.imagen_url ? [p.imagen_url] : []) } catch { return p.imagen_url ? [p.imagen_url] : [] } })())
+    setImprimibles(parseJSON(p.imprimibles, []))
     setFichaNombre(p.ficha_nombre || ''); setFichaPath(p.ficha_url || ''); setFichaFile(null)
     setTab('nuevo')
     toast(`"${p.nombre}" cargado para edición`)
@@ -630,6 +666,18 @@ export default function Costos() {
         if (idFicha) await supabase.from('products_costing').update({
           categorias: categorias.filter(Boolean),
           costos_adicionales: adicionales.filter(a => a.descripcion?.trim() || a.valor).map(a => ({ descripcion: a.descripcion || '', valor: parseFloat(a.valor) || 0, base: a.base || 'unidad', ...(a.dep ? { dep: a.dep } : {}) })),
+        }).eq('id', idFicha)
+      } catch { /* columnas opcionales: no bloquea el guardado */ }
+      // Precio por ficha (utilidad objetivo propia, IVA, impuesto saludable) e imprimibles —
+      // escritura aparte y tolerante (columnas v130 opcionales).
+      try {
+        const idFicha = editingId || datos._newId
+        const num = (v) => (v === '' || v == null ? null : (parseFloat(v) || 0))
+        if (idFicha) await supabase.from('products_costing').update({
+          utilidad_objetivo: num(formProd.utilidad_objetivo),
+          iva_pct: num(formProd.iva_pct) ?? 0,
+          imp_saludable_pct: num(formProd.imp_saludable_pct) ?? 0,
+          imprimibles,
         }).eq('id', idFicha)
       } catch { /* columnas opcionales: no bloquea el guardado */ }
       // Galería de imágenes — escritura aparte y tolerante (columna v92 opcional).
@@ -850,43 +898,6 @@ export default function Costos() {
     onError: (e) => toast('No se pudo sincronizar con Alegra: ' + e.message, 'error'),
   })
 
-  // Recalcula TODAS las fichas con el CIF/nómina VIGENTES y guarda el resultado en la base.
-  // Necesario tras reclasificar costos o cambiar la nómina: Producto Terminado, Órdenes de
-  // Producción y el Dashboard leen el costo GUARDADO (products_costing.costo_final), no el
-  // cálculo en vivo de esta pantalla — sin esto seguirían usando el costo viejo.
-  const recalcularFichas = useMutation({
-    meta: { label: 'Recalculando costos de todas las fichas…' },
-    mutationFn: async () => {
-      let n = 0
-      const calcPor = {}
-      for (const p of productos) {
-        const calc = recomputeProducto(p)
-        calcPor[p.id] = calc
-        const { error } = await supabase.from('products_costing').update({
-          costo_final: calc.costoFinal || 0, costo_variable: calc.cvu || 0, cif_unit: calc.cifUnit || 0,
-          util_mayor: calc.utilMayor || 0, util_detal: calc.utilDetal || 0, pe: calc.pe || 0,
-        }).eq('id', p.id)
-        if (error) throw error
-        n++
-      }
-      // Réplica del costo al catálogo de Producto Terminado (solo fichas ya enlazadas)
-      try {
-        const { data: fps } = await supabase.from('finished_products').select('id, product_id').not('product_id', 'is', null)
-        for (const fp of (fps || [])) {
-          const calc = calcPor[fp.product_id]
-          if (!calc) continue
-          await supabase.from('finished_products').update({ costo_unitario: Math.round(calc.costoFinal || 0) }).eq('id', fp.id)
-        }
-      } catch { /* tolerante: el catálogo de terminados puede sincronizarse después */ }
-      return n
-    },
-    onSuccess: (n) => {
-      qc.invalidateQueries({ queryKey: ['products_costing'] })
-      qc.invalidateQueries({ queryKey: ['finished_products'] })
-      toast(`Costos recalculados y guardados en ${n} ficha(s) ✓`)
-    },
-    onError: (e) => toast(e.message, 'error'),
-  })
 
   // ---- CIF CRUD ----
   // Guarda el N° de operarios de capacidad en los parámetros de operación (sin perder los demás)
@@ -1032,6 +1043,35 @@ export default function Costos() {
   const quitarImagen = (i) => setImagenes(prev => prev.filter((_, idx) => idx !== i))
   const hacerPrincipal = (i) => setImagenes(prev => [prev[i], ...prev.filter((_, idx) => idx !== i)])
 
+  // ---- Imprimibles (PDF de etiquetas/rótulos que el operario imprime al producir) ----
+  const subirImprimible = async (e) => {
+    const files = Array.from(e.target.files || []); e.target.value = ''
+    if (!files.length) return
+    setSubiendoImp(true)
+    try {
+      for (const f of files) {
+        if (f.type !== 'application/pdf') { toast(`"${f.name}" no es PDF y se omitió`, 'warning'); continue }
+        if (f.size > 15 * 1024 * 1024) { toast(`"${f.name}" pesa más de 15 MB y se omitió`, 'warning'); continue }
+        const path = `fichas/${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${f.name.replace(/[^\w.\-]/g, '_')}`
+        const { error } = await supabase.storage.from('ficha-imprimibles').upload(path, f, { upsert: true, contentType: 'application/pdf' })
+        if (error) throw error
+        setImprimibles(prev => [...prev, { nombre: f.name, path, size: f.size, subido_por: profile?.nombre || '', fecha: new Date().toISOString().split('T')[0] }])
+      }
+      toast('Imprimible(s) cargado(s) ✓ — recuerda guardar la ficha')
+    } catch (err) { toast('No se pudo subir: ' + err.message, 'error') }
+    finally { setSubiendoImp(false) }
+  }
+  const quitarImprimible = (i) => setImprimibles(prev => prev.filter((_, idx) => idx !== i))
+  // Abre el PDF en una pestaña nueva con URL firmada (bucket privado). Desde ahí el operario
+  // imprime con el visor del dispositivo, que en tablets ofrece "Imprimir" y "Compartir".
+  const abrirImprimible = async (imp) => {
+    try {
+      const { data, error } = await supabase.storage.from('ficha-imprimibles').createSignedUrl(imp.path, 3600)
+      if (error) throw error
+      window.open(data.signedUrl, '_blank', 'noopener')
+    } catch (err) { toast('No se pudo abrir el archivo: ' + err.message, 'error') }
+  }
+
   // Resultado ancla (useMemo para calcular en tiempo real)
   const anclaResultado = useMemo(() => {
     if (!anclaId || !anclaQty) return null
@@ -1101,9 +1141,10 @@ export default function Costos() {
         <div className="card">
           <div className="card-title"><Ico as={Package} size={14} />Fichas de Productos</div>
           <div className="alert alert-info" style={{ fontSize:'0.82rem' }}>
-            ℹ El <strong>CIF/unidad</strong> y el <strong>% CIF</strong> que ves aquí se recalculan en vivo según el portafolio actual.
-            Los valores <strong>guardados</strong> (los que usan Producto Terminado, Órdenes de Producción y el Tablero) solo cambian
-            al guardar cada ficha o con el botón <strong>"↻ Aplicar a las fichas"</strong> de la pestaña Costos y Gastos.
+            ℹ Todo se recalcula <strong>en vivo</strong> con el CIF y los precios de MP actuales. La <strong>utilidad neta</strong> ya
+            descuenta costo de producción, gastos de administración/ventas/financieros, comisión e ICA: es lo que de verdad te queda.
+            Los valores <strong>guardados</strong> (los que usan Producto Terminado, Órdenes y el Tablero) solo cambian al guardar la
+            ficha o con <strong>"↻ Aplicar a las fichas"</strong> en Costos y Gastos.
           </div>
           {/* ===== Versión móvil: acordeón ===== */}
           <div className="solo-movil">
@@ -1111,21 +1152,22 @@ export default function Costos() {
               ? <p className="empty-table">No hay fichas. Crea la primera →</p>
               : productos.map(p => {
                   const rc = recomputeProducto(p)
-                  const unidsMes = p.bache * p.baches_mes * (1 - (p.merma||0)/100)
-                  const pctCIF = totalUnidsPortafolio > 0 ? unidsMes/totalUnidsPortafolio*100 : 0
-                  const margen = p.precio_mayor > 0 ? rc.utilMayor/p.precio_mayor*100 : null
+                  const ind = indicadoresProducto(p, rc)
+                  const pctCIF = totalUnidsPortafolio > 0 ? ind.unidsMes/totalUnidsPortafolio*100 : 0
                   return (
                     <AccordionItem key={p.id}
                       titulo={<>{p.imagen_url && <img src={p.imagen_url} alt="" style={{ width:24, height:24, borderRadius:3, objectFit:'cover', verticalAlign:'middle', marginRight:6 }} />}{p.nombre}</>}
-                      sub={<>Costo {fCOP(rc.costoFinal)} · Margen {margen != null ? margen.toFixed(1)+'%' : '—'}</>}
+                      sub={<>Costo pleno {fCOP(ind.cPleno)} · Utilidad neta <span style={{ color: ind.utilNeta >= 0 ? 'var(--selva)' : 'var(--rojo)' }}>{ind.utilNetaPct != null ? ind.utilNetaPct.toFixed(1)+'%' : '—'}</span></>}
                     >
-                      <Fila et="Tipo">{p.tipo}</Fila>
-                      <Fila et="Unid/mes">{fNum(unidsMes)}</Fila>
+                      <Fila et="Tipo">{p.tipo}{p.activo === false ? ' · inactivo' : ''}</Fila>
+                      <Fila et="Unid/mes">{fNum(ind.unidsMes)} <small style={{ color:'var(--texto-suave)' }}>({pctCIF.toFixed(1)}% del portafolio)</small></Fila>
                       <Fila et="MP + empaque">{fCOP(rc.cvu)}</Fila>
-                      <Fila et="MO/overhead (por tiempo)">{fCOP(rc.moUnit)}</Fila>
-                      <Fila et="Costo total/u">{fCOP(rc.costoTotalUnit)}</Fila>
+                      <Fila et="Mano de obra + CIF">{fCOP(rc.moUnit)}</Fila>
+                      <Fila et="Costo de producción/u">{fCOP(rc.costoTotalUnit)}</Fila>
+                      <Fila et="Costo pleno/u (+ gastos)">{fCOP(ind.cPleno)}</Fila>
                       <Fila et="P. Mayor">{fCOP(p.precio_mayor)}</Fila>
-                      <Fila et="% Utilidad">{margen != null ? margen.toFixed(1)+'%' : '—'}</Fila>
+                      <Fila et="Utilidad neta/u">{fCOP(ind.utilNeta)} {ind.utilNetaPct != null ? `(${ind.utilNetaPct.toFixed(1)}%)` : ''}</Fila>
+                      <Fila et="Utilidad al mes">{fCOP(ind.utilMes)}</Fila>
                       <div className="acordeon-acciones">
                         <button className="btn btn-xs btn-secondary" onClick={() => { setVerProd(p); setVerModal(true) }}>Ver</button>
                         <button className="btn btn-xs btn-primary" onClick={() => cargarProducto(p.id)}><Ico as={Pencil} size={14} />Editar</button>
@@ -1141,19 +1183,39 @@ export default function Costos() {
           {/* ===== Versión desktop: tabla ===== */}
           <div className="table-wrap solo-desktop">
             <table>
-              <thead><tr><th>Producto</th><th className="col-opcional-2">Imagen</th><th className="col-opcional-2">Tipo</th><th className="col-opcional">Unid/mes</th><th className="col-opcional">MP+Emp</th><th className="col-opcional">MO/overhead</th><th>Costo total/u</th><th>P. Mayor</th><th className="col-opcional-2">% Utilidad</th><th>Acciones</th></tr></thead>
+              <thead><tr>
+                <th>Producto</th>
+                <th className="col-opcional-2">Imagen</th>
+                <th className="col-opcional-2">Tipo</th>
+                <th className="col-opcional" title="Unidades que produces al mes y su peso dentro del portafolio">Unid/mes</th>
+                <th className="col-opcional" title="Costo variable: materia prima + empaque">MP+Emp</th>
+                <th className="col-opcional" title="Mano de obra y CIF absorbidos según los minutos de proceso">MO+CIF</th>
+                <th title="Materia prima + empaque + mano de obra + CIF">Costo producción/u</th>
+                <th className="col-opcional" title="Costo de producción + la parte que le toca de gastos de administración, ventas y financieros">Costo pleno/u</th>
+                <th>P. Mayor</th>
+                <th title="Lo que queda tras costo pleno, comisión e ICA. Es la utilidad real.">Utilidad neta/u</th>
+                <th className="col-opcional" title="Utilidad neta por unidad × unidades al mes: lo que este producto le deja al negocio">Utilidad/mes</th>
+                <th>Acciones</th>
+              </tr></thead>
               <tbody>
                 {productos.length === 0
-                  ? <tr><td colSpan={10} className="empty-table">No hay fichas. Crea la primera →</td></tr>
+                  ? <tr><td colSpan={12} className="empty-table">No hay fichas. Crea la primera →</td></tr>
                   : productos.map(p => {
                       const rc = recomputeProducto(p)
-                      const unidsMes = p.bache * p.baches_mes * (1 - (p.merma||0)/100)
-                      const pctCIF = totalUnidsPortafolio > 0 ? unidsMes/totalUnidsPortafolio*100 : 0
-                      const margen = p.precio_mayor > 0 ? rc.utilMayor/p.precio_mayor*100 : null
+                      const ind = indicadoresProducto(p, rc)
+                      const pctCIF = totalUnidsPortafolio > 0 ? ind.unidsMes/totalUnidsPortafolio*100 : 0
                       const inactivo = p.activo === false
+                      const colorUtil = ind.utilNeta >= 0 ? 'var(--selva)' : 'var(--rojo)'
+                      const abierta = filasAbiertas.has(p.id)
                       return (
-                        <tr key={p.id} style={inactivo ? { opacity: 0.6 } : undefined}>
-                          <td><strong>{p.nombre}</strong> {inactivo && <span className="badge badge-gris" style={{ fontSize:'0.65rem' }}><Ico as={Pause} size={14} />Inactivo</span>}</td>
+                        <Fragment key={p.id}>
+                        <tr style={inactivo ? { opacity: 0.6 } : undefined}>
+                          <td>
+                            <button type="button" className="btn-detalle-fila" aria-expanded={abierta}
+                              title={abierta ? 'Ocultar el detalle' : 'Ver las columnas que no caben en esta pantalla'}
+                              onClick={() => toggleFila(p.id)}>{abierta ? '⌃' : '⌄'}</button>
+                            <strong>{p.nombre}</strong> {inactivo && <span className="badge badge-gris" style={{ fontSize:'0.65rem' }}><Ico as={Pause} size={14} />Inactivo</span>}
+                          </td>
                           <td className="col-opcional-2">
                             {p.imagen_url
                               ? <img src={p.imagen_url} alt={p.nombre} style={{ width:32, height:32, borderRadius:3, objectFit:'cover' }} />
@@ -1161,12 +1223,17 @@ export default function Costos() {
                             }
                           </td>
                           <td className="col-opcional-2"><span className="badge badge-gris">{p.tipo}</span></td>
-                          <td className="td-number col-opcional">{fNum(unidsMes)}</td>
+                          <td className="td-number col-opcional">{fNum(ind.unidsMes)}<div style={{ fontSize:'0.7rem', color:'var(--texto-suave)' }}>{pctCIF.toFixed(1)}%</div></td>
                           <td className="td-number col-opcional">{fCOP(rc.cvu)}</td>
                           <td className="td-number text-dorado col-opcional">{fCOP(rc.moUnit)}</td>
                           <td className="td-number"><strong>{fCOP(rc.costoTotalUnit)}</strong></td>
+                          <td className="td-number col-opcional">{fCOP(ind.cPleno)}</td>
                           <td className="td-number">{fCOP(p.precio_mayor)}</td>
-                          <td className="td-number text-verde col-opcional-2">{margen != null ? margen.toFixed(1)+'%' : '—'}</td>
+                          <td className="td-number" style={{ color: colorUtil, fontWeight:600 }}>
+                            {fCOP(ind.utilNeta)}
+                            <div style={{ fontSize:'0.7rem' }}>{ind.utilNetaPct != null ? ind.utilNetaPct.toFixed(1)+'%' : '—'}</div>
+                          </td>
+                          <td className="td-number col-opcional" style={{ color: colorUtil }}>{fCOP(ind.utilMes)}</td>
                           <td>
                             <div style={{ display:'flex', gap:4 }}>
                               <button className="btn btn-xs btn-secondary" onClick={() => { setVerProd(p); setVerModal(true) }}>Ver</button>
@@ -1178,10 +1245,46 @@ export default function Costos() {
                             </div>
                           </td>
                         </tr>
+                        {/* Detalle: muestra las columnas que el ancho de pantalla ocultó.
+                            Cada dato aparece solo si SU columna está oculta (lo decide el CSS). */}
+                        <tr className={`fila-detalle ${abierta ? 'abierta' : ''}`}>
+                          <td colSpan={12}>
+                            <div className="fila-detalle-grid">
+                              <span className="dato-opcional-2"><span className="et">Tipo:</span> <span className="badge badge-gris">{p.tipo}</span></span>
+                              <span className="dato-opcional"><span className="et">Unid/mes:</span> <strong>{fNum(ind.unidsMes)}</strong> <small style={{ color:'var(--texto-suave)' }}>({pctCIF.toFixed(1)}% del portafolio)</small></span>
+                              <span className="dato-opcional"><span className="et">MP+Empaque:</span> <strong>{fCOP(rc.cvu)}</strong></span>
+                              <span className="dato-opcional"><span className="et">Mano de obra + CIF:</span> <strong style={{ color:'var(--tierra)' }}>{fCOP(rc.moUnit)}</strong></span>
+                              <span className="dato-opcional"><span className="et">Costo pleno/u:</span> <strong>{fCOP(ind.cPleno)}</strong></span>
+                              <span className="dato-opcional"><span className="et">Utilidad/mes:</span> <strong style={{ color: colorUtil }}>{fCOP(ind.utilMes)}</strong></span>
+                            </div>
+                          </td>
+                        </tr>
+                        </Fragment>
                       )
                     })
                 }
               </tbody>
+              {productos.length > 0 && (() => {
+                // Totales del portafolio ACTIVO: los inactivos no se producen, sumarlos engañaría
+                const act = productos.filter(p => p.activo !== false)
+                const tot = act.reduce((a, p) => {
+                  const i = indicadoresProducto(p, recomputeProducto(p))
+                  return { unids: a.unids + i.unidsMes, util: a.util + i.utilMes }
+                }, { unids: 0, util: 0 })
+                return (
+                  <tfoot>
+                    <tr style={{ background:'var(--selva)', color:'var(--crema)', fontWeight:700 }}>
+                      <td colSpan={3}>TOTAL portafolio activo ({act.length})</td>
+                      <td className="td-number col-opcional">{fNum(tot.unids)}</td>
+                      <td className="col-opcional" colSpan={2}></td>
+                      <td colSpan={3}></td>
+                      <td className="td-number" title="Suma de la utilidad neta mensual de todos los productos activos">{fCOP(tot.util)}</td>
+                      <td className="col-opcional"></td>
+                      <td></td>
+                    </tr>
+                  </tfoot>
+                )
+              })()}
             </table>
           </div>
           {productos.length > 1 && (
@@ -1234,7 +1337,11 @@ export default function Costos() {
                     <select className="form-control" style={{ maxWidth: 380 }} value="" onChange={e => {
                       const m = mps.find(x => String(x.id) === e.target.value); if (!m) return
                       setIngredientes([]); setProcesos([]); setEmpaque([]); setEditingId(null); setSelFuente('')
-                      setFormProd({ ...EMPTY_PROD, nombre: m.nombre, tipo: 'mp', mp_id: String(m.id), presentacion: m.unidad || 'Unidad', activo: !!m.vendible })
+                      // "Activo" significa EN PRODUCCIÓN, no vendible: una MP interna (mermelada,
+                      // pulpa) se fabrica igual que las demás, consume minutos de planta y por tanto
+                      // debe absorber CIF. Marcarla inactiva por no venderse la sacaba del reparto y
+                      // hacía aparecer esos minutos como capacidad ociosa.
+                      setFormProd({ ...EMPTY_PROD, nombre: m.nombre, tipo: 'mp', mp_id: String(m.id), presentacion: m.unidad || 'Unidad', activo: true })
                     }}>
                       <option value="">Seleccionar MP...</option>
                       {mpFabricadas.map(m => <option key={m.id} value={m.id}>{m.nombre} · {m.unidad}{m.vendible ? ' · vendible' : ' · interna'}</option>)}
@@ -1291,7 +1398,11 @@ export default function Costos() {
                     <input type="checkbox" checked={formProd.activo !== false} onChange={e => setFormProd(f=>({...f, activo: e.target.checked}))} />
                     <span style={{ fontWeight:600, color: formProd.activo !== false ? 'var(--selva)' : 'var(--texto-suave)' }}>{formProd.activo !== false ? '✓ Activo (en producción)' : '⏸ Inactivo (no reparte CIF)'}</span>
                   </label>
-                  <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Los inactivos no participan en la distribución del CIF de los demás productos.</small>
+                  <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>
+                    "Activo" = <strong>se fabrica hoy</strong>, no que se venda. Los productos internos (mermelada, pulpa)
+                    van activos: consumen planta y deben absorber CIF. Inactiva solo lo que dejaste de producir —
+                    sus minutos salen del reparto y aparecen como capacidad ociosa.
+                  </small>
                 </div>
                 <div className="form-group">
                   <label className="form-label" style={{ display:'flex', alignItems:'center' }}>
@@ -1770,6 +1881,39 @@ export default function Costos() {
             </div>
           </details>
 
+          {/* ── Insumos imprimibles: PDFs que el operario imprime durante la producción ── */}
+          <details className="card" open={imprimibles.length > 0}>
+            <summary className="card-title">
+              <Ico as={Printer} size={14} />Insumos Imprimibles
+              <span className="card-hint">{imprimibles.length > 0 ? `${imprimibles.length} archivo(s)` : 'etiquetas, rótulos…'}</span>
+            </summary>
+            <div className="card-acc-body">
+              <div className="alert alert-info" style={{ fontSize:'0.82rem' }}>
+                ℹ Sube en PDF las <strong>etiquetas, rótulos o instructivos</strong> que se imprimen al fabricar este producto.
+                El operario los verá al diligenciar la orden de producción y podrá imprimirlos directo desde la tablet,
+                sin tener que buscarlos ni pedirlos.
+              </div>
+              {imprimibles.length > 0 && (
+                <div style={{ display:'grid', gap:6, marginBottom:10 }}>
+                  {imprimibles.map((imp, i) => (
+                    <div key={i} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background:'var(--crema)', borderRadius:'var(--radio)' }}>
+                      <Ico as={FileText} size={14} />
+                      <span style={{ flex:1, fontSize:'0.86rem', minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{imp.nombre}</span>
+                      {imp.size > 0 && <small style={{ color:'var(--texto-suave)' }}>{(imp.size / 1024).toFixed(0)} KB</small>}
+                      <button type="button" className="btn btn-xs btn-secondary" onClick={() => abrirImprimible(imp)}><Ico as={Printer} size={13} />Ver</button>
+                      <button type="button" className="btn btn-xs btn-danger" onClick={() => quitarImprimible(i)}><X size={13} aria-hidden="true" /></button>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <label className={`btn btn-secondary btn-sm ${subiendoImp ? 'disabled' : ''}`} style={{ cursor: subiendoImp ? 'wait' : 'pointer', display:'inline-flex' }}>
+                <Ico as={Printer} size={14} />{subiendoImp ? 'Subiendo…' : 'Agregar PDF imprimible'}
+                <input type="file" accept="application/pdf" multiple disabled={subiendoImp} onChange={subirImprimible} style={{ display:'none' }} />
+              </label>
+              <small style={{ display:'block', marginTop:6, color:'var(--texto-suave)', fontSize:'0.72rem' }}>Solo PDF, hasta 15 MB por archivo. Puedes subir varios a la vez.</small>
+            </div>
+          </details>
+
           {/* ── Precios y Resumen ── */}
           <div className="grid-resp" style={{ gridTemplateColumns:'1fr 1fr', gap:20 }}>
             <div className="card">
@@ -1777,32 +1921,46 @@ export default function Costos() {
 
               {/* ── Precio sugerido por la norma de costeo por absorción ── */}
               {calcResult && calcResult.costoTotalUnit > 0 && (() => {
+                // Utilidad objetivo PROPIA de esta ficha; si está vacía, la global de la empresa
+                const utilFicha = formProd.utilidad_objetivo !== '' && formProd.utilidad_objetivo != null
+                  ? (parseFloat(formProd.utilidad_objetivo) || 0) : utilidadObjetivo
+                const comisionPct = parseFloat(formProd.comision) || 0
                 const sug = getPrecioSugerido({
                   costoProduccionUnit: calcResult.costoTotalUnit, tasaGastosOper,
-                  comisionPct: parseFloat(formProd.comision) || 0, icaPct, utilidadPct: utilidadObjetivo,
+                  comisionPct, icaPct, utilidadPct: utilFicha,
                 })
                 const precioActual = parseFloat(formProd.precio_mayor) || 0
                 const bajoMinimo = precioActual > 0 && precioActual < sug.precioMinimo
                 const bajoObjetivo = precioActual > 0 && precioActual < sug.precioObjetivo && !bajoMinimo
                 const color = bajoMinimo ? 'var(--rojo)' : bajoObjetivo ? 'var(--dorado)' : 'var(--selva)'
+                // Lo que realmente queda en el bolsillo con el precio actual, tras comisión e ICA
+                const utilRealUnit = precioActual > 0
+                  ? precioActual * (1 - comisionPct / 100 - icaPct / 100) - sug.costoPleno : 0
+                const utilRealPct = precioActual > 0 ? (utilRealUnit / precioActual) * 100 : 0
+                // Impuestos INDIRECTOS: los cobras al cliente sobre el precio y los giras a la DIAN.
+                // No son costo ni utilidad tuya, así que no entran al cálculo: solo al precio final.
+                const ivaP = parseFloat(formProd.iva_pct) || 0
+                const saludP = parseFloat(formProd.imp_saludable_pct) || 0
+                const precioConImp = precioActual * (1 + (ivaP + saludP) / 100)
                 return (
                   <div style={{ background:'#fff8e8', border:`1px solid ${color}`, borderRadius:'var(--radio)', padding:'12px', marginBottom:14 }}>
                     <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:8 }}>
                       <strong style={{ color:'var(--selva)', fontSize:'0.88rem' }}><Ico as={TrendingUp} size={14} />Precio sugerido</strong>
-                      <span style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>utilidad objetivo</span>
+                      <span style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>utilidad de este producto</span>
                       <input type="number" className="form-control" style={{ width:64, textAlign:'right', padding:'2px 6px' }}
-                        defaultValue={utilidadObjetivo} min={0} max={99} step={1}
-                        onBlur={e => guardarPrecioParam('utilidad_objetivo', e.target.value)} disabled={!esAdmin} title={esAdmin ? 'Se guarda para todas las fichas' : 'Solo el admin puede cambiarla'} />
+                        value={formProd.utilidad_objetivo} min={0} max={99} step={1} placeholder={String(utilidadObjetivo)}
+                        onChange={e => setFormProd(f => ({ ...f, utilidad_objetivo: e.target.value }))}
+                        title={`Utilidad objetivo SOLO de este producto. Vacío = usa la de la empresa (${utilidadObjetivo}%). Se guarda con la ficha.`} />
                       <span style={{ fontSize:'0.8rem' }}>%</span>
                       <span style={{ fontSize:'0.75rem', color:'var(--texto-suave)', marginLeft:6 }}>ICA</span>
                       <input type="number" className="form-control" style={{ width:64, textAlign:'right', padding:'2px 6px' }}
                         defaultValue={icaPorMil} min={0} max={99} step={0.1}
                         onBlur={e => guardarPrecioParam('ica_por_mil', e.target.value)} disabled={!esAdmin}
-                        title="Tarifa de ICA de tu municipio y actividad, en POR MIL sobre ventas brutas. Ej: 7 = 0,7%. Déjalo en 0 si no aplica o no lo conoces." />
+                        title="Tarifa de ICA de tu municipio y actividad, en POR MIL sobre ventas brutas. Ej: 7 = 0,7%. Este SÍ lo pagas tú, por eso afecta el precio. Es global para toda la empresa." />
                       <span style={{ fontSize:'0.8rem' }} title="por mil sobre ventas">‰</span>
                     </div>
                     {!sug.viable
-                      ? <div className="alert alert-warning" style={{ fontSize:'0.8rem' }}>La comisión ({formProd.comision}%), el ICA ({icaPct.toFixed(2)}%) y la utilidad objetivo ({utilidadObjetivo}%) suman 100% o más: no existe un precio que los cubra. Baja alguno.</div>
+                      ? <div className="alert alert-warning" style={{ fontSize:'0.8rem' }}>La comisión ({comisionPct}%), el ICA ({icaPct.toFixed(2)}%) y la utilidad objetivo ({utilFicha}%) suman 100% o más: no existe un precio que los cubra. Baja alguno.</div>
                       : <>
                           <table style={{ fontSize:'0.84rem', width:'100%' }}>
                             <tbody>
@@ -1810,23 +1968,31 @@ export default function Costos() {
                               <tr><td>(+) Gastos admin/ventas/financieros por u <small style={{ color:'var(--texto-suave)' }}>({(tasaGastosOper*100).toFixed(1)}% del costo)</small></td><td className="td-number">{fCOP(sug.gastosOperUnit)}</td></tr>
                               <tr style={{ fontWeight:600, borderTop:'1px solid var(--crema-oscuro)' }}><td>= Costo pleno/u</td><td className="td-number">{fCOP(sug.costoPleno)}</td></tr>
                               <tr style={{ color:'var(--tierra)' }}><td><strong>Precio mínimo</strong> <small>(cubre costo + comisión{icaPct > 0 ? ' + ICA' : ''}, sin utilidad)</small></td><td className="td-number"><strong>{fCOP(sug.precioMinimo)}</strong></td></tr>
-                              <tr style={{ color:'var(--selva)' }}><td><strong>Precio objetivo</strong> <small>(con {utilidadObjetivo}% de utilidad)</small></td><td className="td-number"><strong style={{ fontSize:'1.05rem' }}>{fCOP(sug.precioObjetivo)}</strong></td></tr>
+                              <tr style={{ color:'var(--selva)' }}><td><strong>Precio objetivo</strong> <small>(con {utilFicha}% de utilidad)</small></td><td className="td-number"><strong style={{ fontSize:'1.05rem' }}>{fCOP(sug.precioObjetivo)}</strong></td></tr>
                             </tbody>
                           </table>
                           <div style={{ marginTop:8, display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
                             <button type="button" className="btn btn-xs btn-dorado" onClick={() => setFormProd(f => ({ ...f, precio_mayor: Math.ceil(sug.precioObjetivo / 50) * 50 }))}>
                               Usar precio objetivo ({fCOP(Math.ceil(sug.precioObjetivo / 50) * 50)})
                             </button>
-                            {precioActual > 0 && (
-                              <span style={{ fontSize:'0.8rem', color, fontWeight:600 }}>
-                                {bajoMinimo ? `⚠ Tu precio (${fCOP(precioActual)}) está por debajo del mínimo: pierdes ${fCOP(sug.precioMinimo - precioActual)} por unidad`
-                                  : bajoObjetivo ? `Tu precio cubre los costos pero queda ${fCOP(sug.precioObjetivo - precioActual)} bajo el objetivo`
-                                  : `✓ Tu precio supera el objetivo`}
-                              </span>
-                            )}
                           </div>
+                          {/* Qué significa el precio que tienes puesto, en plata contante */}
+                          {precioActual > 0 && (
+                            <div style={{ marginTop:8, padding:'8px 10px', background:'#fff', borderRadius:'var(--radio)', border:`1px solid ${color}`, fontSize:'0.8rem' }}>
+                              <div style={{ color, fontWeight:600, marginBottom:4 }}>
+                                {bajoMinimo ? `⚠ Tu precio de ${fCOP(precioActual)} está por debajo del mínimo: pierdes ${fCOP(sug.precioMinimo - precioActual)} por unidad`
+                                  : bajoObjetivo ? `Tu precio de ${fCOP(precioActual)} cubre los costos, pero queda ${fCOP(sug.precioObjetivo - precioActual)} bajo el objetivo`
+                                  : `✓ Tu precio de ${fCOP(precioActual)} alcanza o supera el objetivo`}
+                              </div>
+                              <div style={{ color:'var(--texto-suave)' }}>
+                                Con ese precio te queda: {fCOP(precioActual)} − {comisionPct}% comisión
+                                {icaPct > 0 ? ` − ${icaPct.toFixed(2)}% ICA` : ''} − {fCOP(sug.costoPleno)} de costo pleno =
+                                {' '}<strong style={{ color }}>{fCOP(utilRealUnit)} de utilidad ({utilRealPct.toFixed(1)}%)</strong> por unidad.
+                              </div>
+                            </div>
+                          )}
                           <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem', display:'block', marginTop:6 }}>
-                            Precio = costo pleno ÷ (1 − {formProd.comision || 0}% comisión {icaPct > 0 ? `− ${icaPct.toFixed(2)}% ICA ` : ''}− {utilidadObjetivo}% utilidad). Se <strong>divide</strong>: son porcentajes del precio,
+                            Precio = costo pleno ÷ (1 − {comisionPct}% comisión {icaPct > 0 ? `− ${icaPct.toFixed(2)}% ICA ` : ''}− {utilFicha}% utilidad). Se <strong>divide</strong>: son porcentajes del precio,
                             no del costo (multiplicar por 1+margen deja menos utilidad de la que crees).
                             {icaPorMil === 0 && <> El ICA está en 0: si conoces la tarifa de tu municipio, escríbela en ‰ para que el precio la contemple.</>}
                           </small>
@@ -1849,6 +2015,34 @@ export default function Costos() {
                 </div>
               )}
               <div className="form-group"><label className="form-label">Precio al público (detal)</label><MoneyInput value={formProd.precio_detal} onChange={v => setFormProd(f=>({...f,precio_detal:v}))} /></div>
+
+              {/* ── Impuestos INDIRECTOS: se cobran al cliente SOBRE el precio, no salen de tu utilidad ── */}
+              <div style={{ background:'var(--crema)', borderRadius:'var(--radio)', padding:'10px 12px', marginBottom:12 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+                  <strong style={{ fontSize:'0.82rem', color:'var(--selva)' }}>Impuestos al consumidor</strong>
+                  <span style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>IVA</span>
+                  <input type="number" className="form-control" style={{ width:64, textAlign:'right', padding:'2px 6px' }}
+                    value={formProd.iva_pct} onChange={e => setFormProd(f => ({ ...f, iva_pct: e.target.value }))}
+                    min={0} max={100} step={1} placeholder="0" title="IVA del producto (0%, 5% o 19%). Se suma al precio; no afecta tu costo ni tu utilidad." />
+                  <span style={{ fontSize:'0.8rem' }}>%</span>
+                  <span style={{ fontSize:'0.75rem', color:'var(--texto-suave)', marginLeft:6 }}>Imp. saludable</span>
+                  <input type="number" className="form-control" style={{ width:64, textAlign:'right', padding:'2px 6px' }}
+                    value={formProd.imp_saludable_pct} onChange={e => setFormProd(f => ({ ...f, imp_saludable_pct: e.target.value }))}
+                    min={0} max={100} step={1} placeholder="0" title="Impuesto a alimentos ultraprocesados / bebidas azucaradas (Ley 2277 de 2022), si aplica a este producto." />
+                  <span style={{ fontSize:'0.8rem' }}>%</span>
+                </div>
+                {((parseFloat(formProd.iva_pct) || 0) + (parseFloat(formProd.imp_saludable_pct) || 0)) > 0 && (
+                  <div style={{ fontSize:'0.82rem', marginTop:8, display:'grid', gap:2 }}>
+                    <div>Precio por mayor <strong>con impuestos</strong>: <strong style={{ color:'var(--selva)' }}>{fCOP((parseFloat(formProd.precio_mayor)||0) * (1 + ((parseFloat(formProd.iva_pct)||0) + (parseFloat(formProd.imp_saludable_pct)||0))/100))}</strong></div>
+                    <div>Precio detal <strong>con impuestos</strong>: <strong style={{ color:'var(--selva)' }}>{fCOP((parseFloat(formProd.precio_detal)||0) * (1 + ((parseFloat(formProd.iva_pct)||0) + (parseFloat(formProd.imp_saludable_pct)||0))/100))}</strong></div>
+                  </div>
+                )}
+                <small style={{ display:'block', marginTop:6, color:'var(--texto-suave)', fontSize:'0.72rem' }}>
+                  El IVA y el impuesto saludable <strong>los recaudas y los giras a la DIAN</strong>: no son tuyos, no son costo y
+                  por eso <strong>no cambian el precio sugerido</strong> — solo se suman encima para saber cuánto paga el cliente.
+                  Distinto del <strong>ICA</strong>, que sí sale de tu bolsillo sobre las ventas y por eso sí afecta el precio.
+                </small>
+              </div>
               {calcResult && (
                 <div style={{ fontSize:'0.82rem', color:'var(--texto-suave)', marginTop:4 }}>
                   Ganancia distribuidor (detal − mayor): <strong style={{ color:'var(--selva)' }}>{fCOP((parseFloat(formProd.precio_detal)||0) - (parseFloat(formProd.precio_mayor)||0))}</strong>
@@ -1902,26 +2096,68 @@ export default function Costos() {
             </div>
             <div className="costo-resumen">
               <div style={{ fontFamily:"'Playfair Display',serif", fontSize:'1.1rem', marginBottom:14, color:'var(--dorado)' }}>Resumen de Costos</div>
-              {calcResult && (<>
-                <div className="row"><span>Costo MP por unidad</span><span>{fCOP(calcResult.mpUnit)}</span></div>
-                <div className="row"><span>Costo empaque por unidad</span><span>{fCOP(calcResult.empUnit)}</span></div>
-                <div className="row"><span>+ Mano de obra/overhead por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>({calcResult.totalMinutos} min × {fCOP(calcResult.costoMin)}/min ÷ unidades)</small></span><span style={{color:'var(--dorado)'}}>{fCOP(calcResult.moUnit)}</span></div>
-                {(calcResult.adicUnit || 0) > 0 && <div className="row"><span>+ Costos adicionales por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>(depreciación, otros)</small></span><span style={{color:'var(--dorado)'}}>{fCOP(calcResult.adicUnit)}</span></div>}
-                <div className="row" style={{ borderTop:'1px dashed rgba(245,240,232,0.2)', paddingTop:6, marginTop:4 }}><span>Costo por bache <small style={{opacity:0.6,fontSize:'0.72rem'}}>(MP {fCOP(calcResult.totalMPBache||0)} + MO {fCOP(calcResult.totalMOBache||0)})</small></span><span style={{color:'var(--lima)'}}>{fCOP((calcResult.totalMPBache||0)+(calcResult.totalMOBache||0))}</span></div>
-                <div className="total">
-                  <div className="row"><span><strong>Costo TOTAL por unidad</strong></span><span><strong>{fCOP(calcResult.costoTotalUnit)}</strong></span></div>
-                  <div className="row ganancia"><span>Ganancia mayor <small style={{opacity:0.6,fontSize:'0.72rem'}}>(precio − costo)</small></span><span>{fCOP(calcResult.utilMayor)} ({parseFloat(formProd.precio_mayor)>0?(calcResult.utilMayor/parseFloat(formProd.precio_mayor)*100).toFixed(1)+'%':'-'})</span></div>
-                  {(calcResult.comUnit || 0) > 0 && <>
-                    <div className="row"><span>− Comisión distribuidor <small style={{opacity:0.6,fontSize:'0.72rem'}}>({formProd.comision}% del precio mayor)</small></span><span style={{color:'var(--dorado)'}}>{fCOP(calcResult.comUnit)}</span></div>
-                    <div className="row ganancia"><span>Ganancia mayor neta <small style={{opacity:0.6,fontSize:'0.72rem'}}>(tras comisión)</small></span><span>{fCOP(calcResult.utilMayorNeto)} ({parseFloat(formProd.precio_mayor)>0?(calcResult.utilMayorNeto/parseFloat(formProd.precio_mayor)*100).toFixed(1)+'%':'-'})</span></div>
-                  </>}
-                  <div className="row ganancia"><span>Ganancia detal</span><span>{fCOP(calcResult.utilDetal)} ({parseFloat(formProd.precio_detal)>0?(calcResult.utilDetal/parseFloat(formProd.precio_detal)*100).toFixed(1)+'%':'-'})</span></div>
-                </div>
-                <div style={{ marginTop:10, paddingTop:8, borderTop:'1px dashed rgba(245,240,232,0.2)', fontSize:'0.78rem', opacity:0.75 }}>
-                  <div className="row"><span style={{ cursor:'help' }} title="Unidades que habría que vender al mes para cubrir todo el CIF (arriendo, servicios, nómina...), si este fuera el único producto de la empresa.">Punto de equilibrio ⓘ</span><span>{calcResult.pe>0?fNum(calcResult.pe)+' unid/mes':'—'}</span></div>
-                  <div className="row"><span style={{ cursor:'help' }} title="CIF total del mes (arriendo, servicios, nómina...) dividido entre los minutos productivos disponibles. Así se reparte el overhead SEGÚN EL TIEMPO que usa cada producto, no por unidades.">Costo fijo por minuto ⓘ</span><span>{fCOP(calcResult.costoMin)}/min</span></div>
-                </div>
-              </>)}
+              {calcResult && (() => {
+                const pMayor = parseFloat(formProd.precio_mayor) || 0
+                const pDetal = parseFloat(formProd.precio_detal) || 0
+                const cProd = calcResult.costoTotalUnit                       // costo de PRODUCCIÓN
+                const gastosU = cProd * tasaGastosOper                        // gastos del período prorrateados
+                const cPleno = cProd + gastosU                                // costo PLENO (lo que cuesta de verdad)
+                const icaU = pMayor * (icaPct / 100)
+                // Utilidad NETA: lo que queda tras comisión, ICA y todos los costos y gastos.
+                // Es la cifra que debe cuadrar con el panel de Precio sugerido.
+                const utilNeta = pMayor - calcResult.comUnit - icaU - cPleno
+                const utilNetaDetal = pDetal - (pDetal * icaPct / 100) - cPleno
+                const pct = (v) => (cProd > 0 ? (v / cProd * 100).toFixed(0) + '%' : '—')
+                const unidsMes = calcResult.unidsMesTot || 0
+                const ivaTot = (parseFloat(formProd.iva_pct) || 0) + (parseFloat(formProd.imp_saludable_pct) || 0)
+                return (<>
+                  <div className="row"><span>Materia prima por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>({pct(calcResult.mpUnit)} del costo)</small></span><span>{fCOP(calcResult.mpUnit)}</span></div>
+                  <div className="row"><span>Empaque por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>({pct(calcResult.empUnit)})</small></span><span>{fCOP(calcResult.empUnit)}</span></div>
+                  <div className="row"><span>+ Mano de obra y CIF por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>({calcResult.totalMinutos} min × {fCOP(calcResult.costoMin)}/min ÷ unid · {pct(calcResult.moUnit)})</small></span><span style={{color:'var(--dorado)'}}>{fCOP(calcResult.moUnit)}</span></div>
+                  {(calcResult.adicUnit || 0) > 0 && <div className="row"><span>+ Costos adicionales por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>(depreciación, otros · {pct(calcResult.adicUnit)})</small></span><span style={{color:'var(--dorado)'}}>{fCOP(calcResult.adicUnit)}</span></div>}
+                  <div className="row" style={{ borderTop:'1px solid rgba(245,240,232,0.25)', paddingTop:6, marginTop:4, fontWeight:600 }}>
+                    <span>= COSTO DE PRODUCCIÓN por unidad</span><span>{fCOP(cProd)}</span>
+                  </div>
+                  <div className="row"><span>+ Gastos admin/ventas/financieros <small style={{opacity:0.6,fontSize:'0.72rem'}}>({(tasaGastosOper*100).toFixed(1)}% del costo de producción)</small></span><span style={{color:'var(--dorado)'}}>{fCOP(gastosU)}</span></div>
+                  <div className="total">
+                    <div className="row"><span><strong>= COSTO PLENO por unidad</strong> <small style={{opacity:0.6,fontSize:'0.72rem'}}>(lo que te cuesta de verdad)</small></span><span><strong>{fCOP(cPleno)}</strong></span></div>
+                    <div className="row"><span>Precio de venta por mayor</span><span>{fCOP(pMayor)}</span></div>
+                    {(calcResult.comUnit || 0) > 0 && <div className="row"><span>− Comisión distribuidor <small style={{opacity:0.6,fontSize:'0.72rem'}}>({formProd.comision}%)</small></span><span style={{color:'var(--dorado)'}}>−{fCOP(calcResult.comUnit)}</span></div>}
+                    {icaU > 0 && <div className="row"><span>− ICA <small style={{opacity:0.6,fontSize:'0.72rem'}}>({icaPct.toFixed(2)}% de la venta)</small></span><span style={{color:'var(--dorado)'}}>−{fCOP(icaU)}</span></div>}
+                    <div className="row ganancia" style={{ fontWeight:700 }}>
+                      <span>UTILIDAD NETA por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>{(calcResult.comUnit || 0) > 0 ? '(con comisión)' : ''}</small></span>
+                      <span style={{ color: utilNeta >= 0 ? undefined : 'var(--rojo)' }}>{fCOP(utilNeta)} ({pMayor > 0 ? (utilNeta / pMayor * 100).toFixed(1) + '%' : '-'})</span>
+                    </div>
+                    {/* La comisión solo se paga a distribuidores: en venta directa esa plata se queda */}
+                    {(calcResult.comUnit || 0) > 0 && (
+                      <div className="row ganancia" style={{ fontWeight:700 }}>
+                        <span>UTILIDAD NETA sin comisión <small style={{opacity:0.6,fontSize:'0.72rem'}}>(venta directa)</small></span>
+                        <span style={{ color: (utilNeta + calcResult.comUnit) >= 0 ? 'var(--lima)' : 'var(--rojo)' }}>
+                          {fCOP(utilNeta + calcResult.comUnit)} ({pMayor > 0 ? ((utilNeta + calcResult.comUnit) / pMayor * 100).toFixed(1) + '%' : '-'})
+                        </span>
+                      </div>
+                    )}
+                    <div className="row ganancia"><span>Utilidad neta al detal</span><span style={{ color: utilNetaDetal >= 0 ? undefined : 'var(--rojo)' }}>{fCOP(utilNetaDetal)} ({pDetal > 0 ? (utilNetaDetal / pDetal * 100).toFixed(1) + '%' : '-'})</span></div>
+                  </div>
+
+                  {/* Lo que este producto significa al mes y su margen de contribución */}
+                  <div style={{ marginTop:10, paddingTop:8, borderTop:'1px dashed rgba(245,240,232,0.2)', fontSize:'0.78rem' }}>
+                    <div className="row"><span style={{ cursor:'help' }} title="Utilidad bruta = precio − costo de PRODUCCIÓN, antes de los gastos de administración y ventas. Es el margen con el que la empresa paga esos gastos.">Utilidad bruta (antes de gastos) ⓘ</span><span>{fCOP(calcResult.utilMayor)} ({pMayor > 0 ? (calcResult.utilMayor / pMayor * 100).toFixed(1) + '%' : '-'})</span></div>
+                    <div className="row"><span style={{ cursor:'help' }} title="Precio menos el costo VARIABLE (materia prima + empaque). Es lo que cada unidad aporta para cubrir los costos fijos. Si es negativo, vender más aumenta la pérdida.">Margen de contribución/u ⓘ</span><span style={{ color: (pMayor - calcResult.cvu) > 0 ? 'var(--lima)' : 'var(--rojo)' }}>{fCOP(pMayor - calcResult.cvu)}</span></div>
+                    <div className="row"><span>Unidades/mes proyectadas</span><span>{fNum(unidsMes)}</span></div>
+                    <div className="row"><span style={{ cursor:'help' }} title="Utilidad neta por unidad × unidades que produces al mes. Es lo que este producto le deja al negocio si se vende todo.">Utilidad del producto al mes ⓘ</span><span style={{ color: utilNeta * unidsMes >= 0 ? 'var(--lima)' : 'var(--rojo)', fontWeight:600 }}>{fCOP(utilNeta * unidsMes)}</span></div>
+                    <div className="row"><span style={{ cursor:'help' }} title="Unidades a vender al mes para cubrir los costos fijos, si este fuera el único producto. El mínimo real, repartido entre todo tu portafolio, está en Costos y Gastos.">Punto de equilibrio (solo) ⓘ</span><span>{calcResult.pe > 0 ? fNum(calcResult.pe) + ' unid/mes' : '—'}</span></div>
+                    <div className="row"><span style={{ cursor:'help' }} title="CIF del mes ÷ minutos productivos disponibles. Reparte el overhead SEGÚN EL TIEMPO que usa cada producto.">Costo fijo por minuto ⓘ</span><span>{fCOP(calcResult.costoMin)}/min</span></div>
+                    {ivaTot > 0 && <div className="row"><span>Precio mayor con impuestos <small style={{opacity:0.6,fontSize:'0.72rem'}}>({ivaTot}%)</small></span><span>{fCOP(pMayor * (1 + ivaTot / 100))}</span></div>}
+                  </div>
+                  {utilNeta < 0 && pMayor > 0 && (
+                    <div style={{ marginTop:8, padding:'8px 10px', background:'rgba(192,57,43,0.20)', borderRadius:6, fontSize:'0.78rem' }}>
+                      ⚠ Con este precio <strong>pierdes {fCOP(-utilNeta)} por unidad</strong> una vez cubiertos costos y gastos.
+                      Mira el precio sugerido a la izquierda.
+                    </div>
+                  )}
+                </>)
+              })()}
             </div>
           </div>
 
@@ -2117,10 +2353,10 @@ export default function Costos() {
           <div className="card">
             <div className="card-title">
               💰 Costos y Gastos del mes
-              <button className="btn btn-sm btn-dorado" style={{ marginLeft:'auto' }} disabled={recalcularFichas.isPending}
+              <button className="btn btn-sm btn-dorado" style={{ marginLeft:'auto' }} disabled={recalcularTodos.isPending}
                 title="Guarda en cada ficha el costo calculado con el CIF y la nómina vigentes. Producto Terminado, Órdenes y el Tablero usan ese valor guardado."
-                onClick={() => confirmar(`Se recalcularán y guardarán los costos de ${productos.length} ficha(s) con el CIF y la nómina actuales. ¿Continuar?`).then(ok => ok && recalcularFichas.mutate())}>
-                {recalcularFichas.isPending ? 'Recalculando…' : '↻ Aplicar a las fichas'}
+                onClick={() => confirmar(`Se recalcularán y guardarán los costos de ${productos.length} ficha(s) con el CIF y la nómina actuales. ¿Continuar?`).then(ok => ok && recalcularTodos.mutate())}>
+                {recalcularTodos.isPending ? 'Recalculando…' : '↻ Aplicar a las fichas'}
               </button>
             </div>
             <div className="alert alert-info" style={{ fontSize:'0.83rem' }}>
@@ -2233,35 +2469,62 @@ export default function Costos() {
             </div>
             {cifAbsorcion.items.length === 0
               ? <p style={{ color:'var(--texto-suave)', fontSize:'0.9rem' }}>Agrega fichas de costos para ver la absorción</p>
-              : <div className="table-wrap">
+              : (() => {
+                  // Porcentajes legibles: entero cuando es grande, un decimal cuando es pequeño
+                  const fPct = (v) => (!isFinite(v) ? '—' : Math.abs(v) >= 10 ? Math.round(v) + '%' : v.toFixed(1) + '%')
+                  // El tiempo en horas se lee mucho mejor que en miles de minutos
+                  const fTiempo = (min) => (Math.abs(min) >= 600 ? fNum(min / 60) + ' h' : fNum(min) + ' min')
+                  const sobreAbsorbe = cifAbsorcion.minutosUsados > minsDisponibles
+                  const pctDe = (v) => (cifTotal > 0 ? v / cifTotal * 100 : 0)
+                  // Ordenados de mayor a menor absorción: lo que más pesa, primero
+                  const filas = [...cifAbsorcion.items].sort((a, b) => b.absorbido - a.absorbido)
+                  const totalUnids = cifAbsorcion.items.reduce((s, i) => s + i.unidsMes, 0)
+                  return (
+                <div className="table-wrap">
                   <table>
-                    <thead><tr><th>Producto</th><th>Unid/mes</th><th>Minutos/mes</th><th>% del CIF</th><th>CIF absorbido/mes</th><th>CIF por unidad</th></tr></thead>
+                    <thead><tr><th>Producto</th><th>Unid/mes</th><th>Tiempo/mes</th><th>% del CIF</th><th>CIF absorbido/mes</th><th>CIF por unidad</th></tr></thead>
                     <tbody>
-                      {cifAbsorcion.items.map((i, idx) => {
-                        const pct = cifTotal > 0 ? i.absorbido / cifTotal * 100 : 0
+                      {filas.map((i, idx) => {
+                        const pct = pctDe(i.absorbido)
+                        const sinProcesos = i.minutosMes <= 0
                         return (
-                          <tr key={idx}>
-                            <td><strong>{i.nombre}</strong> <span className="badge badge-gris" style={{ fontSize:'0.7rem' }}>{i.tipo||''}</span></td>
+                          <tr key={idx} style={sinProcesos ? { opacity: 0.6 } : undefined}>
+                            <td>
+                              <strong>{i.nombre}</strong> {i.tipo && <span className="badge badge-gris" style={{ fontSize:'0.7rem' }}>{i.tipo}</span>}
+                              {sinProcesos && <div style={{ fontSize:'0.72rem', color:'var(--tierra)' }}>Sin procesos con minutos: no absorbe CIF</div>}
+                            </td>
                             <td className="td-number">{fNum(i.unidsMes)}</td>
-                            <td className="td-number">{fNum(i.minutosMes)}</td>
+                            <td className="td-number">{sinProcesos ? '—' : fTiempo(i.minutosMes)}</td>
                             <td className="td-number">
                               <div style={{ display:'flex', alignItems:'center', gap:6, justifyContent:'flex-end' }}>
-                                <div className="progress" style={{ width:70 }}><div className="progress-bar" style={{ width:Math.min(100,pct).toFixed(1)+'%' }} /></div>
-                                {pct.toFixed(1)}%
+                                <div className="progress" style={{ width:60 }}><div className="progress-bar" style={{ width:Math.min(100, Math.max(0, pct)).toFixed(0)+'%' }} /></div>
+                                {fPct(pct)}
                               </div>
                             </td>
                             <td className="td-number">{fCOP(i.absorbido)}</td>
-                            <td className="td-number text-dorado"><strong>{fCOP(i.cifUnit)}</strong></td>
+                            <td className="td-number text-dorado"><strong>{sinProcesos ? '—' : fCOP(i.cifUnit)}</strong></td>
                           </tr>
                         )
                       })}
-                      {cifAbsorcion.ocioso > 1 && (
+                      {/* Capacidad ociosa: CIF pagado que ningún producto absorbió */}
+                      {!sobreAbsorbe && cifAbsorcion.ocioso > 1 && (
                         <tr style={{ background:'rgba(192,57,43,0.08)' }}>
-                          <td><strong>⚠ Capacidad ociosa</strong><div style={{ fontSize:'0.72rem', color:'var(--texto-suave)' }}>CIF que ningún producto absorbe porque la planta no opera a tope. Según NIC 2 no se puede cargar al inventario: va al resultado del mes.</div></td>
+                          <td><strong>⚠ Capacidad ociosa</strong><div style={{ fontSize:'0.72rem', color:'var(--texto-suave)' }}>CIF que ningún producto absorbe porque la planta no opera a tope. Según NIC 2 no se carga al inventario: va al resultado del mes.</div></td>
                           <td className="td-number">—</td>
-                          <td className="td-number">{fNum(minsDisponibles - cifAbsorcion.minutosUsados)}</td>
-                          <td className="td-number">{cifTotal > 0 ? (cifAbsorcion.ocioso / cifTotal * 100).toFixed(1) : '0'}%</td>
+                          <td className="td-number">{fTiempo(minsDisponibles - cifAbsorcion.minutosUsados)}</td>
+                          <td className="td-number">{fPct(pctDe(cifAbsorcion.ocioso))}</td>
                           <td className="td-number" style={{ color:'var(--rojo)' }}><strong>{fCOP(cifAbsorcion.ocioso)}</strong></td>
+                          <td>—</td>
+                        </tr>
+                      )}
+                      {/* Sobre-absorción: se trabajó MÁS de la capacidad configurada */}
+                      {sobreAbsorbe && (
+                        <tr style={{ background:'rgba(200,169,74,0.14)' }}>
+                          <td><strong>⚠ Sobre-absorción</strong><div style={{ fontSize:'0.72rem', color:'var(--texto-suave)' }}>Se usaron más minutos de los que tiene la capacidad configurada, así que los productos cargaron más CIF del que existe. Sube el N° de operarios o los días/jornada arriba para que cuadre.</div></td>
+                          <td className="td-number">—</td>
+                          <td className="td-number">+{fTiempo(cifAbsorcion.minutosUsados - minsDisponibles)}</td>
+                          <td className="td-number">+{fPct(pctDe(-cifAbsorcion.ocioso))}</td>
+                          <td className="td-number" style={{ color:'var(--tierra)' }}><strong>+{fCOP(-cifAbsorcion.ocioso)}</strong></td>
                           <td>—</td>
                         </tr>
                       )}
@@ -2269,20 +2532,27 @@ export default function Costos() {
                     <tfoot>
                       <tr style={{ background:'var(--selva)', color:'var(--crema)' }}>
                         <td><strong>TOTAL</strong></td>
-                        <td className="td-number">{fNum(cifAbsorcion.items.reduce((s,i)=>s+i.unidsMes,0))}</td>
-                        <td className="td-number">{fNum(minsDisponibles)}</td>
-                        <td className="td-number">100%</td>
-                        <td className="td-number">{fCOP(cifTotal)}</td>
+                        <td className="td-number">{fNum(totalUnids)}</td>
+                        {/* Tiempo: el disponible cuando sobra capacidad; el realmente usado cuando se excede */}
+                        <td className="td-number">{fTiempo(Math.max(minsDisponibles, cifAbsorcion.minutosUsados))}</td>
+                        <td className="td-number">{fPct(pctDe(sobreAbsorbe ? cifAbsorcion.totalAbsorbido : cifTotal))}</td>
+                        <td className="td-number">{fCOP(sobreAbsorbe ? cifAbsorcion.totalAbsorbido : cifTotal)}</td>
                         <td>—</td>
                       </tr>
                     </tfoot>
                   </table>
                   <div style={{ fontSize:'0.8rem', color:'var(--texto-suave)', marginTop:8 }}>
-                    Uso de capacidad: <strong style={{ color: cifAbsorcion.usoCapacidadPct >= 80 ? 'var(--selva)' : cifAbsorcion.usoCapacidadPct >= 50 ? 'var(--dorado)' : 'var(--rojo)' }}>{cifAbsorcion.usoCapacidadPct.toFixed(1)}%</strong>
-                    {' '}({fNum(cifAbsorcion.minutosUsados)} de {fNum(minsDisponibles)} minutos disponibles al mes).
-                    {cifAbsorcion.ocioso > 1 && <> Si produjeras a capacidad plena, ese {fCOP(cifAbsorcion.ocioso)}/mes se repartiría entre más unidades y cada producto costaría menos.</>}
+                    Uso de capacidad: <strong style={{ color: sobreAbsorbe ? 'var(--tierra)' : cifAbsorcion.usoCapacidadPct >= 80 ? 'var(--selva)' : cifAbsorcion.usoCapacidadPct >= 50 ? 'var(--dorado)' : 'var(--rojo)' }}>{fPct(cifAbsorcion.usoCapacidadPct)}</strong>
+                    {' '}({fTiempo(cifAbsorcion.minutosUsados)} de {fTiempo(minsDisponibles)} al mes).
+                    {sobreAbsorbe
+                      ? <> Estás produciendo por encima de la capacidad configurada, así que el costo/minuto está <strong>sobrestimado</strong> y encarece las fichas. Ajusta los parámetros de operación arriba.</>
+                      : cifAbsorcion.ocioso > 1
+                        ? <> Si produjeras a capacidad plena, ese {fCOP(cifAbsorcion.ocioso)}/mes se repartiría entre más unidades y cada producto costaría menos.</>
+                        : null}
                   </div>
                 </div>
+                  )
+                })()
             }
             {productos.length === 0 && (
               <div style={{ marginTop:12, padding:10, background:'white', borderRadius:'var(--radio)', border:'1px solid var(--crema-oscuro)' }}>
@@ -2299,7 +2569,9 @@ export default function Costos() {
             const mcTotalMes = peqMultiproducto.reduce((s, i) => s + i.mcu * i.q, 0)
             const unidsMesTot = peqMultiproducto.reduce((s, i) => s + i.q, 0)
             const mcuProm = unidsMesTot > 0 ? mcTotalMes / unidsMesTot : 0
-            const fijosTot = cifTotal + gastosOperMensuales
+            // Fijos = CIF + gastos de administración, ventas y financieros. El ICA no entra:
+            // es un porcentaje de la venta (variable), no un costo fijo del mes.
+            const fijosTot = cifTotal + gastosFijosOper
             const peContable = getPEqCaja(fijosTot, 0, mcuProm)
             const peCaja = getPEqCaja(fijosTot, gastosOp.pasivo.total, mcuProm)
             return (
@@ -2323,8 +2595,45 @@ export default function Costos() {
                         </div>
                       </div>
                       <div style={{ fontSize:'0.78rem', color:'var(--texto-suave)', marginTop:10 }}>
-                        Costos fijos {fCOP(fijosTot)} (producción {fCOP(cifTotal)} + gastos {fCOP(gastosOperMensuales)}) ÷ margen de contribución promedio {fCOP(mcuProm)}/u.
+                        Costos fijos {fCOP(fijosTot)} (producción {fCOP(cifTotal)} + gastos {fCOP(gastosFijosOper)}) ÷ margen de contribución promedio {fCOP(mcuProm)}/u.
                         {gastosOp.pasivo.total > 0 && <> El abono a deuda de {fCOP(gastosOp.pasivo.total)}/mes no es gasto, pero exige vender <strong>{fNum(peCaja - peContable)} unidades más</strong> para no quedarte sin caja.</>}
+                      </div>
+
+                      {/* Mínimo a vender de CADA producto, según su peso en el portafolio */}
+                      <div style={{ marginTop:14 }}>
+                        <strong style={{ color:'var(--selva)', fontSize:'0.88rem' }}>Cuánto debes vender de cada producto</strong>
+                        <div className="alert alert-info" style={{ fontSize:'0.8rem', margin:'6px 0 8px' }}>
+                          ℹ El mínimo de cada producto se reparte según su <strong>participación en unidades</strong> del portafolio.
+                          Es el punto en que no ganas ni pierdes: por encima de esa cifra, cada unidad deja utilidad.
+                        </div>
+                        <div className="table-wrap">
+                          <table>
+                            <thead><tr><th>Producto</th><th className="td-number">Produces/mes</th><th className="td-number">Margen/u</th><th className="td-number">Mínimo a vender</th><th className="td-number">Holgura</th></tr></thead>
+                            <tbody>
+                              {peqMultiproducto.map((i, idx) => {
+                                const holgura = i.q - i.pe
+                                const ok = holgura >= 0
+                                return (
+                                  <tr key={idx}>
+                                    <td><strong>{i.nombre}</strong></td>
+                                    <td className="td-number">{fNum(i.q)}</td>
+                                    <td className="td-number" style={{ color: i.mcu > 0 ? 'var(--selva)' : 'var(--rojo)' }}>{fCOP(i.mcu)}</td>
+                                    <td className="td-number"><strong>{i.mcu > 0 ? fNum(i.pe) : '—'}</strong></td>
+                                    <td className="td-number" style={{ color: ok ? 'var(--selva)' : 'var(--rojo)', fontWeight:600 }}>
+                                      {i.mcu > 0 ? (ok ? `+${fNum(holgura)}` : `${fNum(holgura)}`) : 'sin margen'}
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                        <div style={{ fontSize:'0.76rem', color:'var(--texto-suave)', marginTop:6 }}>
+                          <strong>Holgura</strong> = lo que produces al mes menos el mínimo. En verde te sobra colchón; en rojo
+                          ese producto no alcanza a cubrir la parte de costos fijos que le corresponde, aunque el portafolio
+                          completo sí lo haga. Si un producto queda con <em>margen/u</em> negativo, su precio está por debajo
+                          de su costo variable: ahí no hay volumen que lo salve, hay que subir el precio o bajar el costo.
+                        </div>
                       </div>
                     </>}
               </div>

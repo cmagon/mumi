@@ -3,10 +3,13 @@ import { Routes, Route, Link, NavLink, useNavigate, useLocation } from 'react-ro
 import { Leaf, Truck, ShieldCheck, MessageCircle, ShoppingCart, ArrowLeft, Plus, Minus, Trash2, Instagram, Facebook, Youtube, Twitter, Music2, Heart, Send, X, Menu } from 'lucide-react'
 import { useStore } from './store'
 import { Home, Producto, Nosotros, Contacto, Favoritos, Mayorista, Pagina, Galeria } from './pages'
-import { fCOP, iconoDe, confirmarPedidoWA, suscribir, abrirWA, FAVORITOS, cargarGoogleFonts, getCliente, setCliente } from './utils'
+import { fCOP, iconoDe, confirmarPedidoWA, suscribir, abrirWA, FAVORITOS, cargarGoogleFonts, getCliente, setCliente, mensajeSolicitudMayorista, textoEnvio } from './utils'
+import { ModalNombre } from './ui'
+import DOMPurify from 'dompurify'
 import FrutoIcon from './FrutoIcon'
 import Logo from './Logo'
 import BenefitIcon from './BenefitIcon'
+import PagoIcon from './PagoIcon'
 
 // ---- Utilidades de color para derivar la paleta de la plantilla ----
 function hexToRgb(h) {
@@ -71,10 +74,39 @@ function useBodyLock(active) {
   }, [active])
 }
 
+// ---- Aviso superior: hasta 3 mensajes cortos que rotan sobre el header ----
+function AvisoSuperior({ cfg }) {
+  const avisos = (Array.isArray(cfg?.avisos) ? cfg.avisos : []).map(a => (typeof a === 'string' ? a : a?.texto)).filter(a => a && a.trim())
+  const [i, setI] = useState(0)
+  useEffect(() => { if (avisos.length <= 1) return; const t = setInterval(() => setI(x => (x + 1) % avisos.length), 5000); return () => clearInterval(t) }, [avisos.length])
+  if (!avisos.length) return null
+  return (
+    <div className="aviso-top" role="status">
+      <div className="aviso-track" key={i}>{avisos[i % avisos.length]}</div>
+    </div>
+  )
+}
+
+// ---- Modal de términos y política de datos ----
+function ModalTerminos({ cfg, onClose }) {
+  useBodyLock(true)
+  return (
+    <div className="overlay" style={{ alignItems: 'center' }} onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="sheet" style={{ maxWidth: 720, maxHeight: '86vh', borderRadius: 18 }}>
+        <div className="sheet-hd"><span className="serif" style={{ flex: 1 }}>Términos y política de datos</span><button className="iconbtn" onClick={onClose}><X size={20} /></button></div>
+        <div className="rich-content" style={{ padding: 16, lineHeight: 1.65, color: 'var(--texto-suave)' }}
+          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(cfg?.terminos_texto || '') }} />
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const { cfg, nItems, total, favs, mayorista, setMayorista } = useStore()
   const [verCarrito, setVerCarrito] = useState(false)
   const [menu, setMenu] = useState(false)
+  const [pedirNombre, setPedirNombre] = useState(false)   // modal previo a solicitar ser mayorista
+  const [verTerminos, setVerTerminos] = useState(false)
   // Si el usuario no pone nombre/slogan, se usa el valor por defecto de la app.
   // Con "solo logo" se ocultan los textos en pantallas pequeñas (solo se ve el logo).
   const marca = (cfg.nombre_tienda && cfg.nombre_tienda.trim()) ? cfg.nombre_tienda : 'Mumi Amazonia'
@@ -83,9 +115,26 @@ export default function App() {
   useBodyLock(menu)
   useEffect(() => { cargarGoogleFonts([cfg.fuente_titulos, cfg.fuente_subtitulos, cfg.fuente_texto]) }, [cfg.fuente_titulos, cfg.fuente_subtitulos, cfg.fuente_texto])
 
+  // Modo mantenimiento: el catálogo se oculta y se muestra un aviso
+  if (cfg.mantenimiento_activo) {
+    return (
+      <div className="wrap" style={estilo}>
+        <div className="mantenimiento">
+          {cfg.logo_url ? <img src={cfg.logo_url} alt="" style={{ width: 84, height: 84, borderRadius: 16, objectFit: 'cover' }} /> : <Logo size={72} style={{ color: 'var(--dorado)' }} />}
+          <h1 className="serif" style={{ fontSize: '1.7rem', color: 'var(--selva)', marginTop: 12 }}>{marca}</h1>
+          <p style={{ color: 'var(--texto-suave)', marginTop: 8, maxWidth: '38ch' }}>
+            {cfg.mantenimiento_mensaje || 'Estamos haciendo mejoras en la tienda. Volvemos muy pronto 🌿'}
+          </p>
+          {cfg.whatsapp && <a className="btn btn-wa" style={{ width: 'auto', marginTop: 16 }} href={`https://wa.me/${(cfg.whatsapp || '').replace(/[^0-9]/g, '')}`} target="_blank" rel="noreferrer"><MessageCircle size={18} /> Escríbenos</a>}
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="wrap" style={estilo}>
       <ScrollToTop />
+      <AvisoSuperior cfg={cfg} />
       {/* Header */}
       <header className={`hdr ${cfg.solo_logo ? 'solo-logo' : ''}`}>
         <div className="hdr-brand">
@@ -120,7 +169,7 @@ export default function App() {
             {paginasVisibles(cfg).map(p => <NavLink key={p.slug} to={`/p/${p.slug}`} onClick={() => setMenu(false)} className={({ isActive }) => isActive ? 'on' : ''}>{p.titulo}</NavLink>)}
             <NavLink to="/contacto" onClick={() => setMenu(false)} className={({ isActive }) => isActive ? 'on' : ''}>Contacto</NavLink>
             {FAVORITOS && <NavLink to="/favoritos" onClick={() => setMenu(false)} className={({ isActive }) => isActive ? 'on' : ''}>Favoritos</NavLink>}
-            {cfg.mayorista_activo && <button className="menu-mayo" onClick={() => { setMenu(false); abrirWA(cfg, cfg.mayorista_wa_texto || 'Hola, me interesa ser mayorista.') }}><MessageCircle size={17} /> Ser mayorista</button>}
+            {cfg.mayorista_activo && <button className="menu-mayo" onClick={() => { setMenu(false); setPedirNombre(true) }}><MessageCircle size={17} /> Ser mayorista</button>}
           </nav>
         </div>
       )}
@@ -134,7 +183,7 @@ export default function App() {
       )}
 
       {/* Invitación a ser mayorista (barra fija bajo el nav) */}
-      {!mayorista && cfg.mayorista_activo && <InvitacionMayorista cfg={cfg} />}
+      {!mayorista && cfg.mayorista_activo && <InvitacionMayorista cfg={cfg} onSolicitar={() => setPedirNombre(true)} />}
 
       {/* Barra de beneficios (configurable, debajo de la de mayorista) */}
       <BarraBeneficios cfg={cfg} />
@@ -153,7 +202,14 @@ export default function App() {
         <Route path="*" element={<Home />} />
       </Routes>
 
-      <Footer cfg={cfg} />
+      <Footer cfg={cfg} onSolicitar={() => setPedirNombre(true)} onTerminos={() => setVerTerminos(true)} />
+      {verTerminos && <ModalTerminos cfg={cfg} onClose={() => setVerTerminos(false)} />}
+      {pedirNombre && (
+        <ModalNombre inicial={getCliente()} titulo="¿Cómo te llamas?"
+          texto="Así sabemos con quién hablamos al enviarte los precios de mayorista."
+          onClose={() => setPedirNombre(false)}
+          onConfirmar={(n) => { setCliente(n); setPedirNombre(false); abrirWA(cfg, mensajeSolicitudMayorista(cfg, n)) }} />
+      )}
       <WelcomePopup cfg={cfg} />
 
       {/* Barra carrito flotante */}
@@ -169,15 +225,14 @@ export default function App() {
 }
 
 // ---- Invitación a ser mayorista (barra fija descartable bajo el nav) ----
-function InvitacionMayorista({ cfg }) {
+function InvitacionMayorista({ cfg, onSolicitar }) {
   const [oculto, setOculto] = useState(() => { try { return sessionStorage.getItem('mumi_mayo_hide') === '1' } catch { return false } })
   if (oculto) return null
   const cerrar = () => { setOculto(true); try { sessionStorage.setItem('mumi_mayo_hide', '1') } catch { /* noop */ } }
-  const pedir = () => abrirWA(cfg, cfg.mayorista_wa_texto || 'Hola, me interesa ser mayorista.')
   return (
     <div className="mayo-invita">
       <span className="mayo-invita-txt">{cfg.mayorista_mensaje || '¿Eres mayorista? Accede a precios especiales por volumen.'}</span>
-      <button className="mayo-invita-btn" onClick={pedir}><MessageCircle size={14} /> Quiero ser mayorista</button>
+      <button className="mayo-invita-btn" onClick={onSolicitar}><MessageCircle size={14} /> Quiero ser mayorista</button>
       <button className="mayo-invita-x" onClick={cerrar} aria-label="Cerrar"><X size={16} /></button>
     </div>
   )
@@ -215,13 +270,24 @@ function CartDrawer({ onClose }) {
             </div>
             {mayorista && <div style={{ padding: '0 16px', color: 'var(--selva)', fontSize: '0.8rem', fontWeight: 700 }}>Precios de mayorista aplicados 🏷️</div>}
             <div style={{ padding: '4px 16px 8px', display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: '1.1rem', color: 'var(--selva)' }}><span>Total</span><span>{fCOP(total)}</span></div>
+            {textoEnvio(cfg) && <p style={{ padding: '0 16px 6px', color: 'var(--texto-suave)', fontSize: '0.82rem' }}>{textoEnvio(cfg)}</p>}
             {pedidoMinimo > 0 && total < pedidoMinimo && <p style={{ padding: '0 16px 8px', color: 'var(--tierra)', fontSize: '0.82rem' }}>Pedido mínimo{mayorista ? ' mayorista' : ''} sugerido: {fCOP(pedidoMinimo)}</p>}
             <div style={{ padding: '4px 16px 16px' }}>
               <button className="btn btn-wa" disabled={!nombreOk} style={!nombreOk ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}
-                onClick={() => nombreOk && confirmarPedidoWA(carrito, nota, cfg, mayorista, cfg.wa_texto_stock, nombre.trim())}>
+                onClick={() => nombreOk && confirmarPedidoWA(carrito, nota, cfg, mayorista, mayorista ? (cfg.wa_texto_mayorista || cfg.wa_texto_stock) : cfg.wa_texto_stock, nombre.trim())}>
                 <MessageCircle size={18} /> Confirmar por WhatsApp
               </button>
             </div>
+            {Array.isArray(cfg.pagos) && cfg.pagos.filter(p => p?.nombre).length > 0 && (
+              <div className="pagos">
+                <div className="pagos-tit">Medios de pago</div>
+                <div className="pagos-lista">
+                  {cfg.pagos.filter(p => p?.nombre).map((p, i) => (
+                    <span className="pago" key={i}><PagoIcon name={p.icono} size={16} /> {p.nombre}</span>
+                  ))}
+                </div>
+              </div>
+            )}
             <div className="trust">🔒 Seguro · 🌿 Natural · 🚚 Envío nacional</div>
           </>}
       </div>
@@ -292,7 +358,7 @@ function BarraBeneficios({ cfg }) {
 }
 
 // ---- Footer ----
-function Footer({ cfg }) {
+function Footer({ cfg, onSolicitar, onTerminos }) {
   const wa = (cfg?.whatsapp || '+573157702180').replace(/[^0-9]/g, '')
   const nombre = (cfg?.nombre_tienda || '').trim()          // nombre de la empresa (config)
   const marcaFooter = nombre || 'Mumi Amazonia'             // encabezado del footer (sin emoji)
@@ -315,6 +381,7 @@ function Footer({ cfg }) {
         {tieneNosotros(cfg) && <Link to="/nosotros">Nosotros</Link>}
         <Link to="/contacto">Contacto</Link>
         <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer">WhatsApp</a>
+        {cfg?.terminos_texto?.trim() && <button onClick={onTerminos}>Términos y datos</button>}
       </div>
       {redes.length > 0 && (
         <div className="ftr-redes">
