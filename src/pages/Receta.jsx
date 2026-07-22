@@ -12,6 +12,7 @@ import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
 import ImageCropper from '../components/ui/ImageCropper'
 import BuscadorSelect from '../components/ui/BuscadorSelect'
+import Select from '../components/ui/Select'
 
 export default function Receta({ embedded = false, productos = [], onConvertir }) {
   const toast = useToast()
@@ -450,11 +451,11 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
         <div className="grid-resp" style={{ gridTemplateColumns: '1fr 1fr auto', gap: 16, marginBottom: 20, alignItems: 'end' }}>
           <div className="form-group" style={{ margin: 0 }}>
             <label className="form-label">Cargar receta existente</label>
-            <select className="form-control" value={selValue} onChange={e => cargarReceta(e.target.value)}>
+            <Select className="form-control" value={selValue} onChange={e => cargarReceta(e.target.value)}>
               <option value="">— nueva receta —</option>
               {productos.length > 0 && <optgroup label="⭐ Recetas Base (productos)">{productos.map(p => <option key={p.id} value={`prod-${p.id}`}>⭐ {p.nombre}</option>)}</optgroup>}
               {!esAuxiliar && recetas.length > 0 && <optgroup label="💾 Recetas Rápidas">{recetas.map(r => <option key={r.id} value={`recipe-${r.id}`}>💾 {r.nombre}</option>)}</optgroup>}
-            </select>
+            </Select>
           </div>
           <div className="form-group" style={{ margin: 0 }}>
             <label className="form-label">Nombre de la receta</label>
@@ -687,10 +688,10 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
                   <div className="form-grid-2" style={{ gap: 10 }}>
                     <div className="form-group" style={{ margin: 0 }}>
                       <label className="form-label" style={{ color: 'rgba(245,240,232,0.7)' }}>Ingrediente ancla</label>
-                      <select className="form-control" value={ancla} onChange={e => setAncla(e.target.value)} style={{ background: 'rgba(8, 72, 11, 0.55)', color: 'white', borderColor: 'rgba(200,169,74,0.4)' }}>
+                      <Select className="form-control" value={ancla} onChange={e => setAncla(e.target.value)} style={{ background: 'rgba(8, 72, 11, 0.55)', color: 'white', borderColor: 'rgba(200,169,74,0.4)' }}>
                         <option value="">Seleccionar...</option>
                         {nombresIng.map(n => <option key={n} value={n}>{n}</option>)}
-                      </select>
+                      </Select>
                     </div>
                     <div className="form-group" style={{ margin: 0 }}>
                       <label className="form-label" style={{ color: 'rgba(245,240,232,0.7)' }}>Cantidad disponible (g)</label>

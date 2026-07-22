@@ -3,6 +3,7 @@ import { uploadFile } from '../lib/supabase'
 import { getConfig, saveConfig, aplicarTema, DEFAULT_CFG, PALETAS } from '../lib/appConfig'
 import { useToast } from '../hooks/useToast'
 import { Settings, Building2, Palette, Leaf, Upload, RotateCcw, Save, Trash2 } from 'lucide-react'
+import Select from '../components/ui/Select'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 // Fuentes agrupadas para el selector. Las Google Fonts se importan en globals.css.
@@ -103,14 +104,14 @@ export default function Configuracion() {
           <div className="form-group"><label className="form-label">Color dorado/acento</label><input type="color" className="form-control" style={{ height: 40, padding: 4 }} value={cfg.color_dorado} onChange={e => set('color_dorado', e.target.value)} /></div>
           <div className="form-group"><label className="form-label">Color secundario</label><input type="color" className="form-control" style={{ height: 40, padding: 4 }} value={cfg.color_acento} onChange={e => set('color_acento', e.target.value)} /></div>
           <div className="form-group"><label className="form-label">Fuente principal (texto)</label>
-            <select className="form-control" style={{ fontFamily: `'${cfg.fuente}', sans-serif` }} value={cfg.fuente} onChange={e => set('fuente', e.target.value)}>
+            <Select className="form-control" style={{ fontFamily: `'${cfg.fuente}', sans-serif` }} value={cfg.fuente} onChange={e => set('fuente', e.target.value)}>
               <OpcionesFuentes />
-            </select>
+            </Select>
           </div>
           <div className="form-group"><label className="form-label">Fuente secundaria (títulos)</label>
-            <select className="form-control" style={{ fontFamily: `'${cfg.fuente_titulos}', serif` }} value={cfg.fuente_titulos} onChange={e => set('fuente_titulos', e.target.value)}>
+            <Select className="form-control" style={{ fontFamily: `'${cfg.fuente_titulos}', serif` }} value={cfg.fuente_titulos} onChange={e => set('fuente_titulos', e.target.value)}>
               <OpcionesFuentes />
-            </select>
+            </Select>
           </div>
         </div>
 

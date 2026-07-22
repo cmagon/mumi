@@ -4,6 +4,7 @@
 import { useEffect, useState } from 'react'
 import { Clock } from 'lucide-react'
 import TimeWheel from './TimeWheel'
+import Select from './Select'
 
 const HORAS12 = Array.from({ length: 12 }, (_, i) => i + 1)
 const MINUTOS = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'))
@@ -74,19 +75,19 @@ export default function TimeField({ value, onChange, disabled }) {
   const sel = { width: 'auto', padding: '6px 8px' }
   return (
     <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
-      <select className="form-control" style={sel} value={h} disabled={disabled} onChange={e => set(e.target.value, m || '00', ap)}>
+      <Select className="form-control" style={sel} value={h} disabled={disabled} onChange={e => set(e.target.value, m || '00', ap)}>
         <option value="">--</option>
         {HORAS12.map(x => <option key={x} value={x}>{x}</option>)}
-      </select>
+      </Select>
       <strong>:</strong>
-      <select className="form-control" style={sel} value={m} disabled={disabled} onChange={e => set(h || '12', e.target.value, ap)}>
+      <Select className="form-control" style={sel} value={m} disabled={disabled} onChange={e => set(h || '12', e.target.value, ap)}>
         <option value="">--</option>
         {MINUTOS.map(x => <option key={x} value={x}>{x}</option>)}
-      </select>
-      <select className="form-control" style={sel} value={ap} disabled={disabled} onChange={e => set(h || '12', m || '00', e.target.value)}>
+      </Select>
+      <Select className="form-control" style={sel} value={ap} disabled={disabled} onChange={e => set(h || '12', m || '00', e.target.value)}>
         <option value="AM">AM</option>
         <option value="PM">PM</option>
-      </select>
+      </Select>
     </div>
   )
 }

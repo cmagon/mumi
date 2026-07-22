@@ -118,7 +118,7 @@ export default function App() {
   // Modo mantenimiento: el catálogo se oculta y se muestra un aviso
   if (cfg.mantenimiento_activo) {
     return (
-      <div className="wrap" style={estilo}>
+      <div className={`wrap dis-${cfg.diseno || 'selva'}`} style={estilo}>
         <div className="mantenimiento">
           {cfg.logo_url ? <img src={cfg.logo_url} alt="" style={{ width: 84, height: 84, borderRadius: 16, objectFit: 'cover' }} /> : <Logo size={72} style={{ color: 'var(--dorado)' }} />}
           <h1 className="serif" style={{ fontSize: '1.7rem', color: 'var(--selva)', marginTop: 12 }}>{marca}</h1>
@@ -132,7 +132,7 @@ export default function App() {
   }
 
   return (
-    <div className="wrap" style={estilo}>
+    <div className={`wrap dis-${cfg.diseno || 'selva'}`} style={estilo}>
       <ScrollToTop />
       <AvisoSuperior cfg={cfg} />
       {/* Header */}

@@ -8,6 +8,7 @@ import { writeOrQueue } from '../lib/offlineQueue'
 import { getConfig } from '../lib/appConfig'
 import { useReorder } from '../hooks/useReorder'
 import TimeField from '../components/ui/TimeField'
+import BuscadorSelect from '../components/ui/BuscadorSelect'
 import { fFecha, fNum, fCOP, componerSurtido } from '../lib/businessLogic'
 import { setBusy } from '../lib/busy'
 import Cargando from '../components/ui/Cargando'
@@ -39,6 +40,7 @@ function SiNo({ value, onChange }) {
   )
 }
 import Modal from '../components/ui/Modal'
+import Select from '../components/ui/Select'
 
 const ESTADO_LABEL = {
   pendiente:  { txt: 'Pendiente',  badge: 'badge-gris' },
@@ -176,6 +178,10 @@ export default function OrdenesProduccion() {
   // Insumos imprimibles de la ficha (etiquetas/rótulos en PDF) para que el operario los imprima
   const [prepImprimibles, setPrepImprimibles] = useState([])
   const [impBusy, setImpBusy] = useState('')
+  // Ajuste de cantidades de ingredientes en planta: se guarda la cantidad ORIGINAL de la receta
+  // para poder calcular la diferencia y ajustar el stock de MP al enviar la orden.
+  const [prepIngsBase, setPrepIngsBase] = useState([])   // snapshot de la receta, no se toca
+  const [editIngs, setEditIngs] = useState(false)        // modo edición habilitado (tras advertir)
   const prepFotoRef = useRef()
   // Receta del producto seleccionado en Nueva Orden (para planear por ingrediente disponible)
   const [prodReceta, setProdReceta] = useState(null)   // { ings, unidsBacheNet, bache, pesoUnidad, pesoSubp }
@@ -317,6 +323,63 @@ export default function OrdenesProduccion() {
     .filter(s => s.peso > 0 || (ordenPrep && prepLotesExtra.some(e => e.saldo_id === s.id)))
 
   // Devuelve el/los lote(s) de MP usados por un ingrediente, cruzando por mp_id (o nombre) contra la trazabilidad.
+  // ---- Ajustes de ingredientes en planta ----
+  // Reaplica sobre la receta los ajustes que ya estaban guardados en la orden, para que al
+  // reabrir el modal se vean las cantidades reales y no las teóricas.
+  const aplicarAjustesGuardados = (ings, ajustes) => {
+    if (!Array.isArray(ajustes) || !ajustes.length) return ings
+    return ings.map(i => {
+      const a = ajustes.find(x => (i.mpId != null && String(x.mp_id) === String(i.mpId))
+        || String(x.nombre || '').trim().toLowerCase() === String(i.nombre || '').trim().toLowerCase())
+      return a && a.real != null ? { ...i, gramos: Number(a.real) || 0 } : i
+    })
+  }
+  // Diferencias vigentes entre lo que se va a usar y lo que pedía la receta
+  const calcAjustes = () => prepIngs.map((i, k) => {
+    const previsto = Number(prepIngsBase[k]?.gramos) || 0
+    const real = Number(i.gramos) || 0
+    const delta = real - previsto
+    return Math.abs(delta) < 0.01 ? null : { mp_id: i.mpId ?? null, nombre: i.nombre, previsto, real, delta }
+  }).filter(Boolean)
+
+  // La MP guarda su stock en SU unidad (Kg, Litro, Gramo…); la receta trabaja en gramos/ml
+  const gramosAUnidadMP = (gramos, unidad) => {
+    const u = String(unidad || '').trim().toLowerCase()
+    return (u === 'kg' || u.startsWith('kilo') || u === 'litro' || u.startsWith('lit')) ? gramos / 1000 : gramos
+  }
+
+  // 1ª advertencia: cambiar la receta en planta no es lo habitual, así que se pide confirmación
+  // ANTES de dejar editar. Evita ediciones accidentales al tocar la pantalla en la tablet.
+  const habilitarEdicionIngs = async () => {
+    const ok = await confirmar(
+      'Vas a cambiar las cantidades de ingredientes de este lote.\n\n' +
+      'No es lo recomendable: lo normal es respetar la receta de la ficha. Hazlo solo si en planta ' +
+      'realmente se gastó una cantidad distinta (se derramó, sobró, la fruta rindió diferente...).\n\n' +
+      '¿Continuar?',
+      { title: 'Corregir cantidades de la receta', confirmText: 'Sí, corregir' })
+    if (ok) setEditIngs(true)
+  }
+  const cancelarEdicionIngs = () => { setPrepIngs(prepIngsBase.map(i => ({ ...i }))); setEditIngs(false) }
+
+  // 2ª advertencia: al aplicar se detalla exactamente qué se descuenta y qué se devuelve.
+  // El ajuste de stock ocurre al ENVIAR la orden, no aquí (si no, cancelar dejaría el stock movido).
+  const confirmarAjustesIngs = async () => {
+    const ajustes = calcAjustes()
+    if (!ajustes.length) { setEditIngs(false); return }
+    const detalle = ajustes.map(a => {
+      const mp = a.mp_id != null ? mps.find(m => String(m.id) === String(a.mp_id)) : null
+      const sufijo = mp ? '' : '  (sin materia prima enlazada: NO ajusta stock)'
+      return a.delta > 0
+        ? `• ${a.nombre}: se DESCUENTAN ${fCant(a.delta)} g adicionales del inventario${sufijo}`
+        : `• ${a.nombre}: se DEVUELVEN ${fCant(-a.delta)} g al inventario${sufijo}`
+    }).join('\n')
+    const ok = await confirmar(
+      `Confirma el movimiento de inventario que se hará al enviar la orden:\n\n${detalle}\n\n` +
+      'Estos cambios quedan registrados en la orden y se le avisará al administrador.',
+      { title: 'Confirmar ajuste de materia prima', confirmText: 'Confirmar ajuste' })
+    if (ok) { setEditIngs(false); toast(`${ajustes.length} ajuste(s) registrados — se aplicarán al enviar la orden`, 'success') }
+  }
+
   const loteDeTraza = (traza, ing) => {
     const key = String(ing?.nombre || '').trim().toLowerCase()
     const t = (traza || []).find(x => (ing?.mpId != null && String(x.mp_id) === String(ing.mpId)) || String(x.nombre || '').trim().toLowerCase() === key)
@@ -517,7 +580,9 @@ export default function OrdenesProduccion() {
 
   // Carga datos de la orden (ingredientes calculados + lote/vence/fecha/procesos)
   const prepararDatos = async (o) => {
-    setOrdenPrep(o); setPrepIngs([]); setPrepInfo(null); setPrepDatos(null); setPrepFicha(null)
+    // Al abrir otra orden se descarta cualquier edición de ingredientes a medio hacer
+    setOrdenPrep(o); setPrepIngs([]); setPrepIngsBase([]); setEditIngs(false)
+    setPrepInfo(null); setPrepDatos(null); setPrepFicha(null)
     // No se auto-asigna el lote: se deja el que ya tuviera la orden (si venía de una edición previa);
     // en el modal de proceso solo se SUGIERE (placeholder + botón "Usar sugerido").
     setPrepLote(o.lote || ''); setPrepVence(o.vence || '')
@@ -572,7 +637,10 @@ export default function OrdenesProduccion() {
           const costo = ((parseFloat(i.precio) || 0) / (parseFloat(i.presentacion) || 1000)) * gramos
           return { nombre: i.nombre, mpId: i.mpId || null, gramos, costo }
         })
-        setPrepIngs(ings)
+        // Snapshot de la receta ANTES de cualquier ajuste manual, y reaplicación de los
+        // ajustes ya guardados en la orden (si el operario reabre el modal).
+        setPrepIngsBase(ings)
+        setPrepIngs(aplicarAjustesGuardados(ings, o.ajustes_ingredientes))
         // mezclaPorUnid = gramos de MEZCLA que consume cada unidad final (= totalMezclaBache/unidsBacheNet).
         // Es el factor correcto para convertir unidades empacadas ↔ gramos de saldo gastados.
         setPrepInfo({ bache: unidsBacheNet, baches, pesoUnidad: pu, mezclaPorUnid: unidsBacheNet > 0 ? totalMezclaBache / unidsBacheNet : pu })
@@ -592,9 +660,15 @@ export default function OrdenesProduccion() {
         const ings = parse(rec.ingredientes).map(i => {
           const gramos = totalMezcla * ((parseFloat(i.pct) || 0) / 100)
           const costo = ((parseFloat(i.precio) || 0) / 1000) * gramos
-          return { nombre: i.nombre, gramos, costo }
+          // Las recetas rápidas no siempre guardan el mpId: se resuelve por nombre para poder
+          // mostrar el stock disponible de cada ingrediente igual que en los productos.
+          const mpId = i.mpId || mps.find(m => (m.nombre || '').trim().toLowerCase() === (i.nombre || '').trim().toLowerCase())?.id || null
+          return { nombre: i.nombre, mpId, gramos, costo }
         })
-        setPrepIngs(ings)
+        // Snapshot de la receta ANTES de cualquier ajuste manual, y reaplicación de los
+        // ajustes ya guardados en la orden (si el operario reabre el modal).
+        setPrepIngsBase(ings)
+        setPrepIngs(aplicarAjustesGuardados(ings, o.ajustes_ingredientes))
         setPrepInfo({ totalMezcla, pesoUnidad: pu, mezclaPorUnid: denom > 0 ? pu / denom : pu })
         setPrepDatos(calcDatosPrevistos(ings, rend, desp, pu))
         setPrepFicha(rec.ficha_url ? { url: rec.ficha_url, nombre: rec.ficha_nombre } : null)
@@ -1390,6 +1464,31 @@ export default function OrdenesProduccion() {
       }
       // Consumo definitivo de la MP reservada (solo en línea; offline se reconcilia al sincronizar)
       if (!r.queued) { try { await consumirMP(o) } catch (e) { console.warn('No se pudo consumir MP:', e) } }
+      // Ajustes de ingredientes hechos en planta: la reserva descontó lo que decía la receta,
+      // así que aquí solo se mueve la DIFERENCIA (se gastó de más → se descuenta; sobró → se
+      // devuelve). Se registra un movimiento de inventario por cada ajuste, para que quede
+      // el rastro de por qué el stock no cuadra con la receta.
+      const ajustesIngs = calcAjustes()
+      if (!r.queued && ajustesIngs.length) {
+        try {
+          for (const a of ajustesIngs) {
+            if (a.mp_id == null) continue   // ingrediente sin MP enlazada: no hay stock que mover
+            const mp = mps.find(m => String(m.id) === String(a.mp_id))
+            const deltaMP = gramosAUnidadMP(a.delta, mp?.unidad)   // a la unidad en que se guarda el stock
+            await supabase.rpc('ajustar_stock_mp', { p_mp_id: a.mp_id, p_delta: -deltaMP })
+            const movBase = {
+              mp_id: a.mp_id, tipo: a.delta > 0 ? 'salida' : 'entrada', cantidad: Math.abs(deltaMP),
+              fecha: fechaIni, responsable: prepResp || o.operario || '',
+              obs: `Ajuste en planta · orden #${opNum(o.id)} (${o.producto}) — receta ${fCant(a.previsto)} g, usado ${fCant(a.real)} g`,
+              extra: { orden_id: o.id, ajuste_ingrediente: true, previsto: a.previsto, real: a.real },
+            }
+            const { error: mErr } = await supabase.from('inventory_movements').insert({ ...movBase, costo_unitario: mp?.precio || 0 })
+            if (mErr) await supabase.from('inventory_movements').insert(movBase)
+          }
+          // Se guardan en la orden para poder auditarlos y para reabrir el modal con las cantidades reales
+          try { await supabase.from('production_orders').update({ ajustes_ingredientes: ajustesIngs }).eq('id', o.id) } catch { /* columna v131 opcional */ }
+        } catch (e) { console.warn('No se pudieron aplicar los ajustes de ingredientes:', e) }
+      }
       // Descuento del EMPAQUE realmente usado (bolsas por porción, cajas por surtido). Ya se verificó stock.
       if (!r.queued) { try { await aplicarEmpaque(o, empaquePlan) } catch (e) { console.warn('No se pudo descontar empaque:', e) } }
       // Si un subproducto se auto-aprueba (admin), genera la entrada de inventario MP igual que al aprobar
@@ -1474,8 +1573,14 @@ export default function OrdenesProduccion() {
         } catch (e) { console.warn('No se pudieron actualizar los saldos de mezcla:', e) }
       }
       if (!r.queued) {
-        if (autoAprob) { if (o.operario && o.operario !== profile?.nombre) await notificar({ destinatario: o.operario, tipo: 'orden_aprobada', mensaje: `La orden #${opNum(o.id)} (${o.producto}) fue cerrada y aprobada por ${profile?.nombre || 'admin'} ✓`, link: '/ordenes', ref_id: o.id }) }
-        else await notificar({ destinatario: 'admin', tipo: 'orden_enviada', mensaje: `Orden #${opNum(o.id)} (${o.producto}) enviada para aprobación por ${profile?.nombre || 'operario'}`, link: '/ordenes', ref_id: o.id })
+        // Si hubo cambios de receta en planta, el admin debe enterarse SIN tener que abrir la orden:
+        // es la información que explica por qué el inventario no cuadra con la ficha.
+        const avisoAjustes = ajustesIngs.length
+          ? ` ⚠ Se ajustaron ${ajustesIngs.length} ingrediente(s) en planta: ` +
+            ajustesIngs.map(a => `${a.nombre} ${a.delta > 0 ? '+' : ''}${fCant(a.delta)} g`).join(', ') + '.'
+          : ''
+        if (autoAprob) { if (o.operario && o.operario !== profile?.nombre) await notificar({ destinatario: o.operario, tipo: 'orden_aprobada', mensaje: `La orden #${opNum(o.id)} (${o.producto}) fue cerrada y aprobada por ${profile?.nombre || 'admin'} ✓${avisoAjustes}`, link: '/ordenes', ref_id: o.id }) }
+        else await notificar({ destinatario: 'admin', tipo: 'orden_enviada', mensaje: `Orden #${opNum(o.id)} (${o.producto}) enviada para aprobación por ${profile?.nombre || 'operario'}.${avisoAjustes}`, link: '/ordenes', ref_id: o.id })
       }
       qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['production_records'] }); qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] }); qc.invalidateQueries({ queryKey: ['inventory_movements'] }); qc.invalidateQueries({ queryKey: ['mezcla_saldos'] }); qc.invalidateQueries({ queryKey: ['products_costing'] }); qc.invalidateQueries({ queryKey: ['finished_movements'] })
       setModalConfirmEnvio(false); setModalProceso(false)
@@ -2337,12 +2442,34 @@ export default function OrdenesProduccion() {
       >
         <div className="form-group">
           <label className="form-label">Receta / Producto</label>
-          <select className="form-control" value={form.origen_id ? `${form.origen === 'receta' ? 'recipe' : 'prod'}-${form.origen_id}` : ''} onChange={e => selectProducto(e.target.value)}>
-            <option value="">Seleccionar...</option>
-            {productos.filter(p => p.tipo !== 'mp' && p.activo !== false).length > 0 && <optgroup label="⭐ Productos">{productos.filter(p => p.tipo !== 'mp' && p.activo !== false).map(p => <option key={p.id} value={`prod-${p.id}`}>{p.nombre}{p.tipo === 'subproducto' ? ' (subproducto)' : ''}</option>)}</optgroup>}
-            {productos.filter(p => p.tipo === 'mp' && p.activo !== false).length > 0 && <optgroup label="🧪 Materias primas vendibles">{productos.filter(p => p.tipo === 'mp' && p.activo !== false).map(p => <option key={p.id} value={`prod-${p.id}`}>{p.nombre}</option>)}</optgroup>}
-            {recetas.length > 0 && <optgroup label="💾 Recetas rápidas">{recetas.map(r => <option key={r.id} value={`recipe-${r.id}`}>{r.nombre}</option>)}</optgroup>}
-          </select>
+          {(() => {
+            // Buscador propio de la app (no el desplegable del navegador): permite escribir para
+            // filtrar y distingue por color el tipo de lo que se va a producir.
+            const activos = productos.filter(p => p.activo !== false)
+            const opciones = [
+              ...activos.filter(p => p.tipo !== 'mp' && p.tipo !== 'subproducto')
+                .map(p => ({ value: `prod-${p.id}`, label: p.nombre, grupo: 'Productos terminados', color: 'var(--selva)', icono: '📦' })),
+              ...activos.filter(p => p.tipo === 'subproducto' || p.tipo === 'mp')
+                .map(p => ({ value: `prod-${p.id}`, label: p.nombre, grupo: 'Productos internos (se usan en otras recetas)', color: 'var(--tierra)', icono: '🧪',
+                  sub: p.tipo === 'mp' ? 'Materia prima que fabricas' : 'Subproducto interno' })),
+              ...recetas.map(r => ({ value: `recipe-${r.id}`, label: r.nombre, grupo: 'Recetas rápidas (pruebas)', color: 'var(--dorado)', icono: '💾' })),
+            ]
+            return (
+              <>
+                <BuscadorSelect
+                  opciones={opciones}
+                  value={form.origen_id ? `${form.origen === 'receta' ? 'recipe' : 'prod'}-${form.origen_id}` : ''}
+                  onSelect={(v) => selectProducto(v)}
+                  placeholder="Escribe para buscar el producto o la receta..."
+                />
+                <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginTop: 6, fontSize: '0.72rem', color: 'var(--texto-suave)' }}>
+                  <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'var(--selva)', marginRight: 4 }} />Terminado</span>
+                  <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'var(--tierra)', marginRight: 4 }} />Interno</span>
+                  <span><span style={{ display: 'inline-block', width: 8, height: 8, borderRadius: 2, background: 'var(--dorado)', marginRight: 4 }} />Receta rápida</span>
+                </div>
+              </>
+            )
+          })()}
         </div>
         {/* Empaque de saldo pendiente: si el producto elegido tiene saldos, se ofrece empacarlos */}
         {(() => {
@@ -2365,7 +2492,7 @@ export default function OrdenesProduccion() {
                 <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
                   <div>
                     <label style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>Saldo a empacar (ordenado por vencimiento)</label>
-                    <select className="form-control" value={saldoSelId} onChange={e => {
+                    <Select className="form-control" value={saldoSelId} onChange={e => {
                       const id = e.target.value
                       setSaldoSelId(id); setSaldoCant('')
                       // Precargar SOLO el vencimiento del saldo (misma mezcla). El lote debe ser NUEVO para no confundir.
@@ -2374,7 +2501,7 @@ export default function OrdenesProduccion() {
                     }}>
                       <option value="">Seleccionar saldo...</option>
                       {ordenados.map(s => { const enP = ordenEnProcesoDeSaldo(s.id); return <option key={s.id} value={s.id}>Lote {s.lote || '(s/n)'} · disp. {fCant(s.peso)} {s.unidad}{s.vencimiento ? ` · vence ${s.vencimiento}` : ''}{enP ? ` · ⏳ en orden #${opNum(enP.id)} (ciérrala primero)` : ''}</option> })}
-                    </select>
+                    </Select>
                     {/* Alerta naranja si el saldo elegido ya está en una orden abierta: se deshabilita "Crear y asignar" */}
                     {(() => { const enProc = saldoSelId ? ordenEnProcesoDeSaldo(saldoSelId) : null; return enProc ? (
                       <div style={{ marginTop: 6, padding: '6px 10px', borderRadius: 6, background: 'rgba(230,126,34,0.12)', border: '1px solid rgba(230,126,34,0.5)', color: '#c0620f', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -2415,9 +2542,9 @@ export default function OrdenesProduccion() {
             }
           }} min={0} /></div>
           <div className="form-group"><label className="form-label">Unidad</label>
-            <select className="form-control" value={form.unidad} onChange={e => setForm(f => ({ ...f, unidad: e.target.value }))}>
+            <Select className="form-control" value={form.unidad} onChange={e => setForm(f => ({ ...f, unidad: e.target.value }))}>
               <option value="unidades">unidades</option><option value="cajas">cajas</option><option value="kilos">kilos</option><option value="bolsas">bolsas</option>
-            </select>
+            </Select>
           </div>
         </div>
         {/* Guía: equivalencia de un bache según el producto elegido */}
@@ -2434,10 +2561,10 @@ export default function OrdenesProduccion() {
             <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
               <div>
                 <label style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Ingrediente</label>
-                <select className="form-control" style={{ maxWidth: 200 }} value={ingIdx} onChange={e => setIngIdx(e.target.value)}>
+                <Select className="form-control" style={{ maxWidth: 200 }} value={ingIdx} onChange={e => setIngIdx(e.target.value)}>
                   <option value="">Seleccionar...</option>
                   {prodReceta.ings.map((i, k) => <option key={k} value={k}>{i.nombre} ({fNum(i.cantidad)} g/bache)</option>)}
-                </select>
+                </Select>
               </div>
               <div>
                 <label style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Disponible (g)</label>
@@ -2497,12 +2624,12 @@ export default function OrdenesProduccion() {
                           const c = est === 'vencido' ? 'var(--rojo)' : est === 'por_vencer' ? 'var(--tierra)' : 'var(--texto-suave)'
                           return <div style={{ fontSize: '0.78rem', color: c, padding: '2px 0' }}>👉 {descLote(l)}</div>
                         })()
-                      : <select className="form-control" style={{ fontSize: '0.8rem', marginTop: 2 }}
+                      : <Select className="form-control" style={{ fontSize: '0.8rem', marginTop: 2 }}
                           value={elegido}
                           onChange={e => setForm(f => ({ ...f, lotes_elegidos: { ...f.lotes_elegidos, [ing.mpId]: e.target.value } }))}>
                           <option value="">👉 Automático (PEPS sugerido): {descLote(lts[0])}</option>
                           {lts.map(l => <option key={l.id} value={l.id}>{descLote(l)}</option>)}
-                        </select>
+                        </Select>
                   }
                 </div>
               )
@@ -2512,11 +2639,11 @@ export default function OrdenesProduccion() {
         )}
         <div className="form-group">
           <label className="form-label">Operario asignado</label>
-          <select className="form-control" value={form.operario} onChange={e => setForm(f => ({ ...f, operario: e.target.value }))}>
+          <Select className="form-control" value={form.operario} onChange={e => setForm(f => ({ ...f, operario: e.target.value }))}>
             <option value="">Seleccionar...</option>
             {(esAdmin || esOperario) && profile?.nombre && <option value={profile.nombre}>🧑‍💼 {profile.nombre} (yo — asignármela / ejecutar yo mismo)</option>}
             {empleados.filter(e => e.nombre !== profile?.nombre).map(e => <option key={e.id} value={e.nombre}>{e.nombre}</option>)}
-          </select>
+          </Select>
         </div>
         {form.origen === 'receta' && (
           <div className="alert" style={{ fontWeight: 600, color: 'var(--selva)', background: 'rgba(124,179,66,0.10)', border: '1px solid var(--lima)', padding: 10, borderRadius: 'var(--radio)', marginBottom: 10, fontSize: '0.85rem' }}>
@@ -2534,10 +2661,10 @@ export default function OrdenesProduccion() {
         {!form.es_mp && form.es_subproducto && (
           <div className="form-group" style={{ background: 'rgba(200,169,74,0.08)', padding: 12, borderRadius: 'var(--radio)' }}>
             <label className="form-label">Subproducto interno — materia prima que alimenta</label>
-            <select className="form-control" value={form.mp_id} onChange={e => setForm(f => ({ ...f, mp_id: e.target.value }))}>
+            <Select className="form-control" value={form.mp_id} onChange={e => setForm(f => ({ ...f, mp_id: e.target.value }))}>
               <option value="">Seleccionar MP...</option>
               {mps.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
-            </select>
+            </Select>
           </div>
         )}
         <div className="form-group"><label className="form-label">Notas para el operario</label><textarea className="form-control" rows={2} value={form.notas_orden} onChange={e => setForm(f => ({ ...f, notas_orden: e.target.value }))} /></div>
@@ -2568,9 +2695,9 @@ export default function OrdenesProduccion() {
               <div className="form-group"><label className="form-label">Lote</label><input className="form-control" value={ejec.lote} onChange={e => setEjec(s => ({ ...s, lote: e.target.value }))} disabled={soloLectura} /></div>
               <div className="form-group"><label className="form-label">Vencimiento</label><input type="date" className="form-control" value={ejec.vence || ''} onChange={e => setEjec(s => ({ ...s, vence: e.target.value }))} disabled={soloLectura} /></div>
               <div className="form-group"><label className="form-label">Empaque</label>
-                <select className="form-control" value={ejec.empaque} onChange={e => setEjec(s => ({ ...s, empaque: e.target.value }))} disabled={soloLectura}>
+                <Select className="form-control" value={ejec.empaque} onChange={e => setEjec(s => ({ ...s, empaque: e.target.value }))} disabled={soloLectura}>
                   <option>UNIDADES</option><option>CAJAS</option><option>BOLSAS</option><option>KILOS</option>
-                </select>
+                </Select>
               </div>
             </div>
             <div className="form-grid-2">
@@ -2716,14 +2843,29 @@ export default function OrdenesProduccion() {
                   ? <p className="empty-table" style={{ margin: 0 }}>Sin receta vinculada a esta orden (o aún cargando).</p>
                   : (() => {
                       const totalG = prepIngs.reduce((s, i) => s + (i.gramos || 0), 0)
+                      // La MP guarda stock en SU unidad (Kg, Gramo, Litro…), pero la receta pide
+                      // gramos/ml: se convierte antes de comparar, si no un "2 Kg" parecería
+                      // insuficiente frente a "1500 g".
+                      const aUnidadMP = (gramos, unidad) => {
+                        const u = String(unidad || '').trim().toLowerCase()
+                        return (u === 'kg' || u.startsWith('kilo') || u === 'litro' || u.startsWith('lit')) ? gramos / 1000 : gramos
+                      }
                       return (
                         <div className="table-wrap">
                           <table>
-                            <thead><tr><th style={{ width: 40 }}>✓</th><th>Ingrediente</th><th className="td-number">Cantidad a usar</th><th>Lote MP</th></tr></thead>
+                            <thead><tr><th style={{ width: 40 }}>✓</th><th>Ingrediente</th><th className="td-number">Cantidad a usar</th><th className="td-number">Queda en stock</th><th>Lote MP</th></tr></thead>
                             <tbody>
                               {prepIngs.map((i, k) => {
                                 const ok = !!alistado[k]
                                 const loteMp = loteDeTraza(prepTraza, i)
+                                const mp = i.mpId ? mps.find(m => String(m.id) === String(i.mpId)) : null
+                                // El stock que muestra la app YA tiene descontada la reserva de esta
+                                // orden (se reserva al iniciar producción), así que es lo que queda
+                                // realmente disponible para otras órdenes.
+                                const queda = mp ? (Number(mp.stock) || 0) : null
+                                const usa = mp ? aUnidadMP(i.gramos || 0, mp.unidad) : 0
+                                const negativo = queda != null && queda < 0
+                                const justo = queda != null && !negativo && queda < usa
                                 return (
                                   <tr key={k} style={{ background: ok ? 'rgba(124,179,66,0.16)' : 'transparent', transition: 'background 0.2s ease' }}>
                                     <td data-label="✓" style={{ textAlign: 'center' }}>
@@ -2731,15 +2873,80 @@ export default function OrdenesProduccion() {
                                         aria-label={`Alistado: ${i.nombre}`} style={{ width: 20, height: 20, cursor: 'pointer', accentColor: 'var(--selva)' }} />
                                     </td>
                                     <td style={{ fontWeight: ok ? 600 : 400, color: ok ? 'var(--selva)' : 'inherit' }}>{i.nombre}</td>
-                                    <td className="td-number">{fCant(i.gramos)} g</td>
+                                    <td className="td-number">
+                                      {editIngs ? (() => {
+                                        const previsto = Number(prepIngsBase[k]?.gramos) || 0
+                                        const delta = (Number(i.gramos) || 0) - previsto
+                                        return (
+                                          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 2 }}>
+                                            <input type="number" className="form-control" style={{ width: 110, textAlign: 'right', padding: '3px 6px' }}
+                                              value={i.gramos} min={0} step="any"
+                                              onChange={e => setPrepIngs(arr => arr.map((x, j) => j === k ? { ...x, gramos: parseFloat(e.target.value) || 0 } : x))} />
+                                            {Math.abs(delta) >= 0.01 && (
+                                              <small style={{ color: delta > 0 ? 'var(--rojo)' : 'var(--selva)', fontSize: '0.7rem' }}>
+                                                {delta > 0 ? '+' : ''}{fCant(delta)} g vs receta ({fCant(previsto)} g)
+                                              </small>
+                                            )}
+                                          </div>
+                                        )
+                                      })() : <>{fCant(i.gramos)} g</>}
+                                    </td>
+                                    <td className="td-number" style={{ color: negativo ? 'var(--rojo)' : justo ? 'var(--tierra)' : 'var(--texto-suave)', fontSize: '0.84rem' }}>
+                                      {queda == null
+                                        ? <span title="Este ingrediente no está enlazado a una materia prima del inventario">—</span>
+                                        : <>{fMP(queda, mp.unidad)}{negativo && ' ⚠'}</>}
+                                    </td>
                                     <td style={{ fontSize: '0.82rem', color: loteMp ? 'var(--selva)' : 'var(--texto-suave)' }}>{loteMp || '—'}</td>
                                   </tr>
                                 )
                               })}
-                              <tr style={{ fontWeight: 700, background: 'rgba(124,179,66,0.08)' }}><td></td><td>TOTAL</td><td className="td-number">{fCant(totalG)} g</td><td></td></tr>
+                              <tr style={{ fontWeight: 700, background: 'rgba(124,179,66,0.08)' }}><td></td><td>TOTAL</td><td className="td-number">{fCant(totalG)} g</td><td></td><td></td></tr>
                             </tbody>
                           </table>
-                          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Marca cada ingrediente a medida que lo pesas. Es solo una ayuda visual (no se guarda).</small>
+                          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
+                            Marca cada ingrediente a medida que lo pesas (ayuda visual, no se guarda).
+                            <strong> "Queda en stock"</strong> es lo que resta en inventario <em>después</em> de apartar lo de esta orden;
+                            en rojo significa que el inventario quedó en negativo y hay que revisarlo.
+                          </small>
+
+                          {/* Corrección de cantidades en planta: se gastó de más o sobró */}
+                          <div style={{ marginTop: 10, paddingTop: 8, borderTop: '1px dashed var(--crema-oscuro)' }}>
+                            {!editIngs ? (
+                              <button type="button" className="btn btn-xs btn-secondary" onClick={habilitarEdicionIngs}>
+                                <Ico as={Pencil} size={13} />Corregir cantidades realmente usadas
+                              </button>
+                            ) : (() => {
+                              const ajustes = calcAjustes()
+                              return (
+                                <div>
+                                  <div className="alert alert-warning" style={{ fontSize: '0.8rem' }}>
+                                    ⚠ Estás cambiando la receta <strong>solo para este lote</strong>. Al enviar la orden, la diferencia
+                                    se descontará o se devolverá al inventario de materia prima. La ficha del producto no cambia.
+                                  </div>
+                                  {ajustes.length > 0 && (
+                                    <div style={{ fontSize: '0.8rem', marginBottom: 8 }}>
+                                      <strong>Cambios pendientes:</strong>
+                                      <ul style={{ margin: '4px 0 0 18px', padding: 0 }}>
+                                        {ajustes.map((a, n) => (
+                                          <li key={n} style={{ color: a.delta > 0 ? 'var(--rojo)' : 'var(--selva)' }}>
+                                            {a.nombre}: {a.delta > 0 ? 'se gastan' : 'sobran'} <strong>{fCant(Math.abs(a.delta))} g</strong>
+                                            {a.delta > 0 ? ' de más → se descuentan del stock' : ' → se devuelven al stock'}
+                                            {a.mp_id == null && <em style={{ color: 'var(--tierra)' }}> (sin MP enlazada: no ajusta stock)</em>}
+                                          </li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                                    <button type="button" className="btn btn-xs btn-primary" disabled={!ajustes.length} onClick={confirmarAjustesIngs}>
+                                      <Ico as={Check} size={13} />Aplicar {ajustes.length > 0 ? `(${ajustes.length})` : ''}
+                                    </button>
+                                    <button type="button" className="btn btn-xs btn-secondary" onClick={cancelarEdicionIngs}>Cancelar y volver a la receta</button>
+                                  </div>
+                                </div>
+                              )
+                            })()}
+                          </div>
                         </div>
                       )
                     })()}
@@ -2891,11 +3098,11 @@ export default function OrdenesProduccion() {
                     </>
                   })()}
                   <label className="form-label" style={{ marginTop: 8 }}>Producto surtido resultante <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(elige del catálogo de Producto Terminado; se sugiere según el lote)</small></label>
-                  <select className="form-control" value={prepProductoSurtido} onChange={e => setPrepProductoSurtido(e.target.value)}>
+                  <Select className="form-control" value={prepProductoSurtido} onChange={e => setPrepProductoSurtido(e.target.value)}>
                     <option value="">Seleccionar producto terminado...</option>
                     {terminados.map(t => <option key={t.id} value={t.nombre}>{t.tipo === 'surtido' ? '🔀 ' : ''}{t.nombre}</option>)}
                     {prepProductoSurtido && !terminados.some(t => t.nombre === prepProductoSurtido) && <option value={prepProductoSurtido}>⚠ {prepProductoSurtido} (sin registrar)</option>}
-                  </select>
+                  </Select>
                   {prepProductoSurtido && !terminados.some(t => t.nombre === prepProductoSurtido) && (
                     <small style={{ color: 'var(--rojo)', fontSize: '0.72rem' }}>⚠ "{prepProductoSurtido}" no existe en el catálogo. Créalo en <strong>Producto Terminado</strong> para no afectar el stock.</small>
                   )}
@@ -3050,12 +3257,12 @@ export default function OrdenesProduccion() {
                     <label className="form-label">Cantidad sin empacar *</label>
                     <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                       <input type="number" className="form-control" style={{ maxWidth: 140 }} value={prepSobrantePeso} onChange={e => { setPrepSobranteManual(true); setPrepSobrantePeso(e.target.value) }} min={0} max={prepPorciona && prepSobranteUnidad === 'subporciones' ? (parseFloat(prepCantSubp) || undefined) : undefined} step="any" placeholder="Cantidad" />
-                      <select className="form-control" style={{ maxWidth: 140 }} value={prepSobranteUnidad} onChange={e => { setPrepSobranteManual(true); setPrepSobranteUnidad(e.target.value) }}>
+                      <Select className="form-control" style={{ maxWidth: 140 }} value={prepSobranteUnidad} onChange={e => { setPrepSobranteManual(true); setPrepSobranteUnidad(e.target.value) }}>
                         <option value="g">g</option>
                         <option value="Kg">Kg</option>
                         {prepPorciona && <option value="subporciones">subporciones</option>}
                         <option value="unidades">unidades</option>
-                      </select>
+                      </Select>
                       {prepPorciona && parseFloat(prepCantSubp) > 0 && (
                         <button type="button" className="btn btn-xs btn-secondary" onClick={() => { setPrepSobranteManual(true); setPrepSobrantePeso(String(prepCantSubp)); setPrepSobranteUnidad('subporciones') }}>Total ({fNum(parseFloat(prepCantSubp))})</button>
                       )}
@@ -3085,11 +3292,11 @@ export default function OrdenesProduccion() {
                         return (
                           <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.4fr 0.9fr 0.8fr 0.9fr auto auto', gap: 6, alignItems: 'center', marginTop: 6 }}>
                             <input className="form-control" placeholder="Nombre / descripción" value={d.nombre} onChange={e => upd('nombre', e.target.value)} />
-                            <select className="form-control" value={d.modo} onChange={e => upd('modo', e.target.value)}>
+                            <Select className="form-control" value={d.modo} onChange={e => upd('modo', e.target.value)}>
                               <option value="unidad">Por unidad</option>
                               <option value="dia">Por persona/día</option>
                               <option value="kg">Por kg</option>
-                            </select>
+                            </Select>
                             <input type="number" className="form-control" placeholder={uniLabel} title={uniLabel} value={d.cantidad} onChange={e => upd('cantidad', e.target.value)} min={0} />
                             <input type="number" className="form-control" placeholder={tarLabel} title={tarLabel} value={d.tarifa} onChange={e => upd('tarifa', e.target.value)} min={0} />
                             <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--selva)', whiteSpace: 'nowrap' }}>{fCOP(totalL)}</span>

@@ -7,6 +7,7 @@ import { useConfirm } from '../context/ConfirmContext'
 import Modal from '../components/ui/Modal'
 import * as XLSX from 'xlsx'
 import { Download, Pencil, X } from 'lucide-react'
+import Select from '../components/ui/Select'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const CANALES = { mayor: 'Por mayor', detal: 'Detal', feria: 'Feria/Evento', ecommerce: 'E-commerce', whatsapp: 'WhatsApp/Redes' }
@@ -93,10 +94,10 @@ export default function Clientes() {
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
         <input type="text" className="form-control" placeholder="Buscar cliente..." value={buscar} onChange={e => setBuscar(e.target.value)} style={{ maxWidth: 300 }} />
-        <select className="form-control" value={filtroCanal} onChange={e => setFiltroCanal(e.target.value)} style={{ width: 'auto' }}>
+        <Select className="form-control" value={filtroCanal} onChange={e => setFiltroCanal(e.target.value)} style={{ width: 'auto' }}>
           <option value="">Todos los canales</option>
           {Object.entries(CANALES).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
+        </Select>
       </div>
 
       <div className="card">
@@ -152,9 +153,9 @@ export default function Clientes() {
           <div className="form-grid-2">
             <div className="form-group">
               <label className="form-label">Canal de venta</label>
-              <select className="form-control" value={form.canal} onChange={e => setForm(f => ({ ...f, canal: e.target.value }))}>
+              <Select className="form-control" value={form.canal} onChange={e => setForm(f => ({ ...f, canal: e.target.value }))}>
                 {Object.entries(CANALES).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-              </select>
+              </Select>
             </div>
             <div className="form-group"><label className="form-label">Ciudad</label><input className="form-control" value={form.ciudad} onChange={e => setForm(f => ({ ...f, ciudad: e.target.value }))} /></div>
           </div>

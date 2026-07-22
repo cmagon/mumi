@@ -22,6 +22,7 @@ import { CATALOGO_PARAMS, PARAM_UNIDAD, PRESENTACIONES } from '../lib/calidad'
 import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Printer, Settings, ShoppingCart, Tag, Trash2, TrendingUp, Undo2, X, ChevronUp, ChevronDown, Plus } from 'lucide-react'
 import { descargarFichaExcel } from '../lib/fichaExcel'
 import { getConfig } from '../lib/appConfig'
+import Select from '../components/ui/Select'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const EMPTY_PROD = {
@@ -31,7 +32,8 @@ const EMPTY_PROD = {
   vida_util_valor: '', vida_util_unidad: 'meses', descripcion: '',
   // Precio: utilidad objetivo propia de este producto (vacío = usa la global) e impuestos
   // INDIRECTOS que se cobran al cliente sobre el precio (no son costo ni salen de tu utilidad).
-  utilidad_objetivo: '', iva_pct: '', imp_saludable_pct: '',
+  // ICUI se guarda en % (ad valorem); IBUA en pesos por unidad (impuesto específico por 100 ml)
+  utilidad_objetivo: '', iva_pct: '', imp_saludable_pct: '', ibua_valor: '',
 }
 const EMPTY_ING = { mpId: '', nombre: '', modo: 'lista', precio: '', presentacion: 1000, pct: '', cantidad: '', tipo: 'normal', base: '' }
 
@@ -535,7 +537,7 @@ export default function Costos() {
     setEditingId(p.id)
     setSelFuente(`prod-${p.id}`)
     setFormProd({ nombre: p.nombre, tipo: p.tipo, bache: p.bache, baches_mes: p.baches_mes, merma: p.merma, comision: p.comision, precio_mayor: p.precio_mayor, precio_detal: p.precio_detal, presentacion: p.presentacion || 'Unidad', activo: p.activo !== false, mp_id: p.mp_id || '', vida_util_valor: p.vida_util_valor || '', vida_util_unidad: p.vida_util_unidad || 'meses', descripcion: p.descripcion || '',
-      utilidad_objetivo: p.utilidad_objetivo ?? '', iva_pct: p.iva_pct ?? '', imp_saludable_pct: p.imp_saludable_pct ?? '' })
+      utilidad_objetivo: p.utilidad_objetivo ?? '', iva_pct: p.iva_pct ?? '', imp_saludable_pct: p.imp_saludable_pct ?? '', ibua_valor: p.ibua_valor ?? '' })
     setCamposExtra(parseJSON(p.campos_personalizados, []))
     setCategorias(parseJSON(p.categorias, []))
     const adic = parseJSON(p.costos_adicionales, [])
@@ -626,6 +628,14 @@ export default function Costos() {
         ficha_url: fichaPathFinal || '',
         fecha_creado: new Date().toISOString().split('T')[0],
       }
+      // Los parámetros de precio se escriben APARTE (más abajo, tolerante a que falte la
+      // migración v130). Aquí hay que quitarlos: `...formProd` los arrastra en crudo y una
+      // cadena vacía en una columna numérica hace fallar todo el guardado con
+      // "invalid input syntax for type numeric".
+      delete datos.utilidad_objetivo
+      delete datos.iva_pct
+      delete datos.imp_saludable_pct
+      delete datos.ibua_valor
 
       if (editingId) {
         // Detectar cambios en cantidades/costos de ingredientes para guardar histórico
@@ -672,14 +682,22 @@ export default function Costos() {
       // escritura aparte y tolerante (columnas v130 opcionales).
       try {
         const idFicha = editingId || datos._newId
+        // Vacío → null (la columna es numérica y no acepta ''); utilidad_objetivo null significa
+        // "usa la utilidad global de la empresa".
         const num = (v) => (v === '' || v == null ? null : (parseFloat(v) || 0))
-        if (idFicha) await supabase.from('products_costing').update({
-          utilidad_objetivo: num(formProd.utilidad_objetivo),
-          iva_pct: num(formProd.iva_pct) ?? 0,
-          imp_saludable_pct: num(formProd.imp_saludable_pct) ?? 0,
-          imprimibles,
-        }).eq('id', idFicha)
-      } catch { /* columnas opcionales: no bloquea el guardado */ }
+        if (idFicha) {
+          const { error } = await supabase.from('products_costing').update({
+            utilidad_objetivo: num(formProd.utilidad_objetivo),
+            iva_pct: num(formProd.iva_pct) ?? 0,
+            imp_saludable_pct: num(formProd.imp_saludable_pct) ?? 0,
+            ibua_valor: num(formProd.ibua_valor) ?? 0,
+            imprimibles,
+          }).eq('id', idFicha)
+          // Si las columnas aún no existen (migración v130 sin correr) no se bloquea el guardado,
+          // pero sí se avisa: si no, el usuario cree que guardó y esos datos se pierden en silencio.
+          if (error) datos._avisoV130 = error.message
+        }
+      } catch (e) { datos._avisoV130 = e.message }
       // Galería de imágenes — escritura aparte y tolerante (columna v92 opcional).
       try {
         const idFicha = editingId || datos._newId
@@ -755,7 +773,7 @@ export default function Costos() {
         }
       }
       const mpSelf = (cambiosMP || []).find(c => c.esSelf)
-      return { recetasAfectadas, mpSelf }
+      return { recetasAfectadas, mpSelf, avisoV130: datos._avisoV130 }
     },
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['products_costing'] })
@@ -764,6 +782,7 @@ export default function Costos() {
       qc.invalidateQueries({ queryKey: ['finished_products'] })
       const n = res?.recetasAfectadas?.length || 0
       toast(editingId ? 'Producto actualizado ✓' : 'Producto guardado ✓')
+      if (res?.avisoV130) toast('La ficha se guardó, pero el IVA / utilidad objetivo / imprimibles NO: falta correr la migración v130. (' + res.avisoV130 + ')', 'warning')
       if (res?.mpSelf) toast(`Costo de "${res.mpSelf.nombre}" guardado en Inventario MP: $${fNum(res.mpSelf.nuevo)}/${res.mpSelf.unidad || 'u'}`, 'success')
       if (n > 0) toast(`Precio replicado a ${n} receta(s): ${res.recetasAfectadas.join(', ')}`, 'success')
       limpiarForm(); setTab('lista')
@@ -1058,7 +1077,14 @@ export default function Costos() {
         setImprimibles(prev => [...prev, { nombre: f.name, path, size: f.size, subido_por: profile?.nombre || '', fecha: new Date().toISOString().split('T')[0] }])
       }
       toast('Imprimible(s) cargado(s) ✓ — recuerda guardar la ficha')
-    } catch (err) { toast('No se pudo subir: ' + err.message, 'error') }
+    } catch (err) {
+      // El bucket lo crea la migración v130. Sin ella Supabase responde "Bucket not found",
+      // y en móvil/tablet el fallo de red se ve como un genérico "Failed to fetch".
+      const msg = /bucket|not found|failed to fetch/i.test(err.message || '')
+        ? 'No se pudo subir: falta correr la migración v130 en Supabase, que crea el espacio de archivos "ficha-imprimibles".'
+        : 'No se pudo subir: ' + err.message
+      toast(msg, 'error')
+    }
     finally { setSubiendoImp(false) }
   }
   const quitarImprimible = (i) => setImprimibles(prev => prev.filter((_, idx) => idx !== i))
@@ -1306,11 +1332,11 @@ export default function Costos() {
               <span style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', whiteSpace:'nowrap' }}>
                 {editingId ? '✏ Editando producto:' : (selFuente.startsWith('recipe-') ? '🔄 Convirtiendo receta a producto:' : '📋 Cargar:')}
               </span>
-              <select className="form-control" value={selFuente} onChange={e => cargarFuente(e.target.value)} style={{ maxWidth:340 }}>
+              <Select className="form-control" value={selFuente} onChange={e => cargarFuente(e.target.value)} style={{ maxWidth:340 }}>
                 <option value="">— nueva ficha en blanco —</option>
                 {productos.length > 0 && <optgroup label="⭐ Productos (editar)">{productos.map(p => <option key={p.id} value={`prod-${p.id}`}>{p.nombre}</option>)}</optgroup>}
                 {recetas.length > 0 && <optgroup label="💾 Recetas rápidas (convertir a producto)">{recetas.map(r => <option key={r.id} value={`recipe-${r.id}`}>{r.nombre}</option>)}</optgroup>}
-              </select>
+              </Select>
               {(editingId || selFuente) && (
                 <button className="btn btn-secondary btn-sm" onClick={limpiarForm}>+ Nueva ficha</button>
               )}
@@ -1334,7 +1360,7 @@ export default function Costos() {
                 return (
                   <div style={{ marginTop: 10 }}>
                     <label style={{ fontSize:'0.72rem', color:'var(--texto-suave)' }}>MP vendible o interna (fabricada) — marcada en Inventario MP</label>
-                    <select className="form-control" style={{ maxWidth: 380 }} value="" onChange={e => {
+                    <Select className="form-control" style={{ maxWidth: 380 }} value="" onChange={e => {
                       const m = mps.find(x => String(x.id) === e.target.value); if (!m) return
                       setIngredientes([]); setProcesos([]); setEmpaque([]); setEditingId(null); setSelFuente('')
                       // "Activo" significa EN PRODUCCIÓN, no vendible: una MP interna (mermelada,
@@ -1345,7 +1371,7 @@ export default function Costos() {
                     }}>
                       <option value="">Seleccionar MP...</option>
                       {mpFabricadas.map(m => <option key={m.id} value={m.id}>{m.nombre} · {m.unidad}{m.vendible ? ' · vendible' : ' · interna'}</option>)}
-                    </select>
+                    </Select>
                     {mpFabricadas.length === 0 && <small style={{ display:'block', marginTop:6, color:'var(--texto-suave)' }}>No hay MP pendientes. En <strong>Inventario MP</strong> marca la MP como "Se puede vender" (vendible) o créala con tipo <strong>Fabricada/interna</strong>.</small>}
                     {formProd.tipo === 'mp' && formProd.mp_id && <small style={{ display:'block', marginTop:6, color:'var(--selva)' }}>✓ Ficha de MP: <strong>{formProd.nombre}</strong>. Agrega sus ingredientes/procesos y guarda: el costo calculado se guardará como su precio en Inventario MP y se propagará a las recetas que la usan.</small>}
                   </div>
@@ -1409,9 +1435,9 @@ export default function Costos() {
                     Tipo
                     {esAdmin && <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft:'auto' }} onClick={() => setTiposModal(true)}><Ico as={Settings} size={14} />Gestionar</button>}
                   </label>
-                  <select className="form-control" value={formProd.tipo} onChange={e => setFormProd(f=>({...f,tipo:e.target.value}))}>
+                  <Select className="form-control" value={formProd.tipo} onChange={e => setFormProd(f=>({...f,tipo:e.target.value}))}>
                     {opcionesTipo.map(t => <option key={t} value={t}>{tipoLabel(t)}</option>)}
-                  </select>
+                  </Select>
                 </div>
                 {/* Categorías adicionales — sobre todo para MP vendibles que caben en varias categorías */}
                 {formProd.tipo === 'mp' && (
@@ -1634,10 +1660,10 @@ export default function Costos() {
                 <label className="form-label">Vida útil <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(opcional)</small></label>
                 <div style={{ display:'flex', gap:6, alignItems:'center' }}>
                   <input type="number" className="form-control" value={formProd.vida_util_valor} onChange={e => setFormProd(f=>({...f,vida_util_valor:e.target.value}))} min={0} placeholder="Ej: 6" style={{ flex:1 }} />
-                  <select className="form-control" value={formProd.vida_util_unidad} onChange={e => setFormProd(f=>({...f,vida_util_unidad:e.target.value}))} style={{ flex:1 }}>
+                  <Select className="form-control" value={formProd.vida_util_unidad} onChange={e => setFormProd(f=>({...f,vida_util_unidad:e.target.value}))} style={{ flex:1 }}>
                     <option value="dias">Días</option>
                     <option value="meses">Meses</option>
-                  </select>
+                  </Select>
                 </div>
                 <small style={{ color:'var(--texto-suave)', fontSize:'0.68rem' }}>Precarga el vencimiento al producir.</small>
               </div>
@@ -1765,11 +1791,11 @@ export default function Costos() {
                         </div>
                         {modo === 'manual'
                           ? <input key={`emp-man-${r._id}`} className="form-control" placeholder="Ítem (caja, bolsa...)" value={r.nombre||''} onChange={e => updEmp(r._id,'nombre',e.target.value)} />
-                          : <select key={`emp-lst-${r._id}`} className="form-control" value={r.mpId||''} onChange={e => handleSelectEmpaqueMP(r._id, e.target.value)}>
+                          : <Select key={`emp-lst-${r._id}`} className="form-control" value={r.mpId||''} onChange={e => handleSelectEmpaqueMP(r._id, e.target.value)}>
                               <option value="">Seleccionar empaque...</option>
                               {mpsEmpaque.map(m => <option key={m.id} value={m.id}>{m.nombre} — {fCOP(m.precio)}/{m.unidad}</option>)}
                               {mpsEmpaque.length === 0 && <option value="" disabled>No hay insumos de empaque — usa modo ✏ Manual o créalos en Inventario MP</option>}
-                            </select>
+                            </Select>
                         }
                         </div>
                       </div>
@@ -1848,7 +1874,7 @@ export default function Costos() {
                   <div key={a._id || i} style={{ display:'grid', gridTemplateColumns:'1.4fr 0.9fr 0.9fr auto', gap:6, alignItems:'end', marginBottom:6 }}>
                     <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Descripción</label><input className="form-control" value={a.descripcion || ''} onChange={e => updA({ descripcion: e.target.value })} placeholder="Ej. Depreciación horno" /></div>
                     <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Valor (COP)</label><input type="number" className="form-control" value={a.valor ?? ''} onChange={e => updA({ valor: e.target.value })} min={0} step="any" /></div>
-                    <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Base</label><select className="form-control" value={a.base || 'unidad'} onChange={e => updA({ base: e.target.value })}><option value="unidad">por unidad</option><option value="bache">por bache</option><option value="mes">por mes</option></select></div>
+                    <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Base</label><Select className="form-control" value={a.base || 'unidad'} onChange={e => updA({ base: e.target.value })}><option value="unidad">por unidad</option><option value="bache">por bache</option><option value="mes">por mes</option></Select></div>
                     <button type="button" className="btn btn-xs btn-danger" onClick={() => setAdicionales(arr => arr.filter((_,idx) => idx!==i))}>✕</button>
                   </div>
                   )
@@ -2016,33 +2042,66 @@ export default function Costos() {
               )}
               <div className="form-group"><label className="form-label">Precio al público (detal)</label><MoneyInput value={formProd.precio_detal} onChange={v => setFormProd(f=>({...f,precio_detal:v}))} /></div>
 
-              {/* ── Impuestos INDIRECTOS: se cobran al cliente SOBRE el precio, no salen de tu utilidad ── */}
+              {/* ── Impuestos INDIRECTOS (los recaudas y los giras a la DIAN) ──
+                  DIAN Concepto 541 de 2024: el IBUA y el ICUI NO forman parte de la base gravable
+                  del IVA — se discriminan por separado en la factura. Por eso los tres se suman
+                  de forma independiente sobre el precio, no en cascada. */}
+              {(() => {
+                const ivaP   = parseFloat(formProd.iva_pct) || 0
+                const icuiP  = parseFloat(formProd.imp_saludable_pct) || 0
+                const ibuaU  = parseFloat(formProd.ibua_valor) || 0
+                const hayImp = ivaP > 0 || icuiP > 0 || ibuaU > 0
+                const ivaLegal = [0, 5, 19].includes(ivaP)
+                const conImp = (base) => base + base * (ivaP / 100) + base * (icuiP / 100) + ibuaU
+                return (
               <div style={{ background:'var(--crema)', borderRadius:'var(--radio)', padding:'10px 12px', marginBottom:12 }}>
                 <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
                   <strong style={{ fontSize:'0.82rem', color:'var(--selva)' }}>Impuestos al consumidor</strong>
                   <span style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>IVA</span>
-                  <input type="number" className="form-control" style={{ width:64, textAlign:'right', padding:'2px 6px' }}
-                    value={formProd.iva_pct} onChange={e => setFormProd(f => ({ ...f, iva_pct: e.target.value }))}
-                    min={0} max={100} step={1} placeholder="0" title="IVA del producto (0%, 5% o 19%). Se suma al precio; no afecta tu costo ni tu utilidad." />
-                  <span style={{ fontSize:'0.8rem' }}>%</span>
-                  <span style={{ fontSize:'0.75rem', color:'var(--texto-suave)', marginLeft:6 }}>Imp. saludable</span>
-                  <input type="number" className="form-control" style={{ width:64, textAlign:'right', padding:'2px 6px' }}
+                  <Select className="form-control" style={{ width:'auto', padding:'2px 6px', fontSize:'0.8rem' }}
+                    value={ivaLegal ? String(ivaP) : 'otro'}
+                    onChange={e => e.target.value !== 'otro' && setFormProd(f => ({ ...f, iva_pct: e.target.value }))}
+                    title="Tarifas de IVA vigentes en Colombia (art. 468 y ss. del Estatuto Tributario)">
+                    <option value="0">0% (excluido/exento)</option>
+                    <option value="5">5%</option>
+                    <option value="19">19%</option>
+                    {!ivaLegal && <option value="otro">{ivaP}% (no estándar)</option>}
+                  </Select>
+                  <span style={{ fontSize:'0.75rem', color:'var(--texto-suave)', marginLeft:6 }}>ICUI</span>
+                  <input type="number" className="form-control" style={{ width:60, textAlign:'right', padding:'2px 6px' }}
                     value={formProd.imp_saludable_pct} onChange={e => setFormProd(f => ({ ...f, imp_saludable_pct: e.target.value }))}
-                    min={0} max={100} step={1} placeholder="0" title="Impuesto a alimentos ultraprocesados / bebidas azucaradas (Ley 2277 de 2022), si aplica a este producto." />
+                    min={0} max={100} step={1} placeholder="0"
+                    title="ICUI — impuesto a comestibles ultraprocesados (Ley 2277/2022). Tarifa 20% desde 2025. Solo si el producto supera los umbrales de azúcar, sodio o grasas de la OPS." />
                   <span style={{ fontSize:'0.8rem' }}>%</span>
+                  <span style={{ fontSize:'0.75rem', color:'var(--texto-suave)', marginLeft:6 }}>IBUA</span>
+                  <input type="number" className="form-control" style={{ width:78, textAlign:'right', padding:'2px 6px' }}
+                    value={formProd.ibua_valor} onChange={e => setFormProd(f => ({ ...f, ibua_valor: e.target.value }))}
+                    min={0} step={1} placeholder="0"
+                    title="IBUA — impuesto a bebidas azucaradas. NO es un porcentaje: es un valor fijo en pesos por cada 100 ml según el azúcar del producto, que la DIAN indexa cada enero. Escribe aquí el valor que corresponde a UNA unidad de venta." />
+                  <span style={{ fontSize:'0.8rem' }} title="pesos por unidad de venta">$/u</span>
                 </div>
-                {((parseFloat(formProd.iva_pct) || 0) + (parseFloat(formProd.imp_saludable_pct) || 0)) > 0 && (
+                {icuiP > 0 && icuiP !== 20 && (
+                  <div style={{ fontSize:'0.75rem', color:'var(--tierra)', marginTop:6 }}>
+                    ⚠ La tarifa vigente del ICUI es <strong>20%</strong> desde 2025 (tienes {icuiP}%).
+                  </div>
+                )}
+                {hayImp && (
                   <div style={{ fontSize:'0.82rem', marginTop:8, display:'grid', gap:2 }}>
-                    <div>Precio por mayor <strong>con impuestos</strong>: <strong style={{ color:'var(--selva)' }}>{fCOP((parseFloat(formProd.precio_mayor)||0) * (1 + ((parseFloat(formProd.iva_pct)||0) + (parseFloat(formProd.imp_saludable_pct)||0))/100))}</strong></div>
-                    <div>Precio detal <strong>con impuestos</strong>: <strong style={{ color:'var(--selva)' }}>{fCOP((parseFloat(formProd.precio_detal)||0) * (1 + ((parseFloat(formProd.iva_pct)||0) + (parseFloat(formProd.imp_saludable_pct)||0))/100))}</strong></div>
+                    <div>Precio por mayor <strong>con impuestos</strong>: <strong style={{ color:'var(--selva)' }}>{fCOP(conImp(parseFloat(formProd.precio_mayor) || 0))}</strong></div>
+                    <div>Precio detal <strong>con impuestos</strong>: <strong style={{ color:'var(--selva)' }}>{fCOP(conImp(parseFloat(formProd.precio_detal) || 0))}</strong></div>
                   </div>
                 )}
                 <small style={{ display:'block', marginTop:6, color:'var(--texto-suave)', fontSize:'0.72rem' }}>
-                  El IVA y el impuesto saludable <strong>los recaudas y los giras a la DIAN</strong>: no son tuyos, no son costo y
-                  por eso <strong>no cambian el precio sugerido</strong> — solo se suman encima para saber cuánto paga el cliente.
-                  Distinto del <strong>ICA</strong>, que sí sale de tu bolsillo sobre las ventas y por eso sí afecta el precio.
+                  Los recaudas y los giras a la DIAN: no son tuyos, no son costo y por eso <strong>no cambian el precio sugerido</strong> —
+                  solo se suman encima para saber cuánto paga el cliente. Distinto del <strong>ICA</strong>, que sí sale de tu bolsillo.
+                  El <strong>ICUI</strong> (comestibles) y el <strong>IBUA</strong> (bebidas) no entran en la base del IVA: van
+                  discriminados aparte en la factura (DIAN, Concepto 541 de 2024).
+                  {' '}Si eres <strong>persona natural</strong> con ingresos brutos menores a 10.000 UVT en el año, no eres responsable
+                  de estos impuestos saludables: déjalos en 0.
                 </small>
               </div>
+                )
+              })()}
               {calcResult && (
                 <div style={{ fontSize:'0.82rem', color:'var(--texto-suave)', marginTop:4 }}>
                   Ganancia distribuidor (detal − mayor): <strong style={{ color:'var(--selva)' }}>{fCOP((parseFloat(formProd.precio_detal)||0) - (parseFloat(formProd.precio_mayor)||0))}</strong>
@@ -2148,7 +2207,7 @@ export default function Costos() {
                     <div className="row"><span style={{ cursor:'help' }} title="Utilidad neta por unidad × unidades que produces al mes. Es lo que este producto le deja al negocio si se vende todo.">Utilidad del producto al mes ⓘ</span><span style={{ color: utilNeta * unidsMes >= 0 ? 'var(--lima)' : 'var(--rojo)', fontWeight:600 }}>{fCOP(utilNeta * unidsMes)}</span></div>
                     <div className="row"><span style={{ cursor:'help' }} title="Unidades a vender al mes para cubrir los costos fijos, si este fuera el único producto. El mínimo real, repartido entre todo tu portafolio, está en Costos y Gastos.">Punto de equilibrio (solo) ⓘ</span><span>{calcResult.pe > 0 ? fNum(calcResult.pe) + ' unid/mes' : '—'}</span></div>
                     <div className="row"><span style={{ cursor:'help' }} title="CIF del mes ÷ minutos productivos disponibles. Reparte el overhead SEGÚN EL TIEMPO que usa cada producto.">Costo fijo por minuto ⓘ</span><span>{fCOP(calcResult.costoMin)}/min</span></div>
-                    {ivaTot > 0 && <div className="row"><span>Precio mayor con impuestos <small style={{opacity:0.6,fontSize:'0.72rem'}}>({ivaTot}%)</small></span><span>{fCOP(pMayor * (1 + ivaTot / 100))}</span></div>}
+                    {ivaTot > 0 && <div className="row"><span>Precio mayor con impuestos <small style={{opacity:0.6,fontSize:'0.72rem'}}>(IVA/ICUI {ivaTot}%{(parseFloat(formProd.ibua_valor) || 0) > 0 ? ` + IBUA ${fCOP(formProd.ibua_valor)}` : ''})</small></span><span>{fCOP(pMayor * (1 + ivaTot / 100) + (parseFloat(formProd.ibua_valor) || 0))}</span></div>}
                   </div>
                   {utilNeta < 0 && pMayor > 0 && (
                     <div style={{ marginTop:8, padding:'8px 10px', background:'rgba(192,57,43,0.20)', borderRadius:6, fontSize:'0.78rem' }}>
@@ -2262,9 +2321,9 @@ export default function Costos() {
               <div className="form-grid">
                 <div className="form-group">
                   <label className="form-label">Unidad</label>
-                  <select className="form-control" value={nuevaMpIng.unidad} onChange={e => setNuevaMpIng(v => ({ ...v, unidad: e.target.value }))}>
+                  <Select className="form-control" value={nuevaMpIng.unidad} onChange={e => setNuevaMpIng(v => ({ ...v, unidad: e.target.value }))}>
                     {['Kg','Gramo','Litro','Mililitro','Unidad'].map(u => <option key={u} value={u}>{u}</option>)}
-                  </select>
+                  </Select>
                 </div>
                 <div className="form-group">
                   <label className="form-label">Precio por {nuevaMpIng.unidad}</label>
@@ -2310,19 +2369,19 @@ export default function Costos() {
               <td><input className="form-control" defaultValue={c.descripcion} onBlur={e => updateCIF(c.id,'descripcion',e.target.value)} style={{ border:'none', background:'transparent', padding:'4px 0' }} /></td>
               <td><input className="form-control" defaultValue={c.categoria||''} onBlur={e => updateCIF(c.id,'categoria',e.target.value)} placeholder="Categoría" style={{ border:'none', background:'transparent', padding:'4px 0', fontSize:'0.85rem' }} /></td>
               <td>
-                <select className="form-control" value={c.frecuencia} onChange={e => updateCIF(c.id,'frecuencia',e.target.value)} style={{ fontSize:'0.85rem' }}>
+                <Select className="form-control" value={c.frecuencia} onChange={e => updateCIF(c.id,'frecuencia',e.target.value)} style={{ fontSize:'0.85rem' }}>
                   <option value="mensual">Mensual</option><option value="trimestral">Trimestral</option>
                   <option value="semestral">Semestral</option><option value="anual">Anual</option>
-                </select>
+                </Select>
               </td>
               <td>
                 <input type="number" className="form-control" defaultValue={c.valor} onBlur={e => updateCIF(c.id,'valor',parseFloat(e.target.value)||0)} style={{ textAlign:'right', width:130 }} />
                 {esProrrateo && <div style={{ fontSize:'0.75rem', color:'var(--tierra)', marginTop:3 }}>÷ {c.frecuencia==='anual'?12:c.frecuencia==='semestral'?6:3} = {fCOP(mensual)}/mes</div>}
               </td>
               <td>
-                <select className="form-control" value={c.grupo || 'cif'} onChange={e => updateCIF(c.id,'grupo',e.target.value)} title="Mover este ítem a otro grupo" style={{ fontSize:'0.78rem' }}>
+                <Select className="form-control" value={c.grupo || 'cif'} onChange={e => updateCIF(c.id,'grupo',e.target.value)} title="Mover este ítem a otro grupo" style={{ fontSize:'0.78rem' }}>
                   {GRUPOS_CIF.map(g => <option key={g.value} value={g.value}>{GRUPOS_CORTOS[g.value] || g.label}</option>)}
-                </select>
+                </Select>
               </td>
               <td><button className="btn btn-xs btn-danger" onClick={() => deleteCIF(c.id)}><X size={13} aria-hidden="true" /></button></td>
             </tr>
@@ -2438,10 +2497,10 @@ export default function Costos() {
                 {(() => {
                   const empActivos = empleadosProduccion.filter(e => (e.estado || 'activo') === 'activo' && !e.archivado).length
                   return (
-                    <select className="form-control" style={{ width:'auto' }} value={parseInt(op.numOperarios || 0)} onChange={e => guardarNumOperarios(e.target.value)} title="Se guarda en los parámetros de operación (visible también en Nómina → Parámetros)">
+                    <Select className="form-control" style={{ width:'auto' }} value={parseInt(op.numOperarios || 0)} onChange={e => guardarNumOperarios(e.target.value)} title="Se guarda en los parámetros de operación (visible también en Nómina → Parámetros)">
                       <option value={0}>todos los de producción ({empActivos})</option>
                       {Array.from({ length: empActivos }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n}</option>)}
-                    </select>
+                    </Select>
                   )
                 })()}
                 <small style={{ color:'var(--texto-suave)' }}>· {op.dias} días · {op.jornadaHoras} h/día · improd. {((parseFloat(op.improductividad)||0)*100).toFixed(0)}%</small>

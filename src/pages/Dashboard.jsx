@@ -14,6 +14,7 @@ import { notificarVencimientosRegistros } from '../lib/notificaciones'
 import { useAuth } from '../context/AuthContext'
 import { useReorder } from '../hooks/useReorder'
 import { getDevRole, subscribeDevRole, setDevRole } from '../lib/devMode'
+import Select from '../components/ui/Select'
 
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
@@ -588,9 +589,9 @@ export default function Dashboard() {
       <div className="page-header">
         <h1 className="page-title">Tablero Principal</h1>
         <div className="page-actions">
-          <select className="form-control" value={año} onChange={e => setAño(Number(e.target.value))} style={{ width: 'auto' }}>
+          <Select className="form-control" value={año} onChange={e => setAño(Number(e.target.value))} style={{ width: 'auto' }}>
             {añosDisp.map(a => <option key={a} value={a}>{a}</option>)}
-          </select>
+          </Select>
           <button className={`btn btn-sm ${editando ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setEditando(v => !v)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <Settings size={15} aria-hidden="true" />{editando ? 'Listo' : 'Personalizar'}
           </button>

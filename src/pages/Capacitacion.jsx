@@ -7,6 +7,7 @@ import { useConfirm } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
 import { Clock, Download, GraduationCap, Pencil, Users, X } from 'lucide-react'
+import Select from '../components/ui/Select'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const BUCKET = 'documentos'
@@ -159,7 +160,7 @@ export default function Capacitacion() {
         <div className="form-group"><label className="form-label">Tema *</label><input className="form-control" value={form.tema} onChange={e => setForm(f => ({ ...f, tema: e.target.value }))} placeholder="Ej: Higiene y manipulación de alimentos" /></div>
         <div className="form-grid-2">
           <div className="form-group"><label className="form-label">Fecha</label><input type="date" className="form-control" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} /></div>
-          <div className="form-group"><label className="form-label">Tipo</label><select className="form-control" value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}>{TIPOS.map(t => <option key={t} value={t}>{t}</option>)}</select></div>
+          <div className="form-group"><label className="form-label">Tipo</label><Select className="form-control" value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}>{TIPOS.map(t => <option key={t} value={t}>{t}</option>)}</Select></div>
           <div className="form-group"><label className="form-label">Instructor</label><input className="form-control" value={form.instructor} onChange={e => setForm(f => ({ ...f, instructor: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Lugar</label><input className="form-control" value={form.lugar} onChange={e => setForm(f => ({ ...f, lugar: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Duración (horas)</label><input type="number" className="form-control" value={form.duracion_horas} onChange={e => setForm(f => ({ ...f, duracion_horas: e.target.value }))} step="0.5" /></div>

@@ -52,6 +52,39 @@ html { scroll-behavior: smooth; }
 /* ==================== MODO MANTENIMIENTO ==================== */
 .mantenimiento { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 32px 20px; }
 
+/* ==================== ESTILOS DE DISEÑO (formas, bordes, sombras) ====================
+   'selva' = base (redondeado suave). Los siguientes redefinen tokens y componentes clave. */
+
+/* --- EDITORIAL (elegante y minimalista, tipo Evok): esquinas rectas, líneas finas, sin sombras pesadas --- */
+.dis-editorial { --radio: 2px; --radio-sm: 2px; --sombra: 0 1px 0 rgba(26,58,42,0.06); --sombra-sm: none; --sombra-lg: 0 12px 30px rgba(0,0,0,0.10); }
+.dis-editorial .card { border: 1px solid var(--crema-oscuro); box-shadow: none; }
+.dis-editorial .card-media { border-radius: 0; }
+.dis-editorial .card-add,
+.dis-editorial .btn { border-radius: 0; letter-spacing: 0.5px; text-transform: uppercase; font-weight: 700; font-size: 0.82rem; }
+.dis-editorial .chip, .dis-editorial .sortsel, .dis-editorial .search, .dis-editorial .search-toggle { border-radius: 0; }
+.dis-editorial .hero, .dis-editorial .bsec, .dis-editorial .news, .dis-editorial .det-media, .dis-editorial .alb, .dis-editorial .nos-imagen, .dis-editorial .nos-imagen img { border-radius: 0; }
+.dis-editorial .sec-title { text-transform: uppercase; letter-spacing: 2px; font-weight: 600; font-size: 1.05rem; }
+.dis-editorial .sec-title::before { display: none; }
+.dis-editorial .sec-head { border-bottom: 1px solid var(--crema-oscuro); padding-bottom: 12px; }
+.dis-editorial .hero-cta, .dis-editorial .bsec-btn, .dis-editorial .precio-tag { border-radius: 0; }
+.dis-editorial .card-price { font-weight: 600; }
+.dis-editorial .hdr { box-shadow: none; border-bottom: 1px solid rgba(255,255,255,0.1); }
+
+/* --- ORGÁNICO (suave y natural, tipo Munay): muy redondeado, botones píldora, sombras suaves --- */
+.dis-organico { --radio: 26px; --radio-sm: 16px; --sombra: 0 10px 30px rgba(26,58,42,0.10); --sombra-sm: 0 4px 14px rgba(26,58,42,0.08); }
+.dis-organico .card { border: none; box-shadow: var(--sombra-sm); }
+.dis-organico .card-media { border-radius: 22px 22px 0 0; }
+.dis-organico .card-add,
+.dis-organico .btn { border-radius: 999px; }
+.dis-organico .chip { border-radius: 999px; }
+.dis-organico .hero, .dis-organico .bsec, .dis-organico .news, .dis-organico .det-media, .dis-organico .alb { border-radius: 26px; }
+.dis-organico .sec-title::before { border-radius: 999px; }
+.dis-organico .search, .dis-organico .search-toggle, .dis-organico .sortsel { border-radius: 999px; }
+.dis-organico .hero-cta, .dis-organico .bsec-btn { border-radius: 999px; }
+.dis-organico .fruto, .dis-organico .fruto-row { border-radius: 22px; }
+.dis-organico .card { transition: transform .18s ease, box-shadow .18s ease; }
+@media (hover: hover) { .dis-organico .card:hover { transform: translateY(-6px); box-shadow: var(--sombra); } }
+
 /* ==================== HEADER ==================== */
 .hdr { background: var(--selva); color: var(--crema); padding: 14px 16px; position: sticky; top: 0; z-index: 30; box-shadow: 0 2px 14px rgba(0,0,0,0.18); }
 .hdr-brand { display: flex; align-items: center; gap: 12px; }

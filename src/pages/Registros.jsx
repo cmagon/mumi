@@ -8,6 +8,7 @@ import { useConfirm } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
 import { Bell, Download, Link2, NotebookText, Pencil, X } from 'lucide-react'
+import Select from '../components/ui/Select'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const BUCKET = 'documentos'
@@ -246,7 +247,7 @@ export default function Registros() {
     const val = entradaForm.datos[c.key] ?? ''
     const set = (v) => setEntradaForm(f => ({ ...f, datos: { ...f.datos, [c.key]: v } }))
     if (c.tipo === 'checkbox') return <input type="checkbox" checked={!!entradaForm.datos[c.key]} onChange={e => set(e.target.checked)} />
-    if (c.tipo === 'select') return <select className="form-control" value={val} onChange={e => set(e.target.value)}><option value="">—</option>{(c.opciones || []).map(o => <option key={o} value={o}>{o}</option>)}</select>
+    if (c.tipo === 'select') return <Select className="form-control" value={val} onChange={e => set(e.target.value)}><option value="">—</option>{(c.opciones || []).map(o => <option key={o} value={o}>{o}</option>)}</Select>
     if (c.tipo === 'textarea') return <textarea className="form-control" rows={2} value={val} onChange={e => set(e.target.value)} />
     if (c.tipo === 'number') return <input type="number" className="form-control" value={val} onChange={e => set(e.target.value)} />
     if (c.tipo === 'date') return <input type="date" className="form-control" value={val} onChange={e => set(e.target.value)} />
@@ -405,7 +406,7 @@ export default function Registros() {
         {plantillaForm.campos.map((c, i) => (
           <div key={i} style={{ display: 'grid', gridTemplateColumns: '1.6fr 1fr 1.4fr auto auto', gap: 6, marginBottom: 6, alignItems: 'center' }}>
             <input className="form-control" placeholder="Etiqueta" value={c.label} onChange={e => setCampo(i, 'label', e.target.value)} />
-            <select className="form-control" value={c.tipo} onChange={e => setCampo(i, 'tipo', e.target.value)}>{Object.entries(TIPOS_CAMPO).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select>
+            <Select className="form-control" value={c.tipo} onChange={e => setCampo(i, 'tipo', e.target.value)}>{Object.entries(TIPOS_CAMPO).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select>
             {c.tipo === 'select'
               ? <input className="form-control" placeholder="opciones, separadas por coma" value={Array.isArray(c.opciones) ? c.opciones.join(', ') : (c.opciones || '')} onChange={e => setCampo(i, 'opciones', e.target.value)} />
               : <span />}

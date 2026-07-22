@@ -18,6 +18,7 @@ import { useReorder } from '../hooks/useReorder'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import { puedeVerSeccion } from '../lib/permisos'
 import * as XLSX from 'xlsx'
+import Select from '../components/ui/Select'
 import {
   Download, Upload, Plus, Check, Pencil, Trash2, X, BarChart3, DollarSign, Link2,
   ReceiptText, Factory, ClipboardList, Shuffle, Camera, Save, Printer, Undo2, Package,
@@ -626,13 +627,13 @@ export default function Produccion() {
               <div style={{ position: 'absolute', top: '100%', left: 0, zIndex: 30, background: 'var(--blanco, #fff)', border: '1px solid var(--crema-oscuro)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.15)', minWidth: 230, overflow: 'hidden' }}>
                 <div style={{ padding: '9px 12px', borderBottom: '1px solid var(--crema-oscuro)' }}>
                   <label style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', display: 'block', marginBottom: 4 }}>Rango de fechas</label>
-                  <select className="form-control" style={{ width: '100%' }} value={periodoDesc} onChange={e => setPeriodoDesc(e.target.value)}>
+                  <Select className="form-control" style={{ width: '100%' }} value={periodoDesc} onChange={e => setPeriodoDesc(e.target.value)}>
                     <option value="mes">Último mes</option>
                     <option value="trimestre">Último trimestre (3 meses)</option>
                     <option value="semestre">Últimos 6 meses</option>
                     <option value="anio">Último año</option>
                     <option value="total">Total (todos)</option>
-                  </select>
+                  </Select>
                 </div>
                 <button className="btn btn-menu" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 12px', background: 'none', border: 'none', cursor: 'pointer' }} onClick={descargarExcelPTZ}>📊 Excel — formato PTZ-RG-03</button>
                 <button className="btn btn-menu" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 12px', background: 'none', border: 'none', borderTop: '1px solid var(--crema-oscuro)', cursor: 'pointer' }} onClick={descargarPdfPTZ}>📄 PDF — formato PTZ-RG-03</button>
@@ -664,17 +665,17 @@ export default function Produccion() {
             </div>
           )}
           <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-            <select className="form-control" value={filtroMes} onChange={e => setFiltroMes(e.target.value)} style={{ width: 'auto' }}>
+            <Select className="form-control" value={filtroMes} onChange={e => setFiltroMes(e.target.value)} style={{ width: 'auto' }}>
               <option value="">Todos los meses</option>
               {MESES.slice(1).map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
-            </select>
-            <select className="form-control" value={filtroAño} onChange={e => setFiltroAño(e.target.value)} style={{ width: 'auto' }}>
+            </Select>
+            <Select className="form-control" value={filtroAño} onChange={e => setFiltroAño(e.target.value)} style={{ width: 'auto' }}>
               {aniosRegistros.map(a => <option key={a} value={a}>{a}</option>)}
-            </select>
-            <select className="form-control" value={filtroProd} onChange={e => setFiltroProd(e.target.value)} style={{ width: 'auto' }}>
+            </Select>
+            <Select className="form-control" value={filtroProd} onChange={e => setFiltroProd(e.target.value)} style={{ width: 'auto' }}>
               <option value="">Todos los productos</option>
               {prodNames.map(p => <option key={p} value={p}>{p}</option>)}
-            </select>
+            </Select>
           </div>
           {/* ===== Versión móvil: acordeón ===== */}
           <div className="solo-movil">
@@ -759,9 +760,9 @@ export default function Produccion() {
       {tab === 'analisis' && puedeAnalisis && (
         <div className="card">
           <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}><BarChart3 size={16} aria-hidden="true" /> Resumen de Producción por Mes
-            <select className="form-control" style={{ width: 120, marginLeft: 'auto' }} value={anioAnalisis} onChange={e => setAnioAnalisis(e.target.value)}>
+            <Select className="form-control" style={{ width: 120, marginLeft: 'auto' }} value={anioAnalisis} onChange={e => setAnioAnalisis(e.target.value)}>
               {(aniosDisponibles.length ? aniosDisponibles : [anioAnalisis]).map(a => <option key={a} value={a}>{a}</option>)}
-            </select>
+            </Select>
           </div>
           <small style={{ color: 'var(--texto-suave)', fontSize: '0.75rem', display: 'block', marginBottom: 8 }}>
             Cantidades <strong>finales producidas</strong> (en unidades), por producto. No incluye subporciones ni el desglose del surtido.
@@ -827,19 +828,19 @@ export default function Produccion() {
         <div className="form-grid-2">
           <div className="form-group">
             <label className="form-label">Tipo de registro</label>
-            <select className="form-control" value={form.tipo_registro} onChange={e => setForm(f => ({ ...f, tipo_registro: e.target.value }))}>
+            <Select className="form-control" value={form.tipo_registro} onChange={e => setForm(f => ({ ...f, tipo_registro: e.target.value }))}>
               <option value="final">Producto final</option>
               <option value="subproducto">Subproducto</option>
-            </select>
+            </Select>
           </div>
           <div className="form-group">
             <label className="form-label">Producto <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({form.tipo_registro === 'subproducto' ? 'MP fabricadas internamente' : 'de Fichas de Costos'})</small></label>
-            <select className="form-control" value={form.producto} onChange={e => setForm(f => ({ ...f, producto: e.target.value }))}>
+            <Select className="form-control" value={form.producto} onChange={e => setForm(f => ({ ...f, producto: e.target.value }))}>
               <option value="">Seleccionar {form.tipo_registro === 'subproducto' ? 'subproducto' : 'producto'}...</option>
               {form.tipo_registro === 'subproducto'
                 ? mpInternas.map(m => <option key={m.nombre} value={m.nombre}>{m.nombre}</option>)
                 : productos.filter(p => p.tipo !== 'subproducto').map(p => <option key={p.nombre} value={p.nombre}>{p.nombre}</option>)}
-            </select>
+            </Select>
             {form.tipo_registro === 'subproducto' && mpInternas.length === 0 && (
               <small style={{ color: 'var(--texto-suave)', fontSize: '0.75rem' }}>No hay materias primas "fabricadas internamente" en Inventario MP.</small>
             )}
@@ -860,9 +861,9 @@ export default function Produccion() {
         <div className="form-grid-2">
           <div className="form-group">
             <label className="form-label">Labor / Proceso de esta etapa</label>
-            <select className="form-control" value={form.labor} onChange={e => { const v = e.target.value; setForm(f => ({ ...f, labor: v, completado: /final|directo/i.test(v) ? true : f.completado })) }}>
+            <Select className="form-control" value={form.labor} onChange={e => { const v = e.target.value; setForm(f => ({ ...f, labor: v, completado: /final|directo/i.test(v) ? true : f.completado })) }}>
               {LABORES.map(l => <option key={l}>{l}</option>)}
-            </select>
+            </Select>
             {/final|directo/i.test(form.labor)
               ? <small style={{ color: 'var(--lima)', fontSize: '0.75rem' }}>Marca el lote como producto final completo en un solo paso.</small>
               : esRotulado(form.labor) && <small style={{ color: 'var(--lima)', fontSize: '0.75rem' }}>Etapa final — su cantidad suma al total del lote.</small>}
@@ -882,9 +883,9 @@ export default function Produccion() {
           <div className="form-group"><label className="form-label">Peso desperdicio</label><input type="number" className="form-control" value={form.peso_desperdicio} onChange={e => setForm(f => ({ ...f, peso_desperdicio: e.target.value }))} min={0} placeholder="Dañado / quemado / caído" /></div>
           <div className="form-group">
             <label className="form-label">Empaque</label>
-            <select className="form-control" value={form.empaque} onChange={e => setForm(f => ({ ...f, empaque: e.target.value }))}>
+            <Select className="form-control" value={form.empaque} onChange={e => setForm(f => ({ ...f, empaque: e.target.value }))}>
               <option>UNIDADES</option><option>CAJAS</option><option>BOLSAS</option><option>KILOS</option>
-            </select>
+            </Select>
           </div>
         </div>
         {/* Subporciones (si el producto se porciona) */}
@@ -917,11 +918,11 @@ export default function Produccion() {
             </div>
             <div className="form-group">
               <label className="form-label">Producto surtido resultante <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(elige del catálogo de Producto Terminado; se sugiere según el lote)</small></label>
-              <select className="form-control" value={form.producto_surtido} onChange={e => setForm(f => ({ ...f, producto_surtido: e.target.value }))}>
+              <Select className="form-control" value={form.producto_surtido} onChange={e => setForm(f => ({ ...f, producto_surtido: e.target.value }))}>
                 <option value="">Seleccionar producto terminado...</option>
                 {terminados.map(t => <option key={t.id} value={t.nombre}>{t.tipo === 'surtido' ? '🔀 ' : ''}{t.nombre}</option>)}
                 {form.producto_surtido && !terminados.some(t => t.nombre === form.producto_surtido) && <option value={form.producto_surtido}>⚠ {form.producto_surtido} (sin registrar)</option>}
-              </select>
+              </Select>
               {form.producto_surtido && !terminados.some(t => t.nombre === form.producto_surtido) && (
                 <small style={{ color: 'var(--rojo)', fontSize: '0.72rem' }}>⚠ "{form.producto_surtido}" no existe en el catálogo. Créalo en <strong>Producto Terminado</strong>.</small>
               )}
@@ -967,12 +968,12 @@ export default function Produccion() {
         <div style={{ background: 'rgba(45,90,61,0.10)', borderLeft: '3px solid var(--selva)', padding: '6px 10px', borderRadius: 4, fontWeight: 700, fontSize: '0.88rem', color: 'var(--selva)', margin: '14px 0 8px' }}>👤 Responsable y evidencia</div>
         <div className="form-group">
           <label className="form-label">Responsable</label>
-          <select className="form-control" value={form.responsable} onChange={e => setForm(f => ({ ...f, responsable: e.target.value }))}>
+          <Select className="form-control" value={form.responsable} onChange={e => setForm(f => ({ ...f, responsable: e.target.value }))}>
             <option value="">Seleccionar...</option>
             {empleados
               .filter(e => !(esOperario && /administrador/i.test(e.nombre)))
               .map(e => <option key={e.id} value={e.nombre}>{e.nombre}</option>)}
-          </select>
+          </Select>
         </div>
         <div className="form-group"><label className="form-label">Observaciones</label><textarea className="form-control" rows={2} value={form.obs} onChange={e => setForm(f => ({ ...f, obs: e.target.value }))} /></div>
 
@@ -1041,10 +1042,10 @@ export default function Produccion() {
                     <tr key={i} style={sinProd ? { background: 'rgba(192,57,43,0.08)' } : undefined}>
                       <td><input type="date" className="form-control" style={{ minWidth: 130, padding: '3px 5px' }} value={f.fecha || ''} onChange={e => updateImportFila(i, 'fecha', e.target.value)} /></td>
                       <td>
-                        <select className="form-control" style={{ minWidth: 180, padding: '3px 5px', borderColor: sinMatch ? 'var(--rojo)' : undefined }} value={f.prodId} onChange={e => updateImportFila(i, 'prodId', e.target.value)}>
+                        <Select className="form-control" style={{ minWidth: 180, padding: '3px 5px', borderColor: sinMatch ? 'var(--rojo)' : undefined }} value={f.prodId} onChange={e => updateImportFila(i, 'prodId', e.target.value)}>
                           <option value="">— {f.producto ? `sin vincular: "${f.producto}"` : 'elige producto'} —</option>
                           {terminados.map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
-                        </select>
+                        </Select>
                       </td>
                       <td><input className="form-control" style={{ minWidth: 90, padding: '3px 5px' }} value={f.lote || ''} onChange={e => updateImportFila(i, 'lote', e.target.value)} /></td>
                       <td><input type="date" className="form-control" style={{ minWidth: 130, padding: '3px 5px' }} value={f.vence || ''} onChange={e => updateImportFila(i, 'vence', e.target.value)} /></td>

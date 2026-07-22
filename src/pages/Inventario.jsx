@@ -12,10 +12,11 @@ import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import { crearLoteEntrada, consumirPEPS, consumirLote, estadoLote, costoPEPS } from '../lib/lotes'
 import * as XLSX from 'xlsx'
 import { Download, Tags, Tag, Plus, Pencil, X, Package, ClipboardList, FileText, AlertTriangle } from 'lucide-react'
+import Select from '../components/ui/Select'
 
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
-const EMPTY_MP = { nombre: '', categoria: 'pulpa', tipo: 'comprado', unidad: 'Kg', precio: '', stock_min: 0, stock: 0, lote: '', vencimiento: '', obs: '', extra: {}, vendible: false, precio_venta: '' }
+const EMPTY_MP = { nombre: '', categoria: '', tipo: 'comprado', unidad: 'Kg', precio: '', stock_min: 0, stock: 0, lote: '', vencimiento: '', obs: '', extra: {}, vendible: false, precio_venta: '' }
 const EMPTY_MOV = { mp_id: '', tipo: 'entrada', cantidad: '', responsable: '', obs: '', lote: '', vencimiento: '', extra: {}, costo: '', motivo: 'consumo', lote_id: '', proveedor: '' }
 // Motivos de salida/ajuste manual de inventario
 const MOTIVOS_SALIDA = [
@@ -443,17 +444,17 @@ export default function Inventario() {
         <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
           <input className="form-control" style={{ width: 200 }} placeholder="🔍 Buscar materia prima..." value={buscarMP} onChange={e => setBuscarMP(e.target.value)} />
           <label className="form-label" style={{ margin: 0 }}>Categoría:</label>
-          <select className="form-control" value={filtroCat} onChange={e => setFiltroCat(e.target.value)} style={{ width: 'auto' }}>
+          <Select className="form-control" value={filtroCat} onChange={e => setFiltroCat(e.target.value)} style={{ width: 'auto' }}>
             <option value="">Todas las categorías</option>
             {categorias.map(c => <option key={c} value={c}>{c}</option>)}
-          </select>
+          </Select>
           <label className="form-label" style={{ margin: 0 }}>Estado:</label>
-          <select className="form-control" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} style={{ width: 'auto' }}>
+          <Select className="form-control" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} style={{ width: 'auto' }}>
             <option value="">Todos</option>
             <option value="sin_stock">Sin stock</option>
             <option value="bajo">Stock bajo</option>
             <option value="por_vencer">Por vencer / vencidas</option>
-          </select>
+          </Select>
           {(filtroCat || filtroEstado) && <button className="btn btn-sm btn-secondary" onClick={() => { setFiltroCat(''); setFiltroEstado('') }}>Limpiar filtros</button>}
           <span style={{ marginLeft: 'auto', fontSize: '0.8rem', color: 'var(--texto-suave)' }}>Clic en una fila para ver su historial</span>
         </div>
@@ -584,18 +585,18 @@ export default function Inventario() {
           </div>
           <div className="form-group">
             <label className="form-label">Tipo</label>
-            <select className="form-control" value={formMP.tipo} onChange={e => setFormMP(f => ({ ...f, tipo: e.target.value }))}>
+            <Select className="form-control" value={formMP.tipo} onChange={e => setFormMP(f => ({ ...f, tipo: e.target.value }))}>
               <option value="comprado">Comprado</option>
               <option value="interno">Fabricado internamente</option>
-            </select>
+            </Select>
           </div>
         </div>
         <div className="form-grid-2">
           <div className="form-group">
             <label className="form-label">Unidad de medida</label>
-            <select className="form-control" value={formMP.unidad} onChange={e => setFormMP(f => ({ ...f, unidad: e.target.value }))}>
+            <Select className="form-control" value={formMP.unidad} onChange={e => setFormMP(f => ({ ...f, unidad: e.target.value }))}>
               {UNIDADES.map(u => <option key={u} value={u}>{u}</option>)}
-            </select>
+            </Select>
           </div>
           <div className="form-group">
             <label className="form-label">Precio {porUnidad(formMP.unidad)}</label>
@@ -636,18 +637,18 @@ export default function Inventario() {
         <div className="form-grid-2">
           <div className="form-group">
             <label className="form-label">Materia Prima</label>
-            <select className="form-control" value={formMov.mp_id} onChange={e => setFormMov(f => ({ ...f, mp_id: e.target.value }))}>
+            <Select className="form-control" value={formMov.mp_id} onChange={e => setFormMov(f => ({ ...f, mp_id: e.target.value }))}>
               <option value="">Seleccionar...</option>
               {mps.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
-            </select>
+            </Select>
           </div>
           <div className="form-group">
             <label className="form-label">Tipo</label>
-            <select className="form-control" value={formMov.tipo} onChange={e => setFormMov(f => ({ ...f, tipo: e.target.value }))}>
+            <Select className="form-control" value={formMov.tipo} onChange={e => setFormMov(f => ({ ...f, tipo: e.target.value }))}>
               <option value="entrada">Entrada (Compra/Recepción)</option>
               <option value="salida">Salida (Uso en producción)</option>
               <option value="ajuste">Ajuste de inventario</option>
-            </select>
+            </Select>
           </div>
         </div>
         <div className="form-grid-2">
@@ -672,20 +673,20 @@ export default function Inventario() {
           <div className="form-grid-2" style={{ background: 'rgba(192,57,43,0.05)', border: '1px solid rgba(192,57,43,0.18)', borderRadius: 'var(--radio)', padding: 10 }}>
             <div className="form-group">
               <label className="form-label">Motivo {formMov.tipo === 'salida' && <small style={{ color: 'var(--rojo)' }}>*</small>}</label>
-              <select className="form-control" value={formMov.motivo} onChange={e => setFormMov(f => ({ ...f, motivo: e.target.value }))}>
+              <Select className="form-control" value={formMov.motivo} onChange={e => setFormMov(f => ({ ...f, motivo: e.target.value }))}>
                 {MOTIVOS_SALIDA.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-              </select>
+              </Select>
             </div>
             <div className="form-group">
               <label className="form-label">¿De qué lote se descuenta? <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(solo aplica si el ajuste RESTA)</small></label>
               {/* BUG corregido: aquí se usaba `mpSel`, que solo existe en el bloque de entradas —
                   al elegir salida/ajuste con lotes cargados el modal se rompía (ReferenceError). */}
-              <select className="form-control" value={formMov.lote_id} onChange={e => setFormMov(f => ({ ...f, lote_id: e.target.value }))}>
+              <Select className="form-control" value={formMov.lote_id} onChange={e => setFormMov(f => ({ ...f, lote_id: e.target.value }))}>
                 <option value="">Automático (PEPS: el más antiguo/próximo a vencer)</option>
                 {lotesDe(parseInt(formMov.mp_id)).map(l => (
                   <option key={l.id} value={l.id}>Lote {l.lote || '(s/n)'} · {fBase(l.cantidad_actual, mps.find(m => String(m.id) === String(formMov.mp_id))?.unidad)} disp.{l.vencimiento ? ` · vence ${l.vencimiento}` : ''}</option>
                 ))}
-              </select>
+              </Select>
             </div>
           </div>
         )}

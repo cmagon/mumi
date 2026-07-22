@@ -11,6 +11,7 @@ import { useReorder } from '../hooks/useReorder'
 import JSZip from 'jszip'
 import Modal from '../components/ui/Modal'
 import { Bell, ClipboardList, Clock, Download, FileText, FolderOpen, Link2, Mail, Pencil, Trash2, Undo2, X } from 'lucide-react'
+import Select from '../components/ui/Select'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const BUCKET = 'documentos'
@@ -687,14 +688,14 @@ export default function Documentos() {
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        <select className="form-control" value={filtroProceso} onChange={e => setFiltroProceso(e.target.value)} style={{ width: 'auto' }}>
+        <Select className="form-control" value={filtroProceso} onChange={e => setFiltroProceso(e.target.value)} style={{ width: 'auto' }}>
           <option value="">Todos los procesos</option>
           {procesos.map(p => <option key={p} value={p}>{p}</option>)}
-        </select>
-        <select className="form-control" value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)} style={{ width: 'auto' }}>
+        </Select>
+        <Select className="form-control" value={filtroTipo} onChange={e => setFiltroTipo(e.target.value)} style={{ width: 'auto' }}>
           <option value="">Todos los tipos</option>
           {Object.entries(TIPOS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
+        </Select>
         <input className="form-control" placeholder="Buscar por código o nombre..." value={buscar} onChange={e => setBuscar(e.target.value)} style={{ maxWidth: 260 }} />
       </div>
       {puedeReordenar && procesosMostrados.length > 0 && (
@@ -824,15 +825,15 @@ export default function Documentos() {
         <div className="form-grid-2">
           <div className="form-group"><label className="form-label">Código</label><input className="form-control" value={form.codigo} onChange={e => setForm(f => ({ ...f, codigo: e.target.value }))} placeholder="Ej: PR-PTZ-15" /></div>
           <div className="form-group"><label className="form-label">Tipo</label>
-            <select className="form-control" value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}>
+            <Select className="form-control" value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}>
               {Object.entries(TIPOS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+            </Select>
           </div>
         </div>
         <div className="form-group"><label className="form-label">Nombre del documento</label><input className="form-control" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} /></div>
         <div className="form-grid-2">
           <div className="form-group"><label className="form-label">Carpeta / Grupo</label>
-            <select className="form-control" value={form.proceso} onChange={async e => {
+            <Select className="form-control" value={form.proceso} onChange={async e => {
               if (e.target.value === '__nueva__') {
                 const nombre = await pedir('Nombre de la nueva carpeta / grupo:', { title: 'Nueva carpeta' })
                 const n = (nombre || '').trim(); if (!n) return
@@ -843,20 +844,20 @@ export default function Documentos() {
               <option value="">— Selecciona carpeta/grupo —</option>
               {[...new Set([...ordenProcesos.filter(p => p !== 'Sin proceso'), ...(form.proceso ? [form.proceso] : [])])].map(p => <option key={p} value={p}>{p}</option>)}
               <option value="__nueva__">➕ Crear nueva carpeta…</option>
-            </select>
+            </Select>
           </div>
           <div className="form-group"><label className="form-label">Versión</label><input className="form-control" value={form.version} onChange={e => setForm(f => ({ ...f, version: e.target.value }))} /></div>
         </div>
         <div className="form-group"><label className="form-label">Descripción (opcional)</label><input className="form-control" value={form.descripcion} onChange={e => setForm(f => ({ ...f, descripcion: e.target.value }))} /></div>
         <div className="form-group"><label className="form-label">Vínculo a módulo (opcional)</label>
-          <select className="form-control" value={form.modulo_link} onChange={e => setForm(f => ({ ...f, modulo_link: e.target.value }))}>
+          <Select className="form-control" value={form.modulo_link} onChange={e => setForm(f => ({ ...f, modulo_link: e.target.value }))}>
             <option value="">— Ninguno —</option>
             <option value="/produccion">Registro de Producción</option>
             <option value="/ordenes">Órdenes de Producción</option>
             <option value="/inventario">Inventario MP</option>
             <option value="/nomina">Asistencia & Nómina</option>
             <option value="/costos">Calculadora de Costos / Fichas</option>
-          </select>
+          </Select>
         </div>
         <div className="form-group">
           <label style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -879,13 +880,13 @@ export default function Documentos() {
         </p>
         <div className="form-group">
           <label className="form-label">Vigencia del enlace</label>
-          <select className="form-control" value={expHoras} onChange={e => { setExpHoras(parseInt(e.target.value)); setEnlace('') }}>
+          <Select className="form-control" value={expHoras} onChange={e => { setExpHoras(parseInt(e.target.value)); setEnlace('') }}>
             <option value={1}>1 hora</option>
             <option value={24}>1 día</option>
             <option value={72}>3 días</option>
             <option value={168}>7 días</option>
             <option value={720}>30 días</option>
-          </select>
+          </Select>
         </div>
         {!enlace
           ? <button className="btn btn-primary" onClick={generarEnlace} disabled={genEnlace}>{genEnlace ? 'Generando…' : '🔗 Generar enlace'}</button>
@@ -967,9 +968,9 @@ export default function Documentos() {
         </p>
         <div className="form-group">
           <label className="form-label">Vigencia del enlace</label>
-          <select className="form-control" value={expHoras} onChange={e => { setExpHoras(parseInt(e.target.value)); setEnlaceGrupoLink('') }}>
+          <Select className="form-control" value={expHoras} onChange={e => { setExpHoras(parseInt(e.target.value)); setEnlaceGrupoLink('') }}>
             <option value={1}>1 hora</option><option value={24}>1 día</option><option value={72}>3 días</option><option value={168}>7 días</option><option value={720}>30 días</option>
-          </select>
+          </Select>
         </div>
         {!enlaceGrupoLink
           ? <button className="btn btn-primary" onClick={generarEnlacesGrupo} disabled={genGrupo}>{genGrupo ? 'Generando…' : '🔗 Generar enlace de la carpeta'}</button>

@@ -10,6 +10,7 @@ import MoneyInput from '../components/ui/MoneyInput'
 import Cargando from '../components/ui/Cargando'
 import ImageCropper from '../components/ui/ImageCropper'
 import { UNIDADES_ALEGRA, UNSPSC_ALIMENTOS } from '../lib/alegraCatalogos'
+import Select from '../components/ui/Select'
 import {
   Settings, Plug, DollarSign, ClipboardList, Shuffle, Plus, Tags, Scale, ScrollText,
   Pencil, X, RefreshCw, Check, AlertTriangle, FlaskConical, Unplug, BarChart3, TrendingUp, Package,
@@ -922,9 +923,9 @@ export default function ProductosTerminados() {
             <div className="card">
               <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
                 <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><BarChart3 size={16} aria-hidden="true" /> Producido vs Vendido por mes</span>
-                <select className="form-control" style={{ width: 110, marginLeft: 'auto' }} value={anioAn} onChange={e => setAnioAn(Number(e.target.value))}>
+                <Select className="form-control" style={{ width: 110, marginLeft: 'auto' }} value={anioAn} onChange={e => setAnioAn(Number(e.target.value))}>
                   {(anios.length ? anios : [String(anioAn)]).map(a => <option key={a} value={a}>{a}</option>)}
-                </select>
+                </Select>
               </div>
               <div className="table-wrap">
                 <table>
@@ -1052,7 +1053,7 @@ export default function ProductosTerminados() {
             <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Recomendado 1000×1000 px (1:1). Podrás recortar al subir.</small>
             {cropEd && <ImageCropper file={cropEd} aspect={1} salidaW={1000} salidaH={1000} onCancel={() => setCropEd(null)} onCropped={(blob) => { setCropEd(null); subirEdBlob(blob) }} />}
           </div>
-          <div className="form-group"><label className="form-label">Tipo</label><select className="form-control" value={pForm.tipo} onChange={e => setPForm(f => ({ ...f, tipo: e.target.value }))}><option value="base">Base</option><option value="surtido">Surtido</option></select></div>
+          <div className="form-group"><label className="form-label">Tipo</label><Select className="form-control" value={pForm.tipo} onChange={e => setPForm(f => ({ ...f, tipo: e.target.value }))}><option value="base">Base</option><option value="surtido">Surtido</option></Select></div>
           <div className="form-group"><label className="form-label">SKU / Referencia (Alegra)</label><input className="form-control" value={pForm.sku} onChange={e => setPForm(f => ({ ...f, sku: e.target.value }))} /></div>
           <div className="form-group" style={{ gridColumn: '1 / -1' }}>
             <label className="form-label">Enlace con Alegra</label>
@@ -1127,14 +1128,14 @@ export default function ProductosTerminados() {
             <div className="form-group" style={{ gridColumn: '1 / -1', background: 'rgba(124,179,66,0.07)', borderRadius: 6, padding: 10 }}>
               <label className="form-label">Sabores combinados <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(definen costo y precios = promedio de las dos fichas)</small></label>
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <select className="form-control" style={{ maxWidth: 220 }} value={pForm.surtido_a} onChange={e => setSaborSurtido('surtido_a', e.target.value)}>
+                <Select className="form-control" style={{ maxWidth: 220 }} value={pForm.surtido_a} onChange={e => setSaborSurtido('surtido_a', e.target.value)}>
                   <option value="">Sabor 1...</option>
                   {fichas.filter(f => (f.tipo || '') !== 'subproducto').map(f => <option key={f.id} value={f.id}>{f.nombre}</option>)}
-                </select>
-                <select className="form-control" style={{ maxWidth: 220 }} value={pForm.surtido_b} onChange={e => setSaborSurtido('surtido_b', e.target.value)}>
+                </Select>
+                <Select className="form-control" style={{ maxWidth: 220 }} value={pForm.surtido_b} onChange={e => setSaborSurtido('surtido_b', e.target.value)}>
                   <option value="">Sabor 2...</option>
                   {fichas.filter(f => (f.tipo || '') !== 'subproducto').map(f => <option key={f.id} value={f.id}>{f.nombre}</option>)}
-                </select>
+                </Select>
               </div>
             </div>
           )}
@@ -1152,19 +1153,19 @@ export default function ProductosTerminados() {
           </div>
           <div className="form-group">
             <label className="form-label">Unidad de medida (Alegra)</label>
-            <select className="form-control" value={pForm.unidad_medida} onChange={e => setPForm(f => ({ ...f, unidad_medida: e.target.value }))}>
+            <Select className="form-control" value={pForm.unidad_medida} onChange={e => setPForm(f => ({ ...f, unidad_medida: e.target.value }))}>
               {UNIDADES_ALEGRA.map(u => <option key={u.l} value={u.v}>{u.l}</option>)}
-            </select>
+            </Select>
           </div>
           <div className="form-group">
             <label className="form-label" style={{ display: 'flex', alignItems: 'center' }}>
               Categoría (Alegra)
               {esAdmin && !nuevaCatOpen && <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => { setNuevaCatNombre(''); setNuevaCatOpen(true) }}>+ Nueva</button>}
             </label>
-            <select className="form-control" value={pForm.categoria_alegra_id} onChange={e => { const id = e.target.value; const c = alegraCategorias.find(x => x.id === id); setPForm(f => ({ ...f, categoria_alegra_id: id, categoria_alegra_nombre: c?.name || '' })) }}>
+            <Select className="form-control" value={pForm.categoria_alegra_id} onChange={e => { const id = e.target.value; const c = alegraCategorias.find(x => x.id === id); setPForm(f => ({ ...f, categoria_alegra_id: id, categoria_alegra_nombre: c?.name || '' })) }}>
               <option value="">— Sin categoría —</option>
               {alegraCategorias.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-            </select>
+            </Select>
             {nuevaCatOpen && (
               <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                 <input className="form-control" placeholder="Ej: Pulpas y frutas procesadas" value={nuevaCatNombre} onChange={e => setNuevaCatNombre(e.target.value)} />
@@ -1220,11 +1221,11 @@ export default function ProductosTerminados() {
           <div>
             <p style={{ fontSize: '0.85rem' }}>Stock actual: <strong>{fNum(modalAjuste.stock)}</strong></p>
             <div className="form-grid">
-              <div className="form-group"><label className="form-label">Tipo de ajuste</label><select className="form-control" value={aForm.tipo} onChange={e => setAForm(f => ({ ...f, tipo: e.target.value }))}>
+              <div className="form-group"><label className="form-label">Tipo de ajuste</label><Select className="form-control" value={aForm.tipo} onChange={e => setAForm(f => ({ ...f, tipo: e.target.value }))}>
                 <option value="entrada">Entrada (+)</option>
                 <option value="salida">Salida (−)</option>
                 <option value="ajuste">Ajuste (fijar valor)</option>
-              </select></div>
+              </Select></div>
               <div className="form-group"><label className="form-label">{aForm.tipo === 'ajuste' ? 'Nuevo stock' : 'Cantidad'}</label><input type="number" className="form-control" value={aForm.cantidad} onChange={e => setAForm(f => ({ ...f, cantidad: e.target.value }))} min={0} /></div>
               <div className="form-group"><label className="form-label">Lote (opcional)</label><input className="form-control" value={aForm.lote} onChange={e => setAForm(f => ({ ...f, lote: e.target.value }))} /></div>
               <div className="form-group" style={{ gridColumn: '1 / -1' }}><label className="form-label">Motivo</label><input className="form-control" value={aForm.motivo} onChange={e => setAForm(f => ({ ...f, motivo: e.target.value }))} placeholder="Ej: conteo físico, merma, devolución..." /></div>
@@ -1255,16 +1256,16 @@ export default function ProductosTerminados() {
           {listasPrecios && (
             <div className="form-grid">
               <div className="form-group"><label className="form-label">Lista "por mayor"</label>
-                <select className="form-control" value={cfgForm.price_list_mayor} onChange={e => setCfgForm(f => ({ ...f, price_list_mayor: e.target.value }))}>
+                <Select className="form-control" value={cfgForm.price_list_mayor} onChange={e => setCfgForm(f => ({ ...f, price_list_mayor: e.target.value }))}>
                   <option value="">— Sin asignar —</option>
                   {listasPrecios.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-                </select>
+                </Select>
               </div>
               <div className="form-group"><label className="form-label">Lista "detal / distribuidores"</label>
-                <select className="form-control" value={cfgForm.price_list_detal} onChange={e => setCfgForm(f => ({ ...f, price_list_detal: e.target.value }))}>
+                <Select className="form-control" value={cfgForm.price_list_detal} onChange={e => setCfgForm(f => ({ ...f, price_list_detal: e.target.value }))}>
                   <option value="">— Sin asignar —</option>
                   {listasPrecios.map(l => <option key={l.id} value={l.id}>{l.name}</option>)}
-                </select>
+                </Select>
               </div>
             </div>
           )}
@@ -1305,11 +1306,11 @@ export default function ProductosTerminados() {
                               <td><strong>{p.nombre}</strong> {p.tipo === 'surtido' && <span className="badge badge-dorado" style={{ fontSize: '0.6rem' }}><Shuffle size={10} aria-hidden="true" /></span>}</td>
                               <td>{p.sku || '—'}</td>
                               <td>
-                                <select className="form-control" value={sel} onChange={e => setEnlaces(m => ({ ...m, [p.id]: e.target.value }))} style={{ borderColor: yaUsado(sel) ? 'var(--rojo)' : undefined }}>
+                                <Select className="form-control" value={sel} onChange={e => setEnlaces(m => ({ ...m, [p.id]: e.target.value }))} style={{ borderColor: yaUsado(sel) ? 'var(--rojo)' : undefined }}>
                                   <option value="">— Sin enlazar —</option>
                                   {/* Oculta los ítems ya asignados a OTRO producto (en la BD o elegidos en este modal) para evitar enlaces duplicados */}
                                   {alegraItems.filter(it => it.id === sel || (!(ocultarFact && it.esServicio) && !yaUsado(it.id))).map(it => <option key={it.id} value={it.id}>{it.esServicio ? '🧾 ' : '📦 '}{it.name}{it.reference ? ` · ${it.reference}` : ''}{it.esServicio ? ' · solo facturación' : ` · stock ${it.available ?? 0}`}</option>)}
-                                </select>
+                                </Select>
                                 {yaUsado(sel) && <small style={{ color: 'var(--rojo)', fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: 3 }}><AlertTriangle size={11} aria-hidden="true" /> ese ítem ya está asignado a otro producto</small>}
                                 {sel && alegraItems.find(it => it.id === sel)?.esServicio && <small style={{ color: 'var(--tierra)', fontSize: '0.68rem', display: 'flex', alignItems: 'center', gap: 3 }}><AlertTriangle size={11} aria-hidden="true" /> es un ítem de solo facturación — el stock no se sincronizará.</small>}
                               </td>

@@ -8,6 +8,7 @@ import { useToast } from '../hooks/useToast'
 import { CATALOGO_MODULOS, MODULOS_POR_ROL } from '../lib/permisos'
 import Modal from '../components/ui/Modal'
 import { Bell, Check, FolderOpen, Pencil, Save, Tag, Trash2, Undo2, Users, X } from 'lucide-react'
+import Select from '../components/ui/Select'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 // Roles base del sistema (el admin puede crear más)
@@ -259,9 +260,9 @@ export default function Usuarios() {
           <div className="form-grid-2">
             <div className="form-group">
               <label className="form-label">Rol</label>
-              <select className="form-control" value={form.rol} disabled={editEsAdmin} onChange={e => setForm(f => ({ ...f, rol: e.target.value }))}>
+              <Select className="form-control" value={form.rol} disabled={editEsAdmin} onChange={e => setForm(f => ({ ...f, rol: e.target.value }))}>
                 {rolesDisponibles.map(r => <option key={r.value} value={r.value}>{r.label}</option>)}
-              </select>
+              </Select>
               {editEsAdmin
                 ? <small style={{ color: 'var(--texto-suave)', fontSize: '0.75rem' }}>El rol de un administrador no se puede cambiar.</small>
                 : !creandoRol
@@ -277,10 +278,10 @@ export default function Usuarios() {
             {editId && (
               <div className="form-group">
                 <label className="form-label">Estado</label>
-                <select className="form-control" value={form.estado} disabled={editEsAdmin} onChange={e => setForm(f => ({ ...f, estado: e.target.value }))}>
+                <Select className="form-control" value={form.estado} disabled={editEsAdmin} onChange={e => setForm(f => ({ ...f, estado: e.target.value }))}>
                   <option value="activo">Activo</option>
                   <option value="inactivo">Inactivo</option>
-                </select>
+                </Select>
               </div>
             )}
           </div>
@@ -490,9 +491,9 @@ function PermisosTab({ onSaved }) {
 
       <div className="form-group" style={{ maxWidth: 320 }}>
         <label className="form-label">Rol a configurar</label>
-        <select className="form-control" value={rolSel} onChange={e => setRolSel(e.target.value)}>
+        <Select className="form-control" value={rolSel} onChange={e => setRolSel(e.target.value)}>
           {rolesConfigurables.map(r => <option key={r} value={r}>{getRolLabel(r)}</option>)}
-        </select>
+        </Select>
       </div>
 
       <div style={{ display: 'grid', gap: 12 }}>

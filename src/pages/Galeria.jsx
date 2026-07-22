@@ -6,6 +6,7 @@ import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
 import Modal from '../components/ui/Modal'
 import { Camera, Download, Trash2 } from 'lucide-react'
+import Select from '../components/ui/Select'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const CATEGORIAS = { produccion: 'Producción', producto: 'Producto terminado', inventario: 'Inventario', evento: 'Evento / Feria', empleados: 'Empleados', otro: 'Otro' }
@@ -101,10 +102,10 @@ export default function Galeria() {
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap' }}>
-        <select className="form-control" value={filtro} onChange={e => setFiltro(e.target.value)} style={{ width: 'auto' }}>
+        <Select className="form-control" value={filtro} onChange={e => setFiltro(e.target.value)} style={{ width: 'auto' }}>
           <option value="">Todas las categorías</option>
           {Object.entries(CATEGORIAS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
+        </Select>
         <input type="text" className="form-control" placeholder="Buscar..." value={buscar} onChange={e => setBuscar(e.target.value)} style={{ maxWidth: 240 }} />
       </div>
 
@@ -152,9 +153,9 @@ export default function Galeria() {
         <div className="form-grid-2">
           <div className="form-group">
             <label className="form-label">Categoría</label>
-            <select className="form-control" value={form.categoria} onChange={e => setForm(f => ({ ...f, categoria: e.target.value }))}>
+            <Select className="form-control" value={form.categoria} onChange={e => setForm(f => ({ ...f, categoria: e.target.value }))}>
               {Object.entries(CATEGORIAS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-            </select>
+            </Select>
           </div>
           <div className="form-group">
             <label className="form-label">Fecha</label>

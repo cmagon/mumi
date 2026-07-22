@@ -21,7 +21,7 @@ export const CFG_DEFAULT = {
   contacto_mapa: '', paginas: [], galeria_albumes: [], galeria_titulo: '', galeria_subtitulo: '', categorias_extra: [],
   envio_tarifa: null, envio_mensaje: '', avisos: [], pagos: [],
   seo_titulo: '', seo_descripcion: '', seo_imagen: '',
-  mantenimiento_activo: false, mantenimiento_mensaje: '', terminos_texto: '',
+  mantenimiento_activo: false, mantenimiento_mensaje: '', terminos_texto: '', diseno: 'selva',
   mayorista_activo: true, mayorista_clave: '', mayorista_pedido_minimo: 0,
   mayorista_mensaje: '¿Eres mayorista? Accede a precios especiales por volumen.',
   mayorista_wa_texto: 'Hola Mumi Amazonia, me interesa ser mayorista. ¿Me comparten los precios al por mayor?',

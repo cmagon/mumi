@@ -13,6 +13,7 @@ import { useConfirm } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import * as XLSX from 'xlsx'
 import { BarChart3, ClipboardList, Clock, DollarSign, Download, FolderOpen, Pencil, Pin, Settings, Users, X } from 'lucide-react'
+import Select from '../components/ui/Select'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const MESES_LABELS = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
@@ -381,17 +382,17 @@ export default function Nomina() {
           <div className="form-grid">
             <div className="form-group">
               <label className="form-label">Empleado</label>
-              <select className="form-control" value={nomEmpId} onChange={e => { setNomEmpId(e.target.value); setNomDescManual(''); setNomRazonDesc('') }}>
+              <Select className="form-control" value={nomEmpId} onChange={e => { setNomEmpId(e.target.value); setNomDescManual(''); setNomRazonDesc('') }}>
                 <option value="">Seleccionar...</option>
                 {empsActivos.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
-              </select>
+              </Select>
             </div>
             <div className="form-group">
               <label className="form-label">Período</label>
-              <select className="form-control" value={nomPeriodo} onChange={e => setNomPeriodo(e.target.value)}>
+              <Select className="form-control" value={nomPeriodo} onChange={e => setNomPeriodo(e.target.value)}>
                 <option value="quincenal">Quincenal</option>
                 <option value="mensual">Mensual</option>
-              </select>
+              </Select>
             </div>
             <div className="form-group">
               <label className="form-label">Desde</label>
@@ -683,9 +684,9 @@ export default function Nomina() {
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: 12 }}>
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label">Mes</label>
-                  <select className="form-control" value={lisMes} onChange={e => setLisMes(Number(e.target.value))}>
+                  <Select className="form-control" value={lisMes} onChange={e => setLisMes(Number(e.target.value))}>
                     {MESES_LABELS.slice(1).map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
-                  </select>
+                  </Select>
                 </div>
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label">Año</label>
@@ -739,10 +740,10 @@ export default function Nomina() {
                             </td>}
                             <td>
                               {ausencia && esAdmin
-                                ? <select className="form-control" style={{ padding: '4px 6px', fontSize: '0.8rem' }} value={reg.estado_dia || 'injustificada'} onChange={e => setEstadoDia(reg, e.target.value)}>
+                                ? <Select className="form-control" style={{ padding: '4px 6px', fontSize: '0.8rem' }} value={reg.estado_dia || 'injustificada'} onChange={e => setEstadoDia(reg, e.target.value)}>
                                     <option value="justificada">Ausencia justificada</option>
                                     <option value="injustificada">Ausencia injustificada</option>
-                                  </select>
+                                  </Select>
                                 : <span className={`badge ${ausencia ? (reg.estado_dia === 'justificada' ? 'badge-dorado' : 'badge-rojo') : 'badge-verde'}`}>{ausencia ? (reg.estado_dia === 'justificada' ? 'Justificada' : 'Injustificada') : 'Asistió'}</span>}
                             </td>
                             {esAdmin && <td>
@@ -838,7 +839,7 @@ export default function Nomina() {
         {empEsUsuario ? (
           <div className="form-group">
             <label className="form-label">Usuario / Persona <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(debe estar registrado como usuario)</small></label>
-            <select className="form-control" value={formEmp.cedula}
+            <Select className="form-control" value={formEmp.cedula}
               onChange={e => {
                 const u = usuarios.find(x => x.login === e.target.value)
                 setFormEmp(f => ({ ...f, cedula: u ? u.login : '', nombre: u ? u.nombre : '' }))
@@ -850,7 +851,7 @@ export default function Nomina() {
               ).map(u => (
                 <option key={u.id} value={u.login}>{u.nombre} — C.C. {u.login}</option>
               ))}
-            </select>
+            </Select>
             {usuariosDisponibles.length === 0 && !editEmpId && (
               <small style={{ color: 'var(--texto-suave)', fontSize: '0.75rem' }}>
                 No hay usuarios disponibles sin vincular. Crea el usuario en "Usuarios & Permisos", o desmarca la casilla para registrar un empleado sin login.
@@ -873,18 +874,18 @@ export default function Nomina() {
         <div className="form-grid-2">
           <div className="form-group">
             <label className="form-label">Área <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(para el costeo — ver Costos → CIF)</small></label>
-            <select className="form-control" value={formEmp.area_costeo || 'produccion'} onChange={e => setFormEmp(f => ({ ...f, area_costeo: e.target.value }))}>
+            <Select className="form-control" value={formEmp.area_costeo || 'produccion'} onChange={e => setFormEmp(f => ({ ...f, area_costeo: e.target.value }))}>
               {AREAS_COSTEO.map(a => <option key={a.value} value={a.value}>{a.label}</option>)}
-            </select>
+            </Select>
             <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Solo la nómina de <strong>Producción</strong> entra al costo/minuto de los productos; Administración y Ventas van al gasto operacional.</small>
           </div>
         </div>
         <div className="form-grid-2">
           <div className="form-group">
             <label className="form-label">Tipo de pago</label>
-            <select className="form-control" value={formEmp.tipo_pago} onChange={e => setFormEmp(f => ({ ...f, tipo_pago: e.target.value }))}>
+            <Select className="form-control" value={formEmp.tipo_pago} onChange={e => setFormEmp(f => ({ ...f, tipo_pago: e.target.value }))}>
               {TIPOS_PAGO.map(t => <option key={t.value} value={t.value}>{t.label}</option>)}
-            </select>
+            </Select>
             <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
               <strong>Por horas</strong>: contrato laboral, valor hora = salario ÷ horas-mes, <strong>con</strong> prestaciones. ·
               <strong> Por hora informal</strong>: pago ocasional valor hora libre, <strong>sin</strong> prestaciones (no laboral).
@@ -929,9 +930,9 @@ export default function Nomina() {
         </div>
         <div className="form-group">
           <label className="form-label">Estado</label>
-          <select className="form-control" value={formEmp.estado} onChange={e => setFormEmp(f => ({ ...f, estado: e.target.value }))}>
+          <Select className="form-control" value={formEmp.estado} onChange={e => setFormEmp(f => ({ ...f, estado: e.target.value }))}>
             <option value="activo">Activo</option><option value="inactivo">Inactivo</option>
-          </select>
+          </Select>
         </div>
       </Modal>
     </div>
@@ -1023,10 +1024,10 @@ function ParametrosNomina({ params, empleadosActivos = 0, onSaved }) {
             <div className="form-grid-2">
               <div className="form-group" style={{ margin: 0 }}>
                 <label className="form-label">Cómo se detecta la inasistencia</label>
-                <select className="form-control" value={p.modoInasistencia || 'automatico'} onChange={e => setBase('modoInasistencia', e.target.value)}>
+                <Select className="form-control" value={p.modoInasistencia || 'automatico'} onChange={e => setBase('modoInasistencia', e.target.value)}>
                   <option value="automatico">Automático (días hábiles del rango − días asistidos)</option>
                   <option value="manual">Manual (marcado en el listado de asistencia)</option>
-                </select>
+                </Select>
               </div>
             </div>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: 'pointer', marginTop: 8 }}>

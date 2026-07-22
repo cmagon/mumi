@@ -25,6 +25,7 @@ import RichEditor from '../components/ui/RichEditor'
 import FrutoIcon, { ICONOS_FRUTO } from '../components/ui/FrutoIcon'
 import MoneyInput from '../components/ui/MoneyInput'
 import { getConfig } from '../lib/appConfig'
+import Select from '../components/ui/Select'
 
 // Fuentes de Google disponibles para el catálogo (títulos, subtítulos, párrafos)
 const FUENTES = [
@@ -268,10 +269,10 @@ function ProductosExtra({ toast, baseProductos = [] }) {
               <div style={{ marginBottom: 8 }}>
                 <label className="form-label">Componentes (de productos existentes)</label>
                 <div style={{ display: 'flex', gap: 6, marginBottom: 6, flexWrap: 'wrap' }}>
-                  <select className="form-control" style={{ flex: 1, minWidth: 160 }} value={comp[i]?.id || ''} onChange={e => setComp(s => ({ ...s, [i]: { ...(s[i] || {}), id: e.target.value } }))}>
+                  <Select className="form-control" style={{ flex: 1, minWidth: 160 }} value={comp[i]?.id || ''} onChange={e => setComp(s => ({ ...s, [i]: { ...(s[i] || {}), id: e.target.value } }))}>
                     <option value="">Elegir producto…</option>
                     {baseProductos.map(p => <option key={p.id} value={p.id}>{p.nombre} (stock {p.stock ?? 0})</option>)}
-                  </select>
+                  </Select>
                   <input type="number" min="1" className="form-control" style={{ width: 80 }} value={comp[i]?.cantidad || 1} onChange={e => setComp(s => ({ ...s, [i]: { ...(s[i] || {}), cantidad: e.target.value } }))} />
                   <button className="btn btn-sm btn-secondary" onClick={() => addComp(i)}><Plus size={13} /></button>
                 </div>
@@ -822,9 +823,9 @@ function PagosEditor({ pagos = [], onChange }) {
         {pagos.map((p, i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ width: 30, height: 32, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--selva)', flexShrink: 0 }}><PagoIco name={p.icono} /></span>
-            <select className="form-control" style={{ width: 150, flexShrink: 0 }} value={p.icono || 'CreditCard'} onChange={e => upd(i, 'icono', e.target.value)}>
+            <Select className="form-control" style={{ width: 150, flexShrink: 0 }} value={p.icono || 'CreditCard'} onChange={e => upd(i, 'icono', e.target.value)}>
               {PAGO_ICONOS.map(o => <option key={o.n} value={o.n}>{o.l}</option>)}
-            </select>
+            </Select>
             <input className="form-control" style={{ flex: 1 }} value={p.nombre || ''} onChange={e => upd(i, 'nombre', e.target.value)} placeholder="Ej: Nequi, Bancolombia, Efectivo…" />
             <button type="button" className="btn btn-xs btn-secondary" disabled={i === 0} onClick={() => mover(i, -1)}><ChevronUp size={12} /></button>
             <button type="button" className="btn btn-xs btn-secondary" disabled={i === pagos.length - 1} onClick={() => mover(i, 1)}><ChevronDown size={12} /></button>
@@ -1110,6 +1111,12 @@ const SECCIONES_DEFAULT = [
   { id: 'frutos', on: true }, { id: 'newsletter', on: true },
 ]
 const SECCION_LABEL = { hero: '🖼️ Banner principal (hero)', novedades: '✨ Novedades', categorias: '🛍️ Productos por categoría', frutos: '🌿 Frutos que nos inspiran', newsletter: '✉️ Suscripción (newsletter)' }
+// Estilos de diseño (formas/bordes), independientes del color
+const DISENOS = [
+  { id: 'selva', nombre: 'Selva', desc: 'Redondeado suave (actual)', radio: 12, radioMini: 4 },
+  { id: 'editorial', nombre: 'Editorial', desc: 'Elegante, esquinas rectas, líneas finas', radio: 0, radioMini: 0 },
+  { id: 'organico', nombre: 'Orgánico', desc: 'Muy redondeado, botones píldora, suave', radio: 20, radioMini: 8 },
+]
 const PLANTILLAS = [
   { id: 'amazonia', nombre: 'Amazonia', primario: '#1a3a2a', secundario: '#C8A94A' },
   { id: 'natural', nombre: 'Natural', primario: '#3d6b4a', secundario: '#7CB342' },
@@ -1170,10 +1177,10 @@ function BarraItemsEditor({ items = [], onChange }) {
         {norm.map((it, i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <span style={{ width: 30, height: 34, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', color: 'var(--selva)', flexShrink: 0 }}><BIcon name={it.icono} /></span>
-            <select className="form-control" style={{ width: 130, flexShrink: 0 }} value={it.icono || ''} onChange={e => upd(i, 'icono', e.target.value)}>
+            <Select className="form-control" style={{ width: 130, flexShrink: 0 }} value={it.icono || ''} onChange={e => upd(i, 'icono', e.target.value)}>
               <option value="">• (punto)</option>
               {BENEFIT_ICONS.map(o => <option key={o.n} value={o.n}>{o.l}</option>)}
-            </select>
+            </Select>
             <input className="form-control" style={{ flex: 1 }} value={it.texto} onChange={e => upd(i, 'texto', e.target.value)} placeholder="Texto del beneficio" />
             <button type="button" className="btn btn-xs btn-secondary" disabled={i === 0} onClick={() => mover(i, -1)}><ChevronUp size={12} /></button>
             <button type="button" className="btn btn-xs btn-secondary" disabled={i === norm.length - 1} onClick={() => mover(i, 1)}><ChevronDown size={12} /></button>
@@ -1315,9 +1322,9 @@ function EditorNosotros({ bloques = [], onChange, toast, paginas = [], sinFila =
                     <div key={ci} style={{ flex: '1 1 220px', minWidth: 200, border: '1px dashed var(--crema-oscuro)', borderRadius: 8, padding: 8 }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 6 }}>
                         <strong style={{ flex: 1, fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Columna {ci + 1}</strong>
-                        <select className="form-control" style={{ width: 'auto', padding: '2px 6px', fontSize: '0.74rem' }} value={c.ancho || 'auto'} onChange={e => colUpd(i, ci, 'ancho', e.target.value)}>
+                        <Select className="form-control" style={{ width: 'auto', padding: '2px 6px', fontSize: '0.74rem' }} value={c.ancho || 'auto'} onChange={e => colUpd(i, ci, 'ancho', e.target.value)}>
                           <option value="auto">Auto</option><option value="3">1/4</option><option value="4">1/3</option><option value="6">1/2</option><option value="8">2/3</option><option value="9">3/4</option>
-                        </select>
+                        </Select>
                         {(b.columnas || []).length > 1 && <button type="button" className="btn btn-xs btn-danger" onClick={() => colDel(i, ci)}><X size={11} /></button>}
                       </div>
                       <EditorNosotros bloques={c.bloques || []} onChange={(bl) => colUpd(i, ci, 'bloques', bl)} toast={toast} paginas={paginas} sinFila />
@@ -1342,11 +1349,11 @@ function EditorNosotros({ bloques = [], onChange, toast, paginas = [], sinFila =
                       style={{ border: 'none', padding: '4px 10px', cursor: 'pointer', background: act ? 'var(--selva)' : '#fff', color: act ? '#fff' : 'var(--texto)' }}>{ic}</button>
                   })}
                 </div>
-                <select className="form-control" style={{ width: 'auto', padding: '4px 8px', fontSize: '0.8rem' }} value={b.ancho || 'full'} onChange={e => upd(i, 'ancho', e.target.value)}>
+                <Select className="form-control" style={{ width: 'auto', padding: '4px 8px', fontSize: '0.8rem' }} value={b.ancho || 'full'} onChange={e => upd(i, 'ancho', e.target.value)}>
                   <option value="narrow">Ancho: estrecho</option>
                   <option value="medio">Ancho: medio</option>
                   <option value="full">Ancho: completo</option>
-                </select>
+                </Select>
                 {b.tipo === 'titulo' && <label style={{ fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}><input type="checkbox" checked={!!b.grande} onChange={e => upd(i, 'grande', e.target.checked)} /> Grande</label>}
               </div>
             )}
@@ -1365,10 +1372,10 @@ function EditorNosotros({ bloques = [], onChange, toast, paginas = [], sinFila =
               <div className="form-grid-2">
                 <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Texto del botón</label><input className="form-control" value={b.texto || ''} onChange={e => upd(i, 'texto', e.target.value)} placeholder="Ej: Conoce nuestra galería" /></div>
                 <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Destino</label>
-                  <select className="form-control" value={(paginas.some(p => `/p/${p.slug}` === b.destino)) ? b.destino : '__url'} onChange={e => upd(i, 'destino', e.target.value === '__url' ? '' : e.target.value)}>
+                  <Select className="form-control" value={(paginas.some(p => `/p/${p.slug}` === b.destino)) ? b.destino : '__url'} onChange={e => upd(i, 'destino', e.target.value === '__url' ? '' : e.target.value)}>
                     {paginas.map(p => <option key={p.slug} value={`/p/${p.slug}`}>Página: {p.titulo}</option>)}
                     <option value="__url">Enlace externo (URL)…</option>
-                  </select>
+                  </Select>
                   {!paginas.some(p => `/p/${p.slug}` === b.destino) && <input className="form-control" style={{ marginTop: 6 }} value={b.destino || ''} onChange={e => upd(i, 'destino', e.target.value)} placeholder="https://…" />}
                 </div>
               </div>
@@ -1492,7 +1499,7 @@ function GaleriaEditor({ albumes = [], onChange, toast }) {
               <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Subtítulo</label><input className="form-control" value={al.subtitulo || ''} onChange={e => upd(i, 'subtitulo', e.target.value)} /></div>
             </div>
             <div className="form-group" style={{ marginBottom: 8 }}><label className="form-label">Tamaño en la galería</label>
-              <select className="form-control" value={al.tamano || 'md'} onChange={e => upd(i, 'tamano', e.target.value)}><option value="sm">Pequeño</option><option value="md">Mediano</option><option value="lg">Grande</option></select>
+              <Select className="form-control" value={al.tamano || 'md'} onChange={e => upd(i, 'tamano', e.target.value)}><option value="sm">Pequeño</option><option value="md">Mediano</option><option value="lg">Grande</option></Select>
             </div>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 }}>
               <label className="btn btn-xs btn-secondary" style={{ cursor: 'pointer' }}><Upload size={12} /> {subiendo ? 'Subiendo…' : 'Subir fotos'}<input type="file" accept="image/*" multiple hidden onChange={e => { const fs = [...(e.target.files || [])]; if (fs.length) subirFotos(i, fs); e.target.value = '' }} /></label>
@@ -1605,10 +1612,10 @@ function SeccionesEditor({ secciones = [], onChange, categorias = [], banners = 
             </div>
             {abierto === i && <div style={{ marginTop: 8 }}>
             {s.tipo === 'categoria' && (
-              <select className="form-control" style={{ marginTop: 6 }} value={s.categoria || ''} onChange={e => upd(i, 'categoria', e.target.value)}>
+              <Select className="form-control" style={{ marginTop: 6 }} value={s.categoria || ''} onChange={e => upd(i, 'categoria', e.target.value)}>
                 <option value="">Elegir categoría…</option>
                 {categorias.map(c => <option key={c} value={c}>{c}</option>)}
-              </select>
+              </Select>
             )}
             {s.tipo === 'banner' && (() => {
               const secundarios = banners.filter(b => b.es_secundario)
@@ -1623,7 +1630,7 @@ function SeccionesEditor({ secciones = [], onChange, categorias = [], banners = 
               }
               return (
                 <div>
-                  <select className="form-control" style={{ marginTop: 6 }} value={valor} onChange={e => elegir(e.target.value)}>
+                  <Select className="form-control" style={{ marginTop: 6 }} value={valor} onChange={e => elegir(e.target.value)}>
                     <option value="">Elegir qué mostrar aquí…</option>
                     <optgroup label="Un banner individual">
                       {secundarios.map(b => <option key={b.id} value={`b:${b.id}`}>{b.nombre || b.titulo || '(sin nombre)'}</option>)}
@@ -1631,7 +1638,7 @@ function SeccionesEditor({ secciones = [], onChange, categorias = [], banners = 
                     <optgroup label="Un grupo completo (slide)">
                       {grupos.map(g => <option key={g} value={`g:${g}`}>{g}</option>)}
                     </optgroup>
-                  </select>
+                  </Select>
                   <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
                     {secundarios.length === 0
                       ? <>Crea banners <strong>secundarios</strong> en la sección "Banners".</>
@@ -1655,9 +1662,9 @@ function SeccionesEditor({ secciones = [], onChange, categorias = [], banners = 
         ))}
       </div>
       <div style={{ display: 'flex', gap: 6 }}>
-        <select className="form-control" style={{ maxWidth: 260 }} value={nuevo} onChange={e => setNuevo(e.target.value)}>
+        <Select className="form-control" style={{ maxWidth: 260 }} value={nuevo} onChange={e => setNuevo(e.target.value)}>
           {SEC_TIPOS.map(t => <option key={t.tipo} value={t.tipo}>{t.label}</option>)}
-        </select>
+        </Select>
         <button type="button" className="btn btn-sm btn-primary" onClick={add}><Plus size={13} /> Agregar sección</button>
       </div>
     </div>
@@ -1678,9 +1685,9 @@ function CamposVideo({ b, set }) {
   return (
     <div>
       <div className="form-group"><label className="form-label">Red social</label>
-        <select className="form-control" value={b.red || ''} onChange={e => set('red', e.target.value)}>
+        <Select className="form-control" value={b.red || ''} onChange={e => set('red', e.target.value)}>
           {REDES_VIDEO.map(r => <option key={r.id} value={r.id}>{r.label}</option>)}
-        </select>
+        </Select>
       </div>
       <div className="form-group"><label className="form-label">Enlace de la publicación</label>
         <input className="form-control" autoFocus value={b.url || ''} onChange={e => set('url', e.target.value)} placeholder={EJEMPLO_RED[b.red] || 'Pega aquí el enlace de la publicación'} />
@@ -1688,13 +1695,13 @@ function CamposVideo({ b, set }) {
       </div>
       <div className="form-grid-2">
         <div className="form-group"><label className="form-label">Formato</label>
-          <select className="form-control" value={b.formato || ''} onChange={e => set('formato', e.target.value)}>
+          <Select className="form-control" value={b.formato || ''} onChange={e => set('formato', e.target.value)}>
             <option value="">Automático según la red</option>
             <option value="16 / 9">Horizontal (16:9)</option>
             <option value="1 / 1">Cuadrado (1:1)</option>
             <option value="4 / 5">Vertical (4:5)</option>
             <option value="9 / 16">Vertical completo (9:16)</option>
-          </select>
+          </Select>
         </div>
         <div className="form-group"><label className="form-label">Título (opcional)</label><input className="form-control" value={b.titulo || ''} onChange={e => set('titulo', e.target.value)} /></div>
       </div>
@@ -1739,11 +1746,11 @@ function ModalBloque({ bloque, paginas = [], toast, onGuardar, onClose }) {
         <div>
           <div className="form-group"><label className="form-label">Texto del botón</label><input className="form-control" autoFocus value={b.texto || ''} onChange={e => set('texto', e.target.value)} /></div>
           <div className="form-group"><label className="form-label">Destino</label>
-            <select className="form-control" value={paginas.some(p => `/p/${p.slug}` === b.destino) ? b.destino : '__url'} onChange={e => set('destino', e.target.value === '__url' ? '' : e.target.value)}>
+            <Select className="form-control" value={paginas.some(p => `/p/${p.slug}` === b.destino) ? b.destino : '__url'} onChange={e => set('destino', e.target.value === '__url' ? '' : e.target.value)}>
               <option value="/galeria">Galería</option>
               {paginas.map(p => <option key={p.slug} value={`/p/${p.slug}`}>Página: {p.titulo}</option>)}
               <option value="__url">Enlace externo (URL)…</option>
-            </select>
+            </Select>
             {!paginas.some(p => `/p/${p.slug}` === b.destino) && <input className="form-control" style={{ marginTop: 6 }} value={b.destino || ''} onChange={e => set('destino', e.target.value)} placeholder="/galeria, /p/slug o https://…" />}
           </div>
         </div>
@@ -1946,8 +1953,22 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
           <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Si dejas el nombre o el slogan vacíos, se usa el valor por defecto de la app. El logo se recorta cuadrado (recomendado 400×400).</small>
         </PzSec>
 
-        <PzSec abierto={abierto} setAbierto={setAbierto} id="colores" titulo={<><Palette size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Colores y plantilla</>}>
-          <label className="form-label">Plantillas rápidas</label>
+        <PzSec abierto={abierto} setAbierto={setAbierto} id="colores" titulo={<><Palette size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Colores y diseño</>}>
+          <label className="form-label">Estilo de diseño <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(formas, bordes y botones)</small></label>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+            {DISENOS.map(d => (
+              <button key={d.id} type="button" onClick={() => set('diseno', d.id)} title={d.desc}
+                style={{ flex: '1 1 150px', textAlign: 'left', padding: 10, borderRadius: d.radio, cursor: 'pointer', background: '#fff', border: (cfg.diseno || 'selva') === d.id ? '2px solid var(--selva)' : '1px solid var(--crema-oscuro)' }}>
+                <div style={{ display: 'flex', gap: 5, marginBottom: 6 }}>
+                  <span style={{ width: 26, height: 16, background: 'var(--selva)', borderRadius: d.radioMini }} />
+                  <span style={{ width: 16, height: 16, background: 'var(--dorado)', borderRadius: d.radioMini }} />
+                </div>
+                <div style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--selva)' }}>{d.nombre}</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>{d.desc}</div>
+              </button>
+            ))}
+          </div>
+          <label className="form-label">Plantillas de color</label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
             {PLANTILLAS.map(p => (
               <button key={p.id} type="button" onClick={() => aplicarPlantilla(p)} title={p.nombre}
@@ -1966,19 +1987,19 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
         <PzSec abierto={abierto} setAbierto={setAbierto} id="fuentes" titulo={<>🔤 Tipografía (Google Fonts)</>}>
           <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Por defecto se usan las mismas fuentes que configuraste en la app. Aquí puedes cambiarlas solo para el catálogo.</small>
           <div className="form-group" style={{ marginTop: 8 }}><label className="form-label">Títulos</label>
-            <select className="form-control" value={cfg.fuente_titulos || ''} onChange={e => set('fuente_titulos', e.target.value)} style={{ fontFamily: `'${cfg.fuente_titulos}'` }}>
+            <Select className="form-control" value={cfg.fuente_titulos || ''} onChange={e => set('fuente_titulos', e.target.value)} style={{ fontFamily: `'${cfg.fuente_titulos}'` }}>
               {FUENTES.map(f => <option key={f} value={f} style={{ fontFamily: `'${f}'` }}>{f}</option>)}
-            </select>
+            </Select>
           </div>
           <div className="form-group"><label className="form-label">Subtítulos</label>
-            <select className="form-control" value={cfg.fuente_subtitulos || ''} onChange={e => set('fuente_subtitulos', e.target.value)} style={{ fontFamily: `'${cfg.fuente_subtitulos}'` }}>
+            <Select className="form-control" value={cfg.fuente_subtitulos || ''} onChange={e => set('fuente_subtitulos', e.target.value)} style={{ fontFamily: `'${cfg.fuente_subtitulos}'` }}>
               {FUENTES.map(f => <option key={f} value={f} style={{ fontFamily: `'${f}'` }}>{f}</option>)}
-            </select>
+            </Select>
           </div>
           <div className="form-group" style={{ marginBottom: 0 }}><label className="form-label">Párrafos / texto</label>
-            <select className="form-control" value={cfg.fuente_texto || ''} onChange={e => set('fuente_texto', e.target.value)} style={{ fontFamily: `'${cfg.fuente_texto}'` }}>
+            <Select className="form-control" value={cfg.fuente_texto || ''} onChange={e => set('fuente_texto', e.target.value)} style={{ fontFamily: `'${cfg.fuente_texto}'` }}>
               {FUENTES.map(f => <option key={f} value={f} style={{ fontFamily: `'${f}'` }}>{f}</option>)}
-            </select>
+            </Select>
           </div>
         </PzSec>
 
@@ -2002,7 +2023,7 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
           </label>
           <BarraItemsEditor items={Array.isArray(cfg.barra_items) ? cfg.barra_items : []} onChange={(v) => set('barra_items', v)} />
           <div className="form-group" style={{ marginTop: 8 }}><label className="form-label">Tamaño del texto</label>
-            <select className="form-control" value={cfg.barra_tamano || 'md'} onChange={e => set('barra_tamano', e.target.value)}><option value="sm">Pequeño</option><option value="md">Mediano</option><option value="lg">Grande</option></select>
+            <Select className="form-control" value={cfg.barra_tamano || 'md'} onChange={e => set('barra_tamano', e.target.value)}><option value="sm">Pequeño</option><option value="md">Mediano</option><option value="lg">Grande</option></Select>
           </div>
           <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>El color de la barra depende de la <strong>plantilla</strong>. Aparece debajo de la de "¿Eres mayorista?".</small>
         </PzSec>
@@ -2010,7 +2031,7 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
         <PzSec abierto={abierto} setAbierto={setAbierto} id="footer" titulo={<>🔻 Pie de página (footer)</>}>
           <div className="form-group"><label className="form-label">Texto del footer</label><textarea className="form-control" rows={2} value={cfg.footer_texto || ''} onChange={e => set('footer_texto', e.target.value)} placeholder="Sabores artesanales de la selva del Guaviare. 100% natural." /></div>
           <div className="form-group"><label className="form-label">Tamaño</label>
-            <select className="form-control" value={cfg.footer_tamano || 'md'} onChange={e => set('footer_tamano', e.target.value)}><option value="sm">Pequeño</option><option value="md">Mediano</option><option value="lg">Grande</option></select>
+            <Select className="form-control" value={cfg.footer_tamano || 'md'} onChange={e => set('footer_tamano', e.target.value)}><option value="sm">Pequeño</option><option value="md">Mediano</option><option value="lg">Grande</option></Select>
           </div>
           <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Las redes sociales del footer se toman de <strong>Configuración</strong>.</small>
         </PzSec>
@@ -2189,7 +2210,7 @@ function EditorBanner({ banner, toast, qc, onClose }) {
       <div className="form-grid-2">
         <div className="form-group"><label className="form-label">Nombre interno <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(no se muestra en el catálogo)</small></label><input className="form-control" value={b.nombre || ''} onChange={e => set('nombre', e.target.value)} placeholder="Ej: Promo octubre" /></div>
         <div className="form-group"><label className="form-label">Tipo</label>
-          <select className="form-control" value={b.tipo} onChange={e => set('tipo', e.target.value)}><option value="imagen">Imagen</option><option value="youtube">Video de YouTube</option></select>
+          <Select className="form-control" value={b.tipo} onChange={e => set('tipo', e.target.value)}><option value="imagen">Imagen</option><option value="youtube">Video de YouTube</option></Select>
         </div>
       </div>
       {b.tipo === 'youtube'
@@ -2218,10 +2239,10 @@ function EditorBanner({ banner, toast, qc, onClose }) {
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600, color: 'var(--selva)' }}><input type="checkbox" checked={!!b.activo} onChange={e => set('activo', e.target.checked)} /> Activo (visible en el catálogo)</label>
       <div className="form-group" style={{ marginTop: 10 }}>
         <label className="form-label">Ubicación</label>
-        <select className="form-control" value={b.es_secundario ? 'sec' : 'prin'} onChange={e => set('es_secundario', e.target.value === 'sec')}>
+        <Select className="form-control" value={b.es_secundario ? 'sec' : 'prin'} onChange={e => set('es_secundario', e.target.value === 'sec')}>
           <option value="prin">Banner principal (slide de arriba)</option>
           <option value="sec">Banner secundario (dentro del inicio)</option>
-        </select>
+        </Select>
       </div>
       {b.es_secundario && (
         <div className="form-group">

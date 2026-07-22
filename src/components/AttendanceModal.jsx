@@ -9,6 +9,7 @@ import { puedeSeccionExplicita } from '../lib/permisos'
 import Modal from './ui/Modal'
 import TimeField from './ui/TimeField'
 import { LogIn, LogOut, CalendarDays } from 'lucide-react'
+import Select from './ui/Select'
 
 // Fecha LOCAL de hoy (no UTC): con toISOString() un fichaje nocturno en Colombia (UTC-5) entre
 // las 19:00 y 23:59 hora local ya cae en el día siguiente en UTC, adelantando la fecha registrada.
@@ -190,10 +191,10 @@ export default function AttendanceModal({ emp, modo, onClose, onLogout, onRegist
       {puedeOtros && (
         <div className="form-group">
           <label className="form-label">Registrar asistencia de</label>
-          <select className="form-control" value={objetivo?.id || ''} onChange={e => { const id = e.target.value; setEmpSel(String(id) === String(emp?.id) ? emp : (empleados.find(x => String(x.id) === String(id)) || emp)); setHora(horaAhora()) }}>
+          <Select className="form-control" value={objetivo?.id || ''} onChange={e => { const id = e.target.value; setEmpSel(String(id) === String(emp?.id) ? emp : (empleados.find(x => String(x.id) === String(id)) || emp)); setHora(horaAhora()) }}>
             {emp && <option value={emp.id}>{emp.nombre}{empEsYo ? ' (yo)' : ''}</option>}
             {empleados.filter(x => String(x.id) !== String(emp?.id)).map(x => <option key={x.id} value={x.id}>{x.nombre}</option>)}
-          </select>
+          </Select>
         </div>
       )}
 

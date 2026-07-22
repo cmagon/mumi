@@ -7,6 +7,7 @@ import { useConfirm } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
 import { AlertTriangle, BarChart3, CheckCircle2, Download, Pencil, X } from 'lucide-react'
+import Select from '../components/ui/Select'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const BUCKET = 'documentos'
@@ -209,12 +210,12 @@ export default function Calidad() {
       )}
 
       <div style={{ display: 'flex', gap: 8, margin: '12px 0', flexWrap: 'wrap' }}>
-        <select className="form-control" value={fEstado} onChange={e => setFEstado(e.target.value)} style={{ width: 'auto' }}>
+        <Select className="form-control" value={fEstado} onChange={e => setFEstado(e.target.value)} style={{ width: 'auto' }}>
           <option value="">Todos los estados</option>{Object.entries(ESTADOS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
-        <select className="form-control" value={fSev} onChange={e => setFSev(e.target.value)} style={{ width: 'auto' }}>
+        </Select>
+        <Select className="form-control" value={fSev} onChange={e => setFSev(e.target.value)} style={{ width: 'auto' }}>
           <option value="">Toda severidad</option>{Object.entries(SEVERIDAD).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
-        </select>
+        </Select>
         <input className="form-control" placeholder="Buscar..." value={buscar} onChange={e => setBuscar(e.target.value)} style={{ maxWidth: 240 }} />
       </div>
 
@@ -252,9 +253,9 @@ export default function Calidad() {
         <div className="card-title" style={{ fontSize: '0.9rem' }}>1. Detección</div>
         <div className="form-grid-2">
           <div className="form-group"><label className="form-label">Fecha</label><input type="date" className="form-control" value={form.fecha} onChange={e => setForm(f => ({ ...f, fecha: e.target.value }))} /></div>
-          <div className="form-group"><label className="form-label">Tipo</label><select className="form-control" value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}><option value="interna">Interna</option><option value="externa">Externa (cliente)</option></select></div>
-          <div className="form-group"><label className="form-label">Origen</label><select className="form-control" value={form.origen} onChange={e => setForm(f => ({ ...f, origen: e.target.value }))}>{ORIGENES.map(o => <option key={o} value={o}>{o}</option>)}</select></div>
-          <div className="form-group"><label className="form-label">Severidad</label><select className="form-control" value={form.severidad} onChange={e => setForm(f => ({ ...f, severidad: e.target.value }))}>{Object.entries(SEVERIDAD).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
+          <div className="form-group"><label className="form-label">Tipo</label><Select className="form-control" value={form.tipo} onChange={e => setForm(f => ({ ...f, tipo: e.target.value }))}><option value="interna">Interna</option><option value="externa">Externa (cliente)</option></Select></div>
+          <div className="form-group"><label className="form-label">Origen</label><Select className="form-control" value={form.origen} onChange={e => setForm(f => ({ ...f, origen: e.target.value }))}>{ORIGENES.map(o => <option key={o} value={o}>{o}</option>)}</Select></div>
+          <div className="form-group"><label className="form-label">Severidad</label><Select className="form-control" value={form.severidad} onChange={e => setForm(f => ({ ...f, severidad: e.target.value }))}>{Object.entries(SEVERIDAD).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></div>
           <div className="form-group"><label className="form-label">Producto</label><input className="form-control" value={form.producto} onChange={e => setForm(f => ({ ...f, producto: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Lote</label><input className="form-control" value={form.lote} onChange={e => setForm(f => ({ ...f, lote: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Detectado por</label><input className="form-control" value={form.detectado_por} onChange={e => setForm(f => ({ ...f, detectado_por: e.target.value }))} /></div>
@@ -266,17 +267,17 @@ export default function Calidad() {
         <div className="form-group"><label className="form-label">Análisis de causa raíz</label><textarea className="form-control" rows={2} value={form.causa_raiz} onChange={e => setForm(f => ({ ...f, causa_raiz: e.target.value }))} /></div>
         <div className="form-group"><label className="form-label">Acción correctiva/preventiva</label><textarea className="form-control" rows={2} value={form.accion_correctiva} onChange={e => setForm(f => ({ ...f, accion_correctiva: e.target.value }))} /></div>
         <div className="form-grid-2">
-          <div className="form-group"><label className="form-label">Tipo de acción</label><select className="form-control" value={form.tipo_accion} onChange={e => setForm(f => ({ ...f, tipo_accion: e.target.value }))}>{Object.entries(TIPO_ACCION).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
+          <div className="form-group"><label className="form-label">Tipo de acción</label><Select className="form-control" value={form.tipo_accion} onChange={e => setForm(f => ({ ...f, tipo_accion: e.target.value }))}>{Object.entries(TIPO_ACCION).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></div>
           <div className="form-group"><label className="form-label">Responsable</label><input className="form-control" value={form.responsable} onChange={e => setForm(f => ({ ...f, responsable: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Fecha compromiso</label><input type="date" className="form-control" value={form.fecha_compromiso} onChange={e => setForm(f => ({ ...f, fecha_compromiso: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Fecha de cierre</label><input type="date" className="form-control" value={form.fecha_cierre} onChange={e => setForm(f => ({ ...f, fecha_cierre: e.target.value }))} /></div>
         </div>
         <div className="form-grid-2">
-          <div className="form-group"><label className="form-label">Estado</label><select className="form-control" value={form.estado} onChange={e => setForm(f => ({ ...f, estado: e.target.value }))}>{Object.entries(ESTADOS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</select></div>
+          <div className="form-group"><label className="form-label">Estado</label><Select className="form-control" value={form.estado} onChange={e => setForm(f => ({ ...f, estado: e.target.value }))}>{Object.entries(ESTADOS).map(([v, l]) => <option key={v} value={v}>{l}</option>)}</Select></div>
           <div className="form-group"><label className="form-label">Eficacia verificada</label>
-            <select className="form-control" value={form.eficaz === null || form.eficaz === undefined ? '' : String(form.eficaz)} onChange={e => setForm(f => ({ ...f, eficaz: e.target.value === '' ? null : e.target.value === 'true' }))}>
+            <Select className="form-control" value={form.eficaz === null || form.eficaz === undefined ? '' : String(form.eficaz)} onChange={e => setForm(f => ({ ...f, eficaz: e.target.value === '' ? null : e.target.value === 'true' }))}>
               <option value="">Pendiente</option><option value="true">Eficaz ✓</option><option value="false">No eficaz</option>
-            </select>
+            </Select>
           </div>
         </div>
         <div className="form-group"><label className="form-label">Evidencia (foto/archivo, opcional)</label><input type="file" accept="image/*,.pdf" onChange={e => setFile(e.target.files[0] || null)} />{file && <div style={{ fontSize: '0.8rem', color: 'var(--selva)' }}>📎 {file.name}</div>}</div>
