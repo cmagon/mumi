@@ -1049,3 +1049,42 @@ details.card > .card-acc-body { padding: 20px 24px; }
 .cfg-badge.gris { background: rgba(30,30,30,0.82); color: #fff; border-radius: 999px; }
 /* Footer demo (redes) */
 .cfg-footer-demo { background: var(--selva); color: var(--crema); border-radius: 10px; padding: 14px; display: flex; gap: 14px; justify-content: center; flex-wrap: wrap; font-size: 0.82rem; font-weight: 600; }
+
+/* ============================================================
+   AJUSTES DE USO EN PANTALLAS PEQUEÑAS (celular y tablet)
+   Correcciones de problemas concretos que aparecían al reducir el ancho:
+   controles que se salían de la caja, botones que se aplastaban hasta
+   desaparecer, y campos con ancho fijo que rompían la maquetación.
+   ============================================================ */
+@media (max-width: 1024px) {
+  /* 1) Ningún control con ancho fijo puede desbordar su contenedor.
+        Había inputs de 110–196px que en pantallas de 360px sacaban la fila. */
+  .card input, .card select, .card textarea,
+  .modal input, .modal select, .modal textarea { max-width: 100%; }
+
+  /* 2) Los grupos de botones se envuelven en varias líneas en vez de
+        comprimirse: antes el último botón (normalmente "eliminar")
+        quedaba fuera de la pantalla y no se podía tocar. */
+  .celda-acciones > div, .acordeon-acciones, .card-title { flex-wrap: wrap; }
+  .celda-acciones .btn, .acordeon-acciones .btn { flex-shrink: 0; }
+
+  /* 3) Los acordeones de sección ganan aire y un indicador claro de que
+        se pueden abrir; en el celular son la forma principal de navegar. */
+  details.card > summary { cursor: pointer; padding: 4px 0; }
+  details.card > summary::marker { color: var(--selva); }
+  .card-hint { margin-left: auto; font-size: 0.74rem; color: var(--texto-suave); font-weight: 400; }
+
+  /* 4) Las tablas anchas avisan que se pueden desplazar de lado. */
+  .table-wrap { -webkit-overflow-scrolling: touch; }
+
+  /* 5) Los campos numéricos pequeños (%, cantidades) mantienen un tamaño
+        cómodo para el dedo sin estirarse a todo el ancho. */
+  input[type="number"] { min-height: 38px; }
+}
+
+/* Evita el zoom automático de iOS al enfocar un campo: Safari hace zoom si la
+   letra mide menos de 16px, y luego la pantalla queda descuadrada. */
+@media (max-width: 1024px) and (pointer: coarse) {
+  input, select, textarea, .form-control { font-size: 16px; }
+  .btn-xs { font-size: 0.78rem; }
+}

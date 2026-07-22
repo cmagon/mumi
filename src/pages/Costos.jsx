@@ -10,6 +10,7 @@ import {
 } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
 import { useReorder } from '../hooks/useReorder'
+import { usePantallaChica } from '../hooks/useMediaQuery'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
 import ImageCropper from '../components/ui/ImageCropper'
@@ -46,6 +47,15 @@ export default function Costos() {
   const navigate = useNavigate()
   const { profile } = useAuth()
   const soloReceta = profile?.rol && profile.rol !== 'admin'   // operario/auxiliar: solo Calculadora de Receta
+
+  // Secciones de la ficha: en pantalla chica se comportan como acordeón EXCLUSIVO (todas cerradas
+  // al entrar y, al abrir una, el navegador cierra las demás gracias al atributo `name`). Así la
+  // ficha no queda como una tira interminable en el celular. En escritorio no cambia nada: se
+  // pueden tener varias secciones abiertas a la vez, que es cómodo con espacio de sobra.
+  const pantallaChica = usePantallaChica()
+  const secProps = (abiertaEnEscritorio) => pantallaChica
+    ? { name: 'ficha-seccion' }
+    : { open: abiertaEnEscritorio }
 
   // ---- Tabs y modo ----
   const [tab, setTab] = useState(profile?.rol && profile.rol !== 'admin' ? 'receta' : 'lista')
@@ -1069,12 +1079,25 @@ export default function Costos() {
     setSubiendoImp(true)
     try {
       for (const f of files) {
-        if (f.type !== 'application/pdf') { toast(`"${f.name}" no es PDF y se omitió`, 'warning'); continue }
+        const esPdf = f.type === 'application/pdf' || /\.pdf$/i.test(f.name || '')
+        if (!esPdf) { toast(`"${f.name}" no es PDF y se omitió`, 'warning'); continue }
         if (f.size > 15 * 1024 * 1024) { toast(`"${f.name}" pesa más de 15 MB y se omitió`, 'warning'); continue }
-        const path = `fichas/${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${f.name.replace(/[^\w.\-]/g, '_')}`
-        const { error } = await supabase.storage.from('ficha-imprimibles').upload(path, f, { upsert: true, contentType: 'application/pdf' })
+        // Los archivos elegidos desde Drive/OneDrive por el selector del celular no están en el
+        // teléfono: son un "atajo" que el navegador debe descargar al leerlo, y si eso falla la
+        // subida moría con un genérico "Failed to fetch". Se lee a memoria primero para poder
+        // detectarlo y explicarlo, y se sube el contenido ya descargado.
+        let datos
+        try {
+          datos = new Blob([await f.arrayBuffer()], { type: 'application/pdf' })
+          if (datos.size === 0) throw new Error('archivo vacío')
+        } catch {
+          toast(`No se pudo leer "${f.name}". Si está en Google Drive, descárgalo primero al dispositivo y vuelve a intentarlo.`, 'error')
+          continue
+        }
+        const path = `fichas/${Date.now()}-${Math.random().toString(36).slice(2, 7)}-${(f.name || 'archivo.pdf').replace(/[^\w.\-]/g, '_')}`
+        const { error } = await supabase.storage.from('ficha-imprimibles').upload(path, datos, { upsert: true, contentType: 'application/pdf' })
         if (error) throw error
-        setImprimibles(prev => [...prev, { nombre: f.name, path, size: f.size, subido_por: profile?.nombre || '', fecha: new Date().toISOString().split('T')[0] }])
+        setImprimibles(prev => [...prev, { nombre: f.name, path, size: datos.size, subido_por: profile?.nombre || '', fecha: new Date().toISOString().split('T')[0] }])
       }
       toast('Imprimible(s) cargado(s) ✓ — recuerda guardar la ficha')
     } catch (err) {
@@ -1381,7 +1404,7 @@ export default function Costos() {
           )}
 
           {/* ── Imagen + Info básica del producto ── */}
-          <details className="card" open>
+          <details className="card" {...secProps(true)}>
             <summary className="card-title"><Ico as={FileText} size={14} />Información básica<span className="card-hint">{formProd.nombre || 'nombre, tipo, SKU, vida útil...'}</span></summary>
             <div className="card-acc-body">
             {/* Galería de imágenes: la primera es la principal (miniatura del listado y del terminado) */}
@@ -1487,7 +1510,7 @@ export default function Costos() {
           </details>
 
           {/* ── Ingredientes (integrado con toggle lista/manual de Calculadora de Receta) ── */}
-          <details className="card" open={!!editingId || ingredientes.length > 0}>
+          <details className="card" {...secProps(!!editingId || ingredientes.length > 0)}>
             <summary className="card-title">
               🌿 Materias Primas e Insumos
               <span className="card-hint">{ingredientes.length} ingrediente{ingredientes.length === 1 ? '' : 's'}</span>
@@ -1650,7 +1673,7 @@ export default function Costos() {
           </details>
 
           {/* ── Parámetros de producción ── */}
-          <details className="card">
+          <details className="card" {...secProps(false)}>
             <summary className="card-title"><Ico as={Settings} size={14} />Parámetros de Producción <span className="card-hint">rendimiento, desperdicio, calidad</span></summary>
             <div className="card-acc-body">
             <div className="form-grid">
@@ -1727,7 +1750,7 @@ export default function Costos() {
           </details>
 
           {/* ── Mano de obra ── */}
-          <details className="card" open={procesos.length > 0}>
+          <details className="card" {...secProps(procesos.length > 0)}>
             <summary className="card-title"><Ico as={Clock} size={14} />Mano de Obra (por proceso)<span className="card-hint">{procesos.length} proceso{procesos.length === 1 ? '' : 's'}</span><div onClick={e => e.stopPropagation()} style={{ marginLeft:8 }}><button className="btn btn-sm btn-secondary" onClick={addProceso}>+ Agregar proceso</button></div></summary>
             <div className="card-acc-body">
             <div style={{ overflowX:'auto' }}>
@@ -1758,7 +1781,7 @@ export default function Costos() {
           </details>
 
           {/* ── Empaque ── */}
-          <details className="card" open={empaque.length > 0}>
+          <details className="card" {...secProps(empaque.length > 0)}>
             <summary className="card-title"><Ico as={Package} size={14} />Empaque & Envase<span className="card-hint">{empaque.length} ítem{empaque.length === 1 ? '' : 's'}</span><div onClick={e => e.stopPropagation()} style={{ marginLeft:8 }}><button className="btn btn-sm btn-secondary" onClick={addEmpaque}>+ Agregar</button></div></summary>
             <div className="card-acc-body">
             <div style={{ overflowX:'auto' }}>
@@ -1889,7 +1912,7 @@ export default function Costos() {
           </div>
 
           {/* ── Ficha técnica (instrucciones paso a paso) ── */}
-          <details className="card" open={!!fichaNombre}>
+          <details className="card" {...secProps(!!fichaNombre)}>
             <summary className="card-title"><Ico as={FileText} size={14} />Ficha Técnica — Instrucciones de Elaboración<span className="card-hint">{fichaNombre || 'opcional'}</span></summary>
             <div className="card-acc-body">
             {fichaNombre && (
@@ -1908,7 +1931,7 @@ export default function Costos() {
           </details>
 
           {/* ── Insumos imprimibles: PDFs que el operario imprime durante la producción ── */}
-          <details className="card" open={imprimibles.length > 0}>
+          <details className="card" {...secProps(imprimibles.length > 0)}>
             <summary className="card-title">
               <Ico as={Printer} size={14} />Insumos Imprimibles
               <span className="card-hint">{imprimibles.length > 0 ? `${imprimibles.length} archivo(s)` : 'etiquetas, rótulos…'}</span>
@@ -1922,12 +1945,17 @@ export default function Costos() {
               {imprimibles.length > 0 && (
                 <div style={{ display:'grid', gap:6, marginBottom:10 }}>
                   {imprimibles.map((imp, i) => (
-                    <div key={i} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background:'var(--crema)', borderRadius:'var(--radio)' }}>
+                    // En pantalla angosta el nombre empujaba los botones fuera de la caja y no se
+                    // podía eliminar: ahora el nombre se parte en varias líneas y los botones
+                    // nunca se encogen (flexShrink 0), así siempre quedan accesibles.
+                    <div key={i} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background:'var(--crema)', borderRadius:'var(--radio)', flexWrap:'wrap' }}>
                       <Ico as={FileText} size={14} />
-                      <span style={{ flex:1, fontSize:'0.86rem', minWidth:0, overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{imp.nombre}</span>
-                      {imp.size > 0 && <small style={{ color:'var(--texto-suave)' }}>{(imp.size / 1024).toFixed(0)} KB</small>}
-                      <button type="button" className="btn btn-xs btn-secondary" onClick={() => abrirImprimible(imp)}><Ico as={Printer} size={13} />Ver</button>
-                      <button type="button" className="btn btn-xs btn-danger" onClick={() => quitarImprimible(i)}><X size={13} aria-hidden="true" /></button>
+                      <span style={{ flex:'1 1 140px', fontSize:'0.86rem', minWidth:0, overflowWrap:'anywhere' }}>{imp.nombre}</span>
+                      {imp.size > 0 && <small style={{ color:'var(--texto-suave)', flexShrink:0 }}>{(imp.size / 1024).toFixed(0)} KB</small>}
+                      <div style={{ display:'flex', gap:6, flexShrink:0, marginLeft:'auto' }}>
+                        <button type="button" className="btn btn-xs btn-secondary" onClick={() => abrirImprimible(imp)}><Ico as={Printer} size={13} />Ver</button>
+                        <button type="button" className="btn btn-xs btn-danger" title="Quitar este archivo" onClick={() => quitarImprimible(i)}><X size={13} aria-hidden="true" />Quitar</button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -1940,10 +1968,16 @@ export default function Costos() {
             </div>
           </details>
 
-          {/* ── Precios y Resumen ── */}
+          {/* ── Precios y Resumen ──
+              En móvil son dos acordeones más de la misma serie (se abren de a uno); en escritorio
+              se ven lado a lado y siempre abiertos, que es donde el usuario compara precio contra
+              costo mientras ajusta. */}
           <div className="grid-resp" style={{ gridTemplateColumns:'1fr 1fr', gap:20 }}>
-            <div className="card">
-              <div className="card-title"><Ico as={DollarSign} size={14} />Precios de Venta</div>
+            <details className="card" {...secProps(true)}>
+              <summary className="card-title"><Ico as={DollarSign} size={14} />Precios de Venta
+                {calcResult && <span className="card-hint">{fCOP(parseFloat(formProd.precio_mayor) || 0)} por mayor</span>}
+              </summary>
+              <div className="card-acc-body">
 
               {/* ── Precio sugerido por la norma de costeo por absorción ── */}
               {calcResult && calcResult.costoTotalUnit > 0 && (() => {
@@ -2110,11 +2144,18 @@ export default function Costos() {
                   )}
                 </div>
               )}
-              {/* Precio sugerido al CONSUMIDOR para los distribuidores (margen del distribuidor sobre el precio mayor) */}
+              {/* Precio sugerido al CONSUMIDOR para los distribuidores (margen del distribuidor sobre
+                  el precio mayor). Va plegado: es una tabla de referencia que no se consulta
+                  siempre, y en el celular empujaba todo lo demás fuera de la pantalla. */}
               {calcResult && (parseFloat(formProd.precio_mayor) || 0) > 0 && (
-                <div style={{ marginTop:12 }}>
-                  <div style={{ display:'flex', alignItems:'center', marginBottom:6 }}>
-                    <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.85rem' }}><Ico as={ShoppingCart} size={14} />Precio sugerido al público <small style={{ fontWeight:400, color:'var(--texto-suave)' }}>(margen del distribuidor sobre el precio mayor = {fCOP(parseFloat(formProd.precio_mayor)||0)})</small></div>
+                <details style={{ marginTop:12, border:'1px solid var(--crema-oscuro)', borderRadius:'var(--radio)', padding:'8px 10px' }}>
+                  <summary style={{ cursor:'pointer', fontWeight:600, color:'var(--selva)', fontSize:'0.85rem', listStyle:'revert' }}>
+                    <Ico as={ShoppingCart} size={14} />Precio sugerido al público
+                    <small style={{ fontWeight:400, color:'var(--texto-suave)' }}> — a cuánto revendería el distribuidor</small>
+                  </summary>
+                  <div style={{ marginTop:8 }}>
+                  <div style={{ display:'flex', alignItems:'center', marginBottom:6, flexWrap:'wrap', gap:6 }}>
+                    <div style={{ fontSize:'0.78rem', color:'var(--texto-suave)' }}>Margen del distribuidor sobre el precio mayor = {fCOP(parseFloat(formProd.precio_mayor)||0)}</div>
                     {esAdmin && !editMargenes && <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft:'auto' }} onClick={abrirEditMargenes}><Ico as={Pencil} size={14} />Editar márgenes</button>}
                   </div>
                   {editMargenes ? (
@@ -2150,9 +2191,11 @@ export default function Costos() {
                     </div>
                   )}
                   <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Precio al público = precio a distribuidor ÷ (1 − margen). Te indica a cuánto vendería el distribuidor al consumidor final y cuánto ganaría con cada margen.</small>
-                </div>
+                  </div>
+                </details>
               )}
-            </div>
+              </div>
+            </details>
             <div className="costo-resumen">
               <div style={{ fontFamily:"'Playfair Display',serif", fontSize:'1.1rem', marginBottom:14, color:'var(--dorado)' }}>Resumen de Costos</div>
               {calcResult && (() => {

@@ -176,14 +176,14 @@ export function Home() {
           switch (tipo) {
             case 'hero': return null   // el banner principal ya se muestra arriba de los filtros
             case 'banner': {
-              // Un banner individual seleccionado: se muestra solo ese
+              // Un banner individual seleccionado: se muestra solo ese (con el mismo diseño del hero)
               if (s.bannerId) {
                 const b = (banners || []).find(x => String(x.id) === String(s.bannerId) && x.activo !== false)
-                return b ? <BannerSecundario key={key} b={b} /> : null
+                return b ? <HeroSlider key={key} slides={[b]} onOpen={() => {}} /> : null
               }
               // Un grupo completo: sus imágenes como slide (una sola = estático)
               const grupoBanners = (banners || []).filter(b => b.es_secundario && b.activo !== false && ((b.grupo || '').trim() || 'General') === s.grupo)
-              return grupoBanners.length ? <BannerGrupo key={key} banners={grupoBanners} /> : null
+              return grupoBanners.length ? <HeroSlider key={key} slides={grupoBanners} onOpen={() => {}} /> : null
             }
             case 'novedades':
               return novedades.length > 0 ? (
