@@ -1915,12 +1915,16 @@ export default function Costos() {
           <details className="card" {...secProps(!!fichaNombre)}>
             <summary className="card-title"><Ico as={FileText} size={14} />Ficha Técnica — Instrucciones de Elaboración<span className="card-hint">{fichaNombre || 'opcional'}</span></summary>
             <div className="card-acc-body">
+            {/* En el celular el nombre largo del archivo empujaba los botones fuera de la pantalla
+                y no se podía quitar la ficha: por eso la fila envuelve y los botones no se encogen. */}
             {fichaNombre && (
-              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12, padding:'8px 12px', background:'rgba(124,179,66,0.08)', borderRadius:'var(--radio)', border:'1px solid rgba(124,179,66,0.2)' }}>
-                <span style={{ flex:1, fontSize:'0.88rem', color:'var(--selva-claro)' }}><Ico as={FileText} size={14} /><strong>{fichaNombre}</strong></span>
-                {fichaPath && !fichaFile && <button className="btn btn-xs btn-dorado" onClick={descargarFicha}><Ico as={Download} size={14} />Descargar</button>}
-                {fichaFile && <span style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>pendiente de guardar</span>}
-                <button className="btn btn-xs btn-danger" onClick={() => { setFichaFile(null); setFichaNombre(''); setFichaPath('') }}><X size={13} aria-hidden="true" /></button>
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12, padding:'8px 12px', background:'rgba(124,179,66,0.08)', borderRadius:'var(--radio)', border:'1px solid rgba(124,179,66,0.2)', flexWrap:'wrap' }}>
+                <span style={{ flex:'1 1 140px', minWidth:0, fontSize:'0.88rem', color:'var(--selva-claro)', overflowWrap:'anywhere' }}><Ico as={FileText} size={14} /><strong>{fichaNombre}</strong></span>
+                {fichaFile && <span style={{ fontSize:'0.75rem', color:'var(--texto-suave)', flexShrink:0 }}>pendiente de guardar</span>}
+                <div style={{ display:'flex', gap:6, flexShrink:0, marginLeft:'auto' }}>
+                  {fichaPath && !fichaFile && <button className="btn btn-xs btn-dorado" onClick={descargarFicha}><Ico as={Download} size={14} />Descargar</button>}
+                  <button className="btn btn-xs btn-danger" title="Quitar la ficha técnica" onClick={() => { setFichaFile(null); setFichaNombre(''); setFichaPath('') }}><X size={13} aria-hidden="true" />Quitar</button>
+                </div>
               </div>
             )}
             <label className="btn btn-secondary btn-sm" style={{ cursor:'pointer', display:'inline-flex' }}>

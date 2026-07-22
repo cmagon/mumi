@@ -23,6 +23,10 @@ const EMPTY_PROD = { nombre: '', descripcion: '', sku: '', alegra_item_id: '', t
 const EMPTY_AJUSTE = { tipo: 'entrada', cantidad: '', lote: '', motivo: '' }
 
 export default function ProductosTerminados() {
+  // Normaliza texto para comparar nombres/referencias con Alegra (minúsculas, sin espacios dobles).
+  // Se declara aquí arriba porque la usan varios useMemo que corren durante el render: si queda
+  // más abajo, JavaScript falla con "Cannot access 'norm' before initialization".
+  const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim()
   const toast = useToast()
   const confirmar = useConfirm()
   const qc = useQueryClient()
@@ -652,7 +656,6 @@ export default function ProductosTerminados() {
   }
 
   // ---- Enlazar con Alegra ----
-  const norm = (s) => String(s || '').toLowerCase().replace(/\s+/g, ' ').trim()
   const abrirEnlace = async () => {
     setModalEnlace(true)
     if (!alegraItems) await escanearAlegra()
