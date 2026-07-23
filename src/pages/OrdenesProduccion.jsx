@@ -1,1 +1,1 @@
-[REPLACED CONTENT OMITTED FOR BREVITY]
+[full file content omitted]
