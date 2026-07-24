@@ -42,3 +42,36 @@ export async function notificarVencimientosRegistros() {
     }
   } catch { /* silencioso */ }
 }
+
+// Revisa los LOTES de materia prima con existencia y notifica (a admin) los vencidos o próximos
+// a vencer (dentro de los próximos `diasAviso` días). Deduplica: una notificación por lote por día.
+export async function notificarLotesMPPorVencer(diasAviso = 15) {
+  try {
+    const { data: lotes } = await supabase.from('raw_material_lots')
+      .select('id, mp_id, lote, vencimiento, cantidad_actual')
+      .gt('cantidad_actual', 0).not('vencimiento', 'is', null)
+    if (!lotes?.length) return
+    // Nombres de las MP para que el mensaje sea legible
+    const ids = [...new Set(lotes.map(l => l.mp_id).filter(Boolean))]
+    const { data: mps } = ids.length ? await supabase.from('raw_materials').select('id, nombre').in('id', ids) : { data: [] }
+    const nombreMP = Object.fromEntries((mps || []).map(m => [String(m.id), m.nombre]))
+    const hoy = new Date().toISOString().split('T')[0]
+    const limite = addDias(hoy, diasAviso)
+    for (const l of lotes) {
+      let estado = null
+      if (l.vencimiento < hoy) estado = 'vencido'
+      else if (l.vencimiento <= limite) estado = 'proximo'
+      if (!estado) continue
+      const { data: existe } = await supabase.from('notifications').select('id')
+        .eq('tipo', 'lote_vencimiento').eq('ref_id', l.id).gte('created_at', hoy).limit(1)
+      if (existe && existe.length) continue
+      const nom = nombreMP[String(l.mp_id)] || 'Materia prima'
+      await supabase.from('notifications').insert({
+        destinatario: 'admin', tipo: 'lote_vencimiento', ref_id: l.id, link: '/inventario',
+        mensaje: estado === 'vencido'
+          ? `⚠ Lote VENCIDO: ${nom} — lote ${l.lote || 's/n'} (venció ${l.vencimiento}). Dalo de baja.`
+          : `🔔 Lote por vencer: ${nom} — lote ${l.lote || 's/n'} (vence ${l.vencimiento})`,
+      })
+    }
+  } catch { /* silencioso */ }
+}

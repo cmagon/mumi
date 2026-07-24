@@ -1677,7 +1677,7 @@ export default function Costos() {
             <summary className="card-title"><Ico as={Settings} size={14} />Parámetros de Producción <span className="card-hint">rendimiento, desperdicio, calidad</span></summary>
             <div className="card-acc-body">
             <div className="form-grid">
-              <div className="form-group"><label className="form-label">{presLabel}s por bache</label><input type="number" className="form-control" value={formProd.bache} onChange={e => setFormProd(f=>({...f,bache:e.target.value}))} min={1} /></div>
+              <div className="form-group"><label className="form-label">{presLabel}s por bache</label><input type="number" className="form-control" value={formProd.bache} onChange={e => setFormProd(f=>({...f,bache:e.target.value}))} min={0} step="any" /></div>
               <div className="form-group"><label className="form-label">Baches por mes</label><input type="number" className="form-control" value={formProd.baches_mes} onChange={e => setFormProd(f=>({...f,baches_mes:e.target.value}))} min={1} /></div>
               <div className="form-group">
                 <label className="form-label">Vida útil <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(opcional)</small></label>
@@ -1737,14 +1737,22 @@ export default function Costos() {
                 Unidades estimadas: <strong style={{ color:'var(--selva)' }}>{unidadesDesdeReceta > 0 ? unidadesDesdeReceta.toFixed(1) : '—'}</strong>
                 {' '}<small style={{ color:'var(--texto-suave)' }}>(g × rend% × (1−desp%) ÷ peso unidad)</small>
               </span>
-              <button
-                className="btn btn-xs btn-success"
-                disabled={!(unidadesDesdeReceta > 0)}
-                onClick={() => { setFormProd(f => ({ ...f, bache: Math.round(unidadesDesdeReceta) })); toast('Unidades por bache actualizadas desde la receta ✓') }}
-                title="Copia las unidades estimadas al campo 'Unidades por bache' (Información del Producto)"
-              >
-                ↑ Usar como "Unidades por bache" ({unidadesDesdeReceta > 0 ? Math.round(unidadesDesdeReceta) : 0})
-              </button>
+              {(() => {
+                // Se conservan hasta 2 decimales (no se redondea a entero): un bache que rinde
+                // 62,5 unidades cuesta distinto por unidad que uno de 63, y para el costeo esa
+                // fracción importa. El campo "Unidades por bache" acepta decimales.
+                const estimada = Math.round(unidadesDesdeReceta * 100) / 100
+                return (
+                  <button
+                    className="btn btn-xs btn-success"
+                    disabled={!(unidadesDesdeReceta > 0)}
+                    onClick={() => { setFormProd(f => ({ ...f, bache: estimada })); toast('Unidades por bache actualizadas desde la receta ✓') }}
+                    title="Copia las unidades estimadas al campo 'Unidades por bache' (Información del Producto)"
+                  >
+                    ↑ Usar como "Unidades por bache" ({unidadesDesdeReceta > 0 ? estimada.toLocaleString('es-CO', { maximumFractionDigits: 2 }) : 0})
+                  </button>
+                )
+              })()}
             </div>
             </div>
           </details>

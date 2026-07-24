@@ -2220,14 +2220,8 @@ function EditorBanner({ banner, toast, qc, onClose }) {
               {b.imagen_url && <img src={b.imagen_url} alt="" style={{ width: 120, height: 68, objectFit: 'cover', borderRadius: 8 }} />}
               <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>{subiendo ? 'Subiendo…' : <><Upload size={14} /> Subir imagen</>}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) setCropFile(f); e.target.value = '' }} /></label>
             </div>
-            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
-              {b.es_secundario
-                ? <>Banner secundario: proporción <strong>320×100</strong> (se guarda a 1600×500). En móvil se recorta un poco a <strong>320×70</strong>; el marco punteado te lo muestra al recortar.</>
-                : <>Banner principal: proporción <strong>16:9</strong> (se guarda a 1600×900).</>}
-            </small>
-            {cropFile && (b.es_secundario
-              ? <ImageCropper file={cropFile} aspect={320 / 100} salidaW={1600} salidaH={500} guia={70} onCancel={() => setCropFile(null)} onCropped={(blob) => { setCropFile(null); subirBlob(blob) }} />
-              : <ImageCropper file={cropFile} aspect={16 / 9} salidaW={1600} salidaH={900} onCancel={() => setCropFile(null)} onCropped={(blob) => { setCropFile(null); subirBlob(blob) }} />)}
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Proporción <strong>16:9</strong> (se guarda a 1600×900). Los banners secundarios usan el mismo diseño y medidas que el principal.</small>
+            {cropFile && <ImageCropper file={cropFile} aspect={16 / 9} salidaW={1600} salidaH={900} onCancel={() => setCropFile(null)} onCropped={(blob) => { setCropFile(null); subirBlob(blob) }} />}
           </div>}
       <div className="form-grid-2">
         <div className="form-group"><label className="form-label">Título</label><input className="form-control" value={b.titulo} onChange={e => set('titulo', e.target.value)} /></div>

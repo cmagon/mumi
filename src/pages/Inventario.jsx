@@ -11,7 +11,7 @@ import { useConfirm, usePrompt } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import { crearLoteEntrada, consumirPEPS, consumirLote, estadoLote, costoPEPS } from '../lib/lotes'
 import * as XLSX from 'xlsx'
-import { Download, Tags, Tag, Plus, Pencil, X, Package, ClipboardList, FileText, AlertTriangle } from 'lucide-react'
+import { Download, Tags, Tag, Plus, Pencil, X, Package, ClipboardList, FileText, AlertTriangle, Trash2, Undo2 } from 'lucide-react'
 import Select from '../components/ui/Select'
 
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
@@ -132,6 +132,8 @@ export default function Inventario() {
     queryFn: async () => { const { data } = await supabase.from('raw_material_lots').select('*').order('vencimiento', { ascending: true, nullsFirst: false }); return data || [] },
   })
   const [modalLotes, setModalLotes] = useState(false)
+  const [bajaLote, setBajaLote] = useState(null)   // lote a dar de baja: { lote, mp }
+  const [bajaForm, setBajaForm] = useState({ cantidad: '', motivo: 'vencido', obs: '' })
   const [lotesMP, setLotesMP] = useState(null)
   const lotesDe = (mpId) => lotesDB.filter(l => l.mp_id === mpId).sort((a, b) => (a.vencimiento || '9999') < (b.vencimiento || '9999') ? -1 : (a.fecha_entrada < b.fecha_entrada ? -1 : 1))
   const stockLotes = (mpId) => lotesDe(mpId).reduce((s, l) => s + (l.cantidad_actual || 0), 0)
@@ -335,6 +337,107 @@ export default function Inventario() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['inventory_movements'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
       setModalMov(false); setFormMov(EMPTY_MOV); toast('Movimiento registrado ✓')
+    },
+    onError: (e) => toast(e.message, 'error'),
+  })
+
+  // ---- Anular un movimiento equivocado del historial ----
+  // No se "edita" el movimiento (rehacer el ajuste de stock y lotes sería frágil): se REVIERTE.
+  // Un movimiento ya anulado, generado por otra anulación, un consumo de orden o una baja de lote
+  // no se puede anular desde aquí, porque su reverso vive en el módulo que lo creó.
+  const [anularMov, setAnularMov] = useState(null)
+  const puedeAnular = (mv) => {
+    if (!esAdmin) return false
+    const ex = mv.extra || {}
+    if (ex.anulado || ex.anulacion || ex.orden_id || ex.baja_lote || ex.ajuste_ingrediente) return false
+    return true
+  }
+  const anularMovimiento = useMutation({
+    mutationFn: async (mv) => {
+      const mp = mps.find(m => m.id === mv.mp_id)
+      if (!mp) throw new Error('Materia prima no encontrada')
+      const cant = Number(mv.cantidad) || 0
+      // El reverso del efecto que tuvo en el stock: entrada sumó → resta; salida restó → suma.
+      const signoOriginal = mv.tipo === 'salida' ? -1 : 1   // ajuste guarda con signo en cantidad
+      const delta = mv.tipo === 'ajuste' ? -cant : -(signoOriginal * cant)
+      await supabase.rpc('ajustar_stock_mp', { p_mp_id: mv.mp_id, p_delta: delta })
+      // Reversa de lotes:
+      //  - Entrada con lote propio → se elimina/reduce ese lote (si aún tiene esa cantidad).
+      //  - Salida que consumió lotes → se devuelve la cantidad a cada lote consumido.
+      const ex = mv.extra || {}
+      try {
+        if (mv.tipo === 'entrada' && mv.lote) {
+          const { data: ls } = await supabase.from('raw_material_lots').select('*')
+            .eq('mp_id', mv.mp_id).eq('lote', mv.lote).order('fecha_entrada', { ascending: false }).limit(1)
+          const l = ls?.[0]
+          if (l) {
+            const nuevo = Math.max(0, (Number(l.cantidad_actual) || 0) - cant)
+            await supabase.from('raw_material_lots').update({ cantidad_actual: nuevo }).eq('id', l.id)
+          }
+        } else if (Array.isArray(ex.lotes_consumidos) && ex.lotes_consumidos.length) {
+          for (const lc of ex.lotes_consumidos) {
+            if (!lc.lote) continue
+            const { data: ls } = await supabase.from('raw_material_lots').select('*')
+              .eq('mp_id', mv.mp_id).eq('lote', lc.lote).limit(1)
+            const l = ls?.[0]
+            if (l) await supabase.from('raw_material_lots').update({ cantidad_actual: (Number(l.cantidad_actual) || 0) + (Number(lc.cantidad) || 0) }).eq('id', l.id)
+          }
+        }
+      } catch (e) { console.warn('No se pudo revertir el lote del movimiento:', e) }
+      // Marca el original como anulado y crea un contra-asiento visible en el historial
+      await supabase.from('inventory_movements').update({ extra: { ...ex, anulado: true, anulado_por: profile?.nombre || '', anulado_el: new Date().toISOString() } }).eq('id', mv.id)
+      const contra = {
+        mp_id: mv.mp_id, tipo: mv.tipo === 'entrada' ? 'salida' : mv.tipo === 'salida' ? 'entrada' : 'ajuste',
+        cantidad: mv.tipo === 'ajuste' ? -cant : cant, fecha: new Date().toISOString().split('T')[0],
+        responsable: profile?.nombre || '', obs: `[Anulación de movimiento del ${fFecha(mv.fecha)}] ${mv.obs || ''}`.trim(),
+        lote: mv.lote || '', vencimiento: mv.vencimiento || null, extra: { anulacion: true, anula_id: mv.id },
+      }
+      let { error: cErr } = await supabase.from('inventory_movements').insert({ ...contra, costo_unitario: mv.costo_unitario || 0 })
+      if (cErr && /costo_unitario/i.test(cErr.message || '')) await supabase.from('inventory_movements').insert(contra)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['inventory_movements'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
+      setAnularMov(null); toast('Movimiento anulado — stock revertido ✓')
+    },
+    onError: (e) => toast(e.message, 'error'),
+  })
+
+  // ---- Dar de baja un lote PEPS (vencido, dañado, contaminado…) ----
+  // Descuenta la cantidad del lote y del stock general de la MP, y deja registro con motivo.
+  const darBajaLote = useMutation({
+    mutationFn: async () => {
+      const l = bajaLote?.lote, mp = bajaLote?.mp
+      if (!l || !mp) throw new Error('Lote no válido')
+      const cant = parseFloat(bajaForm.cantidad) || 0
+      const disp = Number(l.cantidad_actual) || 0
+      if (!(cant > 0)) throw new Error('Ingresa la cantidad a dar de baja')
+      if (cant > disp + 0.0001) throw new Error(`No puedes dar de baja más de lo disponible en el lote (${fBase(disp, mp.unidad)})`)
+      if (!bajaForm.motivo) throw new Error('Indica el motivo de la baja')
+      // 1) Descuenta del lote
+      await supabase.from('raw_material_lots').update({ cantidad_actual: disp - cant }).eq('id', l.id)
+      // 2) Descuenta del stock general de la MP (atómico)
+      await supabase.rpc('ajustar_stock_mp', { p_mp_id: mp.id, p_delta: -cant })
+      // 3) Registro de la baja (auditoría). Tolerante si falta la migración v132.
+      const motivoTxt = bajaForm.obs.trim() ? `${bajaForm.motivo} — ${bajaForm.obs.trim()}` : bajaForm.motivo
+      try {
+        await supabase.from('lote_bajas').insert({
+          lote_id: l.id, mp_id: mp.id, mp_nombre: mp.nombre, lote: l.lote || '',
+          cantidad: cant, unidad: mp.unidad, motivo: motivoTxt, vencimiento: l.vencimiento || null,
+          creado_por: profile?.nombre || '',
+        })
+      } catch { /* sin tabla: no bloquea la baja */ }
+      // 4) También como movimiento de inventario, para que aparezca en el historial de la MP
+      const movBase = {
+        mp_id: mp.id, tipo: 'salida', cantidad: cant, fecha: new Date().toISOString().split('T')[0],
+        responsable: profile?.nombre || '', obs: `[Baja de lote ${l.lote || 's/n'}] ${motivoTxt}`,
+        lote: l.lote || '', vencimiento: l.vencimiento || null, extra: { baja_lote: true, lote_id: l.id, motivo: motivoTxt },
+      }
+      let { error: mErr } = await supabase.from('inventory_movements').insert({ ...movBase, costo_unitario: l.costo_unitario || 0 })
+      if (mErr && /costo_unitario/i.test(mErr.message || '')) await supabase.from('inventory_movements').insert(movBase)
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] }); qc.invalidateQueries({ queryKey: ['inventory_movements'] })
+      setBajaLote(null); toast('Lote dado de baja ✓')
     },
     onError: (e) => toast(e.message, 'error'),
   })
@@ -765,10 +868,10 @@ export default function Inventario() {
               </div>
               <div className="table-wrap">
                 <table>
-                  <thead><tr><th>#PEPS</th><th>Lote</th><th>Ingreso</th><th>Proveedor</th><th>Vence</th><th className="td-number">Inicial</th><th className="td-number">Disponible</th><th className="td-number">Reservado</th><th className="td-number">Costo/u</th><th>Estado</th></tr></thead>
+                  <thead><tr><th>#PEPS</th><th>Lote</th><th>Ingreso</th><th>Proveedor</th><th>Vence</th><th className="td-number">Inicial</th><th className="td-number">Disponible</th><th className="td-number">Reservado</th><th className="td-number">Costo/u</th><th>Estado</th><th></th></tr></thead>
                   <tbody>
                     {lotes.length === 0
-                      ? <tr><td colSpan={10} className="empty-table">Sin lotes. Registra una entrada para crear el primero.</td></tr>
+                      ? <tr><td colSpan={11} className="empty-table">Sin lotes. Registra una entrada para crear el primero.</td></tr>
                       : lotes.map((l, i) => {
                         const est = estadoLote(l.vencimiento)
                         const agotado = (l.cantidad_actual || 0) <= 0
@@ -784,6 +887,14 @@ export default function Inventario() {
                             <td className="td-number">{(l.cantidad_reservada || 0) > 0 ? <span style={{ color: 'var(--tierra)' }}>{fBase(l.cantidad_reservada, lotesMP.unidad)}</span> : '—'}</td>
                             <td className="td-number">{l.costo_unitario ? fNum(l.costo_unitario) : '—'}</td>
                             <td>{agotado ? <span className="badge">Agotado</span> : est === 'vencido' ? <span className="badge badge-rojo">Vencido</span> : est === 'por_vencer' ? <span className="badge badge-dorado">Por vencer</span> : <span className="badge badge-verde">Vigente</span>}</td>
+                            <td>
+                              {!agotado && (
+                                <button className="btn btn-xs btn-danger" title="Dar de baja (vencido, dañado…)"
+                                  onClick={() => { setBajaLote({ lote: l, mp: lotesMP }); setBajaForm({ cantidad: String(l.cantidad_actual || ''), motivo: est === 'vencido' ? 'vencido' : 'dañado', obs: '' }) }}>
+                                  <Ico as={Trash2} size={13} />
+                                </button>
+                              )}
+                            </td>
                           </tr>
                         )
                       })}
@@ -793,6 +904,67 @@ export default function Inventario() {
             </>
           )
         })()}
+      </Modal>
+
+      {/* Modal Anular movimiento */}
+      <Modal open={!!anularMov} onClose={() => setAnularMov(null)} title="↩ Anular movimiento"
+        footer={<>
+          <button className="btn btn-secondary" onClick={() => setAnularMov(null)}>Cancelar</button>
+          <button className="btn btn-danger" onClick={() => anularMovimiento.mutate(anularMov)} disabled={anularMovimiento.isPending}>{anularMovimiento.isPending ? 'Anulando…' : 'Anular y revertir'}</button>
+        </>}>
+        {anularMov && (
+          <div style={{ fontSize: '0.88rem' }}>
+            <p>Vas a anular este movimiento:</p>
+            <div style={{ background: 'var(--crema)', borderRadius: 'var(--radio)', padding: 10, marginBottom: 12 }}>
+              <div><strong>{anularMov.tipo}</strong> de <strong>{fCantMov(anularMov.cantidad, histMP?.unidad)}</strong> · {fFecha(anularMov.fecha)}</div>
+              {anularMov.lote && <div>Lote: {anularMov.lote}</div>}
+              {anularMov.obs && <div style={{ color: 'var(--texto-suave)' }}>{anularMov.obs}</div>}
+            </div>
+            <div className="alert alert-warning" style={{ fontSize: '0.82rem' }}>
+              Se revertirá el efecto en el stock {anularMov.tipo === 'entrada' ? '(se descuenta lo que había sumado)' : '(se devuelve lo que había restado)'}
+              {(anularMov.lote || anularMov.extra?.lotes_consumidos) && ' y en los lotes involucrados'}.
+              Queda un registro de anulación en el historial; el movimiento original no se borra.
+            </div>
+          </div>
+        )}
+      </Modal>
+
+      {/* Modal Dar de baja lote */}
+      <Modal open={!!bajaLote} onClose={() => setBajaLote(null)} title={`🗑 Dar de baja lote — ${bajaLote?.mp?.nombre || ''}`}
+        footer={<>
+          <button className="btn btn-secondary" onClick={() => setBajaLote(null)}>Cancelar</button>
+          <button className="btn btn-danger" onClick={() => darBajaLote.mutate()} disabled={darBajaLote.isPending}>{darBajaLote.isPending ? 'Guardando…' : 'Dar de baja'}</button>
+        </>}>
+        {bajaLote && (
+          <div>
+            <p style={{ fontSize: '0.85rem' }}>
+              Lote <strong>{bajaLote.lote.lote || '(s/n)'}</strong> · Disponible: <strong>{fBase(bajaLote.lote.cantidad_actual, bajaLote.mp.unidad)}</strong>
+              {bajaLote.lote.vencimiento && <> · Vence {fFecha(bajaLote.lote.vencimiento)}</>}
+            </p>
+            <div className="form-group">
+              <label className="form-label">Cantidad a dar de baja ({baseLbl(bajaLote.mp.unidad)})</label>
+              <input type="number" className="form-control" value={bajaForm.cantidad} min={0} max={bajaLote.lote.cantidad_actual} step="any"
+                onChange={e => setBajaForm(f => ({ ...f, cantidad: e.target.value }))} />
+            </div>
+            <div className="form-group">
+              <label className="form-label">Motivo</label>
+              <Select className="form-control" value={bajaForm.motivo} onChange={e => setBajaForm(f => ({ ...f, motivo: e.target.value }))}>
+                <option value="vencido">Vencido</option>
+                <option value="dañado">Dañado / deteriorado</option>
+                <option value="contaminado">Contaminado</option>
+                <option value="derrame">Derrame / pérdida física</option>
+                <option value="otro">Otro</option>
+              </Select>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Observación <small style={{ fontWeight: 400, color: 'var(--texto-suave)' }}>(opcional)</small></label>
+              <input className="form-control" value={bajaForm.obs} onChange={e => setBajaForm(f => ({ ...f, obs: e.target.value }))} placeholder="Detalle de lo ocurrido" />
+            </div>
+            <div className="alert alert-warning" style={{ fontSize: '0.8rem' }}>
+              Se descontará del lote y del stock general de la materia prima. Queda registrado con tu nombre y la fecha.
+            </div>
+          </div>
+        )}
       </Modal>
 
       {/* Modal Historial por MP */}
@@ -819,22 +991,28 @@ export default function Inventario() {
             <div className="card-title" style={{ fontSize: '0.95rem' }}><Ico as={ClipboardList} size={15} />Movimientos ({histMovs.length})</div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Fecha</th><th>Tipo</th><th>Cantidad</th><th>Lote</th><th>Vence</th><th>Responsable</th><th>Obs</th><th>Otros</th></tr></thead>
+                <thead><tr><th>Fecha</th><th>Tipo</th><th>Cantidad</th><th>Lote</th><th>Vence</th><th>Responsable</th><th>Obs</th>{esAdmin && <th></th>}</tr></thead>
                 <tbody>
                   {histMovs.length === 0
-                    ? <tr><td colSpan={8} className="empty-table">Sin movimientos registrados</td></tr>
-                    : histMovs.map(mv => (
-                      <tr key={mv.id}>
+                    ? <tr><td colSpan={esAdmin ? 8 : 7} className="empty-table">Sin movimientos registrados</td></tr>
+                    : histMovs.map(mv => {
+                      const anulado = mv.extra?.anulado
+                      return (
+                      <tr key={mv.id} style={anulado ? { opacity: 0.5, textDecoration: 'line-through' } : undefined}>
                         <td>{fFecha(mv.fecha)}</td>
                         <td><span className={`badge ${mv.tipo === 'entrada' ? 'badge-verde' : mv.tipo === 'salida' ? 'badge-rojo' : 'badge-gris'}`}>{mv.tipo}</span></td>
                         <td className="td-number">{fCantMov(mv.cantidad, histMP?.unidad)}</td>
                         <td>{mv.lote || '—'}</td>
                         <td>{mv.vencimiento ? fFecha(mv.vencimiento) : '—'}</td>
                         <td>{mv.responsable || '—'}</td>
-                        <td>{mv.obs || '—'}</td>
-                        <td>{mv.extra && Object.keys(mv.extra).length > 0 ? Object.entries(mv.extra).map(([k, v]) => `${k}: ${v}`).join(' · ') : '—'}</td>
+                        <td>{mv.obs || '—'}{anulado && <span className="badge badge-gris" style={{ marginLeft: 4, fontSize: '0.62rem' }}>anulado</span>}</td>
+                        {esAdmin && <td>
+                          {puedeAnular(mv)
+                            ? <button className="btn btn-xs btn-danger" title="Anular este movimiento y revertir el stock" onClick={() => setAnularMov(mv)}><Ico as={Undo2} size={13} /></button>
+                            : null}
+                        </td>}
                       </tr>
-                    ))}
+                    )})}
                 </tbody>
               </table>
             </div>

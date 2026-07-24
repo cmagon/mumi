@@ -13,6 +13,7 @@ import SavingOverlay from './components/ui/SavingOverlay'
 import DownloadProgress from './components/ui/DownloadProgress'
 import DevModeBanner from './components/DevModeBanner'
 import ErrorBoundary from './components/ErrorBoundary'
+import { sincronizarStockAlegra } from './lib/syncAlegra'
 
 // Cada módulo se descarga al abrirlo: las herramientas pesadas (PDF, Excel y gráficas) no
 // bloquean el primer render del tablero ni la pantalla de inicio de sesión.
@@ -74,6 +75,13 @@ function ProtectedLayout() {
   const [asistModo, setAsistModo] = useState(null)   // null | 'login' | 'logout'
   useEffect(() => { loadConfig() }, [])
   useResponsiveTableLabels()
+
+  // Al abrir la app (admin), trae de Alegra las ventas/remisiones para que el stock de producto
+  // terminado baje solo cuando se factura, sin depender de que alguien pulse el botón manual.
+  // Es silencioso y con enfriamiento; el cron del servidor (si está configurado) lo complementa.
+  useEffect(() => {
+    if (profile?.rol === 'admin') sincronizarStockAlegra()
+  }, [profile?.rol])
 
   // Empleado vinculado al usuario (por nombre). Los admin no fichan asistencia.
   // En "vista de rol" se usa el rol EFECTIVO para reflejar lo que ese rol vería.

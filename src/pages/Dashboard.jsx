@@ -10,7 +10,7 @@ import { Factory, Users, Package, Handshake, Lightbulb, TrendingUp, PieChart as 
 import { supabase } from '../lib/supabase'
 import { fNum, fCOP, fFecha, getRolLabel, PARAMS_NOMINA_DEFAULT, getGastosOperacionales, getEstadoResultados, getSemaforoFinanciero, getCIFTotalMensual, getCostoNominaMensual } from '../lib/businessLogic'
 import { fraseDelDia } from '../lib/frases'
-import { notificarVencimientosRegistros } from '../lib/notificaciones'
+import { notificarVencimientosRegistros, notificarLotesMPPorVencer } from '../lib/notificaciones'
 import { useAuth } from '../context/AuthContext'
 import { useReorder } from '../hooks/useReorder'
 import { getDevRole, subscribeDevRole, setDevRole } from '../lib/devMode'
@@ -64,7 +64,10 @@ export default function Dashboard() {
   // Al cargar el tablero (admin), genera alertas de vencimientos de registros periódicos.
   // En modo "vista de rol" no se ejecuta (es solo lectura).
   useEffect(() => {
-    if (profile?.rol === 'admin' && !getDevRole()) notificarVencimientosRegistros()
+    if (profile?.rol === 'admin' && !getDevRole()) {
+      notificarVencimientosRegistros()
+      notificarLotesMPPorVencer()   // lotes de MP vencidos o próximos a vencer
+    }
   }, [profile?.rol, devRole])
 
   const { data: produccion = [] } = useQuery({
@@ -78,6 +81,10 @@ export default function Dashboard() {
   const { data: mps = [] } = useQuery({
     queryKey: ['raw_materials'],
     queryFn: async () => { const { data } = await supabase.from('raw_materials').select('*'); return data || [] },
+  })
+  const { data: lotesMP = [] } = useQuery({
+    queryKey: ['raw_material_lots_dash'],
+    queryFn: async () => { const { data } = await supabase.from('raw_material_lots').select('id, mp_id, lote, vencimiento, cantidad_actual').gt('cantidad_actual', 0); return data || [] },
   })
   const { data: clientes = [] } = useQuery({
     queryKey: ['clientes'],
@@ -286,6 +293,12 @@ export default function Dashboard() {
   const bajoStock = mps.filter(m => (m.stock || 0) > 0 && (m.stock_min || 0) > 0 && m.stock <= m.stock_min)
   const sinStock = mps.filter(m => (m.stock || 0) <= 0)
   const alertaMP = [...sinStock.map(m => ({ ...m, _estado: 'sin' })), ...bajoStock.map(m => ({ ...m, _estado: 'bajo' }))]
+  // Lotes de MP vencidos o próximos a vencer (con existencia). Alimenta la lista de pendientes.
+  const hoyLote = new Date().toISOString().split('T')[0]
+  const limiteLote = (() => { const d = new Date(); d.setDate(d.getDate() + 15); return d.toISOString().split('T')[0] })()
+  const lotesConExist = lotesMP.filter(l => (Number(l.cantidad_actual) || 0) > 0 && l.vencimiento)
+  const lotesVencidos = lotesConExist.filter(l => l.vencimiento < hoyLote)
+  const lotesPorVencer = lotesConExist.filter(l => l.vencimiento >= hoyLote && l.vencimiento <= limiteLote)
 
   // Registros SGC (BPM)
   const plantById = Object.fromEntries(regPlantillas.map(p => [p.id, p]))
@@ -328,6 +341,8 @@ export default function Dashboard() {
     acpmVencidas > 0 && { txt: `${acpmVencidas} ACPM con compromiso vencido`, tono: 'rojo', to: '/calidad' },
     sinStock.length > 0 && { txt: `${sinStock.length} materia(s) prima(s) sin stock`, tono: 'rojo', to: '/inventario' },
     bajoStock.length > 0 && { txt: `${bajoStock.length} materia(s) prima(s) con stock bajo`, tono: 'dorado', to: '/inventario' },
+    lotesVencidos.length > 0 && { txt: `${lotesVencidos.length} lote(s) de MP VENCIDO(s) — dar de baja`, tono: 'rojo', to: '/inventario' },
+    lotesPorVencer.length > 0 && { txt: `${lotesPorVencer.length} lote(s) de MP por vencer (15 días)`, tono: 'dorado', to: '/inventario' },
     pendientesAprob > 0 && { txt: `${pendientesAprob} registro(s) de producción por aprobar`, tono: 'dorado', to: '/produccion' },
   ].filter(Boolean)
 

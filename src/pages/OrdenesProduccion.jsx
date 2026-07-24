@@ -343,6 +343,14 @@ export default function OrdenesProduccion() {
   }).filter(Boolean)
 
   // La MP guarda su stock en SU unidad (Kg, Litro, Gramo…); la receta trabaja en gramos/ml
+  // Texto de ayuda de la equivalencia entre unidades y subporciones (ej. "1 unidad = 8 subporciones")
+  const psubUnidHint = (pesoUnidad, pesoSubp) => {
+    const pu = parseFloat(pesoUnidad) || 0, ps = parseFloat(pesoSubp) || 0
+    if (!(pu > 0) || !(ps > 0)) return 'según el peso de la subporción de la ficha'
+    const n = pu / ps
+    return `1 unidad = ${Number.isInteger(n) ? n : n.toFixed(1)} subporción(es) de ${fNum(ps)} g`
+  }
+
   const gramosAUnidadMP = (gramos, unidad) => {
     const u = String(unidad || '').trim().toLowerCase()
     return (u === 'kg' || u.startsWith('kilo') || u === 'litro' || u.startsWith('lit')) ? gramos / 1000 : gramos
@@ -1606,6 +1614,33 @@ export default function OrdenesProduccion() {
   })
 
   // ---- Crear / editar orden (admin) ----
+  // Ingredientes cuyo consumo excede el STOCK REAL de la MP (no solo los lotes). Se usa para
+  // avisar antes de crear la orden: producir igual es válido (el stock puede reponerse), pero el
+  // usuario debe saberlo — no descubrirlo cuando el inventario quede negativo.
+  const faltantesStock = () => {
+    if (!prodReceta || form.origen !== 'producto' || form.forzar_sin_lote) return []
+    return (prodReceta.ings || []).filter(i => i.mpId).map(i => {
+      const mp = mps.find(m => String(m.id) === String(i.mpId))
+      const unidad = mp?.unidad || ''
+      const necesita = gramosAUnidadMP(Number(i.gramos) || 0, unidad)
+      const stock = Number(mp?.stock) || 0
+      return necesita > stock + 0.001 ? { nombre: i.nombre, falta: necesita - stock, unidad } : null
+    }).filter(Boolean)
+  }
+  // Envoltura del botón crear: si falta stock, confirma antes de continuar.
+  const intentarCrearOrden = async () => {
+    const faltan = faltantesStock()
+    if (faltan.length) {
+      const ok = await confirmar(
+        'No hay stock suficiente para producir esto:\n\n' +
+        faltan.map(f => `• ${f.nombre}: faltan ${fMP(f.falta, f.unidad)}`).join('\n') +
+        '\n\nPuedes crear la orden igual, pero al consumir la materia prima el inventario quedará en negativo. ¿Continuar?',
+        { title: 'Stock insuficiente', confirmText: 'Crear de todas formas' })
+      if (!ok) return
+    }
+    crearOrden.mutate()
+  }
+
   const crearOrden = useMutation({
     mutationFn: async () => {
       if (!form.producto.trim()) throw new Error('Indica el producto/receta')
@@ -1928,7 +1963,10 @@ export default function OrdenesProduccion() {
 
   // Calcula el plan de descuento y VERIFICA stock (lanza error si falta → bloquea el cierre).
   const prepararEmpaque = async (o, { unidadesEmpacadas = 0, subpTotal = 0, surtidoUnid = 0, esPorcionado = false, esSurtido = false }) => {
-    if (o.es_subproducto || o.es_prueba || o.origen !== 'producto' || !o.origen_id) return []
+    // SIEMPRE devuelve { plan, faltantes }. Antes retornaba [] para subproductos/pruebas, y como
+    // el resultado se guarda en `empaquePrevio` y luego se lee `.plan.length`, iniciar una orden
+    // de MP interna reventaba con "Cannot read properties of undefined (reading 'length')".
+    if (o.es_subproducto || o.es_prueba || o.origen !== 'producto' || !o.origen_id) return { plan: [], faltantes: [] }
     const { data: prod } = await supabase.from('products_costing').select('empaque, bache, merma').eq('id', o.origen_id).single()
     let emps = []; try { emps = Array.isArray(prod?.empaque) ? prod.empaque : JSON.parse(prod?.empaque || '[]') } catch { emps = [] }
     // Unidades netas por bache (para deducir la relación empaque-por-unidad de la ficha, p.ej. 12 filtros/caja)
@@ -2437,7 +2475,7 @@ export default function OrdenesProduccion() {
       <Modal open={modalNueva} onClose={() => { setModalNueva(false); setEditOrdenId(null) }} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>{editOrdenId ? <Pencil size={18} aria-hidden="true" /> : <Factory size={18} aria-hidden="true" />}{editOrdenId ? 'Editar Orden de Producción' : 'Nueva Orden de Producción'}</span>} size="modal-lg"
         footer={<>
           <button className="btn btn-secondary" onClick={() => { setModalNueva(false); setEditOrdenId(null) }}>Cancelar</button>
-          <button className="btn btn-primary" onClick={() => crearOrden.mutate()} disabled={crearOrden.isPending || (empacarSaldo === true && saldoSelId && !!ordenEnProcesoDeSaldo(saldoSelId, editOrdenId))}>{editOrdenId ? 'Guardar cambios' : 'Crear y asignar'}</button>
+          <button className="btn btn-primary" onClick={intentarCrearOrden} disabled={crearOrden.isPending || (empacarSaldo === true && saldoSelId && !!ordenEnProcesoDeSaldo(saldoSelId, editOrdenId))}>{editOrdenId ? 'Guardar cambios' : 'Crear y asignar'}</button>
         </>}
       >
         <div className="form-group">
@@ -2601,6 +2639,17 @@ export default function OrdenesProduccion() {
               const mpUnidad = mpRow?.unidad || ''
               // Stock REAL de la MP (fuente de verdad en Inventario), independiente de si tiene lotes cargados.
               const stockReal = Number(mpRow?.stock) || 0
+              // Cuánto se necesita para esta orden, en la unidad de la MP (la receta trae gramos/ml).
+              const necesita = gramosAUnidadMP(Number(ing.gramos) || 0, mpUnidad)
+              // Suma de los lotes disponibles y reservados (lo que la trazabilidad "conoce").
+              const dispLotes = lts.reduce((s, l) => s + (Number(l.cantidad_actual) || 0), 0)
+              const totalLotes = lts.reduce((s, l) => s + (Number(l.cantidad_actual) || 0) + (Number(l.cantidad_reservada) || 0), 0)
+              // Descuadre: la suma de lotes no puede superar el stock real de la MP. Si pasa, es que
+              // los lotes y el stock quedaron desincronizados (una entrada directa, un ajuste manual…)
+              // y hay que revisar el inventario antes de producir.
+              const descuadre = totalLotes - stockReal > 0.001
+              // Falta de stock real para cubrir el consumo (aunque haya lotes que digan lo contrario).
+              const faltaStock = necesita > stockReal + 0.001
               const elegido = form.lotes_elegidos?.[ing.mpId] || form.lotes_elegidos?.[String(ing.mpId)] || ''
               const descLote = (l) => {
                 const est = estadoLote(l.vencimiento)
@@ -2611,7 +2660,25 @@ export default function OrdenesProduccion() {
               }
               return (
                 <div key={k} style={{ marginBottom: 8 }}>
-                  <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--selva)' }}>{ing.nombre}</div>
+                  <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--selva)', display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
+                    <span>{ing.nombre}</span>
+                    {necesita > 0 && (
+                      <span style={{ fontWeight: 400, color: faltaStock ? 'var(--rojo)' : 'var(--texto-suave)', fontSize: '0.76rem' }}>
+                        necesita {fMP(necesita, mpUnidad)} · stock real {fMP(stockReal, mpUnidad)}
+                      </span>
+                    )}
+                  </div>
+                  {/* Alertas de coherencia entre lotes y stock real */}
+                  {faltaStock && (
+                    <div style={{ fontSize: '0.76rem', color: 'var(--rojo)', marginTop: 2 }}>
+                      ⚠ Stock insuficiente: faltan <strong>{fMP(necesita - stockReal, mpUnidad)}</strong> de {ing.nombre}.
+                    </div>
+                  )}
+                  {descuadre && (
+                    <div style={{ fontSize: '0.76rem', color: 'var(--tierra)', marginTop: 2 }}>
+                      ⚠ Los lotes suman <strong>{fMP(totalLotes, mpUnidad)}</strong> pero el stock real es {fMP(stockReal, mpUnidad)}: revisa el inventario, están descuadrados.
+                    </div>
+                  )}
                   {lts.length === 0
                     ? (stockReal > 0
                         // Hay stock real, pero sin lotes PEPS cargados (se entró directo en la MP, no por "Entrada").
@@ -3022,7 +3089,16 @@ export default function OrdenesProduccion() {
             <div style={{ background: 'rgba(200,169,74,0.08)', padding: 10, borderRadius: 'var(--radio)' }}>
               <strong style={{ fontSize: '0.9rem' }}><Ico as={Package} size={15} />Resultado de producción</strong>
               <div className="form-grid-2" style={{ marginTop: 8 }}>
-                <div className="form-group" style={{ margin: 0 }}><label className="form-label">Unidades obtenidas *{ordenPrep.empaque_saldo ? ' (del saldo empacado)' : ''}</label><input type="number" className="form-control" value={prepUnidades} onChange={e => setPrepUnidades(e.target.value)} min={0} step="0.01" placeholder={`Planificado: ${fNum(ordenPrep.cantidad_plan)}`} readOnly={ordenPrep.empaque_saldo} style={ordenPrep.empaque_saldo ? { background: 'var(--crema)' } : undefined} /></div>
+                <div className="form-group" style={{ margin: 0 }}><label className="form-label">Unidades obtenidas *{ordenPrep.empaque_saldo ? ' (del saldo empacado)' : ''}</label><input type="number" className="form-control" value={prepUnidades} onChange={e => {
+                  const v = e.target.value; setPrepUnidades(v)
+                  // Conversión inversa: al escribir las unidades (cajas) se calculan las
+                  // subporciones que caben en ellas. Antes solo funcionaba de subporciones a
+                  // unidades, así que quien contaba cajas tenía que hacer la cuenta a mano.
+                  if (prepPorciona) {
+                    const pu = parseFloat(prepInfo?.pesoUnidad) || 0, psub = parseFloat(prepPesoSubp) || 0
+                    if (pu > 0 && psub > 0 && v !== '') setPrepCantSubp(String(Math.round((parseFloat(v) || 0) * pu / psub)))
+                  }
+                }} min={0} step="0.01" placeholder={`Planificado: ${fNum(ordenPrep.cantidad_plan)}`} readOnly={ordenPrep.empaque_saldo} style={ordenPrep.empaque_saldo ? { background: 'var(--crema)' } : undefined} /></div>
                 <div className="form-group" style={{ margin: 0 }}><label className="form-label">Responsable</label><input className="form-control" value={prepResp} onChange={e => setPrepResp(e.target.value)} /></div>
                 <div className="form-group" style={{ margin: 0 }}><label className="form-label">Peso final (g/Kg)</label><input type="number" className="form-control" value={prepPesoFinal} onChange={e => setPrepPesoFinal(e.target.value)} min={0} placeholder="Peso conforme obtenido" /></div>
                 <div className="form-group" style={{ margin: 0 }}><label className="form-label">Peso desperdicio</label><input type="number" className="form-control" value={prepPesoDesp} onChange={e => setPrepPesoDesp(e.target.value)} min={0} placeholder="Dañado / quemado" /></div>
@@ -3033,6 +3109,10 @@ export default function OrdenesProduccion() {
                     const pu = parseFloat(prepInfo?.pesoUnidad) || 0, psub = parseFloat(prepPesoSubp) || 0
                     if (pu > 0 && psub > 0 && v !== '') setPrepUnidades(String(Math.round((parseFloat(v) || 0) * psub / pu)))
                   }} min={0} /></div>
+                  <div style={{ gridColumn: '1 / -1', fontSize: '0.72rem', color: 'var(--texto-suave)', marginTop: -4 }}>
+                    ℹ Escribe <strong>unidades</strong> o <strong>subporciones</strong>: al llenar una, la otra se calcula sola
+                    ({psubUnidHint(prepInfo?.pesoUnidad, prepPesoSubp)}).
+                  </div>
                 </>}
               </div>
               {/* Empaque que se descontará (bolsas/cajas) según lo empacado — informativo, sale en la impresión */}

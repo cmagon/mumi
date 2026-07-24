@@ -252,7 +252,11 @@ export default function ProductosTerminados() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productos, alegraStock, mpsVendibles])
   // Fichas ACTIVAS (vendibles) que aún no están en el catálogo de terminados
-  const fichasDisponibles = fichas.filter(f => (f.tipo || '') !== 'subproducto' && f.activo !== false &&
+  // "Agregar producto" es SOLO para productos base/finales. Se excluyen:
+  //  - subproductos internos (nunca se venden)
+  //  - fichas inactivas (ej. MP interna fabricada, que no es un producto vendible)
+  //  - fichas tipo 'mp' (las MP vendibles tienen su propia vía "Agregar MP vendible", sin duplicar aquí)
+  const fichasDisponibles = fichas.filter(f => (f.tipo || '') !== 'subproducto' && (f.tipo || '') !== 'mp' && f.activo !== false &&
     !productos.some(p => p.product_id === f.id || (p.nombre || '').toLowerCase() === (f.nombre || '').toLowerCase()))
   // "Agregar" NO inserta directo: precarga el modal de edición con los datos de la ficha/MP
   // (costo, precios) para que el usuario termine de definir SKU, stock mínimo, categoría,
@@ -566,6 +570,10 @@ export default function ProductosTerminados() {
       qc.invalidateQueries({ queryKey: ['finished_products'] }); qc.invalidateQueries({ queryKey: ['finished_movements'] })
       const partes = [data?.reservas && `${data.reservas} reserva(s)`, data?.descuentos && `${data.descuentos} descuento(s)`, data?.liberaciones && `${data.liberaciones} liberación(es)`, data?.devoluciones && `${data.devoluciones} devolución(es)`].filter(Boolean)
       toast(partes.length ? `Traído desde Alegra: ${partes.join(', ')} ✓` : 'Todo al día con Alegra ✓')
+      // Productos vendidos en Alegra que NO están enlazados en la app: su stock NO se movió.
+      // Es la causa más común de "vendí y el stock no bajó" — hay que enlazarlos (botón 🔗).
+      const noEnc = (data?.errores || []).filter(e => /no encontrado/i.test(e))
+      if (noEnc.length) toast(`⚠ ${noEnc.length} producto(s) vendido(s) en Alegra NO están enlazados en la app — su stock no se descontó. Enlázalos con el botón 🔗.`, 'warning')
     },
     onError: (e) => toast('No se pudo traer desde Alegra: ' + e.message, 'error'),
   })
@@ -718,7 +726,7 @@ export default function ProductosTerminados() {
                   {[
                     { ico: Settings, label: 'Configurar Alegra', on: () => abrirConfig() },
                     { ico: Plug, label: 'Enlazar con Alegra (masivo)', on: () => abrirEnlace() },
-                    { ico: ArrowDownToLine, label: traerDesdeAlegra.isPending ? 'Trayendo...' : 'Traer ventas de Alegra (respaldo del webhook)', on: () => traerDesdeAlegra.mutate(), disabled: traerDesdeAlegra.isPending },
+                    { ico: ArrowDownToLine, label: traerDesdeAlegra.isPending ? 'Trayendo...' : 'Sincronizar ventas de Alegra ahora', on: () => traerDesdeAlegra.mutate(), disabled: traerDesdeAlegra.isPending },
                   ].map((it, i) => (
                     <button key={i} disabled={it.disabled} onClick={() => { it.on(); setMenuAlegraOpen(false) }}
                       style={{ display: 'flex', alignItems: 'center', gap: 8, width: '100%', textAlign: 'left', padding: '8px 10px', border: 'none', background: 'transparent', cursor: it.disabled ? 'default' : 'pointer', fontSize: '0.84rem', borderRadius: 6, color: 'var(--texto)' }}
