@@ -77,6 +77,8 @@ const desdeFechaVidaUtil = (base, valor, unidad) => {
   return fechaLocalISO(d)
 }
 const horaAhora = () => new Date().toTimeString().slice(0, 5)
+// ¿La unidad de inventario se mide por peso/volumen (se produce por gramaje/kilos), no por conteo?
+const esUnidadPeso = (u) => /kg|kilo|gramo|^g$|^gr$|litro|^l$|^ml$|mili|onza|lb|libra/i.test(String(u || '').trim())
 const hoyISO = () => fechaLocalISO()
 const labelMeses = (m) => m % 12 === 0 ? `${m / 12} año${m / 12 > 1 ? 's' : ''}` : `${m} mes${m > 1 ? 'es' : ''}`
 const VENCE_OPTS_DEFAULT = [1, 2, 3, 6, 12, 24]
@@ -158,6 +160,9 @@ export default function OrdenesProduccion() {
   // Campos adicionales personalizados de la orden (MP vendibles: Productor, Finca, etc.)
   const [prepCamposExtra, setPrepCamposExtra] = useState([])
   const [prepEsMpVend, setPrepEsMpVend] = useState(false)
+  // Unidad de INVENTARIO de la MP interna vinculada (Kg, Gramo, Litro…). Cuando es por peso, el
+  // resultado de la orden se captura y acredita al stock en ESA unidad, no en "unidades".
+  const [prepMpUnidad, setPrepMpUnidad] = useState('')
   const [prepCamposOpen, setPrepCamposOpen] = useState(false)   // acordeón de campos adicionales (arriba)
   // Sobrante de mezcla que NO se empacó y queda como saldo en proceso (en peso)
   const [prepHaySobrante, setPrepHaySobrante] = useState(null)   // null = sin marcar (obligatorio)
@@ -603,6 +608,9 @@ export default function OrdenesProduccion() {
     const cantidad = parseFloat(o.cantidad_plan) || 0
     const parse = (v) => { try { return Array.isArray(v) ? v : JSON.parse(v || '[]') } catch { return [] } }
     setPrepEsMpVend(false)
+    // Cualquier orden que acredite una MP al inventario (MP vendible o subproducto) usa la unidad
+    // de esa MP. Si es por peso (Kg/Gramo…), el resultado se captura en esa unidad, no en "unidades".
+    setPrepMpUnidad((o.es_mp || o.es_subproducto) && o.mp_id ? (mps.find(m => String(m.id) === String(o.mp_id))?.unidad || '') : '')
     if (o.origen === 'producto' && o.origen_id) {
       // `imprimibles` es de la migración v130: si la columna no existe, se reintenta sin ella
       let prod = null
@@ -1069,7 +1077,8 @@ export default function OrdenesProduccion() {
   }
 
   // Genera el PDF de una orden y lo comparte (para el botón "Compartir" en móvil/tablet)
-  const compartirOrden = async (o) => {
+  // Sin argumento: comparte la orden VIVA del modal de proceso (estado prep*). Con `o`: la orden guardada.
+  const compartirOrden = async (o = null) => {
     try { setBusy(true); const { html, archivoNombre } = await imprimirOrden('html', o); await compartirComoPDF(html, archivoNombre) }
     catch (e) { toast('No se pudo compartir: ' + (e.message || e), 'error') }
     finally { setBusy(false) }
@@ -1322,7 +1331,7 @@ export default function OrdenesProduccion() {
     if (!prepLote.trim()) { toast('Completa el LOTE', 'warning'); return }
     if (!prepVence) { toast('Completa la FECHA DE VENCIMIENTO', 'warning'); return }
     if (!prepFechaInicio) { toast('Completa la FECHA DE INICIO DE FABRICACIÓN', 'warning'); return }
-    if (!(parseFloat(prepUnidades) >= 0) || prepUnidades === '') { toast('Ingresa las unidades obtenidas', 'warning'); return }
+    if (!(parseFloat(prepUnidades) >= 0) || prepUnidades === '') { toast(esUnidadPeso(prepMpUnidad) ? `Ingresa los ${prepMpUnidad} obtenidos` : 'Ingresa las unidades obtenidas', 'warning'); return }
     if (prepPorciona && !(parseFloat(prepCantSubp) > 0)) { toast('Ingresa la CANTIDAD DE SUBPORCIONES', 'warning'); return }
     if (prepSurtido && !(parseFloat(prepSurtidoCantidad) > 0)) { toast('Ingresa la CANTIDAD EMPACADA SURTIDA', 'warning'); return }
     if (prepSurtido) {
@@ -2297,7 +2306,10 @@ export default function OrdenesProduccion() {
       const p = productos.find(x => String(x.id) === id)
       // MP vendible: se comporta como subproducto (suma a stock de MP), con su mp_id ya vinculado
       const esMpFicha = p?.tipo === 'mp'
-      setForm(f => ({ ...f, producto: p?.nombre || '', origen: 'producto', origen_id: id, es_subproducto: p?.tipo === 'subproducto' || esMpFicha, es_mp: esMpFicha, mp_id: esMpFicha ? String(p?.mp_id || '') : f.mp_id, unidadesPorBache: parseFloat(p?.bache) || 0 }))
+      // Para una MP interna medida por peso, la orden se cuenta en la unidad de la MP (Kg, Gramo…),
+      // no en "unidades": así el resultado se captura y acredita al inventario en esa unidad.
+      const unidadMpFicha = esMpFicha ? (mps.find(m => String(m.id) === String(p?.mp_id))?.unidad || '') : ''
+      setForm(f => ({ ...f, producto: p?.nombre || '', origen: 'producto', origen_id: id, es_subproducto: p?.tipo === 'subproducto' || esMpFicha, es_mp: esMpFicha, mp_id: esMpFicha ? String(p?.mp_id || '') : f.mp_id, unidad: (esMpFicha && esUnidadPeso(unidadMpFicha)) ? unidadMpFicha : 'unidades', unidadesPorBache: parseFloat(p?.bache) || 0 }))
       // Cargar la receta para permitir planear por ingrediente disponible
       const { data: full } = await supabase.from('products_costing').select('ingredientes, bache, rendimiento, desperdicio, peso_unidad, peso_subporcion').eq('id', id).single()
       if (full) {
@@ -2814,7 +2826,10 @@ export default function OrdenesProduccion() {
       {/* Modal Iniciar proceso — fecha de inicio + tiempos por subproceso (autoguardado) */}
       <Modal open={modalProceso} onClose={() => setModalProceso(false)} guard={false}
         title={<span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', width: '100%' }}><Play size={18} aria-hidden="true" /> Proceso — {ordenPrep?.producto || ''}
-          <button type="button" className="btn btn-dorado btn-sm" style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }} title="Imprimir orden" onClick={() => imprimirOrden()}><Printer size={16} aria-hidden="true" /> Imprimir</button></span>}
+          {puedeCompartirArchivos && (
+            <button type="button" className="btn btn-secondary btn-sm" style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }} title="Compartir orden (PDF)" onClick={() => compartirOrden()}><Share2 size={16} aria-hidden="true" /> Compartir</button>
+          )}
+          <button type="button" className="btn btn-dorado btn-sm" style={{ marginLeft: puedeCompartirArchivos ? 0 : 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }} title="Imprimir orden" onClick={() => imprimirOrden()}><Printer size={16} aria-hidden="true" /> Imprimir</button></span>}
         size="modal-lg"
         footer={<>
           <button className="btn btn-secondary" onClick={async () => { await guardarProcesoData(false); setModalProceso(false) }}><Ico as={Save} size={14} />Guardar</button>
@@ -3089,7 +3104,7 @@ export default function OrdenesProduccion() {
             <div style={{ background: 'rgba(200,169,74,0.08)', padding: 10, borderRadius: 'var(--radio)' }}>
               <strong style={{ fontSize: '0.9rem' }}><Ico as={Package} size={15} />Resultado de producción</strong>
               <div className="form-grid-2" style={{ marginTop: 8 }}>
-                <div className="form-group" style={{ margin: 0 }}><label className="form-label">Unidades obtenidas *{ordenPrep.empaque_saldo ? ' (del saldo empacado)' : ''}</label><input type="number" className="form-control" value={prepUnidades} onChange={e => {
+                <div className="form-group" style={{ margin: 0 }}><label className="form-label">{esUnidadPeso(prepMpUnidad) ? `${prepMpUnidad} obtenidos *` : 'Unidades obtenidas *'}{ordenPrep.empaque_saldo ? ' (del saldo empacado)' : ''}</label><input type="number" className="form-control" value={prepUnidades} onChange={e => {
                   const v = e.target.value; setPrepUnidades(v)
                   // Conversión inversa: al escribir las unidades (cajas) se calculan las
                   // subporciones que caben en ellas. Antes solo funcionaba de subporciones a
@@ -3114,6 +3129,21 @@ export default function OrdenesProduccion() {
                     ({psubUnidHint(prepInfo?.pesoUnidad, prepPesoSubp)}).
                   </div>
                 </>}
+                {esUnidadPeso(prepMpUnidad) && (
+                  <div style={{ gridColumn: '1 / -1', fontSize: '0.75rem', color: 'var(--texto-suave)', marginTop: -2 }}>
+                    ℹ Esta es una <strong>materia prima interna</strong> que se mide en <strong>{prepMpUnidad}</strong>: escribe arriba
+                    los <strong>{prepMpUnidad} producidos</strong> (no unidades). Ese peso es el que ingresa al inventario de MP.
+                    {(parseFloat(prepPesoFinal) || 0) > 0 && (() => {
+                      // El peso final se registra en gramos; si la MP está en Kg/Litro se convierte a esa unidad.
+                      const enKilos = /kg|kilo|litro|^l$|lb|libra/i.test(prepMpUnidad)
+                      const val = enKilos ? (parseFloat(prepPesoFinal) || 0) / 1000 : (parseFloat(prepPesoFinal) || 0)
+                      const val2 = Math.round(val * 1000) / 1000
+                      const val2Txt = val2.toLocaleString('es-CO', { maximumFractionDigits: 3 })
+                      return <> <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 6 }}
+                        onClick={() => setPrepUnidades(String(val2))}>Usar peso final ({val2Txt} {prepMpUnidad})</button></>
+                    })()}
+                  </div>
+                )}
               </div>
               {/* Empaque que se descontará (bolsas/cajas) según lo empacado — informativo, sale en la impresión */}
               {empaquePrevio && empaquePrevio.plan.length > 0 && (
@@ -3439,7 +3469,7 @@ export default function OrdenesProduccion() {
               <tr><td><b>Fecha inicio fabricación</b></td><td>{prepFechaInicio ? fFecha(prepFechaInicio) : '—'}</td></tr>
               <tr><td><b>Horario</b></td><td>{tiemposGlobal().inicioGlobal || '—'} a {tiemposGlobal().finGlobal || '—'}</td></tr>
               <tr><td><b>Subprocesos</b></td><td>{tiemposGlobal().procs.length ? tiemposGlobal().procs.map(p => `${p.nombre}${p.inicio ? ' (' + p.inicio + (p.fin ? '–' + p.fin : '') + ')' : ''}`).join(' · ') : '—'}</td></tr>
-              <tr><td><b>Unidades obtenidas</b></td><td>{fNum(parseFloat(prepUnidades) || 0)}</td></tr>
+              <tr><td><b>{esUnidadPeso(prepMpUnidad) ? `${prepMpUnidad} obtenidos` : 'Unidades obtenidas'}</b></td><td>{fNum(parseFloat(prepUnidades) || 0)}{esUnidadPeso(prepMpUnidad) ? ` ${prepMpUnidad}` : ''}</td></tr>
               <tr><td><b>Peso final / desperdicio</b></td><td>{fNum(parseFloat(prepPesoFinal) || 0)} / {fNum(parseFloat(prepPesoDesp) || 0)}</td></tr>
               {prepPorciona && <tr><td><b>Subporciones</b></td><td>{fNum(parseFloat(prepCantSubp) || 0)} de {fNum(parseFloat(prepPesoSubp) || 0)} g c/u</td></tr>}
               <tr><td><b>Empaque surtido</b></td><td>{prepSurtido ? `Sí — mezclado con: ${prepLoteMezcla || '(sin especificar)'}` : 'No'}</td></tr>

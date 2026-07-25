@@ -352,10 +352,13 @@ const costoEmpleadoMensual = (e, P) => {
   }
   const incluyeAux = sal <= P.topeAuxSMLMV * P.smlmv
   const auxilio = incluyeAux ? P.auxTransporte : 0
-  const ces = sal * P.prestaciones.cesantias
-  // Intereses sobre cesantías: 12% ANUAL sobre el saldo de cesantías ≈ 1% MENSUAL sobre el
-  // salario (intCesantias = 0.01 se aplica sobre el salario, no sobre la cesantía del mes).
-  const prestaciones = ces + sal * P.prestaciones.intCesantias + sal * P.prestaciones.prima + sal * P.prestaciones.vacaciones
+  // Cesantías, intereses y prima se liquidan sobre salario + auxilio de transporte;
+  // vacaciones solo sobre el salario (el auxilio no es factor salarial para vacaciones).
+  const baseP = sal + auxilio
+  const ces = baseP * P.prestaciones.cesantias
+  // Intereses sobre cesantías: 12% ANUAL sobre el saldo de cesantías ≈ 1% MENSUAL sobre la base
+  // (intCesantias = 0.01 se aplica sobre salario + auxilio).
+  const prestaciones = ces + baseP * P.prestaciones.intCesantias + baseP * P.prestaciones.prima + sal * P.prestaciones.vacaciones
   const exime = P.exoneraParafiscales && sal < 10 * P.smlmv
   const parafiscales = (exime ? 0 : sal * P.empleador.salud) + sal * P.empleador.pension + sal * P.empleador.arl
     + sal * P.empleador.caja + (exime ? 0 : sal * P.empleador.icbf) + (exime ? 0 : sal * P.empleador.sena)
@@ -571,10 +574,14 @@ export const calcularNomina = (empleado, asistencia = [], periodo = 'mensual', m
   const neto    = salBase + auxTransp - salud - pension - descuentoInasistencia
 
   // Provisión de prestaciones
-  const cesantias  = salBase * P.prestaciones.cesantias
-  // Intereses cesantías: 12% anual sobre cesantías ≈ 1% mensual sobre lo devengado
-  const intCes     = salBase * P.prestaciones.intCesantias
-  const prima      = salBase * P.prestaciones.prima
+  // Base legal: cesantías, intereses de cesantías y prima se liquidan sobre el salario
+  // + el auxilio de transporte. Las vacaciones se liquidan SOLO sobre el salario
+  // (el auxilio de transporte no es factor salarial para vacaciones).
+  const basePrestaciones = salBase + auxTransp
+  const cesantias  = basePrestaciones * P.prestaciones.cesantias
+  // Intereses cesantías: 12% anual sobre cesantías ≈ 1% mensual sobre la base (salario + aux)
+  const intCes     = basePrestaciones * P.prestaciones.intCesantias
+  const prima      = basePrestaciones * P.prestaciones.prima
   const vacaciones = salBase * P.prestaciones.vacaciones
   const totalPrestaciones = cesantias + intCes + prima + vacaciones
 

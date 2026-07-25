@@ -6,10 +6,32 @@ import { Component } from 'react'
 // un módulo que fallaba dejaba el boundary "pegado": el usuario hacía clic en otra opción del
 // menú, la ruta cambiaba, pero se seguía viendo la pantalla de error y parecía que la app
 // entera se había caído.
+// ¿Es un error de carga de módulo? Ocurre al recargar la página después de un DEPLOY nuevo:
+// el navegador tiene el index.html viejo en caché y pide chunks con hash antiguo que ya no
+// existen en el servidor → "Failed to fetch dynamically imported module". No es un fallo real
+// de la app, solo hay que recargar para tomar la versión nueva.
+function esErrorDeChunk(error) {
+  const msg = String(error?.message || error || '')
+  return /dynamically imported module|Failed to fetch|Importing a module script failed|ChunkLoadError|error loading dynamically imported/i.test(msg)
+}
+
 export default class ErrorBoundary extends Component {
   constructor(props) { super(props); this.state = { error: null } }
   static getDerivedStateFromError(error) { return { error } }
-  componentDidCatch(error, info) { console.error('ErrorBoundary:', error, info) }
+  componentDidCatch(error, info) {
+    console.error('ErrorBoundary:', error, info)
+    // Si el módulo no cargó por caché vieja, recarga UNA sola vez (bandera en sessionStorage
+    // para no entrar en bucle de recargas si el error fuese permanente).
+    if (esErrorDeChunk(error) && sessionStorage.getItem('chunkReload') !== '1') {
+      sessionStorage.setItem('chunkReload', '1')
+      location.reload()
+    }
+  }
+
+  componentDidMount() {
+    // Montó sin error → la versión nueva cargó bien; libera la bandera para el próximo deploy.
+    if (!this.state.error) sessionStorage.removeItem('chunkReload')
+  }
 
   componentDidUpdate(prevProps) {
     if (this.state.error && prevProps.resetKey !== this.props.resetKey) {
