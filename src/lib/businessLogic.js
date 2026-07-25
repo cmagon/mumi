@@ -236,25 +236,26 @@ export const getCIFDistribucion = (cifTotal, productos = []) => {
 export const getTasaGastosOper = (gastosOperMensuales = 0, costoProduccionMensual = 0) =>
   costoProduccionMensual > 0 ? gastosOperMensuales / costoProduccionMensual : 0
 
-// Precio de venta según la norma:
-//   Costo pleno = costo de producción × (1 + tasa de gastos operacionales)
-//   Precio      = Costo pleno ÷ (1 − %comisión − %ICA − %utilidad)
+// Precio de venta a partir del COSTO DE PRODUCCIÓN (NIC 2), no de un "costo pleno":
+//   Precio = Costo de producción ÷ (1 − %comisión − %ICA − %utilidad bruta)
+// El costo de producción es MP + MO + CIF. Los gastos operativos (admin/ventas/financieros) NO
+// entran al costo del producto: son gastos del período. El %utilidad de aquí es el MARGEN BRUTO
+// objetivo (antes de gastos), que debe ser suficiente para cubrir esos gastos y dejar utilidad neta.
 // Se DIVIDE porque comisión, ICA y utilidad son porcentajes del PRECIO, no del costo:
 //   Precio = Costo + Precio×com + Precio×ica + Precio×util  →  Precio × (1 − com − ica − util) = Costo
-// Multiplicar por (1 + margen) es el error clásico: "30% sobre el costo" deja solo 23% sobre
-// el precio.
+// Multiplicar por (1 + margen) es el error clásico: "30% sobre el costo" deja solo 23% sobre el precio.
 export const getPrecioSugerido = ({ costoProduccionUnit = 0, tasaGastosOper = 0, comisionPct = 0, icaPct = 0, utilidadPct = 0 }) => {
-  const costoPleno = costoProduccionUnit * (1 + tasaGastosOper)
   const com  = (comisionPct || 0) / 100
   const ica  = (icaPct      || 0) / 100
-  const util = (utilidadPct || 0) / 100
+  const util = (utilidadPct || 0) / 100   // margen BRUTO objetivo (sobre el precio)
   const divMin = 1 - com - ica, divObj = 1 - com - ica - util
   return {
-    costoPleno,
-    gastosOperUnit: costoPleno - costoProduccionUnit,
-    // Precio mínimo: cubre costo + gastos + comisión + ICA, sin utilidad. Por debajo, se pierde plata.
-    precioMinimo:   divMin > 0 ? costoPleno / divMin : 0,
-    precioObjetivo: divObj > 0 ? costoPleno / divObj : 0,
+    costoProduccionUnit,
+    // Gasto operacional prorrateado por unidad: SOLO informativo (no se suma al costo del producto).
+    gastosOperUnit: costoProduccionUnit * (tasaGastosOper || 0),
+    // Precio mínimo: cubre costo de producción + comisión + ICA, sin utilidad. Por debajo, se pierde plata.
+    precioMinimo:   divMin > 0 ? costoProduccionUnit / divMin : 0,
+    precioObjetivo: divObj > 0 ? costoProduccionUnit / divObj : 0,
     viable: divObj > 0,   // false si comisión + ICA + utilidad ≥ 100% (no hay precio posible)
   }
 }

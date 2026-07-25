@@ -609,7 +609,8 @@ export default function Costos() {
         bache: parseFloat(formProd.bache) || 70,
         baches_mes: parseFloat(formProd.baches_mes) || 1,
         merma: parseFloat(formProd.merma) || 0,
-        comision: parseFloat(formProd.comision) || 3,
+        // Comisión permite 0 (sin comisión): no usar "|| 3" que convertiría el 0 en 3.
+        comision: isNaN(parseFloat(formProd.comision)) ? 3 : parseFloat(formProd.comision),
         precio_mayor: parseFloat(formProd.precio_mayor) || 0,
         precio_detal: parseFloat(formProd.precio_detal) || 0,
         vida_util_valor: parseFloat(formProd.vida_util_valor) || null,
@@ -2005,10 +2006,19 @@ export default function Costos() {
                 const bajoMinimo = precioActual > 0 && precioActual < sug.precioMinimo
                 const bajoObjetivo = precioActual > 0 && precioActual < sug.precioObjetivo && !bajoMinimo
                 const color = bajoMinimo ? 'var(--rojo)' : bajoObjetivo ? 'var(--dorado)' : 'var(--selva)'
-                // Lo que realmente queda en el bolsillo con el precio actual, tras comisión e ICA
+                // Costo pleno = costo de producción + gastos operativos por u (solo para el cálculo NETO;
+                // NO es el costo del producto ni la base del precio, que es solo el costo de producción).
+                const costoPlenoUnit = calcResult.costoTotalUnit + sug.gastosOperUnit
+                // Utilidad BRUTA (antes de gastos) al precio objetivo = precio − costo de producción.
+                const utilBrutaUnit = sug.precioObjetivo - calcResult.costoTotalUnit
+                const utilBrutaPct = sug.precioObjetivo > 0 ? (utilBrutaUnit / sug.precioObjetivo) * 100 : 0
+                // Lo que realmente queda NETO con el precio actual, tras comisión, ICA y gastos operativos.
                 const utilRealUnit = precioActual > 0
-                  ? precioActual * (1 - comisionPct / 100 - icaPct / 100) - sug.costoPleno : 0
+                  ? precioActual * (1 - comisionPct / 100 - icaPct / 100) - costoPlenoUnit : 0
                 const utilRealPct = precioActual > 0 ? (utilRealUnit / precioActual) * 100 : 0
+                // Utilidad BRUTA con el precio actual (antes de gastos operativos).
+                const utilBrutaRealUnit = precioActual > 0 ? precioActual - calcResult.costoTotalUnit : 0
+                const utilBrutaRealPct = precioActual > 0 ? (utilBrutaRealUnit / precioActual) * 100 : 0
                 // Impuestos INDIRECTOS: los cobras al cliente sobre el precio y los giras a la DIAN.
                 // No son costo ni utilidad tuya, así que no entran al cálculo: solo al precio final.
                 const ivaP = parseFloat(formProd.iva_pct) || 0
@@ -2037,10 +2047,18 @@ export default function Costos() {
                           <table style={{ fontSize:'0.84rem', width:'100%' }}>
                             <tbody>
                               <tr><td>Costo de producción/u <small style={{ color:'var(--texto-suave)' }}>(MP + empaque + CIF)</small></td><td className="td-number">{fCOP(calcResult.costoTotalUnit)}</td></tr>
-                              <tr><td>(+) Gastos admin/ventas/financieros por u <small style={{ color:'var(--texto-suave)' }}>({(tasaGastosOper*100).toFixed(1)}% del costo)</small></td><td className="td-number">{fCOP(sug.gastosOperUnit)}</td></tr>
-                              <tr style={{ fontWeight:600, borderTop:'1px solid var(--crema-oscuro)' }}><td>= Costo pleno/u</td><td className="td-number">{fCOP(sug.costoPleno)}</td></tr>
-                              <tr style={{ color:'var(--tierra)' }}><td><strong>Precio mínimo</strong> <small>(cubre costo + comisión{icaPct > 0 ? ' + ICA' : ''}, sin utilidad)</small></td><td className="td-number"><strong>{fCOP(sug.precioMinimo)}</strong></td></tr>
-                              <tr style={{ color:'var(--selva)' }}><td><strong>Precio objetivo</strong> <small>(con {utilFicha}% de utilidad)</small></td><td className="td-number"><strong style={{ fontSize:'1.05rem' }}>{fCOP(sug.precioObjetivo)}</strong></td></tr>
+                              <tr style={{ color:'var(--tierra)' }}><td><strong>Precio mínimo</strong> <small>(cubre costo de producción + comisión{icaPct > 0 ? ' + ICA' : ''}, sin utilidad)</small></td><td className="td-number"><strong>{fCOP(sug.precioMinimo)}</strong></td></tr>
+                              <tr style={{ color:'var(--selva)' }}><td><strong>Precio objetivo</strong> <small>(con {utilFicha}% de utilidad bruta + %comisión)</small></td><td className="td-number"><strong style={{ fontSize:'1.05rem' }}>{fCOP(sug.precioObjetivo)}</strong ><br /> <small>Utilidad bruta real</small> <strong style={{ fontSize:'0.8rem' }}>{utilBrutaPct.toFixed(1)}%</strong ></td></tr>
+                              <tr></tr>
+                            </tbody>
+                          </table>
+                          {/* Gastos del período: informativos, DESPUÉS del margen bruto (no entran al costo del producto). */}
+                          <table style={{ fontSize:'0.8rem', width:'100%', marginTop:6, color:'var(--texto-suave)' }}>
+                            <tbody>
+                              <tr><td>(−) Comisión de ventas <small>({comisionPct}%)</small></td><td className="td-number">{fCOP(sug.precioObjetivo * comisionPct / 100)}</td></tr>
+                              {icaPct > 0 && <tr><td>(−) ICA <small>({icaPct.toFixed(2)}%)</small></td><td className="td-number">{fCOP(sug.precioObjetivo * icaPct / 100)}</td></tr>}
+                              <tr><td>(−) Gastos admin/ventas/financieros por u <small>({(tasaGastosOper*100).toFixed(1)}% del costo de producción · informativo)</small></td><td className="td-number">{fCOP(sug.gastosOperUnit)}</td></tr>
+                              <tr style={{ fontWeight:600, color:'var(--texto)' }}><td>= Utilidad neta estimada/u</td><td className="td-number">{fCOP(utilBrutaUnit - sug.precioObjetivo * (comisionPct + icaPct) / 100 - sug.gastosOperUnit)}</td></tr>
                             </tbody>
                           </table>
                           <div style={{ marginTop:8, display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
@@ -2057,15 +2075,15 @@ export default function Costos() {
                                   : `✓ Tu precio de ${fCOP(precioActual)} alcanza o supera el objetivo`}
                               </div>
                               <div style={{ color:'var(--texto-suave)' }}>
-                                Con ese precio te queda: {fCOP(precioActual)} − {comisionPct}% comisión
-                                {icaPct > 0 ? ` − ${icaPct.toFixed(2)}% ICA` : ''} − {fCOP(sug.costoPleno)} de costo pleno =
-                                {' '}<strong style={{ color }}>{fCOP(utilRealUnit)} de utilidad ({utilRealPct.toFixed(1)}%)</strong> por unidad.
+                                Utilidad <strong>bruta</strong> (precio − costo de producción): <strong style={{ color:'var(--selva)' }}>{fCOP(utilBrutaRealUnit)} ({utilBrutaRealPct.toFixed(1)}%)</strong>.<br />
+                                Neta, tras {comisionPct}% comisión{icaPct > 0 ? ` + ${icaPct.toFixed(2)}% ICA` : ''} y {fCOP(sug.gastosOperUnit)} de gastos operativos:
+                                {' '}<strong style={{ color }}>{fCOP(utilRealUnit)} ({utilRealPct.toFixed(1)}%)</strong> por unidad.
                               </div>
                             </div>
                           )}
                           <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem', display:'block', marginTop:6 }}>
-                            Precio = costo pleno ÷ (1 − {comisionPct}% comisión {icaPct > 0 ? `− ${icaPct.toFixed(2)}% ICA ` : ''}− {utilFicha}% utilidad). Se <strong>divide</strong>: son porcentajes del precio,
-                            no del costo (multiplicar por 1+margen deja menos utilidad de la que crees).
+                            Precio = costo de producción ÷ (1 − {comisionPct}% comisión {icaPct > 0 ? `− ${icaPct.toFixed(2)}% ICA ` : ''}− {utilFicha}% utilidad bruta). Se <strong>divide</strong>: son porcentajes del precio,
+                            no del costo (multiplicar por 1+margen deja menos utilidad de la que crees). Los gastos admin/ventas/financieros NO se suman al costo del producto (NIC 2): se muestran aparte y el margen bruto debe cubrirlos.
                             {icaPorMil === 0 && <> El ICA está en 0: si conoces la tarifa de tu municipio, escríbela en ‰ para que el precio la contemple.</>}
                           </small>
                         </>}
@@ -2221,6 +2239,9 @@ export default function Costos() {
                 // Es la cifra que debe cuadrar con el panel de Precio sugerido.
                 const utilNeta = pMayor - calcResult.comUnit - icaU - cPleno
                 const utilNetaDetal = pDetal - (pDetal * icaPct / 100) - cPleno
+                // Utilidad BRUTA (antes de gastos) = precio − costo de PRODUCCIÓN. Es el margen, protagonista.
+                const utilBrutaMayor = pMayor - cProd
+                const utilBrutaMayorPct = pMayor > 0 ? (utilBrutaMayor / pMayor * 100) : 0
                 const pct = (v) => (cProd > 0 ? (v / cProd * 100).toFixed(0) + '%' : '—')
                 const unidsMes = calcResult.unidsMesTot || 0
                 const ivaTot = (parseFloat(formProd.iva_pct) || 0) + (parseFloat(formProd.imp_saludable_pct) || 0)
@@ -2230,16 +2251,21 @@ export default function Costos() {
                   <div className="row"><span>+ Mano de obra y CIF por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>({calcResult.totalMinutos} min × {fCOP(calcResult.costoMin)}/min ÷ unid · {pct(calcResult.moUnit)})</small></span><span style={{color:'var(--dorado)'}}>{fCOP(calcResult.moUnit)}</span></div>
                   {(calcResult.adicUnit || 0) > 0 && <div className="row"><span>+ Costos adicionales por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>(depreciación, otros · {pct(calcResult.adicUnit)})</small></span><span style={{color:'var(--dorado)'}}>{fCOP(calcResult.adicUnit)}</span></div>}
                   <div className="row" style={{ borderTop:'1px solid rgba(245,240,232,0.25)', paddingTop:6, marginTop:4, fontWeight:600 }}>
-                    <span>= COSTO DE PRODUCCIÓN por unidad</span><span>{fCOP(cProd)}</span>
+                    <span>= COSTO DE PRODUCCIÓN por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>(MP + empaque + MO + CIF)</small></span><span>{fCOP(cProd)}</span>
                   </div>
-                  <div className="row"><span>+ Gastos admin/ventas/financieros <small style={{opacity:0.6,fontSize:'0.72rem'}}>({(tasaGastosOper*100).toFixed(1)}% del costo de producción)</small></span><span style={{color:'var(--dorado)'}}>{fCOP(gastosU)}</span></div>
                   <div className="total">
-                    <div className="row"><span><strong>= COSTO PLENO por unidad</strong> <small style={{opacity:0.6,fontSize:'0.72rem'}}>(lo que te cuesta de verdad)</small></span><span><strong>{fCOP(cPleno)}</strong></span></div>
                     <div className="row"><span>Precio de venta por mayor</span><span>{fCOP(pMayor)}</span></div>
+                    {/* Utilidad BRUTA (antes de gastos): el margen, protagonista y en grande. */}
+                    <div className="row ganancia" style={{ fontWeight:800, borderTop:'1px solid rgba(245,240,232,0.25)', paddingTop:8, marginTop:2, alignItems:'baseline' }}>
+                      <span style={{ cursor:'help' }} title="Utilidad bruta = precio − costo de PRODUCCIÓN, antes de comisión, ICA y gastos de administración/ventas/financieros. Es el margen con el que la empresa paga esos gastos y deja utilidad.">UTILIDAD BRUTA (antes de gastos) ⓘ</span>
+                      <span style={{ color: utilBrutaMayor >= 0 ? 'var(--lima)' : 'var(--rojo)' }}><strong style={{ fontSize:'1.5rem' }}>{utilBrutaMayorPct.toFixed(1)}%</strong> <small style={{ opacity:0.85 }}>· {fCOP(utilBrutaMayor)}/u</small></span>
+                    </div>
+                    {/* Gastos del período, DESPUÉS del margen bruto (no se suman al costo del producto). */}
                     {(calcResult.comUnit || 0) > 0 && <div className="row"><span>− Comisión distribuidor <small style={{opacity:0.6,fontSize:'0.72rem'}}>({formProd.comision}%)</small></span><span style={{color:'var(--dorado)'}}>−{fCOP(calcResult.comUnit)}</span></div>}
                     {icaU > 0 && <div className="row"><span>− ICA <small style={{opacity:0.6,fontSize:'0.72rem'}}>({icaPct.toFixed(2)}% de la venta)</small></span><span style={{color:'var(--dorado)'}}>−{fCOP(icaU)}</span></div>}
-                    <div className="row ganancia" style={{ fontWeight:700 }}>
-                      <span>UTILIDAD NETA por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>{(calcResult.comUnit || 0) > 0 ? '(con comisión)' : ''}</small></span>
+                    <div className="row"><span>− Gastos admin/ventas/financieros <small style={{opacity:0.6,fontSize:'0.72rem'}}>({(tasaGastosOper*100).toFixed(1)}% del costo de producción)</small></span><span style={{color:'var(--dorado)'}}>−{fCOP(gastosU)}</span></div>
+                    <div className="row ganancia" style={{ fontWeight:700, borderTop:'1px solid rgba(245,240,232,0.25)', paddingTop:6 }}>
+                      <span>= UTILIDAD NETA por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>{(calcResult.comUnit || 0) > 0 ? '(con comisión)' : ''}</small></span>
                       <span style={{ color: utilNeta >= 0 ? undefined : 'var(--rojo)' }}>{fCOP(utilNeta)} ({pMayor > 0 ? (utilNeta / pMayor * 100).toFixed(1) + '%' : '-'})</span>
                     </div>
                     {/* La comisión solo se paga a distribuidores: en venta directa esa plata se queda */}
@@ -2256,7 +2282,6 @@ export default function Costos() {
 
                   {/* Lo que este producto significa al mes y su margen de contribución */}
                   <div style={{ marginTop:10, paddingTop:8, borderTop:'1px dashed rgba(245,240,232,0.2)', fontSize:'0.78rem' }}>
-                    <div className="row"><span style={{ cursor:'help' }} title="Utilidad bruta = precio − costo de PRODUCCIÓN, antes de los gastos de administración y ventas. Es el margen con el que la empresa paga esos gastos.">Utilidad bruta (antes de gastos) ⓘ</span><span>{fCOP(calcResult.utilMayor)} ({pMayor > 0 ? (calcResult.utilMayor / pMayor * 100).toFixed(1) + '%' : '-'})</span></div>
                     <div className="row"><span style={{ cursor:'help' }} title="Precio menos el costo VARIABLE (materia prima + empaque). Es lo que cada unidad aporta para cubrir los costos fijos. Si es negativo, vender más aumenta la pérdida.">Margen de contribución/u ⓘ</span><span style={{ color: (pMayor - calcResult.cvu) > 0 ? 'var(--lima)' : 'var(--rojo)' }}>{fCOP(pMayor - calcResult.cvu)}</span></div>
                     <div className="row"><span>Unidades/mes proyectadas</span><span>{fNum(unidsMes)}</span></div>
                     <div className="row"><span style={{ cursor:'help' }} title="Utilidad neta por unidad × unidades que produces al mes. Es lo que este producto le deja al negocio si se vende todo.">Utilidad del producto al mes ⓘ</span><span style={{ color: utilNeta * unidsMes >= 0 ? 'var(--lima)' : 'var(--rojo)', fontWeight:600 }}>{fCOP(utilNeta * unidsMes)}</span></div>
