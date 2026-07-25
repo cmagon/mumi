@@ -1113,6 +1113,14 @@ export default function OrdenesProduccion() {
     const vSobranteUnidad = live ? prepSobranteUnidad : (o.sobrante_unidad || 'g')
     const vLoteMezcla = live ? prepLoteMezcla : (o.lote_mezcla || '')
     const vCamposExtra = live ? prepCamposExtra : (Array.isArray(o.campos_extra) ? o.campos_extra : [])
+    // Valores REALES diligenciados por el operario (no los previstos de la ficha).
+    const vPesoFinal = live ? prepPesoFinal : (o.peso_final != null ? String(o.peso_final) : '')
+    const vPesoDesp = live ? prepPesoDesp : (o.peso_desperdicio != null ? String(o.peso_desperdicio) : '')
+    // Imagen principal de la ficha del producto (para el encabezado de datos de la orden).
+    let imagenFicha = ''
+    if (o.origen === 'producto' && o.origen_id) {
+      try { const { data } = await supabase.from('products_costing').select('imagen_url').eq('id', o.origen_id).single(); imagenFicha = data?.imagen_url || '' } catch { /* sin imagen */ }
+    }
     // Ingredientes / peso unidad / datos previstos: del estado si es viva; de la ficha si es guardada.
     let ings = prepIngs, pesoUnidad = prepInfo?.pesoUnidad, d = prepDatos
     if (!live) {
@@ -1136,14 +1144,6 @@ export default function OrdenesProduccion() {
     const loteIng = (ing) => loteDeTraza(traza, ing)
     const filas = ings.map(i => `<tr><td>${i.nombre}</td><td class="r">${g(i.gramos)} g</td></tr>`).join('')
     const totalG = ings.reduce((s, i) => s + (i.gramos || 0), 0)
-    const datosHtml = d ? `
-      <div class="datos">
-        <span>Mezcla total: <b>${g(d.totalMezcla)} g</b></span>
-        <span>Peso esperado: <b>${g(d.pesoEsperado)} g</b></span>
-        <span>Desperdicio: <b>${g(d.pesoDesp)} g</b></span>
-        <span>Unidades estimadas: <b>${(d.unidades||0).toFixed(1)}</b></span>
-        <span>Costo MP: <b>$ ${Math.round(d.totalCostoMP).toLocaleString('es-CO')}</b></span>
-      </div>` : ''
     const fecha = new Date().toLocaleDateString('es-CO')
     const emision = o.created_at ? new Date(o.created_at).toLocaleDateString('es-CO') : fecha
     const fabIni = vFechaIni || ''
@@ -1171,8 +1171,8 @@ export default function OrdenesProduccion() {
     const filasPrev = d ? `
       <table class="prev"><tbody>
         <tr><td>Mezcla total</td><td class="r"><b>${g(d.totalMezcla)} g</b></td><td>Peso esperado</td><td class="r"><b>${g(d.pesoEsperado)} g</b></td></tr>
-        <tr><td>Desperdicio</td><td class="r"><b>${g(d.pesoDesp)} g</b></td><td>Unidades estimadas</td><td class="r"><b>${(d.unidades||0).toFixed(1)}</b></td></tr>
-        <tr><td>Costo MP</td><td class="r"><b>$ ${Math.round(d.totalCostoMP||0).toLocaleString('es-CO')}</b></td><td>Peso obtenido</td><td class="r" style="min-width:60px"></td></tr>
+        <tr><td>Unidades estimadas</td><td class="r"><b>${(d.unidades||0).toFixed(1)}</b></td><td>Peso obtenido</td><td class="r"><b>${vPesoFinal !== '' ? g(parseFloat(vPesoFinal)) + ' g' : ''}</b></td></tr>
+        <tr><td>Desperdicio</td><td class="r"><b>${vPesoDesp !== '' ? g(parseFloat(vPesoDesp)) + ' g' : ''}</b></td><td></td><td class="r"></td></tr>
       </tbody></table>` : ''
     const procRows = (vProcesos || []).filter(p => p.nombre?.trim() || p.inicio || p.fin)
     const fmtF = (f) => f ? new Date(f + 'T00:00:00').toLocaleDateString('es-CO') : ''
@@ -1241,7 +1241,7 @@ export default function OrdenesProduccion() {
 
       <div class="seccion">DATOS DE LA ORDEN</div>
       <table class="campos">
-        <tr><td class="lbl">Nombre comercial</td><td colspan="3" style="font-size:1.35em;font-weight:bold;background:#fff7e6;color:#2d5a3d">${o.producto || ''}</td></tr>
+        <tr><td class="lbl">Nombre comercial</td><td colspan="${imagenFicha ? '2' : '3'}" style="font-size:1.35em;font-weight:bold;background:#fff7e6;color:#2d5a3d">${o.producto || ''}</td>${imagenFicha ? `<td style="text-align:center;vertical-align:middle;width:22%"><img src="${imagenFicha}" style="max-width:100%;max-height:70px;object-fit:contain" /></td>` : ''}</tr>
         <tr><td class="lbl">Lote</td><td>${rotLote || ''}</td><td class="lbl">Presentación</td><td>${pesoUnidad ? g(pesoUnidad) + ' gr' : ''}</td></tr>
         <tr><td class="lbl">Fecha de fabricación</td><td>${fabricacion}</td><td class="lbl">Fecha de vencimiento</td><td>${rotVence ? new Date(rotVence + 'T00:00:00').toLocaleDateString('es-CO') : ''}</td></tr>
         <tr><td class="lbl">Unidades a producir</td><td>${o.cantidad_plan || ''} ${o.unidad || ''}</td><td class="lbl">Operario</td><td>${o.operario || ''}</td></tr>
@@ -2825,7 +2825,7 @@ export default function OrdenesProduccion() {
 
       {/* Modal Iniciar proceso — fecha de inicio + tiempos por subproceso (autoguardado) */}
       <Modal open={modalProceso} onClose={() => setModalProceso(false)} guard={false}
-        title={<span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', width: '100%' }}><Play size={18} aria-hidden="true" /> Proceso — {ordenPrep?.producto || ''}
+        title={<span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', width: '100%' }}><Play size={18} aria-hidden="true" /> #{ordenPrep ? opNum(ordenPrep.id) : ''} Proceso — {ordenPrep?.producto || ''}
           {puedeCompartirArchivos && (
             <button type="button" className="btn btn-secondary btn-sm" style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }} title="Compartir orden (PDF)" onClick={() => compartirOrden()}><Share2 size={16} aria-hidden="true" /> Compartir</button>
           )}
