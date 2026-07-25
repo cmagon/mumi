@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback, Children, isValidElement } from 'react'
+import { createPortal } from 'react-dom'
 
 // Desplegable PROPIO de la app, con la MISMA API que un <select> nativo.
 //
@@ -126,7 +127,7 @@ export default function Select({
         <span aria-hidden="true" style={{ fontSize: '0.7rem', color: 'var(--texto-suave)', transform: abierto ? 'rotate(180deg)' : 'none', transition: 'transform .15s' }}>▼</span>
       </div>
 
-      {abierto && pos && (
+      {abierto && pos && createPortal(
         <div ref={menuRef} role="listbox"
           style={{ position: 'fixed', left: pos.left, width: pos.width, top: pos.top, bottom: pos.bottom,
             maxHeight: pos.maxHeight, overflowY: 'auto', zIndex: 3000,
@@ -165,7 +166,8 @@ export default function Select({
                 </div>
               )
             })}
-        </div>
+        </div>,
+        document.body
       )}
     </>
   )
