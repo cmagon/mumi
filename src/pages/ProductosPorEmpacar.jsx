@@ -25,7 +25,10 @@ export default function ProductosPorEmpacar() {
 
   const { data: saldos = [] } = useQuery({
     queryKey: ['mezcla_saldos'],
-    queryFn: async () => { const { data } = await supabase.from('mezcla_saldos').select('*').eq('estado', 'disponible').gt('peso', 0).order('vencimiento', { ascending: true, nullsFirst: false }); return data || [] },
+    // El segundo .order() replica exactamente la consulta de Órdenes de Producción, que
+    // comparte esta clave: si difieren, los saldos con igual vencimiento salen en distinto
+    // orden en cada pantalla según cuál haya cargado primero.
+    queryFn: async () => { const { data } = await supabase.from('mezcla_saldos').select('*').eq('estado', 'disponible').gt('peso', 0).order('vencimiento', { ascending: true, nullsFirst: false }).order('created_at', { ascending: true }); return data || [] },
   })
   const { data: bajas = [] } = useQuery({
     queryKey: ['saldo_bajas'],

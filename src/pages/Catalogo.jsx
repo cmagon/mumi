@@ -1,7 +1,9 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useToast } from '../hooks/useToast'
+import { useAuth } from '../context/AuthContext'
+import { puedeVerSeccion } from '../lib/permisos'
 import { fNum } from '../lib/businessLogic'
 import { Store, Eye, EyeOff, Star, Save, Settings, BarChart3, ExternalLink, Pencil, X, Plus, Upload, Trash2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Palette, Image as ImageIcon, Layout, Users, RefreshCw, Monitor, Tablet, Smartphone } from 'lucide-react'
 import { Truck, ShieldCheck, MessageCircle, Package, CreditCard, Heart, Clock, Gift, Award, Sprout, BadgeCheck, Sparkles, MapPin, Phone, Percent, ThumbsUp, Recycle, HandCoins, Leaf } from 'lucide-react'
@@ -29,16 +31,34 @@ import Select from '../components/ui/Select'
 
 // Fuentes de Google disponibles para el catálogo (títulos, subtítulos, párrafos)
 const FUENTES = [
-  'Playfair Display', 'Cormorant Garamond', 'DM Serif Display', 'Lora', 'Merriweather', 'Libre Baskerville',
+  'Playfair Display', 'Libre Caslon Text', 'Cormorant Garamond', 'DM Serif Display', 'Lora', 'Merriweather', 'Libre Baskerville',
   'Source Sans 3', 'Poppins', 'Montserrat', 'Nunito', 'Raleway', 'Work Sans', 'Quicksand',
   'Josefin Sans', 'Roboto', 'Open Sans', 'Inter', 'DM Sans', 'Rubik', 'Mulish',
 ]
+
+// Tamaños de imagen de producto (web + móvil) — hero Atelier ~780px móvil
+const IMG_PROD_WEB = { key: 'web', w: 1200, h: 1200 }
+const IMG_PROD_MOBILE = { key: 'mobile', w: 780, h: 780 }
+const normalizeImgAdmin = (x) => {
+  if (!x) return null
+  if (typeof x === 'string') return { url: x, url_mobile: x }
+  const url = x.url || ''
+  if (!url) return null
+  return { url, url_mobile: x.url_mobile || url }
+}
+const thumbUrl = (x) => normalizeImgAdmin(x)?.url_mobile || normalizeImgAdmin(x)?.url || ''
 
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 const fCOP = (n) => '$' + Math.round(Number(n) || 0).toLocaleString('es-CO')
 
 const capital = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : '—'
-const imgsDe = (p) => { try { const a = Array.isArray(p.imagenes) ? p.imagenes : JSON.parse(p.imagenes || '[]'); return a.length ? a : (p.imagen_url ? [p.imagen_url] : []) } catch { return p.imagen_url ? [p.imagen_url] : [] } }
+const imgsDe = (p) => {
+  try {
+    const a = Array.isArray(p.imagenes) ? p.imagenes : JSON.parse(p.imagenes || '[]')
+    const list = (a.length ? a : (p.imagen_url ? [p.imagen_url] : [])).map(normalizeImgAdmin).filter(Boolean)
+    return list
+  } catch { return p.imagen_url ? [normalizeImgAdmin(p.imagen_url)].filter(Boolean) : [] }
+}
 
 // Detecta los frutos relacionados a partir del NOMBRE del producto (sin tildes).
 const sinTildes = (s) => (s || '').toLowerCase().normalize('NFD').replace(new RegExp('[\u0300-\u036f]','g'), '')
@@ -55,7 +75,17 @@ const labelFrutoCat = (id, frutosCat) => (frutosCat || []).find(f => f.id === id
 export default function Catalogo() {
   const toast = useToast()
   const qc = useQueryClient()
-  const [tab, setTab] = useState('productos')
+  const { profile } = useAuth()
+  const rol = profile?.rol
+  const puedeProductos = puedeVerSeccion(rol, 'catalogo', 'productos')
+  const puedeConfig    = puedeVerSeccion(rol, 'catalogo', 'config')
+  const puedeMetricas  = puedeVerSeccion(rol, 'catalogo', 'metricas')
+  const tabInicialCat = puedeProductos ? 'productos' : (puedeConfig ? 'personalizar' : (puedeMetricas ? 'metricas' : 'productos'))
+  const [tab, setTab] = useState(tabInicialCat)
+  useEffect(() => {
+    const ok = { productos: puedeProductos, personalizar: puedeConfig, config: puedeConfig, mensajes: puedeConfig, metricas: puedeMetricas }
+    if (!ok[tab]) setTab(tabInicialCat)
+  }, [puedeProductos, puedeConfig, puedeMetricas, tab, tabInicialCat])
   const { data: cfgUrl } = useQuery({
     queryKey: ['catalogo_url'],
     queryFn: async () => { const { data } = await supabase.from('config_catalogo').select('url_publica').eq('id', 1).maybeSingle(); return data?.url_publica || '' },
@@ -75,18 +105,18 @@ export default function Catalogo() {
       </div>
 
       <div className="tabs">
-        <button className={`tab-btn ${tab === 'productos' ? 'active' : ''}`} onClick={() => setTab('productos')}><Ico as={Store} size={14} />Productos</button>
-        <button className={`tab-btn ${tab === 'personalizar' ? 'active' : ''}`} onClick={() => setTab('personalizar')}><Ico as={Palette} size={14} />Personalizar</button>
-        <button className={`tab-btn ${tab === 'config' ? 'active' : ''}`} onClick={() => setTab('config')}><Ico as={Settings} size={14} />Configuración</button>
-        <button className={`tab-btn ${tab === 'mensajes' ? 'active' : ''}`} onClick={() => setTab('mensajes')}>✉️ Mensajes</button>
-        <button className={`tab-btn ${tab === 'metricas' ? 'active' : ''}`} onClick={() => setTab('metricas')}><Ico as={BarChart3} size={14} />Métricas</button>
+        {puedeProductos && <button className={`tab-btn ${tab === 'productos' ? 'active' : ''}`} onClick={() => setTab('productos')}><Ico as={Store} size={14} />Productos</button>}
+        {puedeConfig && <button className={`tab-btn ${tab === 'personalizar' ? 'active' : ''}`} onClick={() => setTab('personalizar')}><Ico as={Palette} size={14} />Personalizar</button>}
+        {puedeConfig && <button className={`tab-btn ${tab === 'config' ? 'active' : ''}`} onClick={() => setTab('config')}><Ico as={Settings} size={14} />Configuración</button>}
+        {puedeConfig && <button className={`tab-btn ${tab === 'mensajes' ? 'active' : ''}`} onClick={() => setTab('mensajes')}>✉️ Mensajes</button>}
+        {puedeMetricas && <button className={`tab-btn ${tab === 'metricas' ? 'active' : ''}`} onClick={() => setTab('metricas')}><Ico as={BarChart3} size={14} />Métricas</button>}
       </div>
 
-      {tab === 'productos' && <TabProductos toast={toast} qc={qc} />}
-      {tab === 'personalizar' && <TabPersonalizar toast={toast} qc={qc} cfgUrl={cfgUrl} />}
-      {tab === 'config' && <TabConfig toast={toast} />}
-      {tab === 'mensajes' && <TabMensajes />}
-      {tab === 'metricas' && <TabMetricas />}
+      {tab === 'productos' && puedeProductos && <TabProductos toast={toast} qc={qc} />}
+      {tab === 'personalizar' && puedeConfig && <TabPersonalizar toast={toast} qc={qc} cfgUrl={cfgUrl} />}
+      {tab === 'config' && puedeConfig && <TabConfig toast={toast} />}
+      {tab === 'mensajes' && puedeConfig && <TabMensajes />}
+      {tab === 'metricas' && puedeMetricas && <TabMetricas />}
     </div>
   )
 }
@@ -103,7 +133,7 @@ function TabProductos({ toast, qc }) {
     queryKey: ['catalogo_admin_productos'],
     queryFn: async () => {
       const { data } = await supabase.from('finished_products')
-        .select('id, nombre, product_id, precio_detal, precio_mayor, imagen_url, imagenes, descripcion, catalogo_descripcion, categoria_alegra_nombre, catalogo_visible, catalogo_frutos, catalogo_beneficios, catalogo_destacado, catalogo_novedad, catalogo_precio_oferta, catalogo_seo_titulo, catalogo_seo_desc, stock, activo')
+        .select('id, nombre, product_id, precio_detal, precio_mayor, imagen_url, imagenes, descripcion, catalogo_descripcion, categoria_alegra_nombre, catalogo_visible, catalogo_frutos, catalogo_beneficios, catalogo_destacado, catalogo_novedad, catalogo_precio_oferta, catalogo_seo_titulo, catalogo_seo_desc, catalogo_contenido, catalogo_origen, stock, activo')
         .order('nombre')
       const prods = (data || []).filter(p => p.activo !== false)
       // Categoría = la de Alegra; si no, el tipo de la ficha (products_costing)
@@ -151,7 +181,7 @@ function TabProductos({ toast, qc }) {
                   </td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      {imgsDe(p)[0] ? <img src={imgsDe(p)[0]} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover' }} /> : <span style={{ fontSize: '1.3rem' }}>🌿</span>}
+                      {imgsDe(p)[0] ? <img src={thumbUrl(imgsDe(p)[0])} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover' }} /> : <span style={{ fontSize: '1.3rem' }}>🌿</span>}
                       <strong>{p.nombre}</strong>
                     </div>
                   </td>
@@ -353,6 +383,8 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose }) {
   const [precioOferta, setPrecioOferta] = useState(producto.catalogo_precio_oferta ?? '')
   const [seoTitulo, setSeoTitulo] = useState(producto.catalogo_seo_titulo || '')
   const [seoDesc, setSeoDesc] = useState(producto.catalogo_seo_desc || '')
+  const [contenido, setContenido] = useState(producto.catalogo_contenido || '')
+  const [origen, setOrigen] = useState(producto.catalogo_origen || '')
   const [imgs, setImgs] = useState(imgsDe(producto))
   const [subiendo, setSubiendo] = useState(false)
   const [cropFile, setCropFile] = useState(null)   // archivo pendiente de recortar
@@ -365,32 +397,39 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose }) {
   const addBene = () => { const v = beneInput.trim(); if (v && !beneficios.includes(v)) setBeneficios(b => [...b, v]); setBeneInput('') }
   const quitarBene = (b) => setBeneficios(bs => bs.filter(x => x !== b))
 
-  // Sube un blob ya recortado (1:1) al bucket y lo agrega a la galería
-  const subirBlob = async (blob) => {
+  // Sube versión web (1200) + móvil (780) del mismo recorte
+  const subirBlobPar = async (blobs) => {
     setSubiendo(true)
     try {
-      const path = `catalogo/${producto.id}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}.jpg`
-      const { error } = await supabase.storage.from('product-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
-      if (error) throw error
-      const { data } = supabase.storage.from('product-images').getPublicUrl(path)
-      setImgs(a => [...a, data.publicUrl])
+      const stamp = `${producto.id}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+      const subirUno = async (blob, suf) => {
+        const path = `catalogo/${stamp}_${suf}.jpg`
+        const { error } = await supabase.storage.from('product-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
+        if (error) throw error
+        return supabase.storage.from('product-images').getPublicUrl(path).data.publicUrl
+      }
+      const url = await subirUno(blobs.web || blobs.main, 'web')
+      const url_mobile = blobs.mobile ? await subirUno(blobs.mobile, 'mob') : url
+      setImgs(a => [...a, { url, url_mobile }])
     } catch (e) { toast('No se pudo subir la imagen: ' + e.message, 'error') } finally { setSubiendo(false) }
   }
-  const quitarImg = (url) => setImgs(a => a.filter(x => x !== url))
+  const quitarImg = (i) => setImgs(a => a.filter((_, k) => k !== i))
 
   const guardar = async () => {
     setSaving(true)
     try {
+      const imagenes = imgs.map(normalizeImgAdmin).filter(Boolean)
+      const imagen_url = imagenes[0]?.url || null
       const { error } = await supabase.from('finished_products').update({
         catalogo_frutos: frutos, catalogo_beneficios: beneficios, catalogo_destacado: destacado, catalogo_novedad: novedad,
         catalogo_descripcion: descripcion || null, catalogo_precio_oferta: (precioOferta === '' || Number(precioOferta) <= 0) ? null : Number(precioOferta),
         catalogo_seo_titulo: seoTitulo.trim() || null, catalogo_seo_desc: seoDesc.trim() || null,
-        imagen_url: imgs[0] || null, imagenes: imgs,
+        catalogo_contenido: contenido.trim() || null, catalogo_origen: origen.trim() || null,
+        imagen_url, imagenes,
       }).eq('id', producto.id)
       if (error) throw error
-      // Las imágenes SÍ son las mismas de la ficha; se sincronizan. La descripción NO (la del catálogo es aparte).
       if (producto.product_id) {
-        try { await supabase.from('products_costing').update({ imagen_url: imgs[0] || null, imagenes: imgs }).eq('id', producto.product_id) } catch { /* opcional */ }
+        try { await supabase.from('products_costing').update({ imagen_url, imagenes }).eq('id', producto.product_id) } catch { /* opcional */ }
       }
       qc.invalidateQueries({ queryKey: ['catalogo_admin_productos'] })
       toast('Producto actualizado ✓'); onClose()
@@ -438,27 +477,42 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose }) {
       </div>
       <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginBottom: 12 }}>Si los dejas vacíos se usan el <strong>nombre</strong> y la <strong>descripción</strong> del producto.</small>
 
-      {/* Imágenes */}
-      <div className="card-title" style={{ fontSize: '0.95rem' }}>🖼️ Imágenes <span style={{ fontWeight: 400, fontSize: '0.78rem', color: 'var(--texto-suave)' }}>(las mismas de la ficha)</span></div>
+      {/* Specs ficha Atelier */}
+      <div className="card-title" style={{ fontSize: '0.95rem' }}>📦 Specs de ficha <span style={{ fontWeight: 400, fontSize: '0.78rem', color: 'var(--texto-suave)' }}>(diseño Atelier)</span></div>
+      <div className="form-grid-2">
+        <div className="form-group"><label className="form-label">Contenido</label><input className="form-control" value={contenido} onChange={e => setContenido(e.target.value)} placeholder="24 gr / 12 Unid." /></div>
+        <div className="form-group"><label className="form-label">Origen</label><input className="form-control" value={origen} onChange={e => setOrigen(e.target.value)} placeholder="Guaviare, Colombia" /></div>
+      </div>
+
+      {/* Imágenes web + móvil */}
+      <div className="card-title" style={{ fontSize: '0.95rem' }}>🖼️ Imágenes <span style={{ fontWeight: 400, fontSize: '0.78rem', color: 'var(--texto-suave)' }}>(web 1200×1200 + móvil 780×780)</span></div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
-        {imgs.map((url, i) => (
-          <div key={url} style={{ position: 'relative', width: 84, height: 84 }}>
-            <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8, border: i === 0 ? '2px solid var(--selva)' : '1px solid var(--crema-oscuro)' }} />
-            {i === 0 && <span style={{ position: 'absolute', top: -8, left: -6, fontSize: '0.6rem', background: 'var(--selva)', color: '#fff', padding: '1px 5px', borderRadius: 6 }}>Principal</span>}
-            <button className="btn btn-xs btn-danger" style={{ position: 'absolute', top: -8, right: -8, padding: 3 }} onClick={() => quitarImg(url)}><X size={12} /></button>
-            <div style={{ position: 'absolute', bottom: 2, left: 2, right: 2, display: 'flex', justifyContent: 'space-between' }}>
-              <button className="btn btn-xs btn-secondary" style={{ padding: '1px 4px' }} disabled={i === 0} onClick={() => moverImg(i, -1)}><ChevronLeft size={12} /></button>
-              <button className="btn btn-xs btn-secondary" style={{ padding: '1px 4px' }} disabled={i === imgs.length - 1} onClick={() => moverImg(i, 1)}><ChevronRight size={12} /></button>
+        {imgs.map((im, i) => {
+          const n = normalizeImgAdmin(im)
+          return (
+            <div key={n.url + i} style={{ position: 'relative', width: 84, height: 84 }}>
+              <img src={thumbUrl(n)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8, border: i === 0 ? '2px solid var(--selva)' : '1px solid var(--crema-oscuro)' }} />
+              {i === 0 && <span style={{ position: 'absolute', top: -8, left: -6, fontSize: '0.6rem', background: 'var(--selva)', color: '#fff', padding: '1px 5px', borderRadius: 6 }}>Principal</span>}
+              {n.url_mobile && n.url_mobile !== n.url && <span style={{ position: 'absolute', bottom: 22, left: 2, fontSize: '0.55rem', background: 'rgba(0,0,0,0.55)', color: '#fff', padding: '0 4px', borderRadius: 4 }}>web+mób</span>}
+              <button type="button" className="btn btn-xs btn-danger" style={{ position: 'absolute', top: -8, right: -8, padding: 3 }} onClick={() => quitarImg(i)}><X size={12} /></button>
+              <div style={{ position: 'absolute', bottom: 2, left: 2, right: 2, display: 'flex', justifyContent: 'space-between' }}>
+                <button type="button" className="btn btn-xs btn-secondary" style={{ padding: '1px 4px' }} disabled={i === 0} onClick={() => moverImg(i, -1)}><ChevronLeft size={12} /></button>
+                <button type="button" className="btn btn-xs btn-secondary" style={{ padding: '1px 4px' }} disabled={i === imgs.length - 1} onClick={() => moverImg(i, 1)}><ChevronRight size={12} /></button>
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
         <label className="btn btn-secondary btn-sm" style={{ width: 84, height: 84, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', gap: 4 }}>
           {subiendo ? '…' : <><Upload size={18} /><span style={{ fontSize: '0.66rem' }}>Subir</span></>}
           <input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) setCropFile(f); e.target.value = '' }} />
         </label>
       </div>
-      <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Recomendado: 1000×1000 px (cuadrada). Al subir podrás recortar. Usa ‹ › para ordenar (la 1ª es la principal).</small>
-      {cropFile && <ImageCropper file={cropFile} aspect={1} salidaW={1000} salidaH={1000} onCancel={() => setCropFile(null)} onCropped={(blob) => { setCropFile(null); subirBlob(blob) }} />}
+      <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Cuadrada 1:1. Al recortar se generan <strong>web 1200×1200</strong> y <strong>móvil 780×780</strong> (hero Atelier). La 1ª es la principal.</small>
+      {cropFile && (
+        <ImageCropper file={cropFile} aspect={1} variantes={[IMG_PROD_WEB, IMG_PROD_MOBILE]}
+          onCancel={() => setCropFile(null)}
+          onCropped={(blobs) => { setCropFile(null); subirBlobPar(blobs) }} />
+      )}
 
       {/* Descripción del catálogo (texto enriquecido, independiente de la ficha técnica) */}
       <div className="form-group"><label className="form-label">Descripción del catálogo <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(texto enriquecido; distinta a la descripción técnica de la ficha)</small></label>
@@ -1005,6 +1059,23 @@ function TabConfig({ toast }) {
           <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 6 }}>El mensaje que se envía por WhatsApp se edita en <strong>Mensajes de WhatsApp → 4)</strong>.</small>
         </PzSec>
 
+        <PzSec abierto={sec} setAbierto={setSec} id="ficha" titulo={<>🛒 Ficha de producto</>}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem', cursor: 'pointer', margin: '2px 0 8px' }}>
+            <input type="checkbox" checked={!!cfg.mostrar_mayor} onChange={e => set('mostrar_mayor', e.target.checked)} /> Mostrar precio mayorista en la ficha (modo detal)
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem', cursor: 'pointer', margin: '2px 0 8px' }}>
+            <input type="checkbox" checked={cfg.ficha_cta_fijo !== false} onChange={e => set('ficha_cta_fijo', e.target.checked)} /> CTA fijo abajo (diseño Atelier)
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem', cursor: 'pointer', margin: '2px 0 10px' }}>
+            <input type="checkbox" checked={cfg.ficha_mostrar_envio !== false} onChange={e => set('ficha_mostrar_envio', e.target.checked)} /> Mostrar bloque de envío en la ficha Atelier
+          </label>
+          <div className="form-group" style={{ marginBottom: 0 }}>
+            <label className="form-label">Título de relacionados</label>
+            <input className="form-control" value={cfg.ficha_titulo_relacionados || ''} onChange={e => set('ficha_titulo_relacionados', e.target.value)} placeholder="Combina bien con" />
+          </div>
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 8 }}>El estilo visual de la ficha (Clásico / Atelier) se elige en <strong>Personalizar → Colores y diseño</strong>.</small>
+        </PzSec>
+
         <PzSec abierto={sec} setAbierto={setSec} id="stock" titulo={<>📦 Avisos de stock</>}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem', cursor: 'pointer', margin: '2px 0 10px' }}>
             <input type="checkbox" checked={cfg.mostrar_stock !== false} onChange={e => set('mostrar_stock', e.target.checked)} /> Mostrar avisos de urgencia por stock
@@ -1113,9 +1184,41 @@ const SECCIONES_DEFAULT = [
 const SECCION_LABEL = { hero: '🖼️ Banner principal (hero)', novedades: '✨ Novedades', categorias: '🛍️ Productos por categoría', frutos: '🌿 Frutos que nos inspiran', newsletter: '✉️ Suscripción (newsletter)' }
 // Estilos de diseño (formas/bordes), independientes del color
 const DISENOS = [
-  { id: 'selva', nombre: 'Selva', desc: 'Redondeado suave (actual)', radio: 12, radioMini: 4 },
+  { id: 'selva', nombre: 'Selva', desc: 'Redondeado suave (clásico)', radio: 12, radioMini: 4 },
   { id: 'editorial', nombre: 'Editorial', desc: 'Elegante, esquinas rectas, líneas finas', radio: 0, radioMini: 0 },
   { id: 'organico', nombre: 'Orgánico', desc: 'Muy redondeado, botones píldora, suave', radio: 20, radioMini: 8 },
+  { id: 'atelier', nombre: 'Atelier', desc: 'Diseño Stitch completo: catálogo + ficha', radio: 22, radioMini: 12 },
+]
+// Plantillas de diseño predefinidas (diseno + color + tipografía + opciones de ficha)
+const PLANTILLAS_DISENO = [
+  {
+    id: 'clasico',
+    nombre: 'Clásico Mumi',
+    desc: 'Diseño Selva actual: redondeado suave y tipografía Playfair',
+    payload: {
+      diseno: 'selva', plantilla: 'amazonia', color_primario: '#1a3a2a', color_secundario: '#C8A94A',
+      fuente_titulos: 'Playfair Display', fuente_subtitulos: 'Source Sans 3', fuente_texto: 'Source Sans 3',
+      ficha_cta_fijo: false, ficha_mostrar_envio: true, ficha_titulo_relacionados: 'También te puede gustar',
+    },
+  },
+  {
+    id: 'atelier',
+    nombre: 'Atelier Amazonía',
+    desc: 'Home tipo Munay/Naturela: hero de marca, cosecha, impacto y ficha',
+    payload: {
+      diseno: 'atelier', plantilla: 'amazonia', color_primario: '#1A3A2A', color_secundario: '#CFB360',
+      fuente_titulos: 'Libre Caslon Text', fuente_subtitulos: 'Source Sans 3', fuente_texto: 'Source Sans 3',
+      ficha_cta_fijo: true, ficha_mostrar_envio: true, ficha_titulo_relacionados: 'Combina bien con',
+      mostrar_filtro_frutos: true, barra_activa: false,
+      titulo_banner: 'Sabiduría de la selva, en cada sorbo.',
+      subtitulo: 'Infusiones y superalimentos amazónicos, con respeto por la tierra y las comunidades.',
+    },
+  },
+]
+const CAMPOS_PLANTILLA = [
+  'diseno', 'plantilla', 'color_primario', 'color_secundario',
+  'fuente_titulos', 'fuente_subtitulos', 'fuente_texto',
+  'ficha_cta_fijo', 'ficha_mostrar_envio', 'ficha_titulo_relacionados', 'mostrar_mayor',
 ]
 const PLANTILLAS = [
   { id: 'amazonia', nombre: 'Amazonia', primario: '#1a3a2a', secundario: '#C8A94A' },
@@ -1814,6 +1917,7 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
   const [abierto, setAbierto] = useState('marca')       // sección abierta del acordeón
   const [gestionFrutos, setGestionFrutos] = useState(false)
   const [previewMayorista, setPreviewMayorista] = useState(false)
+  const [selPackId, setSelPackId] = useState(null)       // plantilla seleccionada (preview); Aplicar la confirma en cfg
   const [dispositivo, setDispositivo] = useState('desktop')   // desktop | tablet | mobile
   const [iframeEl, setIframeEl] = useState(null)
   const [lienzo, setLienzo] = useState(false)   // objetivo en edición de lienzo ('nosotros' | 'pagina:slug')
@@ -1835,6 +1939,23 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
   })
   const { data: bannersLista = [] } = useQuery({ queryKey: ['banners_catalogo'], queryFn: async () => { const { data } = await supabase.from('banners_catalogo').select('id, nombre, titulo, es_secundario, grupo').order('orden'); return data || [] } })
 
+  const packsDiseno = useMemo(() => [
+    ...PLANTILLAS_DISENO,
+    ...(Array.isArray(cfg?.plantillas_guardadas) ? cfg.plantillas_guardadas.filter(p => !PLANTILLAS_DISENO.some(b => b.id === p.id)) : []),
+  ], [cfg?.plantillas_guardadas])
+  const selPack = packsDiseno.find(p => p.id === selPackId) || null
+  const packPendiente = !!(selPack?.payload && (
+    (cfg?.diseno || 'selva') !== (selPack.payload.diseno || '')
+    || String(cfg?.color_primario || '').toLowerCase() !== String(selPack.payload.color_primario || '').toLowerCase()
+    || (cfg?.fuente_titulos || '') !== (selPack.payload.fuente_titulos || '')
+  ))
+  // Config que ve el iframe: plantilla seleccionada (aún no aplicada) se mezcla solo en preview
+  const cfgEnVivo = useMemo(() => {
+    if (!cfg) return null
+    if (!packPendiente || !selPack?.payload) return cfg
+    return { ...cfg, ...selPack.payload }
+  }, [cfg, selPack, packPendiente])
+
   useEffect(() => {
     supabase.from('config_catalogo').select('*').eq('id', 1).maybeSingle().then(({ data }) => {
       const base = data || { id: 1 }
@@ -1845,13 +1966,17 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
       if (!base.fuente_subtitulos) base.fuente_subtitulos = app.fuente || 'Source Sans 3'
       if (!base.fuente_texto) base.fuente_texto = app.fuente || 'Source Sans 3'
       setCfg(base)
+      // Marca seleccionada la plantilla que coincida con el diseño guardado
+      const match = [...PLANTILLAS_DISENO, ...(Array.isArray(base.plantillas_guardadas) ? base.plantillas_guardadas : [])]
+        .find(p => p.payload?.diseno === (base.diseno || 'selva'))
+      if (match) setSelPackId(match.id)
     })
   }, [])
 
-  const set = (k, v) => setCfg(c => ({ ...c, [k]: v }))
+  const set = (k, v) => { setSelPackId(null); setCfg(c => ({ ...c, [k]: v })) }
 
   // Envía la config al preview (iframe) para verlo en vivo
-  const enviarPreview = () => { try { iframeEl?.contentWindow?.postMessage({ type: 'mumi-preview', cfg }, '*') } catch { /* noop */ } }
+  const enviarPreview = () => { try { iframeEl?.contentWindow?.postMessage({ type: 'mumi-preview', cfg: cfgEnVivo }, '*') } catch { /* noop */ } }
   const enviarEdicion = () => { try { iframeEl?.contentWindow?.postMessage({ type: 'mumi-edit-mode', on: !!lienzo, target: lienzo }, '*') } catch { /* noop */ } }
   // Entra/sale del editor en el lienzo para un objetivo ('nosotros' o 'pagina:slug')
   const entrarLienzo = (target) => {
@@ -1862,7 +1987,7 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
       iframeEl.src = on === 'nosotros' ? `${base}/nosotros` : (on && on.startsWith('pagina:')) ? `${base}/p/${on.slice(7)}` : cfgUrl
     }
   }
-  useEffect(() => { if (iframeEl && cfg) { const t = setTimeout(enviarPreview, 150); return () => clearTimeout(t) } }, [cfg, iframeEl]) // eslint-disable-line
+  useEffect(() => { if (iframeEl && cfgEnVivo) { const t = setTimeout(enviarPreview, 150); return () => clearTimeout(t) } }, [cfgEnVivo, iframeEl]) // eslint-disable-line
   useEffect(() => { enviarEdicion() }, [lienzo, iframeEl]) // eslint-disable-line
   useEffect(() => {
     const onMsg = (e) => {
@@ -1900,7 +2025,27 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
       set('logo_url', data.publicUrl)
     } catch (e) { toast('No se pudo subir el logo: ' + e.message, 'error') } finally { setSubiendoLogo(false) }
   }
-  const aplicarPlantilla = (p) => setCfg(c => ({ ...c, plantilla: p.id, color_primario: p.primario, color_secundario: p.secundario }))
+  const aplicarPlantilla = (p) => { setSelPackId(null); setCfg(c => ({ ...c, plantilla: p.id, color_primario: p.primario, color_secundario: p.secundario })) }
+  // Seleccionar = solo preview en el iframe (no escribe cfg hasta Aplicar)
+  const seleccionarPlantillaDiseno = (pack) => setSelPackId(pack.id)
+  const aplicarPlantillaDiseno = (pack) => {
+    setCfg(c => ({ ...c, ...pack.payload }))
+    setSelPackId(pack.id)
+    toast(`${pack.nombre} aplicada en el panel. Pulsa «Guardar cambios» para publicarla.`)
+  }
+  const guardarPlantillaActual = () => {
+    const nombre = window.prompt('Nombre de la plantilla guardada', 'Mi diseño')
+    if (!nombre || !nombre.trim()) return
+    const payload = {}
+    CAMPOS_PLANTILLA.forEach(k => { if (cfg[k] !== undefined) payload[k] = cfg[k] })
+    const item = { id: `custom_${Date.now()}`, nombre: nombre.trim(), desc: 'Guardada desde Personalizar', payload, custom: true }
+    setCfg(c => ({ ...c, plantillas_guardadas: [...(Array.isArray(c.plantillas_guardadas) ? c.plantillas_guardadas : []), item] }))
+    toast('Plantilla añadida. Pulsa «Guardar cambios» para persistirla.')
+  }
+  const borrarPlantillaGuardada = (id) => {
+    if (!window.confirm('¿Eliminar esta plantilla guardada?')) return
+    setCfg(c => ({ ...c, plantillas_guardadas: (c.plantillas_guardadas || []).filter(p => p.id !== id) }))
+  }
   const moverSeccion = (i, d) => setCfg(c => { const a = [...(c.secciones || SECCIONES_DEFAULT)]; const j = i + d; if (j < 0 || j >= a.length) return c;[a[i], a[j]] = [a[j], a[i]]; return { ...c, secciones: a } })
   const toggleSeccion = (id) => setCfg(c => ({ ...c, secciones: (c.secciones || SECCIONES_DEFAULT).map(s => s.id === id ? { ...s, on: !(s.on !== false) } : s) }))
 
@@ -1954,6 +2099,40 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
         </PzSec>
 
         <PzSec abierto={abierto} setAbierto={setAbierto} id="colores" titulo={<><Palette size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Colores y diseño</>}>
+          <label className="form-label">Plantillas de diseño <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(elige una para verla en la preview → Aplicar)</small></label>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+            {packsDiseno.map(pack => {
+              const seleccionada = selPackId === pack.id
+              const aplicada = (cfg.diseno || 'selva') === (pack.payload?.diseno || '')
+                && String(cfg.color_primario || '').toLowerCase() === String(pack.payload?.color_primario || '').toLowerCase()
+              return (
+                <div key={pack.id} role="button" tabIndex={0}
+                  onClick={() => seleccionarPlantillaDiseno(pack)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); seleccionarPlantillaDiseno(pack) } }}
+                  style={{ flex: '1 1 180px', minWidth: 160, borderRadius: 12, cursor: seleccionada ? '2px solid var(--selva)' : '1px solid var(--crema-oscuro)', background: seleccionada ? 'color-mix(in srgb, var(--selva) 6%, #fff)' : '#fff', padding: 10, cursor: 'pointer' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
+                    <div style={{ fontWeight: 700, fontSize: '0.84rem', color: 'var(--selva)' }}>{pack.nombre}</div>
+                    {aplicada && <span style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--selva)', opacity: 0.8 }}>Activa</span>}
+                  </div>
+                  <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)', margin: '4px 0 8px', minHeight: 28 }}>{pack.desc}</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }} onClick={e => e.stopPropagation()}>
+                    <button type="button" className={`btn btn-xs ${seleccionada && !aplicada ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => aplicarPlantillaDiseno(pack)} disabled={aplicada && seleccionada}>
+                      {aplicada && seleccionada ? 'Aplicada' : 'Aplicar'}
+                    </button>
+                    {pack.custom && <button type="button" className="btn btn-xs btn-danger" onClick={() => borrarPlantillaGuardada(pack.id)}>Borrar</button>}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          {packPendiente && selPack && (
+            <small style={{ display: 'block', marginBottom: 10, color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
+              Vista previa: <strong>{selPack.nombre}</strong>. Pulsa <strong>Aplicar</strong> y luego <strong>Guardar cambios</strong> para dejarla fija.
+            </small>
+          )}
+          <button type="button" className="btn btn-secondary btn-sm" style={{ marginBottom: 14 }} onClick={guardarPlantillaActual}>💾 Guardar diseño actual como plantilla</button>
+
           <label className="form-label">Estilo de diseño <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(formas, bordes y botones)</small></label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
             {DISENOS.map(d => (
@@ -2087,7 +2266,7 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
       {/* Vista previa en vivo */}
       <div className="pz-preview">
         <div className="pz-preview-bar">
-          <span><Eye size={14} style={{ verticalAlign: '-2px' }} /> Vista previa</span>
+          <span><Eye size={14} style={{ verticalAlign: '-2px' }} /> Vista previa{selPack ? ` · ${selPack.nombre}` : ''}</span>
           <div className="pz-devices">
             <button className={dispositivo === 'desktop' ? 'on' : ''} onClick={() => setDispositivo('desktop')} title="PC"><Monitor size={15} /></button>
             <button className={dispositivo === 'tablet' ? 'on' : ''} onClick={() => setDispositivo('tablet')} title="Tablet"><Tablet size={15} /></button>

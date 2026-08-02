@@ -17,6 +17,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { requireUser } from '../_shared/auth.ts'
+import { getAlegraCreds } from '../_shared/alegra.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -29,10 +30,8 @@ const cors = {
 const json = (o: unknown, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { ...cors, 'Content-Type': 'application/json' } })
 
 async function getCreds(supabase: any) {
-  const { data } = await supabase.from('alegra_config').select('email, token, price_list_mayor, price_list_detal').eq('id', 1).maybeSingle()
-  const email = (data?.email || Deno.env.get('ALEGRA_EMAIL') || '').trim()
-  const token = (data?.token || Deno.env.get('ALEGRA_TOKEN') || '').trim()
-  return { email, token, listaMayor: data?.price_list_mayor || '', listaDetal: data?.price_list_detal || '' }
+  const { email, token, cfg } = await getAlegraCreds(supabase, ['price_list_mayor', 'price_list_detal'])
+  return { email, token, listaMayor: (cfg.price_list_mayor as string) || '', listaDetal: (cfg.price_list_detal as string) || '' }
 }
 
 // 1) Actualiza nombre, precios (por lista) y costo del ítem (PUT /items). El stock NO se setea aquí.
@@ -108,6 +107,11 @@ async function ajustarStock(authHeader: string, itemId: string, objetivo: number
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
+  // requireUser y no requireAdmin a propósito: esta función no acepta valores del
+  // cliente, solo espeja hacia Alegra lo que ya está en finished_products. Quién
+  // puede cambiar esos datos lo decide la RLS de esa tabla (migración v134), y el
+  // admin puede conceder ajustes de stock a un operario. Exigir admin aquí dejaría
+  // a Alegra desincronizado justo cuando ese operario ajusta el inventario.
   const guard = await requireUser(req); if (guard.resp) return guard.resp
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY)

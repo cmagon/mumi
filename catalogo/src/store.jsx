@@ -22,6 +22,8 @@ export const CFG_DEFAULT = {
   envio_tarifa: null, envio_mensaje: '', avisos: [], pagos: [],
   seo_titulo: '', seo_descripcion: '', seo_imagen: '',
   mantenimiento_activo: false, mantenimiento_mensaje: '', terminos_texto: '', diseno: 'selva',
+  plantillas_guardadas: [],
+  ficha_cta_fijo: true, ficha_mostrar_envio: true, ficha_titulo_relacionados: 'Combina bien con',
   mayorista_activo: true, mayorista_clave: '', mayorista_pedido_minimo: 0,
   mayorista_mensaje: '¿Eres mayorista? Accede a precios especiales por volumen.',
   mayorista_wa_texto: 'Hola Mumi Amazonia, me interesa ser mayorista. ¿Me comparten los precios al por mayor?',
@@ -64,12 +66,15 @@ export function StoreProvider({ children }) {
         if (!isFinite(stock)) stock = 0
       }
       const imgs = Array.isArray(e.imagenes) ? e.imagenes : []
+      const primera = imgs[0]
+      const imagen_url = typeof primera === 'string' ? primera : (primera?.url || null)
       return {
         id: e.id, nombre: e.nombre, descripcion: e.descripcion || '',
         precio_detal: Number(e.precio_detal) || 0, precio_mayor: Number(e.precio_mayor) || 0,
         precio_oferta: Number(e.precio_oferta) || null,
-        imagen_url: imgs[0] || null, imagenes: imgs, categoria: e.categoria || 'otros',
+        imagen_url, imagenes: imgs, categoria: e.categoria || 'otros',
         frutos: e.frutos || [], beneficios: e.beneficios || [],
+        contenido: e.contenido || '', origen: e.origen || '',
         destacado: !!e.destacado, novedad: !!e.novedad, stock, _extra: true, _tipo: e.tipo || 'producto',
       }
     })
@@ -111,7 +116,7 @@ export function StoreProvider({ children }) {
 
   const agregar = (p, delta = 1) => setCarrito(c => {
     const ex = c.find(i => i.id === p.id)
-    if (!ex) return delta > 0 ? [...c, { ...p, cantidad: 1 }] : c
+    if (!ex) return delta > 0 ? [...c, { ...p, cantidad: delta }] : c
     const cant = ex.cantidad + delta
     return cant <= 0 ? c.filter(i => i.id !== p.id) : c.map(i => i.id === p.id ? { ...i, cantidad: cant } : i)
   })

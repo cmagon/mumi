@@ -31,11 +31,56 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // Cachea el "app shell"; las consultas a Supabase siguen yendo a la red.
-        globPatterns: ['**/*.{js,css,html,svg,woff2}'],
+        // Se precachea SOLO el shell: index.html, el bundle de arranque, su CSS,
+        // fuentes e iconos. Las consultas a Supabase siguen yendo a la red.
+        //
+        // Antes el patrón era '**/*.{js,css,html,svg,woff2}', o sea los ~55 chunks de
+        // todos los módulos (Excel, PDF, gráficas): 4,4 MB que había que descargar
+        // COMPLETOS en cada actualización antes de que el service worker activara.
+        // Si esa descarga fallaba a medias —conexión de planta, datos móviles— la
+        // instalación se abortaba y quedaba un SW activo sin precaché: la siguiente
+        // recarga dependía de que la red respondiera en ese instante y terminaba en
+        // la pantalla de "sitio no disponible" del navegador. Con el shell solo son
+        // ~600 KB y la instalación es prácticamente atómica.
+        //
+        // 'assets/index-*' es el punto de entrada que Vite referencia desde
+        // index.html. Si algún día se renombra hay que actualizarlo aquí, o la app
+        // dejará de arrancar sin conexión.
+        globPatterns: [
+          'index.html',
+          'registerSW.js',
+          'manifest.webmanifest',
+          'assets/index-*.{js,css}',
+          '**/*.{woff2,svg}',
+        ],
         navigateFallback: '/index.html',
         navigateFallbackDenylist: [/^\/api/],
+        cleanupOutdatedCaches: true,
         maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        runtimeCaching: [
+          {
+            // Chunks de los módulos: el nombre lleva el hash del contenido, así que
+            // nunca cambian → CacheFirst, se descargan una sola vez.
+            //
+            // Guardarlos APARTE del precaché es lo que evita romper una sesión
+            // abierta cuando se despliega una versión nueva: cleanupOutdatedCaches()
+            // borra el precaché viejo, y si los chunks vivieran ahí, al abrir un
+            // módulo la app pediría un archivo con el hash antiguo que ya no está
+            // ni en caché ni en el servidor ("Failed to fetch dynamically imported
+            // module", pantalla en blanco). En esta caché los chunks viejos
+            // sobreviven hasta que la pestaña se recarga.
+            // Se compara el origen a mano en vez de usar el `sameOrigin` que pasa
+            // Workbox: si esa propiedad cambiara de nombre entre versiones, la ruta
+            // dejaría de coincidir en silencio y los módulos no se cachearían nunca.
+            urlPattern: ({ url }) => url.origin === self.location.origin && url.pathname.startsWith('/assets/'),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'mumi-modulos',
+              expiration: { maxEntries: 200, maxAgeSeconds: 60 * 60 * 24 * 60 },  // 60 días
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+        ],
       },
     }),
   ],

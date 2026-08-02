@@ -71,8 +71,11 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
     },
   })
 
+  // Sub-clave: aquí solo hacen falta 4 columnas, mientras ['raw_materials'] guarda la
+  // tabla completa que usan Costos e Inventario. Con la clave compartida, abrir esta
+  // pantalla dejaba a Inventario sin stock ni categorías hasta la siguiente recarga.
   const { data: mps = [] } = useQuery({
-    queryKey: ['raw_materials'],
+    queryKey: ['raw_materials', 'receta'],
     queryFn: async () => {
       const { data } = await supabase.from('raw_materials').select('id, nombre, precio, unidad').order('nombre')
       return data || []

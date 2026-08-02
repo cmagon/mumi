@@ -485,8 +485,11 @@ function PermisosTab({ onSaved }) {
     <div className="card">
       <div className="card-title">🔐 Gestión de Permisos por Rol</div>
       <div className="alert alert-info" style={{ fontSize: '0.85rem' }}>
-        Define qué <strong>módulos</strong> y qué <strong>secciones</strong> puede ver cada rol. El rol
-        <strong> Administrador</strong> siempre tiene acceso total y no es configurable.
+        Define qué <strong>módulos</strong> y qué <strong>secciones</strong> puede ver cada rol. Las
+        secciones se aplican de verdad en Costos, Inventario, Órdenes, Producción, Nómina, Producto
+        Terminado y Catálogo. El rol <strong>Administrador</strong> siempre tiene acceso total y no
+        es configurable. Sin override, cada rol conserva sus secciones por defecto (p. ej. operario
+        ve Recetas pero no CIF ni Liquidación).
       </div>
 
       <div className="form-group" style={{ maxWidth: 320 }}>

@@ -10,16 +10,26 @@ import { getRolLabel } from '../../lib/businessLogic'
 import { puedeVer } from '../../lib/permisos'
 import { getConfig, loadConfig } from '../../lib/appConfig'
 
-// Recarga "en frío": limpia el caché de datos (react-query persistido) y el del service worker,
-// actualiza el SW y vuelve a cargar. Equivale a un Ctrl+Shift+R, útil en la app instalada (PWA)
-// donde no existe el botón de recargar del navegador.
+// Recarga "en frío": borra el caché de datos (react-query persistido), quita el service
+// worker y vuelve a cargar desde el servidor. Equivale a un Ctrl+Shift+R, útil en la app
+// instalada (PWA) donde no existe el botón de recargar del navegador.
+//
+// El ORDEN importa. Antes se borraban los cachés y solo se llamaba a r.update(), dejando
+// un service worker ACTIVO pero con el precaché vacío: a partir de ahí cada recarga
+// dependía de que la red contestara en ese mismo instante, y en la planta eso acababa en
+// la pantalla de "sitio no disponible" del navegador una y otra vez. Desregistrar primero
+// hace que la recarga sea una petición normal, sin nada en medio; registerSW.js vuelve a
+// instalar un service worker limpio en cuanto la página carga.
 async function recargarApp() {
   try { await del('mumi-query-cache') } catch { /* noop */ }
   try {
-    if ('caches' in window) { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))) }
+    if ('serviceWorker' in navigator) {
+      const rs = await navigator.serviceWorker.getRegistrations()
+      await Promise.all(rs.map(r => r.unregister()))
+    }
   } catch { /* noop */ }
   try {
-    if ('serviceWorker' in navigator) { const rs = await navigator.serviceWorker.getRegistrations(); await Promise.all(rs.map(r => r.update())) }
+    if ('caches' in window) { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))) }
   } catch { /* noop */ }
   window.location.reload()
 }

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo, useRef, Fragment } from 'react'
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
@@ -12,6 +12,7 @@ import { useToast } from '../hooks/useToast'
 import { useReorder } from '../hooks/useReorder'
 import { usePantallaChica } from '../hooks/useMediaQuery'
 import { useAuth } from '../context/AuthContext'
+import { puedeVerSeccion } from '../lib/permisos'
 import Modal from '../components/ui/Modal'
 import ImageCropper from '../components/ui/ImageCropper'
 import BuscadorSelect from '../components/ui/BuscadorSelect'
@@ -46,7 +47,15 @@ export default function Costos() {
   const location = useLocation()
   const navigate = useNavigate()
   const { profile } = useAuth()
-  const soloReceta = profile?.rol && profile.rol !== 'admin'   // operario/auxiliar: solo Calculadora de Receta
+  const rol = profile?.rol
+  // Secciones configurables en Usuarios → Permisos. Sin override, SECCIONES_POR_ROL deja a
+  // operario/auxiliar solo en "receta" (comportamiento histórico).
+  const puedeFicha  = puedeVerSeccion(rol, 'costos', 'resultados')
+  const puedeReceta = puedeVerSeccion(rol, 'costos', 'receta')
+  const puedeCif    = puedeVerSeccion(rol, 'costos', 'cif')
+  const puedeMps    = puedeVerSeccion(rol, 'costos', 'mps')
+  const soloReceta  = puedeReceta && !puedeFicha && !puedeCif && !puedeMps
+  const tabInicial = puedeFicha ? 'lista' : (puedeReceta ? 'receta' : (puedeCif ? 'cif' : (puedeMps ? 'mps' : 'lista')))
 
   // Secciones de la ficha: en pantalla chica se comportan como acordeón EXCLUSIVO (todas cerradas
   // al entrar y, al abrir una, el navegador cierra las demás gracias al atributo `name`). Así la
@@ -58,7 +67,12 @@ export default function Costos() {
     : { open: abiertaEnEscritorio }
 
   // ---- Tabs y modo ----
-  const [tab, setTab] = useState(profile?.rol && profile.rol !== 'admin' ? 'receta' : 'lista')
+  const [tab, setTab] = useState(tabInicial)
+  // Si el admin quita una sección, no dejar al usuario atrapado en una pestaña prohibida
+  useEffect(() => {
+    const ok = { lista: puedeFicha, nuevo: puedeFicha, receta: puedeReceta, cif: puedeCif, mps: puedeMps }
+    if (!ok[tab]) setTab(tabInicial)
+  }, [puedeFicha, puedeReceta, puedeCif, puedeMps, tab, tabInicial])
   const [editingId, setEditingId] = useState(null)   // null = nuevo, number = editando producto existente
   const [selFuente, setSelFuente] = useState('')     // valor del selector: '' | prod-{id} | recipe-{id}
   const [modoMpVend, setModoMpVend] = useState(false)   // "calcular costos de una MP vendible"
@@ -127,13 +141,9 @@ export default function Costos() {
   // ---- Modales de lista ----
   const [verModal, setVerModal] = useState(false)
   const [verProd, setVerProd]   = useState(null)
-  // Filas del listado con el detalle desplegado (solo aplica en anchos donde se ocultan columnas)
-  const [filasAbiertas, setFilasAbiertas] = useState(() => new Set())
-  const toggleFila = (id) => setFilasAbiertas(prev => {
-    const s = new Set(prev); s.has(id) ? s.delete(id) : s.add(id); return s
-  })
-
   // ---- Queries ----
+  // Dueña de la clave ['raw_materials']: tabla completa ordenada por nombre. Las pantallas
+  // que solo necesitan unas columnas usan sub-claves (['raw_materials','receta'], etc.).
   const { data: mps = [] } = useQuery({
     queryKey: ['raw_materials'],
     queryFn: async () => { const { data } = await supabase.from('raw_materials').select('*').order('nombre'); return data || [] },
@@ -146,8 +156,12 @@ export default function Costos() {
     queryKey: ['products_costing'],
     queryFn: async () => { const { data } = await supabase.from('products_costing').select('*').order('nombre'); return data || [] },
   })
+  // 'activos' es una sub-clave, no la lista completa: la clave ['empleados'] la usan
+  // Nómina y el tablero para TODOS los empleados. Compartirlas hacía que el tablero
+  // contara como activos a todos (o Nómina perdiera a los inactivos) según cuál
+  // pantalla se hubiera abierto primero. El prefijo conserva sus invalidateQueries.
   const { data: empleados = [] } = useQuery({
-    queryKey: ['empleados'],
+    queryKey: ['empleados', 'activos'],
     queryFn: async () => { const { data } = await supabase.from('employees').select('*').eq('estado','activo'); return data || [] },
   })
   const { data: recetas = [] } = useQuery({
@@ -311,6 +325,29 @@ export default function Costos() {
 
   // Unidades/mes totales del portafolio activo (para % CIF en vivo)
   const totalUnidsPortafolio = productosActivos.reduce((s, p) => s + (p.bache * p.baches_mes * (1 - (p.merma||0)/100)), 0)
+
+  // Listado de fichas agrupado por tipo/categoría (orden de tipos configurados, luego alfabético)
+  const productosAgrupados = useMemo(() => {
+    const map = new Map()
+    for (const p of productos) {
+      const t = p.tipo || 'otro'
+      if (!map.has(t)) map.set(t, [])
+      map.get(t).push(p)
+    }
+    const orden = opcionesTipo
+    const keys = [...map.keys()].sort((a, b) => {
+      const ia = orden.indexOf(a), ib = orden.indexOf(b)
+      if (ia >= 0 && ib >= 0) return ia - ib
+      if (ia >= 0) return -1
+      if (ib >= 0) return 1
+      return String(a).localeCompare(String(b), 'es')
+    })
+    return keys.map(tipo => ({
+      tipo,
+      label: tipoLabel(tipo),
+      items: map.get(tipo).slice().sort((a, b) => String(a.nombre || '').localeCompare(String(b.nombre || ''), 'es')),
+    }))
+  }, [productos, opcionesTipo])
 
   // Precio vigente de un ingrediente: si viene de la lista (mpId) usa el precio ACTUAL de la MP
   // (canónico por Kg) para que el costo y el margen se actualicen solos al cambiar el precio de la MP.
@@ -1178,17 +1215,20 @@ export default function Costos() {
       </div>
 
       <div className="tabs">
-        {(soloReceta
-          ? [['receta','🧪 Recetas Rápidas / Prueba']]
-          : [['lista','Productos'],['nuevo','📝 Ficha de Producto'],['receta','🧪 Recetas Rápidas / Prueba'],['cif','💰 Costos y Gastos'],['mps','Materias Primas']]
-        ).map(([id, lbl]) => (
+        {[
+          puedeFicha  && ['lista', 'Productos'],
+          puedeFicha  && ['nuevo', '📝 Ficha de Producto'],
+          puedeReceta && ['receta', '🧪 Recetas Rápidas / Prueba'],
+          puedeCif    && ['cif', '💰 Costos y Gastos'],
+          puedeMps    && ['mps', 'Materias Primas'],
+        ].filter(Boolean).map(([id, lbl]) => (
           <button key={id} className={`tab-btn ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>{lbl}</button>
         ))}
       </div>
 
-      {/* ===== LISTA PRODUCTOS ===== */}
+      {/* ===== LISTA PRODUCTOS: listado acordeón agrupado por categoría (todos los anchos) ===== */}
       {tab === 'lista' && (
-        <div className="card">
+        <div className="card fichas-lista">
           <div className="card-title"><Ico as={Package} size={14} />Fichas de Productos</div>
           <div className="alert alert-info" style={{ fontSize:'0.82rem' }}>
             ℹ Todo se recalcula <strong>en vivo</strong> con el CIF y los precios de MP actuales. La <strong>utilidad neta</strong> ya
@@ -1196,149 +1236,75 @@ export default function Costos() {
             Los valores <strong>guardados</strong> (los que usan Producto Terminado, Órdenes y el Tablero) solo cambian al guardar la
             ficha o con <strong>"↻ Aplicar a las fichas"</strong> en Costos y Gastos.
           </div>
-          {/* ===== Versión móvil: acordeón ===== */}
-          <div className="solo-movil">
-            {productos.length === 0
-              ? <p className="empty-table">No hay fichas. Crea la primera →</p>
-              : productos.map(p => {
-                  const rc = recomputeProducto(p)
-                  const ind = indicadoresProducto(p, rc)
-                  const pctCIF = totalUnidsPortafolio > 0 ? ind.unidsMes/totalUnidsPortafolio*100 : 0
-                  return (
-                    <AccordionItem key={p.id}
-                      titulo={<>{p.imagen_url && <img src={p.imagen_url} alt="" style={{ width:24, height:24, borderRadius:3, objectFit:'cover', verticalAlign:'middle', marginRight:6 }} />}{p.nombre}</>}
-                      sub={<>Costo pleno {fCOP(ind.cPleno)} · Utilidad neta <span style={{ color: ind.utilNeta >= 0 ? 'var(--selva)' : 'var(--rojo)' }}>{ind.utilNetaPct != null ? ind.utilNetaPct.toFixed(1)+'%' : '—'}</span></>}
-                    >
-                      <Fila et="Tipo">{p.tipo}{p.activo === false ? ' · inactivo' : ''}</Fila>
-                      <Fila et="Unid/mes">{fNum(ind.unidsMes)} <small style={{ color:'var(--texto-suave)' }}>({pctCIF.toFixed(1)}% del portafolio)</small></Fila>
-                      <Fila et="MP + empaque">{fCOP(rc.cvu)}</Fila>
-                      <Fila et="Mano de obra + CIF">{fCOP(rc.moUnit)}</Fila>
-                      <Fila et="Costo de producción/u">{fCOP(rc.costoTotalUnit)}</Fila>
-                      <Fila et="Costo pleno/u (+ gastos)">{fCOP(ind.cPleno)}</Fila>
-                      <Fila et="P. Mayor">{fCOP(p.precio_mayor)}</Fila>
-                      <Fila et="Utilidad neta/u">{fCOP(ind.utilNeta)} {ind.utilNetaPct != null ? `(${ind.utilNetaPct.toFixed(1)}%)` : ''}</Fila>
-                      <Fila et="Utilidad al mes">{fCOP(ind.utilMes)}</Fila>
-                      <div className="acordeon-acciones">
-                        <button className="btn btn-xs btn-secondary" onClick={() => { setVerProd(p); setVerModal(true) }}>Ver</button>
-                        <button className="btn btn-xs btn-primary" onClick={() => cargarProducto(p.id)}><Ico as={Pencil} size={14} />Editar</button>
-                        <button className="btn btn-xs btn-secondary" onClick={() => duplicarProducto.mutate(p)} disabled={duplicarProducto.isPending}>⧉ Duplicar</button>
-                        <button className="btn btn-xs btn-dorado" title="Descargar ficha de costos en Excel (con fórmulas)" onClick={() => exportarFichaExcel(p)}><Ico as={FileSpreadsheet} size={13} />Excel</button>
-                        <button className="btn btn-xs btn-danger" onClick={() => confirmar(`¿Eliminar la ficha del producto "${p.nombre}"?\nEsta acción no se puede deshacer.`).then(ok => ok && deleteProducto.mutate(p.id))}><X size={13} aria-hidden="true" /></button>
-                      </div>
-                    </AccordionItem>
-                  )
-                })}
-          </div>
 
-          {/* ===== Versión desktop: tabla ===== */}
-          <div className="table-wrap solo-desktop">
-            <table>
-              <thead><tr>
-                <th>Producto</th>
-                <th className="col-opcional-2">Imagen</th>
-                <th className="col-opcional-2">Tipo</th>
-                <th className="col-opcional" title="Unidades que produces al mes y su peso dentro del portafolio">Unid/mes</th>
-                <th className="col-opcional" title="Costo variable: materia prima + empaque">MP+Emp</th>
-                <th className="col-opcional" title="Mano de obra y CIF absorbidos según los minutos de proceso">MO+CIF</th>
-                <th title="Materia prima + empaque + mano de obra + CIF">Costo producción/u</th>
-                <th className="col-opcional" title="Costo de producción + la parte que le toca de gastos de administración, ventas y financieros">Costo pleno/u</th>
-                <th>P. Mayor</th>
-                <th title="Lo que queda tras costo pleno, comisión e ICA. Es la utilidad real.">Utilidad neta/u</th>
-                <th className="col-opcional" title="Utilidad neta por unidad × unidades al mes: lo que este producto le deja al negocio">Utilidad/mes</th>
-                <th>Acciones</th>
-              </tr></thead>
-              <tbody>
-                {productos.length === 0
-                  ? <tr><td colSpan={12} className="empty-table">No hay fichas. Crea la primera →</td></tr>
-                  : productos.map(p => {
-                      const rc = recomputeProducto(p)
-                      const ind = indicadoresProducto(p, rc)
-                      const pctCIF = totalUnidsPortafolio > 0 ? ind.unidsMes/totalUnidsPortafolio*100 : 0
-                      const inactivo = p.activo === false
-                      const colorUtil = ind.utilNeta >= 0 ? 'var(--selva)' : 'var(--rojo)'
-                      const abierta = filasAbiertas.has(p.id)
-                      return (
-                        <Fragment key={p.id}>
-                        <tr style={inactivo ? { opacity: 0.6 } : undefined}>
-                          <td>
-                            <button type="button" className="btn-detalle-fila" aria-expanded={abierta}
-                              title={abierta ? 'Ocultar el detalle' : 'Ver las columnas que no caben en esta pantalla'}
-                              onClick={() => toggleFila(p.id)}>{abierta ? '⌃' : '⌄'}</button>
-                            <strong>{p.nombre}</strong> {inactivo && <span className="badge badge-gris" style={{ fontSize:'0.65rem' }}><Ico as={Pause} size={14} />Inactivo</span>}
-                          </td>
-                          <td className="col-opcional-2">
-                            {p.imagen_url
-                              ? <img src={p.imagen_url} alt={p.nombre} style={{ width:32, height:32, borderRadius:3, objectFit:'cover' }} />
-                              : <span style={{ color:'var(--texto-suave)', fontSize:'0.8rem' }}>—</span>
-                            }
-                          </td>
-                          <td className="col-opcional-2"><span className="badge badge-gris">{p.tipo}</span></td>
-                          <td className="td-number col-opcional">{fNum(ind.unidsMes)}<div style={{ fontSize:'0.7rem', color:'var(--texto-suave)' }}>{pctCIF.toFixed(1)}%</div></td>
-                          <td className="td-number col-opcional">{fCOP(rc.cvu)}</td>
-                          <td className="td-number text-dorado col-opcional">{fCOP(rc.moUnit)}</td>
-                          <td className="td-number"><strong>{fCOP(rc.costoTotalUnit)}</strong></td>
-                          <td className="td-number col-opcional">{fCOP(ind.cPleno)}</td>
-                          <td className="td-number">{fCOP(p.precio_mayor)}</td>
-                          <td className="td-number" style={{ color: colorUtil, fontWeight:600 }}>
-                            {fCOP(ind.utilNeta)}
-                            <div style={{ fontSize:'0.7rem' }}>{ind.utilNetaPct != null ? ind.utilNetaPct.toFixed(1)+'%' : '—'}</div>
-                          </td>
-                          <td className="td-number col-opcional" style={{ color: colorUtil }}>{fCOP(ind.utilMes)}</td>
-                          <td>
-                            <div style={{ display:'flex', gap:4 }}>
-                              <button className="btn btn-xs btn-secondary" onClick={() => { setVerProd(p); setVerModal(true) }}>Ver</button>
-                              <button className="btn btn-xs btn-primary" onClick={() => cargarProducto(p.id)}><Ico as={Pencil} size={14} />Editar</button>
-                              <button className="btn btn-xs btn-secondary" onClick={() => duplicarProducto.mutate(p)} disabled={duplicarProducto.isPending} title="Duplicar producto">⧉ Duplicar</button>
-                              <button className={`btn btn-xs ${inactivo ? 'btn-success' : 'btn-secondary'}`} onClick={() => toggleActivoProducto.mutate(p)} disabled={toggleActivoProducto.isPending} title={inactivo ? 'Activar (vuelve a repartir CIF)' : 'Inactivar (no reparte CIF)'}>{inactivo ? '▶ Activar' : '⏸ Inactivar'}</button>
-                              <button className="btn btn-xs btn-dorado" title="Descargar ficha de costos en Excel (con fórmulas)" onClick={() => exportarFichaExcel(p)}><Ico as={FileSpreadsheet} size={13} />Excel</button>
-                              <button className="btn btn-xs btn-danger" onClick={() => { setConfirmDel(p); setDelText('') }}><X size={13} aria-hidden="true" /></button>
-                            </div>
-                          </td>
-                        </tr>
-                        {/* Detalle: muestra las columnas que el ancho de pantalla ocultó.
-                            Cada dato aparece solo si SU columna está oculta (lo decide el CSS). */}
-                        <tr className={`fila-detalle ${abierta ? 'abierta' : ''}`}>
-                          <td colSpan={12}>
-                            <div className="fila-detalle-grid">
-                              <span className="dato-opcional-2"><span className="et">Tipo:</span> <span className="badge badge-gris">{p.tipo}</span></span>
-                              <span className="dato-opcional"><span className="et">Unid/mes:</span> <strong>{fNum(ind.unidsMes)}</strong> <small style={{ color:'var(--texto-suave)' }}>({pctCIF.toFixed(1)}% del portafolio)</small></span>
-                              <span className="dato-opcional"><span className="et">MP+Empaque:</span> <strong>{fCOP(rc.cvu)}</strong></span>
-                              <span className="dato-opcional"><span className="et">Mano de obra + CIF:</span> <strong style={{ color:'var(--tierra)' }}>{fCOP(rc.moUnit)}</strong></span>
-                              <span className="dato-opcional"><span className="et">Costo pleno/u:</span> <strong>{fCOP(ind.cPleno)}</strong></span>
-                              <span className="dato-opcional"><span className="et">Utilidad/mes:</span> <strong style={{ color: colorUtil }}>{fCOP(ind.utilMes)}</strong></span>
-                            </div>
-                          </td>
-                        </tr>
-                        </Fragment>
-                      )
-                    })
-                }
-              </tbody>
-              {productos.length > 0 && (() => {
-                // Totales del portafolio ACTIVO: los inactivos no se producen, sumarlos engañaría
-                const act = productos.filter(p => p.activo !== false)
+          {productos.length === 0 ? (
+            <p className="empty-table">No hay fichas. Crea la primera →</p>
+          ) : (
+            <div className="fichas-listado">
+              {productosAgrupados.map(grupo => (
+                <div key={grupo.tipo} className="ficha-grupo-bloque">
+                  <div className="ficha-grupo-titulo">
+                    <Tag size={14} aria-hidden="true" />
+                    <strong>{grupo.label}</strong>
+                    <span className="badge badge-gris">{grupo.items.length}</span>
+                  </div>
+                  {grupo.items.map(p => {
+                    const rc = recomputeProducto(p)
+                    const ind = indicadoresProducto(p, rc)
+                    const pctCIF = totalUnidsPortafolio > 0 ? ind.unidsMes / totalUnidsPortafolio * 100 : 0
+                    const colorUtil = ind.utilNeta >= 0 ? 'var(--selva)' : 'var(--rojo)'
+                    const inactivo = p.activo === false
+                    return (
+                      <AccordionItem key={p.id}
+                        titulo={<>
+                          {p.imagen_url && <img src={p.imagen_url} alt="" style={{ width:24, height:24, borderRadius:3, objectFit:'cover', verticalAlign:'middle', marginRight:6 }} />}
+                          {p.nombre}
+                          {inactivo && <span className="badge badge-gris" style={{ marginLeft:6, fontSize:'0.65rem' }}><Ico as={Pause} size={12} />Inactivo</span>}
+                        </>}
+                        sub={<>Costo pleno {fCOP(ind.cPleno)} · Utilidad neta <span style={{ color: colorUtil }}>{ind.utilNetaPct != null ? `${ind.utilNetaPct.toFixed(1)}%` : '—'}</span></>}
+                      >
+                        <Fila et="Tipo">{grupo.label}{inactivo ? ' · inactivo' : ''}</Fila>
+                        <Fila et="Unid/mes">{fNum(ind.unidsMes)} <small style={{ color:'var(--texto-suave)' }}>({pctCIF.toFixed(1)}% del portafolio)</small></Fila>
+                        <Fila et="MP + empaque">{fCOP(rc.cvu)}</Fila>
+                        <Fila et="Mano de obra + CIF">{fCOP(rc.moUnit)}</Fila>
+                        <Fila et="Costo de producción/u">{fCOP(rc.costoTotalUnit)}</Fila>
+                        <Fila et="Costo pleno/u (+ gastos)">{fCOP(ind.cPleno)}</Fila>
+                        <Fila et="P. Mayor">{fCOP(p.precio_mayor)}</Fila>
+                        <Fila et="Utilidad neta/u"><span style={{ color: colorUtil }}>{fCOP(ind.utilNeta)}{ind.utilNetaPct != null ? ` (${ind.utilNetaPct.toFixed(1)}%)` : ''}</span></Fila>
+                        <Fila et="Utilidad al mes"><span style={{ color: colorUtil }}>{fCOP(ind.utilMes)}</span></Fila>
+                        <div className="acordeon-acciones">
+                          <button className="btn btn-xs btn-secondary" onClick={() => { setVerProd(p); setVerModal(true) }}>Ver</button>
+                          <button className="btn btn-xs btn-primary" onClick={() => cargarProducto(p.id)}><Ico as={Pencil} size={14} />Editar</button>
+                          <button className="btn btn-xs btn-secondary" onClick={() => duplicarProducto.mutate(p)} disabled={duplicarProducto.isPending}>⧉ Duplicar</button>
+                          <button className={`btn btn-xs ${inactivo ? 'btn-success' : 'btn-secondary'}`} onClick={() => toggleActivoProducto.mutate(p)} disabled={toggleActivoProducto.isPending}>{inactivo ? '▶ Activar' : '⏸ Inactivar'}</button>
+                          <button className="btn btn-xs btn-dorado" title="Descargar ficha de costos en Excel" onClick={() => exportarFichaExcel(p)}><Ico as={FileSpreadsheet} size={13} />Excel</button>
+                          <button className="btn btn-xs btn-danger" onClick={() => { setConfirmDel(p); setDelText('') }}><X size={13} aria-hidden="true" /></button>
+                        </div>
+                      </AccordionItem>
+                    )
+                  })}
+                </div>
+              ))}
+
+              {(() => {
+                const act = productosActivos
                 const tot = act.reduce((a, p) => {
                   const i = indicadoresProducto(p, recomputeProducto(p))
                   return { unids: a.unids + i.unidsMes, util: a.util + i.utilMes }
                 }, { unids: 0, util: 0 })
                 return (
-                  <tfoot>
-                    <tr style={{ background:'var(--selva)', color:'var(--crema)', fontWeight:700 }}>
-                      <td colSpan={3}>TOTAL portafolio activo ({act.length})</td>
-                      <td className="td-number col-opcional">{fNum(tot.unids)}</td>
-                      <td className="col-opcional" colSpan={2}></td>
-                      <td colSpan={3}></td>
-                      <td className="td-number" title="Suma de la utilidad neta mensual de todos los productos activos">{fCOP(tot.util)}</td>
-                      <td className="col-opcional"></td>
-                      <td></td>
-                    </tr>
-                  </tfoot>
+                  <div className="fichas-total">
+                    <strong>TOTAL portafolio activo ({act.length})</strong>
+                    <span>{fNum(tot.unids)} unid/mes</span>
+                    <span style={{ color: tot.util >= 0 ? 'var(--crema)' : '#ffc9c9' }}>{fCOP(tot.util)}/mes</span>
+                  </div>
                 )
               })()}
-            </table>
-          </div>
+            </div>
+          )}
+
           {productos.length > 1 && (
-            <div style={{ marginTop:12, display:'flex', justifyContent:'flex-end', gap:8, flexWrap:'wrap' }}>
+            <div className="fichas-lista-footer">
               <button className="btn btn-sm btn-dorado" onClick={() => recalcularTodos.mutate()} disabled={recalcularTodos.isPending}>
                 {recalcularTodos.isPending ? 'Recalculando...' : '🔄 Guardar CIF actualizado en todas las fichas'}
               </button>
@@ -2742,12 +2708,12 @@ export default function Costos() {
                       <div style={{ marginTop:14 }}>
                         <strong style={{ color:'var(--selva)', fontSize:'0.88rem' }}>Cuánto debes vender de cada producto</strong>
                         <div className="alert alert-info" style={{ fontSize:'0.8rem', margin:'6px 0 8px' }}>
-                          ℹ El mínimo de cada producto se reparte según su <strong>participación en unidades</strong> del portafolio.
-                          Es el punto en que no ganas ni pierdes: por encima de esa cifra, cada unidad deja utilidad.
+                          ℹ El mínimo de cada producto se reparte según su <strong>participación en ventas</strong> del portafolio
+                          (unidades × precio mayor). Es el punto en que no ganas ni pierdes: por encima de esa cifra, cada unidad deja utilidad.
                         </div>
                         <div className="table-wrap">
                           <table>
-                            <thead><tr><th>Producto</th><th className="td-number">Produces/mes</th><th className="td-number">Margen/u</th><th className="td-number">Mínimo a vender</th><th className="td-number">Holgura</th></tr></thead>
+                            <thead><tr><th>Producto</th><th className="td-number">Produces/mes</th><th className="td-number">% ventas</th><th className="td-number">Margen/u</th><th className="td-number">Mínimo a vender</th><th className="td-number">Holgura</th></tr></thead>
                             <tbody>
                               {peqMultiproducto.map((i, idx) => {
                                 const holgura = i.q - i.pe
@@ -2756,6 +2722,7 @@ export default function Costos() {
                                   <tr key={idx}>
                                     <td><strong>{i.nombre}</strong></td>
                                     <td className="td-number">{fNum(i.q)}</td>
+                                    <td className="td-number">{((i.participacion || 0) * 100).toFixed(1)}%</td>
                                     <td className="td-number" style={{ color: i.mcu > 0 ? 'var(--selva)' : 'var(--rojo)' }}>{fCOP(i.mcu)}</td>
                                     <td className="td-number"><strong>{i.mcu > 0 ? fNum(i.pe) : '—'}</strong></td>
                                     <td className="td-number" style={{ color: ok ? 'var(--selva)' : 'var(--rojo)', fontWeight:600 }}>
@@ -2868,8 +2835,9 @@ export default function Costos() {
       >
         {verProd && (() => {
           const rc = recomputeProducto(verProd)
-          const unidsMes = verProd.bache * verProd.baches_mes * (1 - (verProd.merma||0)/100)
-          const pctCIF = totalUnidsPortafolio > 0 ? unidsMes/totalUnidsPortafolio*100 : 0
+          const ind = indicadoresProducto(verProd, rc)
+          // Participación CIF informativa por ventas (precio mayor × unid); viene del motor.
+          const pctCIF = parseFloat(rc.pctCIF) || 0
           const peq = peqMultiproducto.find(x => x.nombre === verProd.nombre)
           const cifAsigProd = cifAbsorcion.items.find(x => x.nombre === verProd.nombre)?.absorbido || 0
           const pctComponente = (v) => (rc.costoTotalUnit > 0 ? (v / rc.costoTotalUnit * 100).toFixed(1) + '%' : '—')
@@ -2889,7 +2857,7 @@ export default function Costos() {
               <div><strong>Presentación:</strong> {verProd.presentacion || 'Unidad'}</div>
               <div><strong>Unidades/bache:</strong> {verProd.bache}</div>
               <div><strong>Baches/mes:</strong> {verProd.baches_mes}</div>
-              <div><strong>Unidades/mes:</strong> {fNum(unidsMes)}</div>
+              <div><strong>Unidades/mes:</strong> {fNum(ind.unidsMes)}</div>
               <div><strong>Vida útil:</strong> {verProd.vida_util_valor ? `${verProd.vida_util_valor} ${verProd.vida_util_unidad === 'dias' ? 'día(s)' : 'mes(es)'}` : '—'}</div>
               <div><strong>Rendimiento:</strong> {verProd.rendimiento || 62}%</div>
               <div><strong>Desperdicio:</strong> {verProd.desperdicio ?? 2}%</div>
@@ -2958,7 +2926,7 @@ export default function Costos() {
                 {(rc.comUnit || 0) > 0 && <tr style={{ color:'var(--tierra)' }}><td>(−) Comisión distribuidor → Ganancia neta/u</td><td className="td-number">{fCOP(rc.comUnit)} → {fCOP(rc.utilMayorNeto)}</td></tr>}
                 <tr style={{ color:'var(--selva)' }}><td>Precio Detal → Ganancia/u</td><td className="td-number">{fCOP(verProd.precio_detal)} → {fCOP(rc.utilDetal)}</td></tr>
                 <tr style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}><td>Punto de equilibrio (calculado)</td><td className="td-number">{peq && peq.pe>0 ? fNum(peq.pe)+' unid/mes' : '—'}</td></tr>
-                <tr style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}><td>% participación CIF (unid/mes del portafolio)</td><td className="td-number">{pctCIF > 0 ? pctCIF.toFixed(1) + '%' : '—'}</td></tr>
+                <tr style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}><td>% participación CIF (ventas del portafolio)</td><td className="td-number">{pctCIF > 0 ? pctCIF.toFixed(1) + '%' : '—'}</td></tr>
               </tbody>
             </table>
 

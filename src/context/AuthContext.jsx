@@ -49,6 +49,11 @@ export function AuthProvider({ children }) {
     }
   }
 
+  // Un perfil da acceso solo si está activo y sin archivar. Mismo criterio que
+  // usan is_admin() y has_modulo() en la base de datos.
+  const perfilHabilitado = (p) =>
+    !!p && (!p.estado || p.estado === 'activo') && p.archivado !== true
+
   async function fetchProfile(uid) {
     try {
       const { data, error } = await supabase
@@ -57,8 +62,11 @@ export function AuthProvider({ children }) {
         .eq('id', uid)
         .single()
       if (error) throw error
-      // Seguridad: si el usuario quedó INACTIVO, se cierra la sesión (no puede seguir en el sistema).
-      if (data && data.estado && data.estado !== 'activo') { cerrarSesionAuto(); return null }
+      // Seguridad: si el usuario quedó INACTIVO o ARCHIVADO, se cierra la sesión.
+      // Archivado = "usuario antiguo", alguien que ya no trabaja aquí: el servidor
+      // también le niega los permisos (is_admin/has_modulo en la migración v134),
+      // así que dejarlo dentro solo mostraría una app que falla en cada acción.
+      if (data && !perfilHabilitado(data)) { cerrarSesionAuto(); return null }
       if (data) { setProfile(data); localStorage.setItem(PROFILE_KEY, JSON.stringify(data)) }
       return data
     } catch {
@@ -124,15 +132,19 @@ export function AuthProvider({ children }) {
     const email = loginAEmail(login)
     const { data, error } = await supabase.auth.signInWithPassword({ email, password })
     if (error) throw error
-    // Seguridad: un usuario INACTIVO no puede ingresar (se corta la sesión y se avisa)
+    // Seguridad: un usuario INACTIVO o ARCHIVADO no puede ingresar (se corta la sesión y se avisa)
     try {
-      const { data: perfil } = await supabase.from('user_profiles').select('estado').eq('id', data.user.id).single()
-      if (perfil && perfil.estado && perfil.estado !== 'activo') {
+      const { data: perfil } = await supabase.from('user_profiles').select('estado, archivado').eq('id', data.user.id).single()
+      if (perfil && !perfilHabilitado(perfil)) {
         await supabase.auth.signOut()
         setUser(null); setProfile(null); clearLoginAt(); localStorage.removeItem(PROFILE_KEY)
-        throw new Error('Tu usuario está inactivo. Contacta al administrador.')
+        const e = new Error(perfil.archivado === true
+          ? 'Tu usuario está archivado. Contacta al administrador.'
+          : 'Tu usuario está inactivo. Contacta al administrador.')
+        e.accesoDenegado = true   // se distingue de un fallo de red, que no debe bloquear el login
+        throw e
       }
-    } catch (e) { if (e.message?.includes('inactivo')) throw e /* si no se pudo verificar, no bloquea el login */ }
+    } catch (e) { if (e.accesoDenegado) throw e /* si no se pudo verificar, no bloquea el login */ }
     setLoginAt(Date.now())   // marca de inicio para el cierre automático a las 48h
     // Actualizar último acceso
     if (data.user) {

@@ -103,6 +103,7 @@ function ModalTerminos({ cfg, onClose }) {
 
 export default function App() {
   const { cfg, nItems, total, favs, mayorista, setMayorista } = useStore()
+  const loc = useLocation()
   const [verCarrito, setVerCarrito] = useState(false)
   const [menu, setMenu] = useState(false)
   const [pedirNombre, setPedirNombre] = useState(false)   // modal previo a solicitar ser mayorista
@@ -112,6 +113,9 @@ export default function App() {
   const marca = (cfg.nombre_tienda && cfg.nombre_tienda.trim()) ? cfg.nombre_tienda : 'Mumi Amazonia'
   const slogan = cfg.mostrar_slogan === false ? '' : ((cfg.slogan && cfg.slogan.trim()) ? cfg.slogan : (cfg.titulo_banner || 'Sabores de la selva'))
   const estilo = paletaVars(cfg)
+  // Ficha Stitch/Atelier: oculta el chrome verde del catálogo (header sticky propio + CTA)
+  const esAtelier = (cfg.diseno || 'selva') === 'atelier'
+  const fichaAtelier = esAtelier && /^\/producto\//.test(loc.pathname)
   useBodyLock(menu)
   useEffect(() => { cargarGoogleFonts([cfg.fuente_titulos, cfg.fuente_subtitulos, cfg.fuente_texto]) }, [cfg.fuente_titulos, cfg.fuente_subtitulos, cfg.fuente_texto])
 
@@ -132,31 +136,52 @@ export default function App() {
   }
 
   return (
-    <div className={`wrap dis-${cfg.diseno || 'selva'}`} style={estilo}>
+    <div className={`wrap dis-${cfg.diseno || 'selva'}${fichaAtelier ? ' wrap-ficha-atelier' : ''}`} style={estilo}>
       <ScrollToTop />
-      <AvisoSuperior cfg={cfg} />
-      {/* Header */}
-      <header className={`hdr ${cfg.solo_logo ? 'solo-logo' : ''}`}>
-        <div className="hdr-brand">
-          <Link to="/tienda" className="hdr-link">
-            {cfg.logo_url
-              ? <img className="hdr-logo hdr-logo-img" src={cfg.logo_url} alt={marca || 'Logo'} />
-              : <Logo className="hdr-logo" style={{ color: 'var(--dorado)' }} />}
-            <div className="hdr-textos" style={{ minWidth: 0 }}>{marca && <div className="hdr-title serif">{marca}</div>}{slogan && <div className="hdr-sub">{slogan}</div>}</div>
-          </Link>
-          {/* Nav en escritorio */}
-          <nav className="hdr-nav">
-            <NavLink to="/tienda" className={({ isActive }) => isActive ? 'on' : ''}>Tienda</NavLink>
-            {tieneNosotros(cfg) && <NavLink to="/nosotros" className={({ isActive }) => isActive ? 'on' : ''}>Nosotros</NavLink>}
-            {tieneGaleria(cfg) && <NavLink to="/galeria" className={({ isActive }) => isActive ? 'on' : ''}>{cfg.galeria_titulo || 'Galería'}</NavLink>}
-            {paginasVisibles(cfg).map(p => <NavLink key={p.slug} to={`/p/${p.slug}`} className={({ isActive }) => isActive ? 'on' : ''}>{p.titulo}</NavLink>)}
-            <NavLink to="/contacto" className={({ isActive }) => isActive ? 'on' : ''}>Contacto</NavLink>
-            {FAVORITOS && <NavLink to="/favoritos" className={({ isActive }) => `hdr-fav ${isActive ? 'on' : ''}`} aria-label="Favoritos"><Heart size={17} fill={favs.length ? 'currentColor' : 'none'} />{favs.length > 0 && <span className="hdr-fav-n">{favs.length}</span>}</NavLink>}
+      {!fichaAtelier && <AvisoSuperior cfg={cfg} />}
+      {/* Header clásico — en ficha Atelier se oculta (Stitch trae su propio chrome) */}
+      {!fichaAtelier && (
+        <header className={`hdr ${cfg.solo_logo ? 'solo-logo' : ''}`}>
+          <div className="hdr-brand">
+            <Link to="/tienda" className="hdr-link">
+              {cfg.logo_url
+                ? <img className="hdr-logo hdr-logo-img" src={cfg.logo_url} alt={marca || 'Logo'} />
+                : <Logo className="hdr-logo" style={{ color: 'var(--dorado)' }} />}
+              <div className="hdr-textos" style={{ minWidth: 0 }}>{marca && <div className="hdr-title serif">{marca}</div>}{slogan && <div className="hdr-sub">{slogan}</div>}</div>
+            </Link>
+            <nav className="hdr-nav">
+              <NavLink to="/tienda" className={({ isActive }) => isActive ? 'on' : ''}>Tienda</NavLink>
+              {tieneNosotros(cfg) && <NavLink to="/nosotros" className={({ isActive }) => isActive ? 'on' : ''}>Nosotros</NavLink>}
+              {tieneGaleria(cfg) && <NavLink to="/galeria" className={({ isActive }) => isActive ? 'on' : ''}>{cfg.galeria_titulo || 'Galería'}</NavLink>}
+              {paginasVisibles(cfg).map(p => <NavLink key={p.slug} to={`/p/${p.slug}`} className={({ isActive }) => isActive ? 'on' : ''}>{p.titulo}</NavLink>)}
+              <NavLink to="/contacto" className={({ isActive }) => isActive ? 'on' : ''}>Contacto</NavLink>
+              {FAVORITOS && <NavLink to="/favoritos" className={({ isActive }) => `hdr-fav ${isActive ? 'on' : ''}`} aria-label="Favoritos"><Heart size={17} fill={favs.length ? 'currentColor' : 'none'} />{favs.length > 0 && <span className="hdr-fav-n">{favs.length}</span>}</NavLink>}
+              {esAtelier && (
+                <button type="button" className="hdr-cart" onClick={() => setVerCarrito(true)} aria-label="Pedido">
+                  <ShoppingCart size={18} />{nItems > 0 && <span className="hdr-fav-n">{nItems}</span>}
+                </button>
+              )}
+            </nav>
+            <button className="hdr-burger" onClick={() => setMenu(true)} aria-label="Menú"><Menu size={24} /></button>
+          </div>
+        </header>
+      )}
+
+      {/* Header claro Atelier (desktop Stitch) */}
+      {fichaAtelier && (
+        <header className="hdr-atelier-desk">
+          <Link to="/tienda" className="hdr-atelier-brand serif">{marca}</Link>
+          <nav className="hdr-atelier-nav">
+            <NavLink to="/tienda">Tienda</NavLink>
+            {tieneNosotros(cfg) && <NavLink to="/nosotros">Nosotros</NavLink>}
+            <NavLink to="/contacto">Contacto</NavLink>
           </nav>
-          {/* Botón hamburguesa en móvil */}
-          <button className="hdr-burger" onClick={() => setMenu(true)} aria-label="Menú"><Menu size={24} /></button>
-        </div>
-      </header>
+          <div className="hdr-atelier-tools">
+            {FAVORITOS && <NavLink to="/favoritos" aria-label="Favoritos"><Heart size={20} fill={favs.length ? 'currentColor' : 'none'} /></NavLink>}
+            <button type="button" onClick={() => setVerCarrito(true)} aria-label="Pedido"><ShoppingCart size={20} />{nItems > 0 && <span>{nItems}</span>}</button>
+          </div>
+        </header>
+      )}
 
       {/* Menú móvil */}
       {menu && (
@@ -175,7 +200,7 @@ export default function App() {
       )}
 
       {/* Banner: estás viendo precios de mayorista */}
-      {mayorista && (
+      {mayorista && !fichaAtelier && (
         <div className="mayo-banner">
           <span><ShieldCheck size={15} /> Estás viendo <strong>precios de mayorista</strong></span>
           <button onClick={() => setMayorista(false)}>Salir</button>
@@ -183,10 +208,10 @@ export default function App() {
       )}
 
       {/* Invitación a ser mayorista (barra fija bajo el nav) */}
-      {!mayorista && cfg.mayorista_activo && <InvitacionMayorista cfg={cfg} onSolicitar={() => setPedirNombre(true)} />}
+      {!fichaAtelier && !mayorista && cfg.mayorista_activo && <InvitacionMayorista cfg={cfg} onSolicitar={() => setPedirNombre(true)} />}
 
-      {/* Barra de beneficios (configurable, debajo de la de mayorista) */}
-      <BarraBeneficios cfg={cfg} />
+      {/* Barra de beneficios — en Atelier se oculta (home más limpio, estilo Munay) */}
+      {!fichaAtelier && !esAtelier && <BarraBeneficios cfg={cfg} />}
 
       <Routes>
         <Route path="/" element={<Home />} />
@@ -212,8 +237,8 @@ export default function App() {
       )}
       <WelcomePopup cfg={cfg} />
 
-      {/* Barra carrito flotante */}
-      {nItems > 0 && !verCarrito && (
+      {/* Barra carrito flotante — en ficha Atelier móvil el CTA sticky la sustituye */}
+      {nItems > 0 && !verCarrito && !fichaAtelier && (
         <button className="cartbar" onClick={() => setVerCarrito(true)}>
           <span className="cartbar-count">{nItems}</span><ShoppingCart size={20} /> Ver pedido
           <span className="cartbar-total">{fCOP(total)}</span>
@@ -360,11 +385,10 @@ function BarraBeneficios({ cfg }) {
 // ---- Footer ----
 function Footer({ cfg, onSolicitar, onTerminos }) {
   const wa = (cfg?.whatsapp || '+573157702180').replace(/[^0-9]/g, '')
-  const nombre = (cfg?.nombre_tienda || '').trim()          // nombre de la empresa (config)
-  const marcaFooter = nombre || 'Mumi Amazonia'             // encabezado del footer (sin emoji)
+  const nombre = (cfg?.nombre_tienda || '').trim()
+  const marcaFooter = nombre || 'Mumi Amazonia'
   const pais = (cfg?.pais || '').trim()
   const anio = new Date().getFullYear()
-  // Copyright automático: si no hay empresa configurada → genérico
   const copy = nombre
     ? `© ${anio} ${nombre}${pais ? ` · ${pais}` : ''}`
     : `© ${anio} Todos los derechos reservados`
@@ -372,6 +396,46 @@ function Footer({ cfg, onSolicitar, onTerminos }) {
     [cfg?.instagram_url, Instagram, 'Instagram'], [cfg?.facebook_url, Facebook, 'Facebook'],
     [cfg?.tiktok_url, Music2, 'TikTok'], [cfg?.youtube_url, Youtube, 'YouTube'], [cfg?.x_url, Twitter, 'X'],
   ].filter(([u]) => u)
+  const atelier = (cfg?.diseno || 'selva') === 'atelier'
+
+  if (atelier) {
+    return (
+      <footer className={`ftr ftr-atelier ftr-${cfg?.footer_tamano || 'md'}`}>
+        <div className="ftr-grid">
+          <div className="ftr-col">
+            <div className="ftr-brand serif">{marcaFooter}</div>
+            {cfg?.footer_texto?.trim()
+              ? <p className="ftr-txt">{cfg.footer_texto}</p>
+              : <p className="ftr-txt">Sabores artesanales de la selva. Impacto en el corazón de la Amazonía.</p>}
+            {redes.length > 0 && (
+              <div className="ftr-redes">
+                {redes.map(([u, Ico, label]) => <a key={label} href={u} target="_blank" rel="noreferrer" aria-label={label}><Ico size={18} /></a>)}
+              </div>
+            )}
+          </div>
+          <div className="ftr-col">
+            <h4 className="ftr-col-title">Mumi</h4>
+            <div className="ftr-links ftr-links-col">
+              <Link to="/tienda">Tienda</Link>
+              {tieneNosotros(cfg) && <Link to="/nosotros">Nosotros</Link>}
+              {tieneGaleria(cfg) && <Link to="/galeria">{cfg.galeria_titulo || 'Galería'}</Link>}
+            </div>
+          </div>
+          <div className="ftr-col">
+            <h4 className="ftr-col-title">Ayuda</h4>
+            <div className="ftr-links ftr-links-col">
+              <Link to="/contacto">Contacto</Link>
+              <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer">WhatsApp</a>
+              {cfg?.terminos_texto?.trim() && <button type="button" onClick={onTerminos}>Términos</button>}
+              {cfg?.mayorista_activo !== false && <button type="button" onClick={onSolicitar}>Mayorista</button>}
+            </div>
+          </div>
+        </div>
+        <div className="ftr-copy">{copy}</div>
+      </footer>
+    )
+  }
+
   return (
     <footer className={`ftr ftr-${cfg?.footer_tamano || 'md'}`}>
       <div className="ftr-brand serif">{marcaFooter}</div>

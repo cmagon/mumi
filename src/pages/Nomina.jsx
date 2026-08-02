@@ -4,6 +4,7 @@ import { supabase } from '../lib/supabase'
 import { fFecha, fCOP, fNum, calcularNomina, calcHoras, fmtHoras, SMV, getRolLabel, PARAMS_NOMINA_DEFAULT, TIPOS_PAGO, getTipoPagoLabel, AREAS_COSTEO, getAreaCosteoLabel } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
 import { useAuth } from '../context/AuthContext'
+import { puedeVerSeccion } from '../lib/permisos'
 import { withBusy } from '../lib/busy'
 import Modal from '../components/ui/Modal'
 import AttendanceModal from '../components/AttendanceModal'
@@ -31,7 +32,15 @@ export default function Nomina() {
   const rol = profile?.rol || 'admin'
   const esAdmin = rol === 'admin'
   const esAuxiliar = rol === 'auxiliar'   // solo su propia asistencia
-  const [tab, setTab] = useState('empleados')
+  // Secciones configurables en Usuarios → Permisos (antes liquidación solo miraba esAdmin).
+  const puedeEmpleados   = puedeVerSeccion(rol, 'nomina', 'empleados')
+  const puedeLiquidacion = puedeVerSeccion(rol, 'nomina', 'liquidacion')
+  const tabInicialNomina = puedeEmpleados ? 'empleados' : (puedeLiquidacion ? 'nomina' : (esAdmin ? 'parametros' : 'empleados'))
+  const [tab, setTab] = useState(tabInicialNomina)
+  useEffect(() => {
+    const ok = { empleados: puedeEmpleados, nomina: puedeLiquidacion, parametros: esAdmin }
+    if (!ok[tab]) setTab(tabInicialNomina)
+  }, [puedeEmpleados, puedeLiquidacion, esAdmin, tab, tabInicialNomina])
   const [nomEmpId, setNomEmpId] = useState('')
   const [nomUnidades, setNomUnidades] = useState('')   // unidades producidas (para destajo por producción)
   const [nomPeriodo, setNomPeriodo] = useState('mensual')
@@ -361,13 +370,13 @@ export default function Nomina() {
       <div className="page-header">
         <h1 className="page-title">Asistencia & Nómina</h1>
         <div className="page-actions">
-          {esAdmin && <button className="btn btn-primary btn-sm" onClick={() => { setFormEmp(EMPTY_EMP); setEditEmpId(null); setEmpEsUsuario(true); setModalEmp(true) }}>+ Nuevo Empleado</button>}
+          {puedeEmpleados && esAdmin && <button className="btn btn-primary btn-sm" onClick={() => { setFormEmp(EMPTY_EMP); setEditEmpId(null); setEmpEsUsuario(true); setModalEmp(true) }}>+ Nuevo Empleado</button>}
         </div>
       </div>
 
       <div className="tabs">
-        <button className={`tab-btn ${tab === 'empleados' ? 'active' : ''}`} onClick={() => setTab('empleados')}>Empleados</button>
-        {esAdmin && <button className={`tab-btn ${tab === 'nomina' ? 'active' : ''}`} onClick={() => setTab('nomina')}>Liquidación Nómina</button>}
+        {puedeEmpleados && <button className={`tab-btn ${tab === 'empleados' ? 'active' : ''}`} onClick={() => setTab('empleados')}>Empleados</button>}
+        {puedeLiquidacion && <button className={`tab-btn ${tab === 'nomina' ? 'active' : ''}`} onClick={() => setTab('nomina')}>Liquidación Nómina</button>}
         {esAdmin && <button className={`tab-btn ${tab === 'parametros' ? 'active' : ''}`} onClick={() => setTab('parametros')}><Ico as={Settings} size={14} />Parámetros</button>}
       </div>
 
@@ -376,7 +385,7 @@ export default function Nomina() {
       )}
 
       {/* LIQUIDACIÓN NÓMINA */}
-      {tab === 'nomina' && (
+      {tab === 'nomina' && puedeLiquidacion && (
         <div className="card">
           <div className="card-title"><Ico as={DollarSign} size={14} />Liquidación de Nómina</div>
           <div className="form-grid">
@@ -592,7 +601,7 @@ export default function Nomina() {
       )}
 
       {/* EMPLEADOS */}
-      {tab === 'empleados' && (
+      {tab === 'empleados' && puedeEmpleados && (
         <div className="card">
           <div className="card-title"><Ico as={Users} size={14} />Lista de Empleados</div>
 

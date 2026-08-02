@@ -5,6 +5,7 @@ import { fNum, fFecha, componerSurtido } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
+import { puedeVerSeccion } from '../lib/permisos'
 import Modal from '../components/ui/Modal'
 import MoneyInput from '../components/ui/MoneyInput'
 import Cargando from '../components/ui/Cargando'
@@ -32,6 +33,8 @@ export default function ProductosTerminados() {
   const qc = useQueryClient()
   const { profile } = useAuth()
   const esAdmin = profile?.rol === 'admin'
+  const puedeAjustes  = puedeVerSeccion(profile?.rol, 'terminados', 'ajustes')
+  const puedeAnalisis = puedeVerSeccion(profile?.rol, 'terminados', 'analisis')
   const [buscar, setBuscar] = useState('')
   const [modalProd, setModalProd] = useState(false)
   const [pForm, setPForm] = useState(EMPTY_PROD)
@@ -148,21 +151,22 @@ export default function ProductosTerminados() {
   const { data: movAnalisis = [] } = useQuery({
     queryKey: ['finished_mov_analisis'],
     queryFn: async () => { const { data } = await supabase.from('finished_movements').select('finished_id, cantidad, tipo, origen, fecha, created_at').order('created_at', { ascending: false }).limit(8000); return data || [] },
-    enabled: esAdmin, staleTime: 5 * 60 * 1000,
+    enabled: puedeAnalisis, staleTime: 5 * 60 * 1000,
   })
   const [tab, setTab] = useState('lista')
+  useEffect(() => { if (!puedeAnalisis && tab === 'analisis') setTab('lista') }, [puedeAnalisis, tab])
   const [anioAn, setAnioAn] = useState(new Date().getFullYear())
   // Histórico de ventas de Alegra (facturas de todos los años) para el análisis y la proyección
   const { data: alegraVentas = { ventas: {} }, isFetching: cargandoVentas } = useQuery({
     queryKey: ['alegra_ventas_hist'],
     queryFn: async () => { const { data } = await supabase.functions.invoke('alegra-ventas', { body: {} }); return data || { ventas: {} } },
-    enabled: esAdmin && tab === 'analisis', retry: false, staleTime: 30 * 60 * 1000,
+    enabled: puedeAnalisis && tab === 'analisis', retry: false, staleTime: 30 * 60 * 1000,
   })
   // Materias primas (para calcular la MP necesaria según la proyección)
   const { data: rawMps = [] } = useQuery({
     queryKey: ['raw_materials_min'],
     queryFn: async () => { const { data } = await supabase.from('raw_materials').select('id, nombre, unidad'); return data || [] },
-    enabled: esAdmin, staleTime: 5 * 60 * 1000,
+    enabled: puedeAnalisis, staleTime: 5 * 60 * 1000,
   })
   // Categorías de Alegra (para asignarlas a los productos)
   const { data: alegraCategorias = [] } = useQuery({
@@ -626,12 +630,18 @@ export default function ProductosTerminados() {
   })
 
   // ---- Configuración de credenciales de Alegra ----
+  // El token NO se lee: la columna no es legible desde el navegador (migración v134).
+  // Solo llega `token_set`, que dice si ya hay uno guardado. Para cambiarlo se escribe
+  // uno nuevo; dejar el campo vacío conserva el actual.
   const { data: alegraCfg } = useQuery({
     queryKey: ['alegra_config'],
-    queryFn: async () => { const { data } = await supabase.from('alegra_config').select('email, token, price_list_mayor, price_list_detal').eq('id', 1).maybeSingle(); return data || {} },
+    queryFn: async () => { const { data } = await supabase.from('alegra_config').select('email, token_set, price_list_mayor, price_list_detal').eq('id', 1).maybeSingle(); return data || {} },
     enabled: esAdmin,
   })
-  const abrirConfig = () => { setCfgForm({ email: alegraCfg?.email || '', token: alegraCfg?.token || '', price_list_mayor: alegraCfg?.price_list_mayor || '', price_list_detal: alegraCfg?.price_list_detal || '' }); setPruebaMsg(null); setModalConfig(true) }
+  const tokenGuardado = !!alegraCfg?.token_set
+  // Hay credenciales usables si se acaba de escribir un token o si ya había uno guardado.
+  const hayCreds = !!cfgForm.email && (!!cfgForm.token || tokenGuardado)
+  const abrirConfig = () => { setCfgForm({ email: alegraCfg?.email || '', token: '', price_list_mayor: alegraCfg?.price_list_mayor || '', price_list_detal: alegraCfg?.price_list_detal || '' }); setPruebaMsg(null); setModalConfig(true) }
   const cargarListas = async () => {
     setCargandoListas(true)
     try {
@@ -645,7 +655,11 @@ export default function ProductosTerminados() {
   }
   const guardarConfig = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from('alegra_config').upsert({ id: 1, email: cfgForm.email || null, token: cfgForm.token || null, price_list_mayor: cfgForm.price_list_mayor || null, price_list_detal: cfgForm.price_list_detal || null, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+      const payload = { id: 1, email: cfgForm.email || null, price_list_mayor: cfgForm.price_list_mayor || null, price_list_detal: cfgForm.price_list_detal || null, updated_at: new Date().toISOString() }
+      // Solo se manda el token si el admin escribió uno nuevo. Si se mandara vacío
+      // se borraría el que ya está guardado (y que no se puede volver a leer).
+      if (cfgForm.token) payload.token = cfgForm.token
+      const { error } = await supabase.from('alegra_config').upsert(payload, { onConflict: 'id' })
       if (error) throw error
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['alegra_config'] }); toast('Credenciales de Alegra guardadas ✓') },
@@ -749,7 +763,7 @@ export default function ProductosTerminados() {
             </button>
           )}
           <button className="btn btn-secondary btn-sm" onClick={() => actualizarCostos.mutate()} disabled={actualizarCostos.isPending}>{actualizarCostos.isPending ? 'Actualizando...' : <><Ico as={DollarSign} size={14} />Actualizar costos desde fichas</>}</button>
-          {esAdmin && <button className="btn btn-secondary btn-sm" title="Auditoría: quién ajustó el inventario, qué movió, cuánto y cuándo" onClick={() => setModalHistAjustes(true)}><Ico as={ScrollText} size={14} />Historial de ajustes</button>}
+          {puedeAjustes && <button className="btn btn-secondary btn-sm" title="Auditoría: quién ajustó el inventario, qué movió, cuánto y cuándo" onClick={() => setModalHistAjustes(true)}><Ico as={ScrollText} size={14} />Historial de ajustes</button>}
           {fichasDisponibles.length > 0 && <button className="btn btn-secondary btn-sm" onClick={() => setModalFicha(true)}><Ico as={ClipboardList} size={14} />Agregar producto ({fichasDisponibles.length})</button>}
           {mpsDisponibles.length > 0 && <button className="btn btn-secondary btn-sm" onClick={() => setModalMp(true)}><Ico as={FlaskConical} size={14} />Agregar MP vendible ({mpsDisponibles.length})</button>}
           <button className="btn btn-secondary btn-sm" onClick={() => { setSelGen(baseProds.map(p => p.id)); setModalGen(true) }}><Ico as={Shuffle} size={14} />Generar surtidos</button>
@@ -764,7 +778,7 @@ export default function ProductosTerminados() {
 
       <div className="tabs">
         <button className={`tab-btn ${tab === 'lista' ? 'active' : ''}`} onClick={() => setTab('lista')}>Stock</button>
-        {esAdmin && <button className={`tab-btn ${tab === 'analisis' ? 'active' : ''}`} onClick={() => setTab('analisis')}>Análisis mensual</button>}
+        {puedeAnalisis && <button className={`tab-btn ${tab === 'analisis' ? 'active' : ''}`} onClick={() => setTab('analisis')}>Análisis mensual</button>}
       </div>
 
       {tab === 'lista' && (
@@ -818,7 +832,7 @@ export default function ProductosTerminados() {
                         <td className="col-opcional-2">{p.activo === false ? <span className="badge badge-gris">Inactivo</span> : <span className="badge badge-verde">Activo</span>}</td>
                         <td>
                           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                            <button className="btn btn-xs btn-primary" title="Ajustar stock" onClick={() => { setModalAjuste(p); setAForm(EMPTY_AJUSTE) }}><Scale size={13} aria-hidden="true" /></button>
+                            {puedeAjustes && <button className="btn btn-xs btn-primary" title="Ajustar stock" onClick={() => { setModalAjuste(p); setAForm(EMPTY_AJUSTE) }}><Scale size={13} aria-hidden="true" /></button>}
                             <button className="btn btn-xs btn-secondary" title="Kardex (movimientos)" onClick={() => setKardexDe(p)}><ScrollText size={13} aria-hidden="true" /></button>
                             {!p.alegra_item_id && esAdmin && <button className="btn btn-xs btn-dorado" title="Busca si ya existe en Alegra por SKU/nombre; si no existe, permite crearlo" disabled={verifAlegra?.buscando} onClick={() => verificarEnAlegraFila(p)}><Ico as={Plug} size={13} />{verifAlegra?.p?.id === p.id && verifAlegra.buscando ? 'Verificando...' : 'Verificar / Crear en Alegra'}</button>}
                             <button className="btn btn-xs btn-secondary" title={p.alegra_item_id ? 'Sincronizar stock y costo con Alegra' : 'Falta el ID del ítem en Alegra'} disabled={!p.alegra_item_id || sincronizarUno.isPending} onClick={() => sincronizarUno.mutate(p)}><RefreshCw size={13} aria-hidden="true" /></button>
@@ -1250,18 +1264,24 @@ export default function ProductosTerminados() {
       <Modal open={modalConfig} onClose={() => setModalConfig(false)} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Settings size={18} aria-hidden="true" /> Configurar conexión con Alegra</span>}
         footer={<>
           <button className="btn btn-secondary" onClick={() => setModalConfig(false)}>Cerrar</button>
-          <button className="btn btn-secondary" onClick={probarConexion} disabled={probando || !cfgForm.email || !cfgForm.token}>{probando ? 'Probando...' : <><Ico as={Plug} size={14} />Probar conexión</>}</button>
+          <button className="btn btn-secondary" onClick={probarConexion} disabled={probando || !hayCreds}>{probando ? 'Probando...' : <><Ico as={Plug} size={14} />Probar conexión</>}</button>
           <button className="btn btn-primary" onClick={() => guardarConfig.mutate()} disabled={guardarConfig.isPending}>Guardar</button>
         </>}>
-        <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>Ingresa los datos de tu cuenta de Alegra. El <strong>token de API</strong> lo encuentras en Alegra → <strong>Configuración → API / Integraciones</strong>. Se guardan de forma segura y solo los administradores los ven.</div>
+        <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>Ingresa los datos de tu cuenta de Alegra. El <strong>token de API</strong> lo encuentras en Alegra → <strong>Configuración → API / Integraciones</strong>. Solo lo usan los servidores de Mumi para hablar con Alegra: una vez guardado no vuelve a salir de la base de datos, ni siquiera para un administrador.</div>
         <div className="form-group"><label className="form-label">Correo de Alegra</label><input className="form-control" value={cfgForm.email} onChange={e => setCfgForm(f => ({ ...f, email: e.target.value }))} placeholder="tu-correo@dominio.com" /></div>
-        <div className="form-group"><label className="form-label">Token de API</label><input className="form-control" type="password" value={cfgForm.token} onChange={e => setCfgForm(f => ({ ...f, token: e.target.value }))} placeholder="Pega aquí el token de Alegra" /></div>
+        <div className="form-group">
+          <label className="form-label">Token de API {tokenGuardado && <span className="badge badge-verde" style={{ marginLeft: 6, fontSize: '0.68rem' }}>configurado</span>}</label>
+          <input className="form-control" type="password" autoComplete="new-password" value={cfgForm.token}
+            onChange={e => setCfgForm(f => ({ ...f, token: e.target.value }))}
+            placeholder={tokenGuardado ? 'Déjalo vacío para conservar el token actual' : 'Pega aquí el token de Alegra'} />
+          {tokenGuardado && <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Ya hay un token guardado. Escribe uno nuevo solo si quieres reemplazarlo.</small>}
+        </div>
         {pruebaMsg && <div className="alert" style={{ fontSize: '0.85rem', color: pruebaMsg.ok ? 'var(--selva)' : 'var(--rojo)', background: pruebaMsg.ok ? 'rgba(124,179,66,0.10)' : 'rgba(192,57,43,0.08)' }}>{pruebaMsg.txt}</div>}
 
         <div style={{ borderTop: '1px solid var(--crema-oscuro)', marginTop: 12, paddingTop: 12 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <strong style={{ fontSize: '0.88rem', color: 'var(--selva)' }}>Listas de precios</strong>
-            <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={cargarListas} disabled={cargandoListas || !cfgForm.email || !cfgForm.token}>{cargandoListas ? 'Cargando...' : <><Ico as={RefreshCw} size={13} />Cargar listas de Alegra</>}</button>
+            <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={cargarListas} disabled={cargandoListas || !hayCreds}>{cargandoListas ? 'Cargando...' : <><Ico as={RefreshCw} size={13} />Cargar listas de Alegra</>}</button>
           </div>
           <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', marginTop: 0 }}>Indica qué lista de Alegra recibe el precio <strong>mayor</strong> y cuál el <strong>detal/distribuidores</strong>. Se enviarán desde la ficha.</p>
           {listasPrecios && (
@@ -1426,7 +1446,7 @@ export default function ProductosTerminados() {
       <Modal open={!!galeriaDe} onClose={() => setGaleriaDe(null)} guard={false}
         title={`📷 Imágenes — ${galeriaDe?.nombre || ''}`}
         footer={<>
-          {galeriaDe?.alegra_item_id && galeriaImgs.length > 0 && (
+          {esAdmin && galeriaDe?.alegra_item_id && galeriaImgs.length > 0 && (
             <button className="btn btn-dorado" style={{ marginRight: 'auto' }} disabled={probarImgAlegra.isPending}
               title="Experimental: intenta enviar la imagen principal al ítem de Alegra por 3 métodos distintos"
               onClick={() => probarImgAlegra.mutate(galeriaDe)}>

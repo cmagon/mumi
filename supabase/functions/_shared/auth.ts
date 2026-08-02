@@ -1,7 +1,8 @@
 // Guard de autenticación/rol reutilizable para las Edge Functions.
 // Valida el JWT del usuario que llama (cabecera Authorization) contra Supabase Auth.
 //   requireUser(req)  -> exige sesión válida (cualquier usuario autenticado).
-//   requireAdmin(req) -> exige además que su perfil tenga rol = 'admin'.
+//   requireAdmin(req) -> exige además rol = 'admin' y perfil habilitado
+//                        (estado activo y sin archivar).
 // Devuelve { user } si pasa, o { resp } con la respuesta de error lista para retornar.
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 
@@ -42,7 +43,16 @@ export async function requireAdmin(req: Request): Promise<{ user?: any; resp?: R
   if (!user) return { resp: err('No autenticado', 401) }
   // Se consulta con la service key para no depender de las políticas RLS de lectura.
   const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
-  const { data: perfil } = await admin.from('user_profiles').select('rol').eq('id', user.id).single()
+  // select('*') y no una lista de columnas: `archivado` llegó en una migración
+  // posterior y pedirla por nombre haría fallar la consulta (y con ella el guard)
+  // en cualquier instalación que no la tenga.
+  const { data: perfil } = await admin.from('user_profiles').select('*').eq('id', user.id).single()
   if (perfil?.rol !== 'admin') return { resp: err('Solo administradores', 403) }
+  // Desactivar o archivar un usuario no invalida su JWT, que sigue siendo válido
+  // hasta que expire. Sin esta comprobación, un admin al que se le acaba de quitar
+  // el acceso conserva hasta una hora de poder total.
+  if ((perfil.estado && perfil.estado !== 'activo') || perfil.archivado === true) {
+    return { resp: err('Usuario inactivo', 403) }
+  }
   return { user }
 }

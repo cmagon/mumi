@@ -70,17 +70,25 @@ export default function Dashboard() {
     }
   }, [profile?.rol, devRole])
 
+  // Misma consulta que el módulo Producción, así que comparte su clave: se descarga una
+  // sola vez para los dos y, sobre todo, los invalidateQueries(['production_records'])
+  // que hay repartidos por la app ahora también refrescan el tablero. Con la clave
+  // anterior ('produccion') nadie la invalidaba: al aprobar un registro, el tablero
+  // seguía mostrando el dato viejo hasta que venciera el reloj.
   const { data: produccion = [] } = useQuery({
-    queryKey: ['produccion'],
+    queryKey: ['production_records'],
     queryFn: async () => { const { data } = await supabase.from('production_records').select('*').order('fecha', { ascending: false }); return data || [] },
   })
+  // El .order() de estas tres no es estético: la consulta debe ser IDÉNTICA a la del
+  // módulo dueño de la clave (Nómina, Inventario, Clientes) para que compartan caché de
+  // verdad en vez de sobrescribirse una a otra con listas en distinto orden.
   const { data: empleados = [] } = useQuery({
     queryKey: ['empleados'],
-    queryFn: async () => { const { data } = await supabase.from('employees').select('*'); return data || [] },
+    queryFn: async () => { const { data } = await supabase.from('employees').select('*').order('nombre'); return data || [] },
   })
   const { data: mps = [] } = useQuery({
     queryKey: ['raw_materials'],
-    queryFn: async () => { const { data } = await supabase.from('raw_materials').select('*'); return data || [] },
+    queryFn: async () => { const { data } = await supabase.from('raw_materials').select('*').order('nombre'); return data || [] },
   })
   const { data: lotesMP = [] } = useQuery({
     queryKey: ['raw_material_lots_dash'],
@@ -88,11 +96,11 @@ export default function Dashboard() {
   })
   const { data: clientes = [] } = useQuery({
     queryKey: ['clientes'],
-    queryFn: async () => { const { data } = await supabase.from('clients').select('*'); return data || [] },
+    queryFn: async () => { const { data } = await supabase.from('clients').select('*').order('nombre'); return data || [] },
   })
   const { data: regPlantillas = [] } = useQuery({
     queryKey: ['registro_plantillas'],
-    queryFn: async () => { const { data } = await supabase.from('registro_plantillas').select('*'); return data || [] },
+    queryFn: async () => { const { data } = await supabase.from('registro_plantillas').select('*').order('programa').order('orden').order('nombre'); return data || [] },
   })
   const { data: regEntradas = [] } = useQuery({
     queryKey: ['registro_entradas_all'],
@@ -102,8 +110,11 @@ export default function Dashboard() {
     queryKey: ['no_conformidades'],
     queryFn: async () => { const { data } = await supabase.from('no_conformidades').select('id, fecha, severidad, estado, fecha_compromiso'); return data || [] },
   })
+  // Sub-clave propia: el módulo Capacitación pide la tabla completa y aquí solo 4 columnas.
+  // Compartiendo la clave, quien cargara primero dejaba a la otra pantalla con filas
+  // incompletas. El prefijo 'capacitaciones' mantiene vigentes sus invalidateQueries.
   const { data: capacitaciones = [] } = useQuery({
-    queryKey: ['capacitaciones'],
+    queryKey: ['capacitaciones', 'dash'],
     queryFn: async () => { const { data } = await supabase.from('capacitaciones').select('id, fecha, duracion_horas, asistentes'); return data || [] },
   })
 
