@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useRef, createContext, useContext } from 'react'
 import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
-import { Search, X, ArrowLeft, ShoppingCart, MessageCircle, Plus, Minus, Send, Share2, Heart, ZoomIn, ChevronRight, Home as HomeIcon, Play } from 'lucide-react'
+import { Search, X, ArrowLeft, ShoppingCart, MessageCircle, Plus, Minus, Send, Share2, Heart, ZoomIn, ChevronRight, Home as HomeIcon, Play, Truck, Leaf, Droplets, BadgeCheck, Star } from 'lucide-react'
 import DOMPurify from 'dompurify'
 import { useSwipeable } from 'react-swipeable'
 import Lightbox from 'yet-another-react-lightbox'
@@ -10,8 +10,8 @@ import 'yet-another-react-lightbox/styles.css'
 import 'yet-another-react-lightbox/plugins/thumbnails.css'
 import { supabase } from './supabase'
 import { useStore } from './store'
-import { Card, HeroSlider, Newsletter, ModalNombre } from './ui'
-import { fCOP, labelCategoria, getFrutos, iconoDe, iconoFruto, labelFruto, stockLabel, imgsDe, sinTildes, sinHtml, registrarVisita, confirmarPedidoWA, setSEO, compartir, rutaProducto, buscarPorSlug, abrirWA, mensajeSolicitudMayorista, getCliente, setCliente, FAVORITOS, BUSCADOR, videoEmbed, videoThumb, detectRed, formatoRed, paginaPorSlug, postCanvas } from './utils'
+import { Card, HeroSlider, BrandHero, Impacto, BannerGrupo, Newsletter, ModalNombre } from './ui'
+import { fCOP, labelCategoria, getFrutos, iconoDe, iconoFruto, labelFruto, stockLabel, imgsDe, imgSrc, textoEnvio, sinTildes, sinHtml, registrarVisita, confirmarPedidoWA, setSEO, compartir, rutaProducto, buscarPorSlug, abrirWA, mensajeSolicitudMayorista, getCliente, setCliente, FAVORITOS, BUSCADOR, videoEmbed, videoThumb, detectRed, formatoRed, paginaPorSlug, postCanvas } from './utils'
 import FrutoIcon from './FrutoIcon'
 
 // ==================== MIGAS DE PAN ====================
@@ -123,37 +123,88 @@ export function Home() {
 
   if (productos === null) return <div className="spin" />
 
+  const atelier = (cfg.diseno || 'selva') === 'atelier'
   const cardProps = (p) => ({ p, cfg, n: enCarrito(p.id), onOpen: () => abrir(p), onAdd: () => agregar(p, 1) })
+  const listaCls = atelier ? 'grid' : 'row'
+  const frutosLista = getFrutos()
+  const mostrarFrutos = atelier ? frutosLista.length > 0 : (cfg.mostrar_filtro_frutos && frutosLista.length > 0)
+  const cosecha = destacados.length ? destacados : (productos || []).slice(0, 6)
+
+  const secHead = (eyebrow, titulo, linkTo, linkTxt) => (
+    <div className={`sec-head ${atelier ? 'sec-head-atelier' : ''}`}>
+      <div>
+        {atelier && eyebrow ? <p className="sec-eyebrow">{eyebrow}</p> : null}
+        <h2 className="sec-title serif">{titulo}</h2>
+      </div>
+      {linkTo ? <Link to={linkTo} className="sec-link">{linkTxt || 'Ver todo'} {atelier ? <ChevronRight size={16} /> : null}</Link> : null}
+    </div>
+  )
 
   return (
     <>
-      {/* Banner principal arriba del todo */}
-      {heroOn && heroSlides.length > 0 && <HeroSlider slides={heroSlides} onOpen={abrir} />}
+      {/* Atelier: hero de marca (Munay). Selva: slider productos/banners */}
+      {heroOn && (atelier
+        ? <BrandHero cfg={cfg} banner={bannersPrincipales[0] || null} />
+        : (heroSlides.length > 0 && <HeroSlider slides={heroSlides} onOpen={abrir} />))}
 
-      {/* Barra de filtros (debajo del banner) */}
-      <div className="toolbar">
+      {/* Filtro por frutos: círculos en Atelier, chips en Selva */}
+      {mostrarFrutos && (
+        atelier ? (
+          <section className="fruto-filter">
+            <div className="sec-head sec-head-center">
+              <h2 className="sec-title serif">Explora por ingrediente</h2>
+            </div>
+            <div className="frutos">
+              <button type="button" className={`fruto ${!fFruto ? 'on' : ''}`} onClick={() => setFFruto('')}>
+                <div className="fruto-emoji"><Search size={22} /></div>
+                <div className="fruto-name">Todos</div>
+              </button>
+              {frutosLista.map(f => (
+                <button type="button" key={f.id} className={`fruto ${fFruto === f.id ? 'on' : ''}`} onClick={() => setFFruto(fFruto === f.id ? '' : f.id)}>
+                  {f.foto_url
+                    ? <div className="fruto-foto"><img src={f.foto_url} alt="" /></div>
+                    : <div className="fruto-emoji"><FrutoIcon name={f.icono} size={28} /></div>}
+                  <div className="fruto-name">{f.nombre}</div>
+                </button>
+              ))}
+            </div>
+          </section>
+        ) : (
+          <div className="chips" style={{ paddingTop: 0 }}>
+            <button className={`chip chip-sm ${!fFruto ? 'on' : ''}`} onClick={() => setFFruto('')}>Todos los frutos</button>
+            {frutosLista.map(f => <button key={f.id} className={`chip chip-sm ${fFruto === f.id ? 'on' : ''}`} onClick={() => setFFruto(fFruto === f.id ? '' : f.id)}><FrutoIcon name={f.icono} size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />{f.nombre}</button>)}
+          </div>
+        )
+      )}
+
+      {/* Toolbar: en Atelier solo búsqueda compacta (menos ruido tipo Munay) */}
+      <div className={`toolbar ${atelier ? 'toolbar-atelier' : ''}`}>
         {BUSCADOR && (buscando
           ? <div className="search"><Search size={17} /><input autoFocus placeholder="Buscar producto…" value={q} onChange={e => setQ(e.target.value)} /><button onClick={() => { setQ(''); setBuscando(false) }} aria-label="Cerrar"><X size={16} /></button></div>
           : <button className="search-toggle" onClick={() => setBuscando(true)} aria-label="Buscar"><Search size={18} /> <span>Buscar</span></button>)}
-        <select className="sortsel" value={cat} onChange={e => setCat(e.target.value)} aria-label="Categoría">
-          <option value="todos">Todas las categorías</option>
-          {cats.map(c => <option key={c} value={c}>{labelCategoria(c)}</option>)}
-        </select>
-        <select className="sortsel" value={orden} onChange={e => setOrden(e.target.value)} aria-label="Ordenar">
-          <option value="rel">Relevancia</option><option value="precio_asc">Precio: menor a mayor</option>
-          <option value="precio_desc">Precio: mayor a menor</option><option value="nombre">Nombre (A-Z)</option>
-        </select>
+        {!atelier && (
+          <>
+            <select className="sortsel" value={cat} onChange={e => setCat(e.target.value)} aria-label="Categoría">
+              <option value="todos">Todas las categorías</option>
+              {cats.map(c => <option key={c} value={c}>{labelCategoria(c)}</option>)}
+            </select>
+            <select className="sortsel" value={orden} onChange={e => setOrden(e.target.value)} aria-label="Ordenar">
+              <option value="rel">Relevancia</option><option value="precio_asc">Precio: menor a mayor</option>
+              <option value="precio_desc">Precio: mayor a menor</option><option value="nombre">Nombre (A-Z)</option>
+            </select>
+          </>
+        )}
+        {atelier && buscando && (
+          <select className="sortsel" value={orden} onChange={e => setOrden(e.target.value)} aria-label="Ordenar">
+            <option value="rel">Relevancia</option><option value="precio_asc">Precio ↑</option>
+            <option value="precio_desc">Precio ↓</option><option value="nombre">A-Z</option>
+          </select>
+        )}
       </div>
-      {cfg.mostrar_filtro_frutos && getFrutos().length > 0 && (
-        <div className="chips" style={{ paddingTop: 0 }}>
-          <button className={`chip chip-sm ${!fFruto ? 'on' : ''}`} onClick={() => setFFruto('')}>Todos los frutos</button>
-          {getFrutos().map(f => <button key={f.id} className={`chip chip-sm ${fFruto === f.id ? 'on' : ''}`} onClick={() => setFFruto(fFruto === f.id ? '' : f.id)}><FrutoIcon name={f.icono} size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />{f.nombre}</button>)}
-        </div>
-      )}
 
       {filtrando ? (
         <>
-          <Migas items={[{ label: cat !== 'todos' ? labelCategoria(cat) : (q ? `Búsqueda: "${q}"` : 'Resultados') }]} />
+          <Migas items={[{ label: cat !== 'todos' ? labelCategoria(cat) : (q ? `Búsqueda: "${q}"` : (fFruto ? labelFruto(fFruto) : 'Resultados')) }]} />
           <div className="sec-head">
             <h2 className="sec-title serif">{resultados.length} resultado{resultados.length === 1 ? '' : 's'}</h2>
             <button className="sec-link" onClick={() => { limpiarFiltros(); setBuscando(false) }}>Limpiar filtros ✕</button>
@@ -164,59 +215,110 @@ export function Home() {
           </div>
         </>
       ) : (
-        (cfg.secciones || []).filter(s => s.on !== false).map((s, idx) => {
-          const key = s.key || s.id || idx
-          const tipo = s.tipo || s.id   // compatibilidad con el formato antiguo
-          const filaCat = (c) => (porCategoria[c]?.length ? (
-            <section key={c}>
-              <div className="sec-head"><h2 className="sec-title serif">{labelCategoria(c)}</h2></div>
-              <div className="row">{porCategoria[c].map(p => <Card key={p.id} {...cardProps(p)} />)}</div>
+        <>
+          {/* Atelier: cosecha destacada primero (como “Los más vendidos” en Munay) */}
+          {atelier && cosecha.length > 0 && (
+            <section className="sec-cosecha">
+              {secHead('Productos destacados', 'Nuestra cosecha', '/tienda?orden=rel', 'Ver todo')}
+              <div className="grid">{cosecha.map(p => <Card key={p.id} {...cardProps(p)} />)}</div>
             </section>
-          ) : null)
-          switch (tipo) {
-            case 'hero': return null   // el banner principal ya se muestra arriba de los filtros
-            case 'banner': {
-              // Un banner individual seleccionado: se muestra solo ese (con el mismo diseño del hero)
-              if (s.bannerId) {
-                const b = (banners || []).find(x => String(x.id) === String(s.bannerId) && x.activo !== false)
-                return b ? <HeroSlider key={key} slides={[b]} onOpen={() => {}} /> : null
+          )}
+
+          {(cfg.secciones || []).filter(s => s.on !== false).map((s, idx) => {
+            const key = s.key || s.id || idx
+            const tipo = s.tipo || s.id
+            const filaCat = (c) => (porCategoria[c]?.length ? (
+              <section key={c}>
+                {secHead(null, labelCategoria(c), atelier ? `/tienda?cat=${encodeURIComponent(c)}` : null, 'Ver todo')}
+                <div className={listaCls}>{porCategoria[c].map(p => <Card key={p.id} {...cardProps(p)} />)}</div>
+              </section>
+            ) : null)
+            switch (tipo) {
+              case 'hero': return null
+              case 'banner': {
+                if (s.bannerId) {
+                  const b = (banners || []).find(x => String(x.id) === String(s.bannerId) && x.activo !== false)
+                  if (!b) return null
+                  return atelier ? <BannerGrupo key={key} banners={[b]} /> : <HeroSlider key={key} slides={[b]} onOpen={() => {}} />
+                }
+                const grupoBanners = (banners || []).filter(b => b.es_secundario && b.activo !== false && ((b.grupo || '').trim() || 'General') === s.grupo)
+                if (!grupoBanners.length) return null
+                return atelier ? <BannerGrupo key={key} banners={grupoBanners} /> : <HeroSlider key={key} slides={grupoBanners} onOpen={() => {}} />
               }
-              // Un grupo completo: sus imágenes como slide (una sola = estático)
-              const grupoBanners = (banners || []).filter(b => b.es_secundario && b.activo !== false && ((b.grupo || '').trim() || 'General') === s.grupo)
-              return grupoBanners.length ? <HeroSlider key={key} slides={grupoBanners} onOpen={() => {}} /> : null
+              case 'novedades':
+                if (!novedades.length || (atelier && cosecha.length)) return null // en atelier la cosecha ya cubre destacados/novedades arriba
+                return (
+                  <section key={key}>
+                    {secHead(atelier ? 'Lo nuevo' : null, s.titulo || (atelier ? 'Novedades' : '✨ Novedades'), null)}
+                    <div className={listaCls}>{novedades.map(p => <Card key={p.id} {...cardProps(p)} />)}</div>
+                  </section>
+                )
+              case 'combos': {
+                const combos = (productos || []).filter(p => p._tipo === 'combo')
+                return combos.length > 0 ? (
+                  <section key={key}>
+                    {secHead(null, s.titulo || (atelier ? 'Kits y combos' : '🎁 Combos'), null)}
+                    <div className={listaCls}>{combos.map(p => <Card key={p.id} {...cardProps(p)} />)}</div>
+                  </section>
+                ) : null
+              }
+              case 'categorias':
+                // En atelier evitamos duplicar si ya hay cosecha; mostramos 1ª categoría con stock
+                if (atelier && cosecha.length) {
+                  const resto = cats.filter(c => porCategoria[c]?.length).slice(0, 2)
+                  return <div key={key}>{resto.map(filaCat)}</div>
+                }
+                return <div key={key}>{cats.map(filaCat)}</div>
+              case 'categoria':
+                return <div key={key}>{filaCat(s.categoria)}</div>
+              case 'mosaico': case 'frutos':
+                // En atelier los círculos ya filtran arriba; el mosaico decorativo se omite para no duplicar
+                return atelier ? null : <Mosaico key={key} s={s} />
+              case 'impacto':
+                return atelier ? <Impacto key={key} cfg={cfg} /> : null
+              case 'newsletter':
+                return <Newsletter key={key} />
+              default:
+                return null
             }
-            case 'novedades':
-              return novedades.length > 0 ? (
-                <section key={key}>
-                  <div className="sec-head"><h2 className="sec-title serif">{s.titulo || '✨ Novedades'}</h2></div>
-                  <div className="row">{novedades.map(p => <Card key={p.id} {...cardProps(p)} />)}</div>
-                </section>
-              ) : null
-            case 'combos': {
-              const combos = (productos || []).filter(p => p._tipo === 'combo')
-              return combos.length > 0 ? (
-                <section key={key}>
-                  <div className="sec-head"><h2 className="sec-title serif">{s.titulo || '🎁 Combos'}</h2></div>
-                  <div className="row">{combos.map(p => <Card key={p.id} {...cardProps(p)} />)}</div>
-                </section>
-              ) : null
-            }
-            case 'categorias':   // todas las categorías (formato antiguo)
-              return <div key={key}>{cats.map(filaCat)}</div>
-            case 'categoria':    // una categoría específica
-              return <div key={key}>{filaCat(s.categoria)}</div>
-            case 'mosaico': case 'frutos':   // sección de mosaico personalizable
-              return <Mosaico key={key} s={s} />
-            case 'newsletter':
-              return <Newsletter key={key} />
-            default:
-              return null
-          }
-        })
+          })}
+
+          {/* Impacto al final si Atelier y no hay sección impacto en config */}
+          {atelier && !(cfg.secciones || []).some(s => (s.tipo || s.id) === 'impacto' && s.on !== false) && (
+            <Impacto cfg={cfg} />
+          )}
+        </>
       )}
 
       <div className="footer-space" />
     </>
+  )
+}
+
+// Iconos sugeridos para chips de beneficio (Atelier)
+const ICONO_BENE = [
+  [/natural|org[aá]nico|eco/i, Leaf],
+  [/az[uú]car|sin az/i, Droplets],
+  [/verific|certif|garant/i, BadgeCheck],
+]
+function iconoBene(texto) {
+  for (const [re, Ico] of ICONO_BENE) if (re.test(texto || '')) return Ico
+  return Leaf
+}
+
+// Mini-card "Combina bien con" (layout Stitch, no Card genérica)
+function CardRelAtelier({ p, onOpen, onAdd, precioFn }) {
+  const portada = imgsDe(p)[0]
+  const src = imgSrc(portada || p.imagen_url, true) || imgSrc(portada || p.imagen_url, false)
+  return (
+    <article className="rel-mini">
+      <button type="button" className="rel-mini-media" onClick={onOpen} aria-label={p.nombre}>
+        {src ? <img src={src} alt="" /> : <FrutoIcon name={iconoDe(p.frutos)} size={36} />}
+        <span className="rel-mini-add" onClick={(e) => { e.stopPropagation(); onAdd() }} aria-hidden><Plus size={18} /></span>
+      </button>
+      <button type="button" className="rel-mini-name" onClick={onOpen}>{p.nombre}</button>
+      <div className="rel-mini-price">{fCOP(precioFn(p))}</div>
+    </article>
   )
 }
 
@@ -227,29 +329,40 @@ export function Producto() {
   const { cfg, productos, enCarrito, agregar, esFav, toggleFav, precio, mayorista, enOferta, descuentoPct } = useStore()
   const p = buscarPorSlug(productos, param)
   const [img, setImg] = useState(0)
-  const [drag, setDrag] = useState(0)   // desplazamiento en px mientras se desliza
+  const [drag, setDrag] = useState(0)
   const [lightbox, setLightbox] = useState(false)
-  // SEO del producto: usa el configurado y si no, el nombre y la descripción
+  const [cant, setCant] = useState(1)
+  const [hdrScrolled, setHdrScrolled] = useState(false)
+  const atelier = (cfg.diseno || 'selva') === 'atelier'
+  const ctaFijo = atelier && cfg.ficha_cta_fijo !== false
+
   useEffect(() => {
     setImg(0)
+    setCant(1)
     if (p) {
       registrarVisita(p.nombre)
       setSEO({ title: p.seo_titulo || p.nombre, desc: p.seo_desc || sinHtml(p.descripcion).slice(0, 160), image: p.imagen_url })
     }
   }, [param, p?.nombre])
 
-  // OJO: los hooks deben ir siempre antes de cualquier return temprano.
+  useEffect(() => {
+    if (!atelier) return
+    const onScroll = () => setHdrScrolled(window.scrollY > 20)
+    onScroll()
+    window.addEventListener('scroll', onScroll, { passive: true })
+    return () => window.removeEventListener('scroll', onScroll)
+  }, [atelier])
+
   const galeria = p ? imgsDe(p) : []
+  const urlsWeb = galeria.map(g => g.url)
   const pasar = (d) => { if (galeria.length > 1) setImg(k => Math.max(0, Math.min(galeria.length - 1, k + d))) }
   const swipe = useSwipeable({
     onSwiping: (e) => {
       if (galeria.length <= 1) return
-      // Se usa la dirección del gesto (no el signo de deltaX, que varía según la versión):
-      // dedo hacia la izquierda → la tira se mueve a la izquierda (siguiente imagen).
       const signo = e.dir === 'Left' ? 1 : e.dir === 'Right' ? -1 : 0
-      if (!signo) return                       // gesto vertical: no mover la tira
+      if (!signo) return
       let d = signo * Math.abs(e.deltaX)
-      if ((img === 0 && d < 0) || (img === galeria.length - 1 && d > 0)) d /= 3   // resistencia en los extremos
+      if ((img === 0 && d < 0) || (img === galeria.length - 1 && d > 0)) d /= 3
       setDrag(d)
     },
     onSwipedLeft: () => { pasar(1); setDrag(0) },
@@ -265,71 +378,293 @@ export function Producto() {
   const agotado = (p.stock ?? 0) <= 0
   const st = stockLabel(p.stock, cfg)
   const relacionados = (productos || []).filter(x => x.id !== p.id && x.categoria === p.categoria).slice(0, 8)
-  const pedir = () => confirmarPedidoWA([{ ...p, cantidad: Math.max(1, n) }], '', cfg, mayorista,
+  const maxCant = Math.max(1, Number(p.stock) || 1)
+  const pedir = () => confirmarPedidoWA([{ ...p, cantidad: n > 0 ? n : cant }], '', cfg, mayorista,
     agotado ? cfg.wa_texto_sin_stock : (mayorista ? (cfg.wa_texto_mayorista || cfg.wa_texto_stock) : cfg.wa_texto_stock))
   const compartirProd = () => compartir({ title: p.nombre, text: `${p.nombre} — ${fCOP(precio(p))}`, url: window.location.href })
   const fav = esFav(p.id)
+  const oferta = enOferta(p)
+  const envioTxt = (cfg.ficha_mostrar_envio !== false) ? textoEnvio(cfg) : ''
+  const titRel = (cfg.ficha_titulo_relacionados || '').trim() || (atelier ? 'Combina bien con' : 'También te puede gustar')
+  const catLabel = labelCategoria(p.categoria)
+
+  // ——— Layout Stitch / Atelier (móvil + desktop) ———
+  if (atelier) {
+    return (
+      <div className={`prod prod-atelier ${ctaFijo ? 'prod-cta-fijo' : ''}`}>
+        {/* App bar móvil (Stitch) */}
+        <header className={`ficha-top ${hdrScrolled ? 'ficha-top-solid' : ''}`}>
+          <button type="button" className="icon-round" onClick={() => nav(-1)} aria-label="Volver"><ArrowLeft size={18} /></button>
+          <h1 className="serif ficha-top-title">Detalle</h1>
+          <div className="ficha-top-actions">
+            {FAVORITOS && <button type="button" className={`icon-round ${fav ? 'on' : ''}`} onClick={() => toggleFav(p.id)} aria-label="Favorito"><Heart size={18} fill={fav ? 'currentColor' : 'none'} /></button>}
+            <button type="button" className="icon-round" onClick={compartirProd} aria-label="Compartir"><Share2 size={18} /></button>
+          </div>
+        </header>
+
+        {/* Breadcrumbs desktop (Stitch desk) */}
+        <nav className="ficha-crumbs" aria-label="Migas de pan">
+          <Link to="/tienda">Inicio</Link>
+          <ChevronRight size={14} />
+          <Link to={`/tienda?cat=${encodeURIComponent(p.categoria || '')}`}>{catLabel}</Link>
+          <ChevronRight size={14} />
+          <span>{p.nombre}</span>
+        </nav>
+
+        <div className="prod-grid atelier-grid">
+          <div className="prod-media-col">
+            <div className="det-media det-media-atelier" {...swipe} onClick={() => galeria.length && setLightbox(true)}
+              style={{ cursor: galeria.length ? 'zoom-in' : 'default', touchAction: galeria.length > 1 ? 'pan-y' : undefined }}>
+              <div className="det-ornament det-ornament-a" aria-hidden />
+              <div className="det-ornament det-ornament-b" aria-hidden />
+              {galeria.length
+                ? <div className="det-track" style={{ transform: `translate3d(calc(${-img * 100}% - ${drag}px), 0, 0)`, transition: drag ? 'none' : 'transform .38s cubic-bezier(.22,.61,.36,1)' }}>
+                    {galeria.map((g, k) => (
+                      <div className="det-slide" key={g.url}>
+                        <picture>
+                          {g.url_mobile && g.url_mobile !== g.url ? <source media="(max-width: 700px)" srcSet={g.url_mobile} /> : null}
+                          <img className="det-float" src={g.url} alt={k === img ? p.nombre : ''} draggable={false} loading={k === 0 ? 'eager' : 'lazy'} />
+                        </picture>
+                      </div>
+                    ))}
+                  </div>
+                : <span className="ph-fruto"><FrutoIcon name={iconoDe(p.frutos)} size={72} /></span>}
+            </div>
+            {galeria.length > 1 && (
+              <div className="det-dots" onClick={e => e.stopPropagation()}>
+                {galeria.map((_, k) => (
+                  <button key={k} type="button" className={`dot ${k === img ? 'on' : ''}`} onClick={() => setImg(k)} aria-label={`Imagen ${k + 1}`} />
+                ))}
+              </div>
+            )}
+            {galeria.length > 0 && (
+              <div className="det-thumbs atelier-thumbs">
+                {galeria.map((g, k) => (
+                  <button key={g.url} type="button" className={`det-thumb ${k === img ? 'on' : ''}`} onClick={() => setImg(k)}>
+                    <img src={imgSrc(g, true) || g.url} alt="" />
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {lightbox && (
+            <Lightbox open close={() => setLightbox(false)} index={img} on={{ view: ({ index }) => setImg(index) }}
+              slides={urlsWeb.map(u => ({ src: u }))} plugins={[Zoom, Thumbnails]}
+              thumbnails={{ position: 'bottom' }} zoom={{ maxZoomPixelRatio: 3 }} />
+          )}
+
+          <div className="det-body">
+            <div className="det-head-row">
+              <span className="det-cat">{catLabel}</span>
+              {oferta && <span className="det-rating" aria-hidden><Star size={16} fill="currentColor" /><span>Oferta</span></span>}
+            </div>
+            <h1 className="det-name serif">{p.nombre}</h1>
+            <div className="det-price">
+              <span className="det-price-now">{fCOP(precio(p))}</span>
+              {oferta && <><span className="precio-antes">{fCOP(p.precio_detal)}</span><span className="det-off">{descuentoPct(p)}% OFF</span></>}
+              {mayorista ? <span className="precio-tag">precio mayorista</span> : (cfg.mostrar_mayor && p.precio_mayor ? <span className="det-mayor">Mayor {fCOP(p.precio_mayor)}</span> : null)}
+            </div>
+            {st && st.tono !== 'ok' && st.tono !== 'agotado' && <div className={`stock-tag stock-${st.tono}`} style={{ alignSelf: 'flex-start' }}>🔥 {st.texto}</div>}
+
+            {p.beneficios?.length > 0 && (
+              <div className="benes benes-atelier">
+                {p.beneficios.map((b, i) => {
+                  const IcoB = iconoBene(b)
+                  return <span key={i} className="bene"><IcoB size={18} />{b}</span>
+                })}
+              </div>
+            )}
+
+            {p.descripcion && (
+              <div className="det-desc-block">
+                <h3 className="serif det-sec-title">Descripción</h3>
+                <div className="det-desc rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.descripcion) }} />
+              </div>
+            )}
+
+            {(p.contenido || p.origen || envioTxt) && (
+              <div className="det-specs">
+                {p.contenido && <div className="det-spec"><span className="det-spec-lbl">Contenido</span><span className="det-spec-val">{p.contenido}</span></div>}
+                {p.origen && <div className="det-spec"><span className="det-spec-lbl">Origen</span><span className="det-spec-val">{p.origen}</span></div>}
+                {envioTxt && (
+                  <div className="det-spec det-spec-envio">
+                    <Truck size={32} strokeWidth={1.5} />
+                    <div>
+                      <span className="det-spec-lbl">Envío Express</span>
+                      <span className="det-spec-val">{envioTxt.replace(/^🚚\s*/, '')}</span>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Acciones inline (desktop Stitch) */}
+            <div className="ficha-actions-desk">
+              {agotado
+                ? <div className="agotado-box">Producto agotado por ahora. Escríbenos para avisarte cuando vuelva.</div>
+                : (
+                  <div className="ficha-actions-row">
+                    <div className="qty qty-desk">
+                      <button type="button" onClick={() => setCant(c => Math.max(1, c - 1))} disabled={cant <= 1} aria-label="Quitar una unidad"><Minus size={18} /></button>
+                      <span aria-live="polite">{cant}</span>
+                      <button type="button" onClick={() => setCant(c => Math.min(maxCant, c + 1))} disabled={cant >= maxCant} aria-label="Agregar una unidad"><Plus size={18} /></button>
+                    </div>
+                    <button type="button" className="btn btn-selva ficha-cta-btn" onClick={() => agregar(p, cant)}>
+                      <ShoppingCart size={18} /> Añadir al carrito
+                    </button>
+                  </div>
+                )}
+              {FAVORITOS && (
+                <button type="button" className={`btn btn-ghost ficha-wish ${fav ? 'on' : ''}`} onClick={() => toggleFav(p.id)}>
+                  <Heart size={18} fill={fav ? 'currentColor' : 'none'} /> {fav ? 'En deseos' : 'Añadir a deseos'}
+                </button>
+              )}
+              {agotado && <button type="button" className="btn btn-wa" onClick={pedir}><MessageCircle size={18} /> Consultar por WhatsApp</button>}
+            </div>
+          </div>
+        </div>
+
+        {relacionados.length > 0 && (
+          <section className="rel-atelier">
+            <div className="rel-atelier-head">
+              <div>
+                <h2 className="serif">{titRel}</h2>
+                <p className="rel-atelier-sub">Potencia tu experiencia con estos complementos amazónicos.</p>
+              </div>
+              <Link to={`/tienda?cat=${encodeURIComponent(p.categoria || '')}`} className="rel-atelier-all">Ver todos <ChevronRight size={16} /></Link>
+            </div>
+            <div className="rel-atelier-row">
+              {relacionados.map(r => (
+                <CardRelAtelier key={r.id} p={r} precioFn={precio}
+                  onOpen={() => nav(rutaProducto(r))}
+                  onAdd={() => agregar(r, 1)} />
+              ))}
+            </div>
+          </section>
+        )}
+
+        {ctaFijo && !agotado && (
+          <footer className="ficha-cta">
+            <div className="ficha-qty">
+              <div className="qty qty-pill">
+                <button type="button" onClick={() => setCant(c => Math.max(1, c - 1))} disabled={cant <= 1} aria-label="Quitar una unidad"><Minus size={18} /></button>
+                <span aria-live="polite">{cant}</span>
+                <button type="button" onClick={() => setCant(c => Math.min(maxCant, c + 1))} disabled={cant >= maxCant} aria-label="Agregar una unidad"><Plus size={18} /></button>
+              </div>
+            </div>
+            <button type="button" className="btn btn-selva ficha-cta-btn" onClick={() => agregar(p, cant)}>
+              <ShoppingCart size={18} /> Añadir al carrito
+            </button>
+          </footer>
+        )}
+        <div className={`footer-space ${ctaFijo ? 'footer-space-cta' : ''}`} />
+      </div>
+    )
+  }
+
+  // ——— Layout clásico ———
+  const media = (
+    <div className="prod-media-col">
+      <div className="det-media" {...swipe} onClick={() => galeria.length && setLightbox(true)}
+        style={{ cursor: galeria.length ? 'zoom-in' : 'default', touchAction: galeria.length > 1 ? 'pan-y' : undefined }}>
+        {galeria.length
+          ? <div className="det-track" style={{ transform: `translate3d(calc(${-img * 100}% - ${drag}px), 0, 0)`, transition: drag ? 'none' : 'transform .38s cubic-bezier(.22,.61,.36,1)' }}>
+              {galeria.map((g, k) => (
+                <div className="det-slide" key={g.url}>
+                  <picture>
+                    {g.url_mobile && g.url_mobile !== g.url ? <source media="(max-width: 700px)" srcSet={g.url_mobile} /> : null}
+                    <img src={g.url} alt={k === img ? p.nombre : ''} draggable={false} loading={k === 0 ? 'eager' : 'lazy'} />
+                  </picture>
+                </div>
+              ))}
+            </div>
+          : <span className="ph-fruto"><FrutoIcon name={iconoDe(p.frutos)} size={72} /></span>}
+        {galeria.length > 0 && <span className="zoom-hint"><ZoomIn size={16} /> Ampliar</span>}
+        {galeria.length > 1 && (
+          <div className="det-dots" onClick={e => e.stopPropagation()}>
+            {galeria.map((_, k) => (
+              <button key={k} type="button" className={`dot ${k === img ? 'on' : ''}`} onClick={() => setImg(k)} aria-label={`Imagen ${k + 1}`} />
+            ))}
+          </div>
+        )}
+      </div>
+      {galeria.length > 1 && (
+        <div className="det-thumbs">{galeria.map((g, k) => (
+          <button key={g.url} type="button" className={`det-thumb ${k === img ? 'on' : ''}`} onClick={() => setImg(k)}>
+            <img src={imgSrc(g, true) || g.url} alt="" />
+          </button>
+        ))}</div>
+      )}
+    </div>
+  )
 
   return (
     <div className="prod">
-      <Migas items={[{ label: labelCategoria(p.categoria), to: `/tienda?cat=${encodeURIComponent(p.categoria || '')}` }, { label: p.nombre }]} />
+      <Migas items={[{ label: catLabel, to: `/tienda?cat=${encodeURIComponent(p.categoria || '')}` }, { label: p.nombre }]} />
       <div style={{ display: 'flex', alignItems: 'center', padding: '4px 16px' }}>
-        <button className="volver" style={{ padding: 0 }} onClick={() => nav(-1)}><ArrowLeft size={18} /> Volver</button>
+        <button type="button" className="volver" style={{ padding: 0 }} onClick={() => nav(-1)}><ArrowLeft size={18} /> Volver</button>
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
-          {FAVORITOS && <button className={`icon-round ${fav ? 'on' : ''}`} onClick={() => toggleFav(p.id)} aria-label="Favorito"><Heart size={18} fill={fav ? 'currentColor' : 'none'} /></button>}
-          <button className="icon-round" onClick={compartirProd} aria-label="Compartir"><Share2 size={18} /></button>
+          {FAVORITOS && <button type="button" className={`icon-round ${fav ? 'on' : ''}`} onClick={() => toggleFav(p.id)} aria-label="Favorito"><Heart size={18} fill={fav ? 'currentColor' : 'none'} /></button>}
+          <button type="button" className="icon-round" onClick={compartirProd} aria-label="Compartir"><Share2 size={18} /></button>
         </div>
       </div>
+
       <div className="prod-grid">
-       <div className="prod-media-col">
-        <div className="det-media" {...swipe} onClick={() => galeria.length && setLightbox(true)} style={{ cursor: galeria.length ? 'zoom-in' : 'default', touchAction: galeria.length > 1 ? 'pan-y' : undefined }}>
-          {galeria.length
-            ? <div className="det-track" style={{ transform: `translate3d(calc(${-img * 100}% - ${drag}px), 0, 0)`, transition: drag ? 'none' : 'transform .38s cubic-bezier(.22,.61,.36,1)' }}>
-                {galeria.map((u, k) => <div className="det-slide" key={u}><img src={u} alt={k === img ? p.nombre : ''} draggable={false} loading={k === 0 ? 'eager' : 'lazy'} /></div>)}
-              </div>
-            : <span className="ph-fruto"><FrutoIcon name={iconoDe(p.frutos)} size={72} /></span>}
-          {galeria.length > 0 && <span className="zoom-hint"><ZoomIn size={16} /> Ampliar</span>}
-          {galeria.length > 1 && <div className="det-dots" onClick={e => e.stopPropagation()}>{galeria.map((_, k) => <span key={k} className={`dot ${k === img ? 'on' : ''}`} onClick={() => setImg(k)} />)}</div>}
-        </div>
-        {galeria.length > 1 && <div className="det-thumbs">{galeria.map((u, k) => <button key={u} className={`det-thumb ${k === img ? 'on' : ''}`} onClick={() => setImg(k)}><img src={u} alt="" /></button>)}</div>}
-       </div>
-       {lightbox && (
-        <Lightbox open close={() => setLightbox(false)} index={img} on={{ view: ({ index }) => setImg(index) }}
-          slides={galeria.map(u => ({ src: u }))} plugins={[Zoom, Thumbnails]}
-          thumbnails={{ position: 'bottom' }} zoom={{ maxZoomPixelRatio: 3 }} />
-       )}
+        {media}
+        {lightbox && (
+          <Lightbox open close={() => setLightbox(false)} index={img} on={{ view: ({ index }) => setImg(index) }}
+            slides={urlsWeb.map(u => ({ src: u }))} plugins={[Zoom, Thumbnails]}
+            thumbnails={{ position: 'bottom' }} zoom={{ maxZoomPixelRatio: 3 }} />
+        )}
 
-      <div className="det-body">
-        <div className="det-cat">{labelCategoria(p.categoria)}</div>
-        <h1 className="det-name serif">{p.nombre}</h1>
-        <div className="det-price">{fCOP(precio(p))}
-          {enOferta(p) && <><span className="precio-antes">{fCOP(p.precio_detal)}</span><span className="ribbon ribbon-oferta" style={{ position: 'static', marginLeft: 8 }}>-{descuentoPct(p)}%</span></>}
-          {mayorista ? <span className="precio-tag">precio mayorista</span> : (cfg.mostrar_mayor && p.precio_mayor ? <span style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', fontWeight: 400 }}> · Mayor {fCOP(p.precio_mayor)}</span> : null)}
-        </div>
-        {st && st.tono !== 'ok' && st.tono !== 'agotado' && <div className={`stock-tag stock-${st.tono}`} style={{ alignSelf: 'flex-start' }}>🔥 {st.texto}</div>}
-        {/* Propiedades (antes estaban abajo) */}
-        {p.beneficios?.length > 0 && <div className="benes">{p.beneficios.map((b, i) => <span key={i} className="bene">{b}</span>)}</div>}
-        {p.descripcion && <div className="det-desc rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.descripcion) }} />}
-
-        {agotado
-          ? <div className="agotado-box">Producto agotado por ahora. Escríbenos para avisarte cuando vuelva.</div>
-          : <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 4 }}>
-              <span style={{ fontWeight: 600, color: 'var(--texto-suave)' }}>Cantidad</span>
-              <div className="qty"><button onClick={() => agregar(p, -1)} disabled={n <= 0}><Minus size={18} /></button><span>{Math.max(1, n)}</span><button onClick={() => agregar(p, 1)}><Plus size={18} /></button></div>
+        <div className="det-body">
+          <div className="det-head-row"><div className="det-cat">{catLabel}</div></div>
+          <h1 className="det-name serif">{p.nombre}</h1>
+          <div className="det-price">
+            <span className="det-price-now">{fCOP(precio(p))}</span>
+            {oferta && <><span className="precio-antes">{fCOP(p.precio_detal)}</span><span className="det-off">-{descuentoPct(p)}% OFF</span></>}
+            {mayorista ? <span className="precio-tag">precio mayorista</span> : (cfg.mostrar_mayor && p.precio_mayor ? <span className="det-mayor"> · Mayor {fCOP(p.precio_mayor)}</span> : null)}
+          </div>
+          {st && st.tono !== 'ok' && st.tono !== 'agotado' && <div className={`stock-tag stock-${st.tono}`} style={{ alignSelf: 'flex-start' }}>🔥 {st.texto}</div>}
+          {p.beneficios?.length > 0 && (
+            <div className="benes">{p.beneficios.map((b, i) => <span key={i} className="bene">{b}</span>)}</div>
+          )}
+          {p.descripcion && (
+            <div className="det-desc-block">
+              <div className="det-desc rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.descripcion) }} />
             </div>
-            <button className="btn btn-selva" onClick={() => { if (n <= 0) agregar(p, 1) }}><ShoppingCart size={18} /> {n > 0 ? `En el pedido (${n})` : 'Agregar al pedido'}</button>
-          </>}
-        <button className="btn btn-wa" onClick={pedir}><MessageCircle size={18} /> {agotado ? 'Consultar por WhatsApp' : 'Pedir este producto'}</button>
-
-        {/* "Hecho con" abajo, tipo metaetiquetas */}
-        {p.frutos?.length > 0 && <div className="det-meta">Hecho con {p.frutos.map((f, i) => <span key={f} className="det-meta-tag"><FrutoIcon name={iconoFruto(f)} size={13} /> {labelFruto(f)}</span>)}</div>}
-      </div>
+          )}
+          {agotado
+            ? <div className="agotado-box">Producto agotado por ahora. Escríbenos para avisarte cuando vuelva.</div>
+            : (
+              <>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 14, marginTop: 4 }}>
+                  <span style={{ fontWeight: 600, color: 'var(--texto-suave)' }}>Cantidad</span>
+                  <div className="qty">
+                    <button type="button" onClick={() => setCant(c => Math.max(1, c - 1))} disabled={cant <= 1} aria-label="Quitar una unidad"><Minus size={18} /></button>
+                    <span aria-live="polite">{cant}</span>
+                    <button type="button" onClick={() => setCant(c => Math.min(maxCant, c + 1))} disabled={cant >= maxCant} aria-label="Agregar una unidad"><Plus size={18} /></button>
+                  </div>
+                </div>
+                <button type="button" className="btn btn-selva" onClick={() => agregar(p, cant)}>
+                  <ShoppingCart size={18} /> Agregar al pedido
+                </button>
+                {n > 0 && <p style={{ fontSize: '0.85rem', color: 'var(--selva)', fontWeight: 600, marginTop: -4 }}>Ya tienes {n} {n === 1 ? 'unidad' : 'unidades'} en tu pedido.</p>}
+              </>
+            )}
+          <button type="button" className="btn btn-wa" onClick={pedir}><MessageCircle size={18} /> {agotado ? 'Consultar por WhatsApp' : 'Pedir este producto'}</button>
+          {p.frutos?.length > 0 && (
+            <div className="det-meta">Hecho con {p.frutos.map((f) => (
+              <span key={f} className="det-meta-tag"><FrutoIcon name={iconoFruto(f)} size={13} /> {labelFruto(f)}</span>
+            ))}</div>
+          )}
+        </div>
       </div>
 
       {relacionados.length > 0 && (
         <section>
-          <div className="sec-head"><h2 className="sec-title serif">También te puede gustar</h2></div>
+          <div className="sec-head"><h2 className="sec-title serif">{titRel}</h2></div>
           <div className="row">{relacionados.map(r => <Card key={r.id} p={r} cfg={cfg} n={enCarrito(r.id)} onOpen={() => nav(rutaProducto(r))} onAdd={() => agregar(r, 1)} />)}</div>
         </section>
       )}

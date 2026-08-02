@@ -4,6 +4,7 @@ import { BrowserRouter } from 'react-router-dom'
 import App from './App'
 import { StoreProvider } from './store'
 import './styles.css'
+import './themes/atelier.css'
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

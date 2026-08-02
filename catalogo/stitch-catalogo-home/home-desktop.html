@@ -1,0 +1,468 @@
+<!DOCTYPE html>
+
+<html class="light" lang="es"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>Mumi Amazonía | Bienestar Natural</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Libre+Caslon+Text:wght@400;700&amp;family=Source+Sans+3:wght@400;500;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-tertiary-fixed": "#311213",
+                        "on-tertiary-fixed-variant": "#633c3d",
+                        "on-error": "#ffffff",
+                        "tertiary-fixed": "#ffdad9",
+                        "on-surface": "#1a1c1a",
+                        "surface": "#faf9f6",
+                        "on-secondary": "#ffffff",
+                        "on-primary": "#ffffff",
+                        "surface-container-highest": "#e3e3e0",
+                        "surface-container-high": "#e8e8e5",
+                        "inverse-surface": "#2f312f",
+                        "on-surface-variant": "#424843",
+                        "on-background": "#1a1c1a",
+                        "inverse-on-surface": "#f1f1ee",
+                        "on-primary-fixed": "#002113",
+                        "surface-tint": "#456553",
+                        "araza-sun": "#CFB360",
+                        "on-tertiary-container": "#c39090",
+                        "primary": "#032416",
+                        "error": "#ba1a1a",
+                        "secondary-fixed": "#e7e2da",
+                        "on-primary-fixed-variant": "#2d4d3c",
+                        "surface-container-low": "#f4f4f0",
+                        "primary-fixed": "#c7ebd4",
+                        "inverse-primary": "#abcfb8",
+                        "tertiary": "#351517",
+                        "surface-bright": "#faf9f6",
+                        "background": "#faf9f6",
+                        "secondary": "#615e58",
+                        "acai-berry": "#4B2C5E",
+                        "on-error-container": "#93000a",
+                        "outline": "#727973",
+                        "on-secondary-fixed": "#1d1c17",
+                        "secondary-fixed-dim": "#cac6be",
+                        "cocona-bright": "#E88D34",
+                        "surface-container-lowest": "#ffffff",
+                        "on-tertiary": "#ffffff",
+                        "surface-dim": "#dadad7",
+                        "secondary-container": "#e7e2da",
+                        "sand-neutral": "#F5F0E8",
+                        "on-primary-container": "#82a48f",
+                        "on-secondary-container": "#67645e",
+                        "primary-container": "#1a3a2a",
+                        "surface-container": "#eeeeeb",
+                        "earth-moss": "#3F5A4C",
+                        "outline-variant": "#c1c8c2",
+                        "forest-deep": "#1A3A2A",
+                        "surface-variant": "#e3e3e0",
+                        "tertiary-container": "#4e2a2b",
+                        "tertiary-fixed-dim": "#f0b9b9",
+                        "primary-fixed-dim": "#abcfb8",
+                        "on-secondary-fixed-variant": "#494741",
+                        "error-container": "#ffdad6"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    "spacing": {
+                        "stack-lg": "48px",
+                        "container-max": "1280px",
+                        "margin-desktop": "64px",
+                        "margin-mobile": "20px",
+                        "stack-sm": "8px",
+                        "gutter": "24px",
+                        "stack-md": "24px"
+                    },
+                    "fontFamily": {
+                        "label-md": ["\"Source Sans 3\""],
+                        "headline-lg": ["Libre Caslon Text"],
+                        "body-md": ["\"Source Sans 3\""],
+                        "nav-link": ["\"Source Sans 3\""],
+                        "body-lg": ["\"Source Sans 3\""],
+                        "title-md": ["Libre Caslon Text"],
+                        "display-lg": ["Libre Caslon Text"],
+                        "headline-lg-mobile": ["Libre Caslon Text"]
+                    },
+                    "fontSize": {
+                        "label-md": ["14px", {"lineHeight": "20px", "letterSpacing": "0.05em", "fontWeight": "600"}],
+                        "headline-lg": ["32px", {"lineHeight": "40px", "fontWeight": "400"}],
+                        "body-md": ["16px", {"lineHeight": "24px", "fontWeight": "400"}],
+                        "nav-link": ["15px", {"lineHeight": "20px", "fontWeight": "500"}],
+                        "body-lg": ["18px", {"lineHeight": "28px", "fontWeight": "400"}],
+                        "title-md": ["24px", {"lineHeight": "32px", "fontWeight": "400"}],
+                        "display-lg": ["48px", {"lineHeight": "56px", "letterSpacing": "-0.02em", "fontWeight": "400"}],
+                        "headline-lg-mobile": ["28px", {"lineHeight": "36px", "fontWeight": "400"}]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+        .hide-scrollbar::-webkit-scrollbar { display: none; }
+        .hide-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+        
+        .hero-gradient {
+            background: linear-gradient(to right, rgba(250, 249, 246, 0.9) 30%, rgba(250, 249, 246, 0) 100%);
+        }
+
+        @media (max-width: 768px) {
+            .hero-gradient {
+                background: linear-gradient(to top, rgba(250, 249, 246, 1) 20%, rgba(250, 249, 246, 0.4) 100%);
+            }
+        }
+    </style>
+</head>
+<body class="bg-surface text-on-surface font-body-md selection:bg-primary-fixed selection:text-on-primary-fixed overflow-x-hidden">
+<!-- Top AppBar -->
+<header class="bg-surface dark:bg-background shadow-none sticky top-0 z-40">
+<div class="flex justify-between items-center px-margin-mobile md:px-margin-desktop py-4 max-w-container-max mx-auto">
+<div class="flex items-center gap-8">
+<img alt="Mumi Amazonía Logo" class="h-12 w-auto object-contain" src="https://lh3.googleusercontent.com/aida/AP1WRLs9NZztABLp5Gd1OC4zbNAn1WlVJFEz2Gg0U5hY6Dp125be9058baHihPq-9Y3CoDhkR4eBJQxf_0IKQZ7Gbistpl0yQBGzQcKbgWhpNKIqt6RNcxWjwmUmsqABa-RVE53yzRVZCQiGqPWQNbR_kmmLW63gaZgUdIZlhQFafBNjg1TvygsKCmnitCtMmPeeUMcsQ627my3wEpa-s6Ax9hVp_D_YL-epY_1CQyznwdjnrasSDPE"/>
+<nav class="hidden md:flex gap-6">
+<a class="text-primary font-bold border-b-2 border-primary pb-1 font-nav-link text-nav-link hover:text-primary transition-colors duration-200" href="#">Tienda</a>
+<a class="text-on-surface-variant font-nav-link text-nav-link hover:text-primary transition-colors duration-200" href="#">Nosotros</a>
+<a class="text-on-surface-variant font-nav-link text-nav-link hover:text-primary transition-colors duration-200" href="#">Impacto</a>
+<a class="text-on-surface-variant font-nav-link text-nav-link hover:text-primary transition-colors duration-200" href="#">Blog</a>
+</nav>
+</div>
+<div class="flex items-center gap-4">
+<button class="p-2 text-primary dark:text-inverse-primary hover:text-cocona-bright transition-colors">
+<span class="material-symbols-outlined">search</span>
+</button>
+<button class="p-2 text-primary dark:text-inverse-primary hover:text-cocona-bright transition-colors relative">
+<span class="material-symbols-outlined">shopping_cart</span>
+<span class="absolute top-1 right-1 bg-cocona-bright text-white text-[10px] w-4 h-4 flex items-center justify-center rounded-full">2</span>
+</button>
+</div>
+</div>
+</header>
+<main class="min-h-screen">
+<!-- Hero Section -->
+<section class="relative w-full h-[70vh] md:h-[85vh] overflow-hidden">
+<div class="absolute inset-0 z-0">
+<img class="w-full h-full object-cover" data-alt="A lush and vibrant Amazonian rainforest background with soft sunlight filtering through dense green tropical leaves. The atmosphere is humid and serene, with hints of mist. High-quality nature photography style with deep greens and warm highlights, perfect for a luxury wellness brand background." src="https://lh3.googleusercontent.com/aida-public/AB6AXuAyB-5_Q4vhMJgOrAr5V6cIIEf6NrJ8YmC8MUpLC-NQGRyMcrXLIVbb8paxxWLUrXNp6ED4JgJT6U3hMBNO0IOfDEY2X7QeK2edSouDO0lQPBs1TJTwuSugn0ev1gwWIRI478xdH4aWZDwCgDX1QmsyeVgtSNxemUjE2rj77ocqyMexo2vIF-KGaThucfHlG9BafUH2pfa3VVoKCT7V2Uatz25sUKrtOTkT5x_NNVVcbkidtZNbpIL_"/>
+</div>
+<div class="absolute inset-0 z-10 hero-gradient"></div>
+<div class="relative z-20 h-full max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop flex flex-col justify-center items-start">
+<div class="max-w-xl animate-fade-in-up">
+<h1 class="font-display-lg text-display-lg md:text-display-lg text-forest-deep mb-6 leading-tight">
+                        Sabiduría de la selva,<br/>en cada sorbo.
+                    </h1>
+<p class="font-body-lg text-body-lg text-on-surface-variant mb-8 leading-relaxed">
+                        Descubre infusiones y superalimentos creados con frutos amazónicos recolectados de forma sostenible. Un viaje sensorial hacia el bienestar ancestral.
+                    </p>
+<div class="flex flex-col sm:flex-row gap-4">
+<button class="bg-forest-deep text-white px-8 py-4 rounded-full font-label-md text-label-md hover:translate-y-[-2px] transition-transform shadow-lg">
+                            Explorar Catálogo
+                        </button>
+<button class="border border-forest-deep text-forest-deep px-8 py-4 rounded-full font-label-md text-label-md hover:bg-forest-deep/5 transition-colors">
+                            Nuestra Historia
+                        </button>
+</div>
+</div>
+</div>
+</section>
+<!-- Frutos Filter Section -->
+<section class="py-stack-lg bg-sand-neutral/30">
+<div class="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop">
+<div class="mb-stack-md text-center">
+<h2 class="font-title-md text-title-md text-forest-deep">Explora por ingrediente</h2>
+</div>
+<div class="flex items-center gap-6 overflow-x-auto hide-scrollbar pb-4 justify-start md:justify-center">
+<!-- Chip: All -->
+<button class="flex-shrink-0 flex flex-col items-center gap-2 group transition-all">
+<div class="w-16 h-16 rounded-full bg-forest-deep text-white flex items-center justify-center shadow-md">
+<span class="material-symbols-outlined">filter_list</span>
+</div>
+<span class="font-label-md text-label-md text-forest-deep">Todos</span>
+</button>
+<!-- Ingredient Chips -->
+<button class="flex-shrink-0 flex flex-col items-center gap-2 group transition-all">
+<div class="w-16 h-16 rounded-full bg-white border border-outline-variant hover:border-forest-deep flex items-center justify-center transition-colors">
+<span class="material-symbols-outlined text-acai-berry">spa</span>
+</div>
+<span class="font-label-md text-label-md text-on-surface-variant group-hover:text-forest-deep">Açaí</span>
+</button>
+<button class="flex-shrink-0 flex flex-col items-center gap-2 group">
+<div class="w-16 h-16 rounded-full bg-white border border-outline-variant hover:border-forest-deep flex items-center justify-center transition-colors">
+<span class="material-symbols-outlined text-araza-sun">nutrition</span>
+</div>
+<span class="font-label-md text-label-md text-on-surface-variant group-hover:text-forest-deep">Arazá</span>
+</button>
+<button class="flex-shrink-0 flex flex-col items-center gap-2 group">
+<div class="w-16 h-16 rounded-full bg-white border border-outline-variant hover:border-forest-deep flex items-center justify-center transition-colors">
+<span class="material-symbols-outlined text-cocona-bright">nature_people</span>
+</div>
+<span class="font-label-md text-label-md text-on-surface-variant group-hover:text-forest-deep">Cocona</span>
+</button>
+<button class="flex-shrink-0 flex flex-col items-center gap-2 group">
+<div class="w-16 h-16 rounded-full bg-white border border-outline-variant hover:border-forest-deep flex items-center justify-center transition-colors">
+<span class="material-symbols-outlined text-error">brightness_high</span>
+</div>
+<span class="font-label-md text-label-md text-on-surface-variant group-hover:text-forest-deep">Camu Camu</span>
+</button>
+<button class="flex-shrink-0 flex flex-col items-center gap-2 group">
+<div class="w-16 h-16 rounded-full bg-white border border-outline-variant hover:border-forest-deep flex items-center justify-center transition-colors">
+<span class="material-symbols-outlined text-earth-moss">local_florist</span>
+</div>
+<span class="font-label-md text-label-md text-on-surface-variant group-hover:text-forest-deep">Burití</span>
+</button>
+</div>
+</div>
+</section>
+<!-- Product Grid Section -->
+<section class="py-stack-lg">
+<div class="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop">
+<div class="flex justify-between items-end mb-stack-md">
+<div>
+<p class="font-label-md text-label-md text-cocona-bright mb-2">PRODUCTOS DESTACADOS</p>
+<h2 class="font-headline-lg text-headline-lg text-forest-deep">Nuestra Cosecha</h2>
+</div>
+<button class="hidden md:flex items-center gap-2 text-forest-deep font-label-md text-label-md group">
+                        Ver todo <span class="material-symbols-outlined group-hover:translate-x-1 transition-transform">arrow_forward</span>
+</button>
+</div>
+<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-3 gap-gutter">
+<!-- Card 1 -->
+<div class="group">
+<div class="aspect-square rounded-xl overflow-hidden mb-4 bg-surface-container-low relative">
+<img alt="Infusión Cocona" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src="https://lh3.googleusercontent.com/aida/AP1WRLtv9CwZoxe7WFjimfZwy8N3z5hMHIT9o3VVd3EdVTNg8Rhbi-0fvnWmliMgKitZ75RN5GmYfyV4yEx7x3G_X3S_yXhUXYJ4_muJDMpYSWAJGfMRhYBafr3pdv_d-MEwoBJa_Yx_nUXWAGoxv5EYXYF0Juwul5cvzQ9QFj-Qv-KBE8bNu9bnmErQ7ktzDF15t2hi_TtPM1fV4PGdSm9ZAl9ak8M63nyVynveD7k_vsiIg0hUCwnBFVDf7g"/>
+<div class="absolute top-4 left-4 bg-white/90 backdrop-blur-sm px-3 py-1 rounded-full text-[12px] font-bold text-forest-deep">NUEVO</div>
+</div>
+<div class="flex justify-between items-start">
+<div>
+<h3 class="font-title-md text-title-md text-on-surface group-hover:text-forest-deep transition-colors">Infusión Cocona</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">Con Limonaria • 12 Unid.</p>
+</div>
+<span class="font-label-md text-label-md text-forest-deep">$24.000</span>
+</div>
+<button class="w-full mt-4 border border-outline-variant py-2 rounded-lg font-label-md text-label-md hover:bg-forest-deep hover:text-white transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">add_shopping_cart</span> Añadir
+                        </button>
+</div>
+<!-- Card 2 -->
+<div class="group">
+<div class="aspect-square rounded-xl overflow-hidden mb-4 bg-surface-container-low">
+<img alt="Infusión Açaí" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src="https://lh3.googleusercontent.com/aida/AP1WRLvHfeTJAd7Zu9IDxP954_mL9I774pIzq1TZz9OYBcOHd1SQkvBE-sZAdSIqdj_PNovsMlJl2z9u7W7DgH205pXyaO06bimmqkM8ZeFSY-2SlpsuAaXzFU6kswtqWUIk93--jaU1-s6rYHPkQiuhsBUXg0uhNqR17_7GCvfX3w4TXgwnbgzcc7qeEXxMf3kyodnDpYZqSMwwgbEaOsjAVpg9NdmksySdj2Q2G9XW31ORYxvvF7goYvrIX-A"/>
+</div>
+<div class="flex justify-between items-start">
+<div>
+<h3 class="font-title-md text-title-md text-on-surface group-hover:text-forest-deep transition-colors">Infusión Açaí</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">Flor de Jamaica • 12 Unid.</p>
+</div>
+<span class="font-label-md text-label-md text-forest-deep">$24.000</span>
+</div>
+<button class="w-full mt-4 border border-outline-variant py-2 rounded-lg font-label-md text-label-md hover:bg-forest-deep hover:text-white transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">add_shopping_cart</span> Añadir
+                        </button>
+</div>
+<!-- Card 3 -->
+<div class="group">
+<div class="aspect-square rounded-xl overflow-hidden mb-4 bg-surface-container-low relative">
+<img alt="Infusión Arazá" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src="https://lh3.googleusercontent.com/aida/AP1WRLsjWxoJSIjX2Ew3ZTj7MzqMriisSnGCQb9utZ1l4CuISmDr_I1b46FWq-zJ6mjJd2T4PFpiyvyylBfuCQbDLpb3UHBTA-cPcsKeymC6BwczcOuZdcMljTucxy5jxFWu2gAx8JvgYbJrh7pVIeZRtH2dpGUqtstH5NOotPgGIHKugSR5cIoOpbkPj-b9QaG2ofH_hEXm18lt8JGi56IL4F0yY9BjUp-hNy1StvnykDqa_6sDd3kQ23GGQGI"/>
+<div class="absolute top-4 right-4 bg-araza-sun text-forest-deep px-3 py-1 rounded-full text-[12px] font-bold">POPULAR</div>
+</div>
+<div class="flex justify-between items-start">
+<div>
+<h3 class="font-title-md text-title-md text-on-surface group-hover:text-forest-deep transition-colors">Infusión Arazá</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">Piña y Cacao • 12 Unid.</p>
+</div>
+<span class="font-label-md text-label-md text-forest-deep">$24.000</span>
+</div>
+<button class="w-full mt-4 border border-outline-variant py-2 rounded-lg font-label-md text-label-md hover:bg-forest-deep hover:text-white transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">add_shopping_cart</span> Añadir
+                        </button>
+</div>
+<!-- Card 4 -->
+<div class="group">
+<div class="aspect-square rounded-xl overflow-hidden mb-4 bg-surface-container-low">
+<img alt="Dulces de Selva" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src="https://lh3.googleusercontent.com/aida/AP1WRLsoDrv_IZv8mzFPp63PuE3oLQTSZ3oyo07PDg-0rMjlXTgYDfr5JVJ3xL4dn_uKTyeTkqpIvBUGQtZrMJ6GGRFWX1Z3ddleGldEvPe3n4O_ZxID0C78z5CYChuowpJ6Cz3JsUbiBFwxfDLE199kjV1oGp5qbDXJ9aZGZHp6FQcfTxLWL1iZsmHMlA1DXw8nC7yPhskHwgjueXce9jpWLNNLIk7eUxn3VonehqAnoVjaaqCVLIwOdXTnNQ"/>
+</div>
+<div class="flex justify-between items-start">
+<div>
+<h3 class="font-title-md text-title-md text-on-surface group-hover:text-forest-deep transition-colors">Mix Amazónico</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">Frutos deshidratados</p>
+</div>
+<span class="font-label-md text-label-md text-forest-deep">$18.500</span>
+</div>
+<button class="w-full mt-4 border border-outline-variant py-2 rounded-lg font-label-md text-label-md hover:bg-forest-deep hover:text-white transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">add_shopping_cart</span> Añadir
+                        </button>
+</div>
+<!-- Card 5 -->
+<div class="group">
+<div class="aspect-square rounded-xl overflow-hidden mb-4 bg-surface-container-low">
+<img alt="Galletas de Burití" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src="https://lh3.googleusercontent.com/aida/AP1WRLuOvTtmpfdVJLYrldD_IcSLWSpo3nXP4m5-D5vW1oUcaIzA5itJLbVvQHm0dDQGM0i79755kd6H72N5zJQxZc2YAvxhLca5h6EXQM8rHUbBvpsDgmgff4LimGBvRgOEXa61uIlGugD0b48e0uKjkfFMx8k7zxF0BBGXODQ52NIZ8cqRSgBu9aNUsmYr0BS8Rm03aPx-znxxoJpP12Q0gDn0iJDVRC96U6Yot4CaemFnVbE_BSLFxt84sw"/>
+</div>
+<div class="flex justify-between items-start">
+<div>
+<h3 class="font-title-md text-title-md text-on-surface group-hover:text-forest-deep transition-colors">Galletas Burití</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">Artesanales • 250g</p>
+</div>
+<span class="font-label-md text-label-md text-forest-deep">$15.000</span>
+</div>
+<button class="w-full mt-4 border border-outline-variant py-2 rounded-lg font-label-md text-label-md hover:bg-forest-deep hover:text-white transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">add_shopping_cart</span> Añadir
+                        </button>
+</div>
+<!-- Card 6 -->
+<div class="group">
+<div class="aspect-square rounded-xl overflow-hidden mb-4 bg-surface-container-low">
+<img alt="Pack Bienestar" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" src="https://lh3.googleusercontent.com/aida/AP1WRLsJklHgiWGRNGpKUJkWmVxhf9lrP8ISEZ3uM6dDhzTVdSs5bzYYvZffjhRUoD6ZlDmuagr-2azfQIKxduVnZhkjhp6oqbPlooKFaveU3_570IjKCpGseEJ1AeQX-kc-CPsNuik9o74Z62naJlc2WvZg2lKWixEFUNSpeIvAuZic9G1ltWonGAZiI5pO16sCm1mc070-GGEPUB07cHUQBGKOi47ycqmS8nTLkW9CNaJRcY2voam4wE95yJM"/>
+</div>
+<div class="flex justify-between items-start">
+<div>
+<h3 class="font-title-md text-title-md text-on-surface group-hover:text-forest-deep transition-colors">Pack Sabiduría</h3>
+<p class="font-body-md text-body-md text-on-surface-variant">Colección 3 Sabores</p>
+</div>
+<span class="font-label-md text-label-md text-forest-deep">$65.000</span>
+</div>
+<button class="w-full mt-4 border border-outline-variant py-2 rounded-lg font-label-md text-label-md hover:bg-forest-deep hover:text-white transition-all flex items-center justify-center gap-2">
+<span class="material-symbols-outlined text-[18px]">add_shopping_cart</span> Añadir
+                        </button>
+</div>
+</div>
+</div>
+</section>
+<!-- Promotional/Impact Section -->
+<section class="bg-forest-deep text-white py-stack-lg mt-stack-lg relative overflow-hidden">
+<div class="absolute right-0 bottom-0 opacity-10 pointer-events-none">
+<span class="material-symbols-outlined text-[300px]" style="font-variation-settings: 'FILL' 1;">eco</span>
+</div>
+<div class="max-w-container-max mx-auto px-margin-mobile md:px-margin-desktop grid md:grid-cols-2 gap-stack-md items-center relative z-10">
+<div>
+<h2 class="font-headline-lg text-headline-lg text-primary-fixed mb-6">Impacto que florece</h2>
+<p class="font-body-lg text-body-lg text-primary-fixed-dim/80 mb-8 leading-relaxed">
+                        Cada producto que eliges apoya a comunidades recolectoras de la Amazonía colombiana, fomentando prácticas de comercio justo y conservación de la biodiversidad. Juntos, protegemos el pulmón del mundo.
+                    </p>
+<div class="flex gap-8 items-center">
+<div class="text-center">
+<p class="font-display-lg text-[40px] text-araza-sun">45+</p>
+<p class="font-label-md text-label-md opacity-70">Productores</p>
+</div>
+<div class="w-px h-12 bg-white/20"></div>
+<div class="text-center">
+<p class="font-display-lg text-[40px] text-araza-sun">10</p>
+<p class="font-label-md text-label-md opacity-70">Departamentos</p>
+</div>
+</div>
+</div>
+<div class="rounded-2xl overflow-hidden aspect-video md:aspect-square shadow-2xl">
+<img class="w-full h-full object-cover" data-alt="A close-up, high-detail portrait of an indigenous Amazonian woman smiling warmly, holding a basket of fresh colorful berries like açaí and camu camu. Soft natural sunlight filters through the trees, highlighting the textures of her traditional jewelry and the vibrant colors of the fruits. Cinematic and respectful documentary style." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBQZUWXJkBsIBEeM43fmSfhhkn3DShKoTdgo198QtQklMz98MAACQmjJrhpV_IltMl0VpImtm6gerZd-_2AUilbHw1-nL95Rs0YuIJTCM99H1mkr-aJzwk6TQHoB5KXfSXkvHiLCn8GdiPbJpba-4XWXSbRIiLgNVtpBJ88_OixK_tBRt-lX5pLeHz9cT9i3noCr_iL391iW36WUn_Dfa_fJ0JDfRD_aYj7ikBhkaNjpIA0aeznH8MT"/>
+</div>
+</div>
+</section>
+<!-- Newsletter Section -->
+<section class="py-stack-lg bg-surface">
+<div class="max-w-xl mx-auto px-margin-mobile text-center">
+<h2 class="font-headline-lg text-headline-lg text-forest-deep mb-4">Únete a nuestra comunidad</h2>
+<p class="font-body-md text-body-md text-on-surface-variant mb-8">
+                    Suscríbete para recibir historias de la selva, recetas ancestrales y un 10% de descuento en tu primera compra.
+                </p>
+<form class="flex flex-col sm:flex-row gap-3">
+<input class="flex-grow px-6 py-4 rounded-full border-outline-variant focus:ring-forest-deep focus:border-forest-deep bg-sand-neutral/20 outline-none" placeholder="Tu correo electrónico" type="email"/>
+<button class="bg-forest-deep text-white px-8 py-4 rounded-full font-label-md text-label-md whitespace-nowrap hover:bg-opacity-90 transition-all" type="submit">
+                        Suscribirme
+                    </button>
+</form>
+</div>
+</section>
+</main>
+<!-- Footer -->
+<footer class="bg-sand-neutral dark:bg-forest-deep border-t border-outline-variant/10 w-full py-12 px-margin-mobile md:px-margin-desktop flex flex-col md:flex-row justify-between items-start gap-gutter">
+<div class="max-w-sm">
+<img alt="Mumi Logo" class="h-10 mb-6 grayscale opacity-70 hover:grayscale-0 transition-all" src="https://lh3.googleusercontent.com/aida/AP1WRLs9NZztABLp5Gd1OC4zbNAn1WlVJFEz2Gg0U5hY6Dp125be9058baHihPq-9Y3CoDhkR4eBJQxf_0IKQZ7Gbistpl0yQBGzQcKbgWhpNKIqt6RNcxWjwmUmsqABa-RVE53yzRVZCQiGqPWQNbR_kmmLW63gaZgUdIZlhQFafBNjg1TvygsKCmnitCtMmPeeUMcsQ627my3wEpa-s6Ax9hVp_D_YL-epY_1CQyznwdjnrasSDPE"/>
+<p class="font-body-md text-body-md text-on-surface-variant mb-6 leading-relaxed">
+                © 2024 Mumi Amazonía. Sabiduría ancestral, bienestar moderno. Trabajando por la salud de las personas y del planeta.
+            </p>
+<div class="flex gap-4">
+<a class="w-10 h-10 rounded-full border border-outline-variant flex items-center justify-center text-forest-deep hover:bg-forest-deep hover:text-white transition-all" href="#">
+<span class="material-symbols-outlined text-[20px]">public</span>
+</a>
+<a class="w-10 h-10 rounded-full border border-outline-variant flex items-center justify-center text-forest-deep hover:bg-forest-deep hover:text-white transition-all" href="#">
+<span class="material-symbols-outlined text-[20px]">photo_camera</span>
+</a>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-stack-md w-full md:w-auto">
+<div class="flex flex-col gap-3">
+<h4 class="font-label-md text-label-md text-forest-deep mb-2 uppercase tracking-wider">Mumi</h4>
+<a class="text-on-surface-variant hover:text-cocona-bright transition-colors font-body-md text-body-md" href="#">Tienda</a>
+<a class="text-on-surface-variant hover:text-cocona-bright transition-colors font-body-md text-body-md" href="#">Nosotros</a>
+<a class="text-on-surface-variant hover:text-cocona-bright transition-colors font-body-md text-body-md" href="#">Sostenibilidad</a>
+</div>
+<div class="flex flex-col gap-3">
+<h4 class="font-label-md text-label-md text-forest-deep mb-2 uppercase tracking-wider">Ayuda</h4>
+<a class="text-on-surface-variant hover:text-cocona-bright transition-colors font-body-md text-body-md" href="#">Contacto</a>
+<a class="text-on-surface-variant hover:text-cocona-bright transition-colors font-body-md text-body-md" href="#">Privacidad</a>
+<a class="text-on-surface-variant hover:text-cocona-bright transition-colors font-body-md text-body-md" href="#">Términos</a>
+</div>
+</div>
+</footer>
+<!-- BottomNavBar (Mobile Only) -->
+<nav class="fixed bottom-0 left-0 w-full z-50 flex justify-around items-center h-16 pb-safe px-4 md:hidden bg-sand-neutral/90 backdrop-blur-md border-t border-outline-variant/30 shadow-lg">
+<button class="flex flex-col items-center justify-center text-secondary font-label-md text-label-md hover:bg-primary-fixed/20 px-2">
+<span class="material-symbols-outlined">home</span>
+<span>Inicio</span>
+</button>
+<button class="flex flex-col items-center justify-center text-forest-deep font-bold font-label-md text-label-md hover:bg-primary-fixed/20 px-2 scale-95 transition-transform">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">eco</span>
+<span>Tienda</span>
+</button>
+<button class="flex flex-col items-center justify-center text-secondary font-label-md text-label-md hover:bg-primary-fixed/20 px-2">
+<span class="material-symbols-outlined">search</span>
+<span>Buscar</span>
+</button>
+<button class="flex flex-col items-center justify-center text-secondary font-label-md text-label-md hover:bg-primary-fixed/20 px-2">
+<span class="material-symbols-outlined">person</span>
+<span>Perfil</span>
+</button>
+</nav>
+<!-- Floating Action Button -->
+<button class="hidden md:flex fixed bottom-8 right-8 bg-araza-sun text-forest-deep w-14 h-14 rounded-full items-center justify-center shadow-xl hover:scale-110 active:scale-95 transition-all z-30">
+<span class="material-symbols-outlined text-[28px]">chat_bubble</span>
+</button>
+<script>
+        // Simple interactive elements
+        document.querySelectorAll('button').forEach(button => {
+            button.addEventListener('mousedown', () => {
+                button.classList.add('opacity-70');
+            });
+            button.addEventListener('mouseup', () => {
+                button.classList.remove('opacity-70');
+            });
+        });
+
+        // Intersection Observer for scroll animations
+        const observerOptions = {
+            threshold: 0.1
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('opacity-100');
+                    entry.target.classList.remove('opacity-0', 'translate-y-8');
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('.group, .max-w-xl').forEach(el => {
+            el.classList.add('transition-all', 'duration-700', 'opacity-0', 'translate-y-8');
+            observer.observe(el);
+        });
+    </script>
+</body></html>

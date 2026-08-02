@@ -18,6 +18,7 @@
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import { requireAdminOrCron } from '../_shared/auth.ts'
+import { getAlegraCreds } from '../_shared/alegra.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -27,12 +28,8 @@ const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers
 const json = (o: unknown, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { ...cors, 'Content-Type': 'application/json' } })
 
 async function getCreds(supabase: any) {
-  const { data } = await supabase.from('alegra_config').select('email, token, sync_desde').eq('id', 1).maybeSingle()
-  return {
-    email: (data?.email || Deno.env.get('ALEGRA_EMAIL') || '').trim(),
-    token: (data?.token || Deno.env.get('ALEGRA_TOKEN') || '').trim(),
-    syncDesde: String(data?.sync_desde || '').slice(0, 10),
-  }
+  const { email, token, cfg } = await getAlegraCreds(supabase, ['sync_desde'])
+  return { email, token, syncDesde: String(cfg.sync_desde || '').slice(0, 10) }
 }
 
 // Localiza el producto terminado a partir de un ítem de Alegra (por SKU o por alegra_item_id).

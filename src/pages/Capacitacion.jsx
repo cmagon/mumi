@@ -33,8 +33,11 @@ export default function Capacitacion() {
     queryKey: ['capacitaciones'],
     queryFn: async () => { const { data } = await supabase.from('capacitaciones').select('*').order('fecha', { ascending: false }); return data || [] },
   })
+  // Sub-clave 'min': solo 3 columnas para el selector de asistentes. La clave ['empleados']
+  // guarda la ficha completa que usan Nómina y el tablero (salarios, estado); compartirla
+  // dejaba la liquidación de nómina en cero al venir de esta pantalla.
   const { data: empleados = [] } = useQuery({
-    queryKey: ['empleados'],
+    queryKey: ['empleados', 'min'],
     queryFn: async () => { const { data } = await supabase.from('employees').select('id, nombre, cargo').order('nombre'); return data || [] },
   })
 

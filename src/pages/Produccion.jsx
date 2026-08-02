@@ -19,6 +19,8 @@ import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import { puedeVerSeccion } from '../lib/permisos'
 import * as XLSX from 'xlsx'
 import Select from '../components/ui/Select'
+import PaginacionTabla from '../components/ui/PaginacionTabla'
+import { usePaginacion } from '../hooks/usePaginacion'
 import {
   Download, Upload, Plus, Check, Pencil, Trash2, X, BarChart3, DollarSign, Link2,
   ReceiptText, Factory, ClipboardList, Shuffle, Camera, Save, Printer, Undo2, Package,
@@ -64,6 +66,7 @@ export default function Produccion() {
   // Permiso configurable (asignable por el admin en Usuarios): descargar registros y ver el
   // Análisis Mensual. El admin siempre puede; para otros roles depende de la sección 'analisis'.
   const puedeAnalisis = puedeVerSeccion(profile?.rol, 'produccion', 'analisis')
+  const puedeRegistrar = puedeVerSeccion(profile?.rol, 'produccion', 'registrar')
   const fileRef = useRef()
   const importRef = useRef()
   const [tab, setTab] = useState('lista')
@@ -139,8 +142,13 @@ export default function Produccion() {
   })
   const ptzUrl = ptzDoc?.storage_url || ''
 
+  // Sub-claves ('activos', 'produccion'): estas tres consultas piden menos filas o menos
+  // columnas que las dueñas de ['empleados'], ['products_costing'] y ['finished_products']
+  // (Nómina, Costos y Producto Terminado, que traen la tabla completa). Al compartir la
+  // clave se sobrescribían entre sí y la pantalla que cargaba después se quedaba con
+  // datos incompletos. El prefijo mantiene vigentes todos los invalidateQueries.
   const { data: empleados = [] } = useQuery({
-    queryKey: ['empleados'],
+    queryKey: ['empleados', 'activos'],
     queryFn: async () => {
       const { data } = await supabase.from('employees').select('*').eq('estado','activo')
       return data || []
@@ -148,7 +156,7 @@ export default function Produccion() {
   })
 
   const { data: productos = [] } = useQuery({
-    queryKey: ['products_costing'],
+    queryKey: ['products_costing', 'produccion'],
     queryFn: async () => {
       const { data } = await supabase.from('products_costing').select('nombre, tipo, costo_final, costo_variable, cif_unit, porciona, peso_subporcion, peso_unidad').order('nombre')
       return data || []
@@ -156,7 +164,7 @@ export default function Produccion() {
   })
   // Catálogo de productos terminados (para elegir el nombre del surtido — no texto libre)
   const { data: terminados = [] } = useQuery({
-    queryKey: ['finished_products'],
+    queryKey: ['finished_products', 'activos'],
     queryFn: async () => { const { data } = await supabase.from('finished_products').select('id, nombre, tipo, activo').eq('activo', true).order('nombre'); return data || [] },
   })
   // Órdenes (para trazabilidad de MP consumida en el detalle del registro) — solo admin
@@ -521,6 +529,7 @@ export default function Produccion() {
       return true
     } catch { return false }
   })
+  const pagRegistros = usePaginacion(filtrados, { resetDeps: [filtroMes, filtroAño, filtroProd] })
 
   const aprobados = registros.filter(r => r.aprobado !== false)
   const prodNames = [...new Set(registros.map(r => r.producto))].sort()
@@ -647,7 +656,7 @@ export default function Produccion() {
               <input type="file" accept=".xlsx,.xls" ref={ptzRef} onChange={e => { const f = e.target.files?.[0]; importarPTZ(f) }} style={{ display: 'none' }} disabled={importando} />
             </label>
           )}
-          <button className="btn btn-primary btn-sm" onClick={() => { setForm(EMPTY); setEditId(null); setDetalleRec(null); setFotos([]); setOrdenLink(null); setSubprocs([]); setModal(true) }}><Ico as={Plus} size={14} />Nuevo Registro</button>
+          {puedeRegistrar && <button className="btn btn-primary btn-sm" onClick={() => { setForm(EMPTY); setEditId(null); setDetalleRec(null); setFotos([]); setOrdenLink(null); setSubprocs([]); setModal(true) }}><Ico as={Plus} size={14} />Nuevo Registro</button>}
         </div>
       </div>
 
@@ -679,9 +688,9 @@ export default function Produccion() {
           </div>
           {/* ===== Versión móvil: acordeón ===== */}
           <div className="solo-movil">
-            {filtrados.length === 0
+            {pagRegistros.slice.length === 0
               ? <p className="empty-table">Sin registros</p>
-              : filtrados.map(p => (
+              : pagRegistros.slice.map(p => (
                 <AccordionItem key={p.id}
                   titulo={<>{p.producto} {p.completado ? <span className="badge badge-verde" style={{ fontSize: '0.6rem' }}>Completado</span> : <span className="badge badge-dorado" style={{ fontSize: '0.6rem' }}>En proceso</span>}</>}
                   sub={<><span style={{ color: 'var(--texto-suave)' }}>→ {nombreFinal(p)}</span> · Lote {p.lote || '—'} · {fNum(p.cantidad)} {p.empaque || ''}</>}
@@ -710,9 +719,9 @@ export default function Produccion() {
             <table>
               <thead><tr><th>Producto</th><th>Lote</th><th className="col-opcional-2">Fecha fabricación</th><th className="col-opcional-2">Vence</th><th className="col-opcional">Empaque</th><th className="td-number">Producida</th><th className="td-number">Empacada</th><th className="col-opcional-2">Avance</th><th>Estado</th><th>Acciones</th></tr></thead>
               <tbody>
-                {filtrados.length === 0
+                {pagRegistros.slice.length === 0
                   ? <tr><td colSpan={10} className="empty-table">Sin registros</td></tr>
-                  : filtrados.map(p => (
+                  : pagRegistros.slice.map(p => (
                     <tr key={p.id}>
                       <td><strong>{p.producto}</strong>
                         <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>→ {nombreFinal(p)}</div>
@@ -754,6 +763,7 @@ export default function Produccion() {
               </tbody>
             </table>
           </div>
+          <PaginacionTabla {...pagRegistros} />
         </div>
       )}
 

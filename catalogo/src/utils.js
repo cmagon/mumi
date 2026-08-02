@@ -23,11 +23,33 @@ export const BUSCADOR = true
 // ---- Formato moneda COP ----
 export const fCOP = (n) => '$' + Math.round(Number(n) || 0).toLocaleString('es-CO')
 
-// ---- Imágenes de un producto (galería): usa 'imagenes' (array) o cae a imagen_url ----
-export const imgsDe = (p) => {
-  try { const a = Array.isArray(p.imagenes) ? p.imagenes : JSON.parse(p.imagenes || '[]'); return a.length ? a : (p.imagen_url ? [p.imagen_url] : []) }
-  catch { return p.imagen_url ? [p.imagen_url] : [] }
+// ---- Imágenes de un producto (galería) ----
+// Formato nuevo: { url, url_mobile }. Formato legado: string URL.
+export const normalizeImg = (x) => {
+  if (!x) return null
+  if (typeof x === 'string') return { url: x, url_mobile: x }
+  const url = x.url || x.src || ''
+  if (!url) return null
+  return { url, url_mobile: x.url_mobile || url }
 }
+export const imgSrc = (x, mobile = false) => {
+  const n = normalizeImg(x)
+  if (!n) return ''
+  return mobile ? (n.url_mobile || n.url) : n.url
+}
+// ¿Viewport móvil? (para elegir url_mobile en cards/ficha)
+export const esMovil = () => typeof window !== 'undefined' && window.matchMedia('(max-width: 700px)').matches
+export const imgsDe = (p) => {
+  try {
+    const a = Array.isArray(p.imagenes) ? p.imagenes : JSON.parse(p.imagenes || '[]')
+    const list = (a.length ? a : (p.imagen_url ? [p.imagen_url] : [])).map(normalizeImg).filter(Boolean)
+    return list
+  } catch {
+    return p.imagen_url ? [normalizeImg(p.imagen_url)].filter(Boolean) : []
+  }
+}
+// URLs planas (lightbox / compat): siempre la versión web de mayor resolución
+export const imgsUrls = (p) => imgsDe(p).map(i => i.url)
 export const sinTildes = (s) => (s || '').toLowerCase().normalize('NFD').replace(new RegExp('[̀-ͯ]', 'g'), '')
 // Quita etiquetas HTML y colapsa espacios (la descripción del catálogo es texto enriquecido)
 export const sinHtml = (s) => (s || '').replace(/<[^>]*>/g, ' ').replace(/&[a-z]+;/gi, ' ').replace(/\s+/g, ' ').trim()

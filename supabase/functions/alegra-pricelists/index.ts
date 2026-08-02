@@ -3,7 +3,8 @@
 // Respuesta:   { ok, items: [{ id, name }] }
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { requireUser } from '../_shared/auth.ts'
+import { requireAdmin } from '../_shared/auth.ts'
+import { getAlegraCreds } from '../_shared/alegra.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -15,14 +16,11 @@ const cors = {
 }
 const json = (o: unknown, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { ...cors, 'Content-Type': 'application/json' } })
 
-async function getCreds(supabase: any) {
-  const { data } = await supabase.from('alegra_config').select('email, token').eq('id', 1).maybeSingle()
-  return { email: (data?.email || Deno.env.get('ALEGRA_EMAIL') || '').trim(), token: (data?.token || Deno.env.get('ALEGRA_TOKEN') || '').trim() }
-}
+const getCreds = (supabase: any) => getAlegraCreds(supabase)
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
-  const guard = await requireUser(req); if (guard.resp) return guard.resp
+  const guard = await requireAdmin(req); if (guard.resp) return guard.resp
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
   const { email, token } = await getCreds(supabase)
   if (!email || !token) return json({ error: 'Configura el correo y el token de Alegra en la app.' }, 400)

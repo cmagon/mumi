@@ -52,8 +52,10 @@ export default function Calidad() {
     queryKey: ['prod_no_conformes'],
     queryFn: async () => { const { data } = await supabase.from('production_records').select('id, producto, lote, fecha, obs, estado, responsable').eq('estado', 'no conforme').order('fecha', { ascending: false }); return data || [] },
   })
+  // Sub-clave 'min': solo 3 columnas. La dueña de ['registro_plantillas'] es el módulo
+  // Registros, que necesita la plantilla completa (campos, periodicidad).
   const { data: regPlantillas = [] } = useQuery({
-    queryKey: ['registro_plantillas'],
+    queryKey: ['registro_plantillas', 'min'],
     queryFn: async () => { const { data } = await supabase.from('registro_plantillas').select('id, nombre, programa'); return data || [] },
   })
   const { data: regEntradas = [] } = useQuery({

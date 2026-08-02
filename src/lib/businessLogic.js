@@ -71,16 +71,30 @@ export const getCostoMinuto = (cifTotal, operarios = 3, dias = 22, jornadaHoras 
   return minsDisponibles > 0 ? cifTotal / minsDisponibles : 0
 }
 
-// CIF proporcional multiproducto (método Punto de Equilibrio Multiproducto)
-// % participación producto = unidades_mes_producto / total_unidades_mes_portafolio
+// Unidades/mes netas de merma de una ficha (bache × baches_mes × (1 − merma)).
+const unidsMesFicha = (p) =>
+  (parseFloat(p?.bache) || 0) * (parseFloat(p?.baches_mes) || 0) * (1 - (parseFloat(p?.merma) || 0) / 100)
+
+// Ventas/mes estimadas = unidades × precio mayor (AUDITORIA_COSTOS: participación en ventas).
+const ventasMesFicha = (p) => unidsMesFicha(p) * (parseFloat(p?.precio_mayor) || 0)
+
+// CIF proporcional multiproducto (participación en ventas, no en unidades).
+// % participación = ventas_mes_producto / ventas_mes_portafolio
 // CIF por unidad = CIF_total × % participación / unidades_mes_producto
-export const getCIFPorProducto = (cifTotal, productosGuardados = [], unidadesMesActual = 0, cifUnidadesFallback = 600) => {
-  if (!productosGuardados.length) {
+// Si nadie tiene precio mayor, cae a participación por unidades (misma forma, sin distorsionar a 0).
+export const getCIFPorProducto = (cifTotal, productosGuardados = [], unidadesMesActual = 0, cifUnidadesFallback = 600, precioMayorActual = 0) => {
+  if (!productosGuardados.length && !(unidadesMesActual > 0)) {
     return cifTotal / cifUnidadesFallback
   }
-  const unidsPortafolio = productosGuardados.reduce(
-    (s, p) => s + (p.bache * p.baches_mes * (1 - (p.merma || 0) / 100)), 0
-  )
+  const ventasPortafolio = productosGuardados.reduce((s, p) => s + ventasMesFicha(p), 0)
+  const ventasActual = (unidadesMesActual || 0) * (parseFloat(precioMayorActual) || 0)
+  const totalVentas = ventasPortafolio + ventasActual
+  if (totalVentas > 0) {
+    const pct = ventasActual / totalVentas
+    return unidadesMesActual > 0 ? (cifTotal * pct) / unidadesMesActual : 0
+  }
+  // Sin precios: fallback por unidades (comportamiento histórico)
+  const unidsPortafolio = productosGuardados.reduce((s, p) => s + unidsMesFicha(p), 0)
   const totalUnids = unidsPortafolio + unidadesMesActual
   if (totalUnids <= 0) return cifTotal / cifUnidadesFallback
   const pct = unidadesMesActual / totalUnids
@@ -138,7 +152,7 @@ export const calcularCostosProducto = ({
   const mpUnit  = unidsBache > 0 ? totalMPBache / unidsBache : 0
   const moUnit  = unidsBache > 0 ? totalMOBache / unidsBache : 0   // informativo (tiempo × costo fijo/min)
   const empUnit = unidsBache > 0 ? totalEmpBache / unidsBache : 0
-  const cifUnit = getCIFPorProducto(cifTotal, productosGuardados, unidsMesTot, cifUnidadesFallback)  // informativo (absorción)
+  const cifUnit = getCIFPorProducto(cifTotal, productosGuardados, unidsMesTot, cifUnidadesFallback, precioMayor)  // informativo (por ventas)
 
   // ===== Costo del producto (método del Excel) =====
   // El overhead (costos fijos + nómina) se reparte por TIEMPO: costo/minuto = CF ÷ minutos disponibles.
@@ -178,11 +192,14 @@ export const calcularCostosProducto = ({
   // Punto de equilibrio del producto (si fuera único)
   const pe = utilMayor > 0 ? cifTotal / utilMayor : 0
 
-  const totalUnidsTodos = productosGuardados.reduce(
-    (s, p) => s + (p.bache * p.baches_mes * (1 - (p.merma || 0) / 100)), 0
-  ) + unidsMesTot
-  const pctCIF = totalUnidsTodos > 0
-    ? (unidsMesTot / totalUnidsTodos * 100).toFixed(1) : '—'
+  // % participación CIF informativo: por ventas (precio mayor × unidades). Sin precios → unidades.
+  const ventasOtros = productosGuardados.reduce((s, p) => s + ventasMesFicha(p), 0)
+  const ventasActual = unidsMesTot * (precioMayor || 0)
+  const totalVentasTodos = ventasOtros + ventasActual
+  const totalUnidsTodos = productosGuardados.reduce((s, p) => s + unidsMesFicha(p), 0) + unidsMesTot
+  const pctCIF = totalVentasTodos > 0
+    ? (ventasActual / totalVentasTodos * 100).toFixed(1)
+    : (totalUnidsTodos > 0 ? (unidsMesTot / totalUnidsTodos * 100).toFixed(1) : '—')
 
   return {
     totalMPBache, totalMOBache, totalEmpBache, totalMinutos,
@@ -193,37 +210,50 @@ export const calcularCostosProducto = ({
   }
 }
 
-// Punto de equilibrio MULTIPRODUCTO (método del Excel):
-//   PEq_producto = (CF / MCPT) × %participación,  MCPT = Σ(%participación × margen contribución unitario)
+// Punto de equilibrio MULTIPRODUCTO (AUDITORIA_COSTOS / Excel):
+//   %participación = ventas_i / Σventas  (ventas = unidades × precio mayor)
+//   MCPT = Σ(%participación × margen contribución unitario)
+//   PEq_producto = (CF / MCPT) × %participación
+// Sin precios en el portafolio, cae a participación por unidades.
 // productos: [{ nombre, precio_mayor, cvu (o costo_variable), bache, baches_mes, merma }]
 export const getPEqMultiproducto = (productos = [], cifTotal = 0) => {
   const items = productos.map(p => {
-    const q   = (p.bache || 0) * (p.baches_mes || 0) * (1 - (p.merma || 0) / 100)
-    const pvu = p.precio_mayor || 0
+    const q   = unidsMesFicha(p)
+    const pvu = parseFloat(p.precio_mayor) || 0
     const cvu = p.cvu != null ? p.cvu : (p.costo_variable != null ? p.costo_variable : (p.costo_final || 0))
-    return { nombre: p.nombre, q, pvu, cvu, mcu: pvu - cvu }
+    const ventas = q * pvu
+    return { nombre: p.nombre, q, pvu, cvu, mcu: pvu - cvu, ventas }
   })
+  const vTotal = items.reduce((s, i) => s + i.ventas, 0)
   const qTotal = items.reduce((s, i) => s + i.q, 0)
-  const mcpt = qTotal > 0 ? items.reduce((s, i) => s + (i.q / qTotal) * i.mcu, 0) : 0
+  const usaVentas = vTotal > 0
+  const peso = (i) => usaVentas ? i.ventas / vTotal : (qTotal > 0 ? i.q / qTotal : 0)
+  const mcpt = items.reduce((s, i) => s + peso(i) * i.mcu, 0)
   return items.map(i => {
-    const participacion = qTotal > 0 ? i.q / qTotal : 0
+    const participacion = peso(i)
     const pe = mcpt > 0 ? (cifTotal / mcpt) * participacion : 0
-    return { ...i, participacion, pe }
+    return { ...i, participacion, pe, porVentas: usaVentas }
   })
 }
 
-// Distribución del CIF entre todos los productos guardados
+// Distribución del CIF entre productos guardados por participación en ventas (precio mayor).
+// Sin precios, cae a unidades. Es el método del brief; la ficha de costo usa absorción por tiempo.
 export const getCIFDistribucion = (cifTotal, productos = []) => {
   const items = productos.map(p => ({
     nombre: p.nombre, tipo: p.tipo,
-    unidsMes: Math.round(p.bache * p.baches_mes * (1 - (p.merma || 0) / 100)),
+    unidsMes: Math.round(unidsMesFicha(p)),
+    ventasMes: ventasMesFicha(p),
+    precioMayor: parseFloat(p.precio_mayor) || 0,
   }))
+  const totalVentas = items.reduce((s, i) => s + i.ventasMes, 0)
   const totalUnids = items.reduce((s, i) => s + i.unidsMes, 0)
+  const usaVentas = totalVentas > 0
   return items.map(i => {
-    const pct     = totalUnids > 0 ? i.unidsMes / totalUnids : 0
+    const pct     = usaVentas ? (totalVentas > 0 ? i.ventasMes / totalVentas : 0)
+                              : (totalUnids > 0 ? i.unidsMes / totalUnids : 0)
     const cifAsig = cifTotal * pct
     const cifUnit  = i.unidsMes > 0 ? cifAsig / i.unidsMes : 0
-    return { ...i, pct, cifAsig, cifUnit, totalUnids }
+    return { ...i, pct, cifAsig, cifUnit, totalUnids, totalVentas, porVentas: usaVentas }
   })
 }
 

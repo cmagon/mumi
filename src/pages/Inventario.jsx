@@ -5,14 +5,20 @@ import { supabase } from '../lib/supabase'
 import { fFecha, fNum, getEstadoStock } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
 import { useAuth } from '../context/AuthContext'
+import { puedeVerSeccion } from '../lib/permisos'
 import Modal from '../components/ui/Modal'
 import MoneyInput from '../components/ui/MoneyInput'
 import { useConfirm, usePrompt } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
-import { crearLoteEntrada, consumirPEPS, consumirLote, estadoLote, costoPEPS } from '../lib/lotes'
+import {
+  crearLoteEntrada, consumirPEPS, consumirLote, bajarLote, estadoLote, costoPEPS,
+  reponerCantidadesLotes, reducirLote, stockDesdeLotes, sincronizarPEPSAlStock, LOTE_SIN_CODIGO,
+} from '../lib/lotes'
 import * as XLSX from 'xlsx'
 import { Download, Tags, Tag, Plus, Pencil, X, Package, ClipboardList, FileText, AlertTriangle, Trash2, Undo2 } from 'lucide-react'
 import Select from '../components/ui/Select'
+import PaginacionTabla from '../components/ui/PaginacionTabla'
+import { usePaginacion } from '../hooks/usePaginacion'
 
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
@@ -87,7 +93,9 @@ export default function Inventario() {
   const qc = useQueryClient()
   const { profile } = useAuth()
   const esAdmin = profile?.rol === 'admin'
-  const puedeEditarInv = profile?.rol !== 'auxiliar'   // admin y operario editan; auxiliar solo lectura
+  // Secciones configurables: sin override, auxiliar solo ve stock; operario también mueve.
+  const puedeVerStock = puedeVerSeccion(profile?.rol, 'inventario', 'stock')
+  const puedeEditarInv = puedeVerSeccion(profile?.rol, 'inventario', 'movimientos')
 
   const [modalMP, setModalMP] = useState(false)
   const [modalMov, setModalMov] = useState(false)
@@ -136,7 +144,18 @@ export default function Inventario() {
   const [bajaForm, setBajaForm] = useState({ cantidad: '', motivo: 'vencido', obs: '' })
   const [lotesMP, setLotesMP] = useState(null)
   const lotesDe = (mpId) => lotesDB.filter(l => l.mp_id === mpId).sort((a, b) => (a.vencimiento || '9999') < (b.vencimiento || '9999') ? -1 : (a.fecha_entrada < b.fecha_entrada ? -1 : 1))
-  const stockLotes = (mpId) => lotesDe(mpId).reduce((s, l) => s + (l.cantidad_actual || 0), 0)
+  const stockLotes = (mpId) => stockDesdeLotes(lotesDe(mpId))
+  // Descuadre PEPS: stock general vs suma de lotes (incluye empaque / MP sin trazabilidad).
+  // Si hay stock y cero lotes, también cuenta: se puede crear el respaldo "sin lote".
+  const descuadrePEPS = (m) => {
+    if (!m) return null
+    const porLotes = stockLotes(m.id)
+    const stock = Number(m.stock) || 0
+    const diff = stock - porLotes
+    if (Math.abs(diff) <= 0.001) return null
+    return { stock, porLotes, diff }
+  }
+  const mpsDescuadrados = mps.filter(m => descuadrePEPS(m))
   // Proveedores ya registrados en lotes anteriores (para autocompletar en nuevas entradas)
   const proveedoresConocidos = [...new Set(lotesDB.map(l => (l.proveedor || '').trim()).filter(Boolean))].sort()
 
@@ -195,8 +214,32 @@ export default function Inventario() {
             }).eq('id', l.id)
           }
         }
+        // Si se editó el stock a mano (sin movimiento), alinea PEPS: crea/ajusta lote "sin lote"
+        // o consume exceso — el stock de la ficha manda.
+        if (mpVieja && Math.abs((Number(mpVieja.stock) || 0) - (Number(payload.stock) || 0)) > 0.001) {
+          await sincronizarPEPSAlStock({
+            mp_id: editMPId,
+            stock: payload.stock,
+            costo_unitario: payload.precio || 0,
+            creado_por: profile?.nombre || '',
+          })
+        }
       }
-      else { const { error } = await supabase.from('raw_materials').insert(payload); if (error) throw error }
+      else {
+        const { data: nueva, error } = await supabase.from('raw_materials').insert(payload).select('id').single()
+        if (error) throw error
+        // MP nueva con stock inicial → respaldo PEPS "sin lote" (o con el lote de la ficha)
+        if (nueva?.id && (Number(payload.stock) || 0) > 0.001) {
+          await crearLoteEntrada({
+            mp_id: nueva.id,
+            lote: payload.lote || LOTE_SIN_CODIGO,
+            vencimiento: payload.vencimiento || null,
+            cantidad: payload.stock,
+            costo_unitario: payload.precio || 0,
+            creado_por: profile?.nombre || '',
+          })
+        }
+      }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['mp_categories'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
@@ -262,31 +305,35 @@ export default function Inventario() {
       // Costo unitario del movimiento: en entradas el de compra/fabricación; en salidas el
       // costo PEPS real de los lotes consumidos (se calcula más abajo).
       let costoMovimiento = formMov.costo !== '' && formMov.costo != null ? (parseFloat(formMov.costo) || 0) : (mp?.precio || 0)
-      // PEPS: entrada crea lote; salida consume del lote más antiguo/próximo a vencer
-      if ((formMov.tipo === 'entrada' || (formMov.tipo === 'ajuste' && cantidad > 0)) && !esEmpaque(mp?.categoria)) {
-        // Ajuste positivo también crea lote — si no, ese sobrante queda contabilizado en el stock
-        // general pero invisible/sin respaldo en la trazabilidad PEPS para siempre.
-        await crearLoteEntrada({
-          mp_id: mpId, lote: formMov.lote, vencimiento: formMov.vencimiento, fecha: fechaHoy,
+      // Si la salida ya bajó stock dentro de la RPC PEPS (v138), no se vuelve a ajustar.
+      let stockYaAjustado = false
+      // PEPS para TODA MP (también empaque): sin código de lote → "sin lote".
+      if (formMov.tipo === 'entrada' || (formMov.tipo === 'ajuste' && cantidad > 0)) {
+        const creado = await crearLoteEntrada({
+          mp_id: mpId,
+          lote: formMov.lote || (esEmpaque(mp?.categoria) ? LOTE_SIN_CODIGO : ''),
+          vencimiento: formMov.vencimiento, fecha: fechaHoy,
           cantidad, costo_unitario: formMov.costo !== '' ? parseFloat(formMov.costo) || 0 : (mp?.precio || 0),
           creado_por: profile?.nombre || '', proveedor: formMov.proveedor || '',
         })
+        if (creado?.id) extra.lote_id = creado.id
         if (formMov.proveedor) extra.proveedor = formMov.proveedor
-      } else if (!esEmpaque(mp?.categoria) && (formMov.tipo === 'salida' || (formMov.tipo === 'ajuste' && cantidad < 0))) {
-        // Salida (o ajuste negativo): exige motivo; descuenta del lote elegido o por PEPS
+      } else if (formMov.tipo === 'salida' || (formMov.tipo === 'ajuste' && cantidad < 0)) {
         if (!formMov.motivo) throw new Error('Indica el motivo de la salida')
         const aDescontar = formMov.tipo === 'salida' ? cantidad : Math.abs(cantidad)
         let consumidos = [], faltante = 0
         if (formMov.lote_id) {
-          const r = await consumirLote({ lote_id: parseInt(formMov.lote_id), cantidad: aDescontar }); consumidos = r.consumidos; faltante = r.faltante
+          const r = await consumirLote({ lote_id: parseInt(formMov.lote_id), cantidad: aDescontar, ajustarStock: true })
+          consumidos = r.consumidos; faltante = r.faltante; stockYaAjustado = !!r.stockAjustado
         } else {
-          const r = await consumirPEPS({ mp_id: mpId, cantidad: aDescontar }); consumidos = r.consumidos; faltante = r.faltante
+          const r = await consumirPEPS({ mp_id: mpId, cantidad: aDescontar, ajustarStock: true })
+          consumidos = r.consumidos; faltante = r.faltante; stockYaAjustado = !!r.stockAjustado
         }
+        // Si faltó lote, el stock ya bajó: el descuadre se corrige creando deuda visual;
+        // al reconciliar se puede ajustar. Dejamos constancia del faltante.
         if (consumidos.length) extra.lotes_consumidos = consumidos
         if (faltante > 0) extra.faltante_sin_lote = faltante
         extra.motivo = formMov.motivo
-        // Costo REAL de la salida: cada lote a su propio costo de entrada (PEPS). Lo que no
-        // tenga lote se valora al precio promedio de la MP, que es la única referencia posible.
         const cp = costoPEPS(consumidos, faltante, mp?.precio || 0)
         costoMovimiento = cp.costoUnitario
         extra.costo_peps_total = Math.round(cp.costoTotal)
@@ -307,9 +354,11 @@ export default function Inventario() {
       }
       if (movErr) throw movErr
       if (mp) {
-        // Ajuste atómico en BD (evita condición de carrera con otro movimiento/reserva simultánea)
-        const delta = formMov.tipo === 'salida' ? -cantidad : cantidad   // "salida" permite negativo si excede
-        await supabase.rpc('ajustar_stock_mp', { p_mp_id: mpId, p_delta: delta })
+        // Entradas / empaque / fallbacks: ajustan stock aquí. Salidas PEPS v138 ya lo hicieron.
+        if (!stockYaAjustado) {
+          const delta = formMov.tipo === 'salida' ? -cantidad : cantidad
+          await supabase.rpc('ajustar_stock_mp', { p_mp_id: mpId, p_delta: delta })
+        }
         // Si es entrada, también actualiza lote/venc y el COSTO del MP como PROMEDIO PONDERADO
         // (no se reemplaza por el costo del último ingreso; se pondera con el stock que ya había,
         // así la valorización no se distorsiona si el nuevo lote entra a un costo distinto).
@@ -361,27 +410,34 @@ export default function Inventario() {
       const signoOriginal = mv.tipo === 'salida' ? -1 : 1   // ajuste guarda con signo en cantidad
       const delta = mv.tipo === 'ajuste' ? -cant : -(signoOriginal * cant)
       await supabase.rpc('ajustar_stock_mp', { p_mp_id: mv.mp_id, p_delta: delta })
-      // Reversa de lotes:
-      //  - Entrada con lote propio → se elimina/reduce ese lote (si aún tiene esa cantidad).
-      //  - Salida que consumió lotes → se devuelve la cantidad a cada lote consumido.
+      // Reversa de lotes por ID (v138). Fallback por nombre de lote solo si el movimiento es viejo.
       const ex = mv.extra || {}
       try {
-        if (mv.tipo === 'entrada' && mv.lote) {
-          const { data: ls } = await supabase.from('raw_material_lots').select('*')
-            .eq('mp_id', mv.mp_id).eq('lote', mv.lote).order('fecha_entrada', { ascending: false }).limit(1)
-          const l = ls?.[0]
-          if (l) {
-            const nuevo = Math.max(0, (Number(l.cantidad_actual) || 0) - cant)
-            await supabase.from('raw_material_lots').update({ cantidad_actual: nuevo }).eq('id', l.id)
+        if (Array.isArray(ex.lotes_consumidos) && ex.lotes_consumidos.length) {
+          // Salida / ajuste negativo: devolver a los mismos lotes (por id)
+          const porId = ex.lotes_consumidos.filter(lc => lc.id && (Number(lc.cantidad) || 0) > 0)
+          if (porId.length) {
+            await reponerCantidadesLotes(porId)
+          } else {
+            for (const lc of ex.lotes_consumidos) {
+              if (!lc.lote) continue
+              const { data: ls } = await supabase.from('raw_material_lots').select('*')
+                .eq('mp_id', mv.mp_id).eq('lote', lc.lote).limit(1)
+              const l = ls?.[0]
+              if (l) await supabase.from('raw_material_lots').update({
+                cantidad_actual: (Number(l.cantidad_actual) || 0) + (Number(lc.cantidad) || 0),
+              }).eq('id', l.id)
+            }
           }
-        } else if (Array.isArray(ex.lotes_consumidos) && ex.lotes_consumidos.length) {
-          for (const lc of ex.lotes_consumidos) {
-            if (!lc.lote) continue
-            const { data: ls } = await supabase.from('raw_material_lots').select('*')
-              .eq('mp_id', mv.mp_id).eq('lote', lc.lote).limit(1)
-            const l = ls?.[0]
-            if (l) await supabase.from('raw_material_lots').update({ cantidad_actual: (Number(l.cantidad_actual) || 0) + (Number(lc.cantidad) || 0) }).eq('id', l.id)
+        } else if (mv.tipo === 'entrada' || (mv.tipo === 'ajuste' && cant > 0)) {
+          // Entrada: reducir el lote creado (preferir id guardado en extra)
+          let loteId = ex.lote_id
+          if (!loteId && mv.lote) {
+            const { data: ls } = await supabase.from('raw_material_lots').select('id')
+              .eq('mp_id', mv.mp_id).eq('lote', mv.lote).order('fecha_entrada', { ascending: false }).limit(1)
+            loteId = ls?.[0]?.id
           }
+          if (loteId) await reducirLote({ lote_id: loteId, cantidad: Math.abs(cant) })
         }
       } catch (e) { console.warn('No se pudo revertir el lote del movimiento:', e) }
       // Marca el original como anulado y crea un contra-asiento visible en el historial
@@ -402,8 +458,51 @@ export default function Inventario() {
     onError: (e) => toast(e.message, 'error'),
   })
 
+  // Alinea PEPS al stock (no al revés): si hay stock sin lotes, crea "sin lote";
+  // si sobran lotes, los consume. El stock de la ficha no se toca. Solo admin.
+  const reconciliarPEPS = useMutation({
+    mutationFn: async (mp) => {
+      const d = descuadrePEPS(mp)
+      if (!d) return
+      const r = await sincronizarPEPSAlStock({
+        mp_id: mp.id,
+        stock: d.stock,
+        costo_unitario: mp.precio || 0,
+        creado_por: profile?.nombre || '',
+      })
+      const movBase = {
+        mp_id: mp.id, tipo: 'ajuste', cantidad: 0,
+        fecha: new Date().toISOString().split('T')[0],
+        responsable: profile?.nombre || '',
+        obs: r.accion === 'crear_sin_lote' || r.accion === 'sumar_sin_lote'
+          ? `[PEPS] Creado/ajustado lote "${LOTE_SIN_CODIGO}" por ${fBase(Math.abs(d.diff), mp.unidad)} (stock ${fBase(d.stock, mp.unidad)})`
+          : r.accion === 'consumir_exceso'
+            ? `[PEPS] Consumidos ${fBase(Math.abs(d.diff), mp.unidad)} de lotes para igualar al stock ${fBase(d.stock, mp.unidad)}`
+            : `[PEPS] Ya cuadraba`,
+        extra: {
+          reconciliacion_peps: true, accion: r.accion,
+          stock: d.stock, lotes_antes: d.porLotes, diff: d.diff, lote_id: r.lote_id || null,
+        },
+      }
+      const { error } = await supabase.from('inventory_movements').insert(movBase)
+      if (error && !/inventory_movements/i.test(error.message || '')) throw error
+      return r
+    },
+    onSuccess: (r) => {
+      qc.invalidateQueries({ queryKey: ['raw_materials'] })
+      qc.invalidateQueries({ queryKey: ['inventory_movements'] })
+      qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
+      const msg = r?.accion === 'crear_sin_lote' ? 'Registro PEPS "sin lote" creado ✓'
+        : r?.accion === 'sumar_sin_lote' ? 'Lote "sin lote" actualizado ✓'
+        : r?.accion === 'consumir_exceso' ? 'Exceso de lotes consumido — PEPS = stock ✓'
+        : 'PEPS ya cuadraba ✓'
+      toast(msg)
+    },
+    onError: (e) => toast(e.message, 'error'),
+  })
+
   // ---- Dar de baja un lote PEPS (vencido, dañado, contaminado…) ----
-  // Descuenta la cantidad del lote y del stock general de la MP, y deja registro con motivo.
+  // Descuento atómico de lote + stock (RPC v137). Luego deja el rastro de auditoría.
   const darBajaLote = useMutation({
     mutationFn: async () => {
       const l = bajaLote?.lote, mp = bajaLote?.mp
@@ -413,26 +512,26 @@ export default function Inventario() {
       if (!(cant > 0)) throw new Error('Ingresa la cantidad a dar de baja')
       if (cant > disp + 0.0001) throw new Error(`No puedes dar de baja más de lo disponible en el lote (${fBase(disp, mp.unidad)})`)
       if (!bajaForm.motivo) throw new Error('Indica el motivo de la baja')
-      // 1) Descuenta del lote
-      await supabase.from('raw_material_lots').update({ cantidad_actual: disp - cant }).eq('id', l.id)
-      // 2) Descuenta del stock general de la MP (atómico)
-      await supabase.rpc('ajustar_stock_mp', { p_mp_id: mp.id, p_delta: -cant })
-      // 3) Registro de la baja (auditoría). Tolerante si falta la migración v132.
+      // 1) Lote + stock general en una sola transacción (evita carreras entre dos bajas)
+      const baja = await bajarLote({ lote_id: l.id, cantidad: cant })
+      // 2) Registro de la baja (auditoría). Tolerante si falta la tabla/migración.
       const motivoTxt = bajaForm.obs.trim() ? `${bajaForm.motivo} — ${bajaForm.obs.trim()}` : bajaForm.motivo
-      try {
-        await supabase.from('lote_bajas').insert({
-          lote_id: l.id, mp_id: mp.id, mp_nombre: mp.nombre, lote: l.lote || '',
-          cantidad: cant, unidad: mp.unidad, motivo: motivoTxt, vencimiento: l.vencimiento || null,
-          creado_por: profile?.nombre || '',
-        })
-      } catch { /* sin tabla: no bloquea la baja */ }
-      // 4) También como movimiento de inventario, para que aparezca en el historial de la MP
+      const { error: bErr } = await supabase.from('lote_bajas').insert({
+        lote_id: l.id, mp_id: mp.id, mp_nombre: mp.nombre, lote: baja.lote || l.lote || '',
+        cantidad: cant, unidad: mp.unidad, motivo: motivoTxt, vencimiento: baja.vencimiento || l.vencimiento || null,
+        creado_por: profile?.nombre || '',
+      })
+      if (bErr && !/lote_bajas|does not exist|schema cache/i.test(bErr.message || '')) {
+        console.warn('No se pudo registrar la baja en lote_bajas:', bErr.message)
+      }
+      // 3) También como movimiento de inventario, para que aparezca en el historial de la MP
       const movBase = {
         mp_id: mp.id, tipo: 'salida', cantidad: cant, fecha: new Date().toISOString().split('T')[0],
-        responsable: profile?.nombre || '', obs: `[Baja de lote ${l.lote || 's/n'}] ${motivoTxt}`,
-        lote: l.lote || '', vencimiento: l.vencimiento || null, extra: { baja_lote: true, lote_id: l.id, motivo: motivoTxt },
+        responsable: profile?.nombre || '', obs: `[Baja de lote ${baja.lote || l.lote || 's/n'}] ${motivoTxt}`,
+        lote: baja.lote || l.lote || '', vencimiento: baja.vencimiento || l.vencimiento || null,
+        extra: { baja_lote: true, lote_id: l.id, motivo: motivoTxt },
       }
-      let { error: mErr } = await supabase.from('inventory_movements').insert({ ...movBase, costo_unitario: l.costo_unitario || 0 })
+      let { error: mErr } = await supabase.from('inventory_movements').insert({ ...movBase, costo_unitario: baja.costo_unitario || 0 })
       if (mErr && /costo_unitario/i.test(mErr.message || '')) await supabase.from('inventory_movements').insert(movBase)
     },
     onSuccess: () => {
@@ -500,6 +599,7 @@ export default function Inventario() {
   const normBusq = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
   const mpsFiltrados = mps.filter(m => (!filtroCat || m.categoria === filtroCat) && pasaEstado(m)
     && (!buscarMP.trim() || normBusq(m.nombre).includes(normBusq(buscarMP)) || normBusq(m.categoria).includes(normBusq(buscarMP))))
+  const pagMP = usePaginacion(mpsFiltrados, { resetDeps: [filtroCat, filtroEstado, buscarMP] })
   const histMovs = histMP ? movimientos.filter(mv => mv.mp_id === histMP.id) : []
   // Auditoría de EDICIONES de la ficha de la MP (tabla v94 — si no existe, lista vacía)
   const { data: histEdits = [] } = useQuery({
@@ -542,6 +642,15 @@ export default function Inventario() {
         <div className="kpi-card tierra"><div className="kpi-label">Sin Stock</div><div className="kpi-value">{cero}</div></div>
       </div>
 
+      {mpsDescuadrados.length > 0 && (
+        <div className="alert alert-warning" style={{ fontSize: '0.85rem', marginBottom: 12 }}>
+          <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><AlertTriangle size={15} aria-hidden="true" /> Descuadre PEPS</strong>
+          {' '}{mpsDescuadrados.length} materia(s) prima(s) tienen stock distinto a la suma de lotes
+          ({mpsDescuadrados.slice(0, 4).map(m => m.nombre).join(', ')}{mpsDescuadrados.length > 4 ? '…' : ''}).
+          {esAdmin && ' Usa “Crear/igualar PEPS”: si falta respaldo crea lote “sin lote”; si sobran lotes, los ajusta al stock.'}
+        </div>
+      )}
+
       <div className="card">
         <div className="card-title"><Ico as={Package} size={16} />Estado del Inventario</div>
         <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -564,22 +673,25 @@ export default function Inventario() {
 
         {/* ===== Versión móvil: acordeón ===== */}
         <div className="solo-movil">
-          {mpsFiltrados.length === 0
+          {pagMP.slice.length === 0
             ? <p className="empty-table">Sin materias primas en esta categoría</p>
-            : mpsFiltrados.map(m => {
+            : pagMP.slice.map(m => {
               const { label, badge } = getEstadoStock(m.stock || 0, m.stock_min || 0)
               const lv = loteVigente(m)
+              const desq = descuadrePEPS(m)
               return (
                 <AccordionItem key={m.id}
                   titulo={<>
-                    {((m.stock || 0) <= 0 || ((m.stock_min || 0) > 0 && m.stock <= m.stock_min)) && <AlertTriangle size={14} aria-hidden="true" style={{ color: (m.stock || 0) <= 0 ? 'var(--rojo)' : 'var(--dorado)', display: 'inline', verticalAlign: '-2px', marginRight: 4 }} />}
+                    {((m.stock || 0) <= 0 || ((m.stock_min || 0) > 0 && m.stock <= m.stock_min) || desq) && <AlertTriangle size={14} aria-hidden="true" style={{ color: desq ? 'var(--tierra)' : (m.stock || 0) <= 0 ? 'var(--rojo)' : 'var(--dorado)', display: 'inline', verticalAlign: '-2px', marginRight: 4 }} />}
                     {m.nombre} {m.tipo === 'interno' && <span className="badge badge-dorado" style={{ fontSize: '0.6rem' }}>interno</span>}
+                    {desq && <span className="badge badge-dorado" style={{ fontSize: '0.6rem', marginLeft: 4 }}>PEPS</span>}
                   </>}
                   sub={<><span className={`badge ${badge}`} style={{ fontSize: '0.62rem' }}>{label}</span> · {fBase(m.stock, m.unidad)}</>}
                 >
                   <Fila et="Categoría">{m.categoria}</Fila>
                   <Fila et="Precio">${fNum(m.precio || 0)}{sufijoUnidad(m.unidad)}</Fila>
                   <Fila et="Stock">{fBase(m.stock, m.unidad)}</Fila>
+                  {desq && <Fila et="Lotes PEPS">{fBase(desq.porLotes, m.unidad)} <small style={{ color: 'var(--tierra)' }}>(diff {fBase(desq.diff, m.unidad)})</small></Fila>}
                   <Fila et="Stock mín.">{fBase(m.stock_min, m.unidad)}</Fila>
                   <Fila et="Lote">{lv.lote || '—'}</Fila>
                   <Fila et="Vence">{lv.vence ? fFecha(lv.vence) : '—'}</Fila>
@@ -587,6 +699,16 @@ export default function Inventario() {
                     {puedeEditarInv && <button className="btn btn-xs btn-primary" onClick={() => openMovimiento(m.id, 'entrada')}>+ Entrada</button>}
                     {puedeEditarInv && <button className="btn btn-xs btn-secondary" onClick={() => openMovimiento(m.id, 'salida')}>- Salida</button>}
                     <button className="btn btn-xs btn-secondary" onClick={() => openHistorial(m)}>🕑 Historial</button>
+                    {esAdmin && desq && (
+                      <button className="btn btn-xs btn-dorado" disabled={reconciliarPEPS.isPending}
+                        onClick={() => confirmar(
+                          desq.diff > 0
+                            ? `¿Crear/ajustar PEPS "sin lote" por ${fBase(desq.diff, m.unidad)} para "${m.nombre}"?\nEl stock (${fBase(desq.stock, m.unidad)}) no se modifica.`
+                            : `¿Consumir ${fBase(Math.abs(desq.diff), m.unidad)} de lotes PEPS de "${m.nombre}" para igualarlos al stock (${fBase(desq.stock, m.unidad)})?\nEl stock no se modifica.`
+                        ).then(ok => ok && reconciliarPEPS.mutate(m))}>
+                        {desq.diff > 0 ? 'Crear PEPS' : 'Igualar PEPS'}
+                      </button>
+                    )}
                     {puedeEditarInv && <button className="btn btn-xs btn-secondary" onClick={() => openEditMP(m)}><Ico as={Pencil} size={13} />Editar</button>}
                     {esAdmin && <button className="btn btn-xs btn-danger" disabled={(m.stock || 0) !== 0}
                       onClick={() => confirmar(`¿Eliminar la materia prima "${m.nombre}"?\nEsta acción no se puede deshacer.`).then(ok => ok && deleteMP.mutate(m))} title="Eliminar"><X size={13} aria-hidden="true" /></button>}
@@ -601,16 +723,18 @@ export default function Inventario() {
           <table>
             <thead><tr><th>Materia Prima</th><th className="col-opcional-2">Categoría</th><th className="col-opcional-2">Unidad</th><th>Precio</th><th>Stock</th><th className="col-opcional-2">Mín.</th><th className="col-opcional">Lote</th><th className="col-opcional">Vence</th><th className="col-opcional">Estado</th><th>Acciones</th></tr></thead>
             <tbody>
-              {mpsFiltrados.length === 0
+              {pagMP.slice.length === 0
                 ? <tr><td colSpan={10} className="empty-table">Sin materias primas en esta categoría</td></tr>
-                : mpsFiltrados.map(m => {
+                : pagMP.slice.map(m => {
                   const { label, badge } = getEstadoStock(m.stock || 0, m.stock_min || 0)
                   const lv = loteVigente(m)
+                  const desq = descuadrePEPS(m)
                   return (
-                    <tr key={m.id} style={{ cursor: 'pointer' }} onClick={() => openHistorial(m)}>
+                    <tr key={m.id} style={{ cursor: 'pointer', background: desq ? 'color-mix(in srgb, var(--tierra) 8%, transparent)' : undefined }} onClick={() => openHistorial(m)}>
                       <td>
                         <strong>{m.nombre}</strong>
                         {m.tipo === 'interno' && <span className="badge badge-dorado" style={{ marginLeft: 6, fontSize: '0.7rem' }}>interno</span>}
+                        {desq && <span className="badge badge-dorado" style={{ marginLeft: 6, fontSize: '0.7rem' }} title={`Stock ${fBase(desq.stock, m.unidad)} vs lotes ${fBase(desq.porLotes, m.unidad)}`}>PEPS ≠</span>}
                       </td>
                       <td className="col-opcional-2"><span className="badge badge-gris">{m.categoria}</span></td>
                       <td className="col-opcional-2">{m.unidad}</td>
@@ -621,11 +745,22 @@ export default function Inventario() {
                       <td className="col-opcional">{lv.vence ? fFecha(lv.vence) : '—'}</td>
                       <td className="col-opcional"><span className={`badge ${badge}`}>{label}</span></td>
                       <td onClick={e => e.stopPropagation()}>
-                        <div style={{ display: 'flex', gap: 4 }}>
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           {puedeEditarInv && <button className="btn btn-xs btn-primary" onClick={() => openMovimiento(m.id, 'entrada')}>+ Ent.</button>}
                           {puedeEditarInv && <button className="btn btn-xs btn-secondary" onClick={() => openMovimiento(m.id, 'salida')}>- Sal.</button>}
                           <button className="btn btn-xs btn-secondary" onClick={() => openHistorial(m)}>🕑</button>
-                          {!esEmpaque(m.categoria) && <button className="btn btn-xs btn-secondary" title="Lotes (PEPS)" onClick={() => { setLotesMP(m); setModalLotes(true) }}>🧊</button>}
+                          <button className="btn btn-xs btn-secondary" title="Lotes (PEPS)" onClick={() => { setLotesMP(m); setModalLotes(true) }}>🧊</button>
+                          {esAdmin && desq && (
+                            <button className="btn btn-xs btn-dorado" disabled={reconciliarPEPS.isPending}
+                              title={desq.diff > 0 ? `Crear PEPS "sin lote" por ${fBase(desq.diff, m.unidad)}` : `Igualar lotes al stock`}
+                              onClick={() => confirmar(
+                                desq.diff > 0
+                                  ? `¿Crear/ajustar PEPS "sin lote" por ${fBase(desq.diff, m.unidad)} para "${m.nombre}"?\nEl stock (${fBase(desq.stock, m.unidad)}) no se modifica.`
+                                  : `¿Consumir ${fBase(Math.abs(desq.diff), m.unidad)} de lotes PEPS de "${m.nombre}" para igualarlos al stock (${fBase(desq.stock, m.unidad)})?\nEl stock no se modifica.`
+                              ).then(ok => ok && reconciliarPEPS.mutate(m))}>
+                              {desq.diff > 0 ? 'Crear PEPS' : 'Igualar'}
+                            </button>
+                          )}
                           {puedeEditarInv && <button className="btn btn-xs btn-secondary" onClick={() => openEditMP(m)} title="Editar"><Pencil size={13} aria-hidden="true" /></button>}
                           {esAdmin && <button className="btn btn-xs btn-danger"
                             disabled={(m.stock || 0) !== 0}
@@ -639,9 +774,10 @@ export default function Inventario() {
             </tbody>
           </table>
         </div>
+        <PaginacionTabla {...pagMP} />
       </div>
 
-      <div className="card">
+      {(puedeVerStock || puedeEditarInv) && <div className="card">
         <div className="card-title"><Ico as={ClipboardList} size={16} />Últimos Movimientos</div>
         <div className="table-wrap">
           <table>
@@ -667,7 +803,7 @@ export default function Inventario() {
             </tbody>
           </table>
         </div>
-      </div>
+      </div>}
 
       {/* Modal MP */}
       <Modal open={modalMP} onClose={() => { setModalMP(false); setFormMP(EMPTY_MP); setEditMPId(null) }}

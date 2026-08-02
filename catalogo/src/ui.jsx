@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useSwipeable } from 'react-swipeable'
 import { Plus, ChevronLeft, ChevronRight, Send, Heart, X, MessageCircle } from 'lucide-react'
-import { fCOP, labelCategoria, iconoDe, stockLabel, suscribir, FAVORITOS } from './utils'
+import { fCOP, labelCategoria, iconoDe, stockLabel, suscribir, FAVORITOS, imgsDe, imgSrc } from './utils'
 import FrutoIcon from './FrutoIcon'
 import { useStore } from './store'
 
@@ -20,24 +20,120 @@ export function Card({ p, cfg, n = 0, onOpen, onAdd }) {
   const st = stockLabel(p.stock, cfg)
   const fav = esFav(p.id)
   const oferta = enOferta(p)
+  const atelier = (cfg?.diseno || 'selva') === 'atelier'
+  const portada = imgsDe(p)[0]
+  const srcWeb = imgSrc(portada || p.imagen_url, false)
+  const srcMob = imgSrc(portada || p.imagen_url, true)
+  const meta = [p.contenido, p.origen].filter(Boolean).join(' · ')
+  const addBtn = agotado
+    ? <button type="button" className="card-add card-add-off" disabled aria-label="Agotado">{atelier ? <Plus size={18} /> : 'Agotado'}</button>
+    : <button type="button" className="card-add" onClick={(e) => { e.stopPropagation(); onAdd() }} aria-label="Agregar">
+        <Plus size={atelier ? 18 : 15} /> {atelier ? (n > 0 ? `${n}` : '') : (n > 0 ? `Agregar (${n})` : 'Agregar')}
+      </button>
   return (
-    <div className="card">
+    <div className={`card ${atelier ? 'card-atelier' : ''}`}>
       <div className="card-media" onClick={onOpen}>
-        {p.imagen_url ? <img src={p.imagen_url} alt={p.nombre} /> : <span className="ph-fruto"><FrutoIcon name={iconoDe(p.frutos)} size={44} /></span>}
-        {oferta && <span className="ribbon ribbon-oferta">-{descuentoPct(p)}%</span>}
+        {srcWeb
+          ? <picture>
+              {srcMob && srcMob !== srcWeb ? <source media="(max-width: 700px)" srcSet={srcMob} /> : null}
+              <img src={srcWeb} alt={p.nombre} />
+            </picture>
+          : <span className="ph-fruto"><FrutoIcon name={iconoDe(p.frutos)} size={44} /></span>}
+        {oferta && <span className="ribbon ribbon-oferta">{atelier ? 'Oferta' : `-${descuentoPct(p)}%`}</span>}
         {p.novedad && !oferta && <span className="ribbon ribbon-nuevo">Nuevo</span>}
         {agotado && <span className="ribbon ribbon-agotado">Agotado</span>}
-        {FAVORITOS && <button className={`fav-btn ${fav ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); toggleFav(p.id) }} aria-label="Favorito"><Heart size={17} fill={fav ? 'currentColor' : 'none'} /></button>}
+        {FAVORITOS && <button type="button" className={`fav-btn ${fav ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); toggleFav(p.id) }} aria-label="Favorito"><Heart size={17} fill={fav ? 'currentColor' : 'none'} /></button>}
+        {atelier && addBtn}
       </div>
       <div className="card-body">
-        <div className="card-name" onClick={onOpen}>{p.nombre}</div>
-        {st && (st.tono === 'urgente' || st.tono === 'pocas') && <div className={`stock-tag stock-${st.tono}`}>🔥 {st.texto}</div>}
-        <div className="card-price">{fCOP(precio(p))}{oferta && <span className="precio-antes">{fCOP(p.precio_detal)}</span>}{mayorista && p.precio_mayor > 0 && <span className="precio-tag">mayor</span>}</div>
-        {agotado
-          ? <button className="card-add card-add-off" disabled>Agotado</button>
-          : <button className="card-add" onClick={onAdd}><Plus size={15} /> {n > 0 ? `Agregar (${n})` : 'Agregar'}</button>}
+        {atelier ? (
+          <>
+            <div className="card-row">
+              <button type="button" className="card-name" onClick={onOpen}>{p.nombre}</button>
+              <div className="card-price">{fCOP(precio(p))}{oferta && <span className="precio-antes">{fCOP(p.precio_detal)}</span>}</div>
+            </div>
+            {meta ? <div className="card-meta">{meta}</div> : null}
+            {st && (st.tono === 'urgente' || st.tono === 'pocas') && <div className={`stock-tag stock-${st.tono}`}>🔥 {st.texto}</div>}
+            <button type="button" className={`card-add card-add-desk ${agotado ? 'card-add-off' : ''}`} disabled={agotado}
+              onClick={(e) => { e.stopPropagation(); if (!agotado) onAdd() }}>
+              <Plus size={14} /> {agotado ? 'Agotado' : (n > 0 ? `Añadir (${n})` : 'Añadir')}
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="card-name" onClick={onOpen}>{p.nombre}</div>
+            {st && (st.tono === 'urgente' || st.tono === 'pocas') && <div className={`stock-tag stock-${st.tono}`}>🔥 {st.texto}</div>}
+            <div className="card-price">{fCOP(precio(p))}{oferta && <span className="precio-antes">{fCOP(p.precio_detal)}</span>}{mayorista && p.precio_mayor > 0 && <span className="precio-tag">mayor</span>}</div>
+            {addBtn}
+          </>
+        )}
       </div>
     </div>
+  )
+}
+
+// ---- Hero de marca (Atelier / Munay-style): no usa productos como banner ----
+export function BrandHero({ cfg, banner }) {
+  const nav = useNavigate()
+  const img = banner?.imagen_url || ''
+  const yt = banner?.tipo === 'youtube' ? ytId(banner.youtube) : ''
+  const title = (banner?.titulo || cfg.titulo_banner || 'Sabiduría de la selva, en cada sorbo.').trim()
+  const sub = (banner?.subtitulo || cfg.subtitulo || cfg.slogan || 'Infusiones y superalimentos de frutos amazónicos, cultivados con respeto por la tierra y las comunidades.').trim()
+  const cta = (banner?.boton_texto || 'Explorar catálogo').trim()
+  const link = (banner?.boton_link || '/tienda').trim()
+  const tieneNosotros = !!(cfg?.nosotros_texto?.trim() || (Array.isArray(cfg?.nosotros_bloques) && cfg.nosotros_bloques.length))
+  return (
+    <section className="brand-hero" aria-label="Portada">
+      <div className="brand-hero-media">
+        {yt
+          ? <iframe className="brand-hero-img" src={`https://www.youtube.com/embed/${yt}?autoplay=1&mute=1&loop=1&playlist=${yt}&controls=0&modestbranding=1&playsinline=1`} title={title} allow="autoplay; encrypted-media" />
+          : (img
+            ? <img className="brand-hero-img" src={img} alt="" />
+            : <div className="brand-hero-ph" aria-hidden />)}
+      </div>
+      <div className="brand-hero-overlay">
+        <div className="brand-hero-copy">
+          <h1 className="serif brand-hero-title">{title}</h1>
+          {sub && <p className="brand-hero-sub">{sub}</p>}
+          <div className="brand-hero-ctas">
+            <button type="button" className="btn btn-selva" onClick={() => irEnlace(nav, link)}>{cta}</button>
+            {tieneNosotros && <Link to="/nosotros" className="btn btn-ghost brand-hero-ghost">Nuestra historia</Link>}
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+// ---- Bloque impacto (inspirado en Munay / Stitch) ----
+export function Impacto({ cfg }) {
+  if (cfg?.impacto_activo === false) return null
+  const titulo = (cfg.impacto_titulo || 'Impacto que florece').trim()
+  const texto = (cfg.impacto_texto || 'Cada producto apoya a comunidades recolectoras de la Amazonía colombiana: comercio justo y conservación de la biodiversidad.').trim()
+  const s1n = cfg.impacto_stat1_n || '45+'
+  const s1l = cfg.impacto_stat1_l || 'Productores'
+  const s2n = cfg.impacto_stat2_n || '10'
+  const s2l = cfg.impacto_stat2_l || 'Departamentos'
+  const img = cfg.impacto_imagen || ''
+  return (
+    <section className="impacto">
+      <div className="impacto-inner">
+        <div className="impacto-copy">
+          <h2 className="serif impacto-title">{titulo}</h2>
+          <p className="impacto-txt">{texto}</p>
+          <div className="impacto-stats">
+            <div className="impacto-stat"><strong>{s1n}</strong><span>{s1l}</span></div>
+            <div className="impacto-stat"><strong>{s2n}</strong><span>{s2l}</span></div>
+          </div>
+          <Link to="/nosotros" className="impacto-link">Conoce más <ChevronRight size={16} /></Link>
+        </div>
+        {img ? (
+          <div className="impacto-media"><img src={img} alt="" /></div>
+        ) : (
+          <div className="impacto-media impacto-media-ph" aria-hidden />
+        )}
+      </div>
+    </section>
   )
 }
 
@@ -167,20 +263,24 @@ export function ModalNombre({ titulo = '¿Cuál es tu nombre?', texto, inicial =
 
 // ---- Newsletter ----
 export function Newsletter() {
+  const { cfg } = useStore()
+  const atelier = (cfg?.diseno || 'selva') === 'atelier'
   const [email, setEmail] = useState('')
   const [nombre, setNombre] = useState('')
   const [ok, setOk] = useState(false)
   const [err, setErr] = useState('')
   const enviar = async (e) => { e.preventDefault(); setErr(''); try { await suscribir(email, nombre); setOk(true) } catch (ex) { setErr(ex.message) } }
   return (
-    <section className="news">
-      <h2 className="serif news-title">Recibe nuestras ofertas 🌿</h2>
-      <p className="news-sub">Suscríbete y entérate de nuevos sabores, promociones y novedades de la selva.</p>
+    <section className={`news ${atelier ? 'news-atelier' : ''}`}>
+      <h2 className="serif news-title">{atelier ? 'Únete a nuestra comunidad' : 'Recibe nuestras ofertas 🌿'}</h2>
+      <p className="news-sub">{atelier
+        ? 'Suscríbete para recibir noticias, lanzamientos y cuidados de la selva.'
+        : 'Suscríbete y entérate de nuevos sabores, promociones y novedades de la selva.'}</p>
       {ok
         ? <div className="news-ok">¡Gracias por suscribirte! 💚</div>
         : <form className="news-form" onSubmit={enviar}>
-            <input type="text" placeholder="Tu nombre (opcional)" value={nombre} onChange={e => setNombre(e.target.value)} />
-            <input type="email" placeholder="Tu correo" value={email} onChange={e => setEmail(e.target.value)} required />
+            {!atelier && <input type="text" placeholder="Tu nombre (opcional)" value={nombre} onChange={e => setNombre(e.target.value)} />}
+            <input type="email" placeholder={atelier ? 'Tu correo electrónico' : 'Tu correo'} value={email} onChange={e => setEmail(e.target.value)} required />
             <button type="submit"><Send size={16} /> Suscribirme</button>
           </form>}
       {err && <div className="news-err">{err}</div>}

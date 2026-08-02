@@ -1,4 +1,4 @@
-:root {
+﻿:root {
   --selva: #1a3a2a;
   --selva-medio: #2d5a3d;
   --crema: #F5F0E8;
@@ -43,7 +43,7 @@ html { scroll-behavior: smooth; }
   @keyframes avisoMarquee { 0%, 12% { transform: translateX(0); } 88%, 100% { transform: translateX(calc(-100% + 90vw)); } }
 }
 
-/* ==================== MÉTODOS DE PAGO (carrito) ==================== */
+/* ==================== MÃ‰TODOS DE PAGO (carrito) ==================== */
 .pagos { padding: 4px 16px 10px; }
 .pagos-tit { font-size: 0.74rem; font-weight: 700; color: var(--texto-suave); text-transform: uppercase; letter-spacing: .6px; margin-bottom: 6px; }
 .pagos-lista { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -52,10 +52,10 @@ html { scroll-behavior: smooth; }
 /* ==================== MODO MANTENIMIENTO ==================== */
 .mantenimiento { min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 32px 20px; }
 
-/* ==================== ESTILOS DE DISEÑO (formas, bordes, sombras) ====================
+/* ==================== ESTILOS DE DISEÃ‘O (formas, bordes, sombras) ====================
    'selva' = base (redondeado suave). Los siguientes redefinen tokens y componentes clave. */
 
-/* --- EDITORIAL (elegante y minimalista, tipo Evok): esquinas rectas, líneas finas, sin sombras pesadas --- */
+/* --- EDITORIAL (elegante y minimalista, tipo Evok): esquinas rectas, lÃ­neas finas, sin sombras pesadas --- */
 .dis-editorial { --radio: 2px; --radio-sm: 2px; --sombra: 0 1px 0 rgba(26,58,42,0.06); --sombra-sm: none; --sombra-lg: 0 12px 30px rgba(0,0,0,0.10); }
 .dis-editorial .card { border: 1px solid var(--crema-oscuro); box-shadow: none; }
 .dis-editorial .card-media { border-radius: 0; }
@@ -70,7 +70,7 @@ html { scroll-behavior: smooth; }
 .dis-editorial .card-price { font-weight: 600; }
 .dis-editorial .hdr { box-shadow: none; border-bottom: 1px solid rgba(255,255,255,0.1); }
 
-/* --- ORGÁNICO (suave y natural, tipo Munay): muy redondeado, botones píldora, sombras suaves --- */
+/* --- ORGÃNICO (suave y natural, tipo Munay): muy redondeado, botones pÃ­ldora, sombras suaves --- */
 .dis-organico { --radio: 26px; --radio-sm: 16px; --sombra: 0 10px 30px rgba(26,58,42,0.10); --sombra-sm: 0 4px 14px rgba(26,58,42,0.08); }
 .dis-organico .card { border: none; box-shadow: var(--sombra-sm); }
 .dis-organico .card-media { border-radius: 22px 22px 0 0; }
@@ -84,6 +84,8 @@ html { scroll-behavior: smooth; }
 .dis-organico .fruto, .dis-organico .fruto-row { border-radius: 22px; }
 .dis-organico .card { transition: transform .18s ease, box-shadow .18s ease; }
 @media (hover: hover) { .dis-organico .card:hover { transform: translateY(-6px); box-shadow: var(--sombra); } }
+
+/* --- ATELIER: tema completo en themes/atelier.css (Stitch catÃ¡logo + ficha) --- */
 
 /* ==================== HEADER ==================== */
 .hdr { background: var(--selva); color: var(--crema); padding: 14px 16px; position: sticky; top: 0; z-index: 30; box-shadow: 0 2px 14px rgba(0,0,0,0.18); }
@@ -99,9 +101,9 @@ html { scroll-behavior: smooth; }
 .hdr-nav a:hover { opacity: 1; background: rgba(255,255,255,0.08); }
 .hdr-fav { position: relative; display: inline-flex; align-items: center; }
 .hdr-fav-n { position: absolute; top: 0; right: 0; background: var(--dorado); color: var(--selva); font-size: 0.58rem; font-weight: 800; border-radius: 999px; padding: 0 4px; min-width: 14px; text-align: center; line-height: 14px; }
-/* Botón hamburguesa: oculto en escritorio */
+/* BotÃ³n hamburguesa: oculto en escritorio */
 .hdr-burger { display: none; background: none; border: none; color: var(--header-fg, var(--crema)); padding: 4px; flex-shrink: 0; }
-/* Menú móvil */
+/* MenÃº mÃ³vil */
 .menu-overlay { position: fixed; inset: 0; z-index: 70; background: rgba(20,20,20,0.5); backdrop-filter: blur(2px); -webkit-backdrop-filter: blur(2px); display: flex; justify-content: flex-end; }
 .menu-panel { background: var(--selva); width: min(74vw, 300px); height: 100%; padding: 60px 18px 22px; display: flex; flex-direction: column; gap: 6px; box-shadow: -10px 0 40px rgba(0,0,0,0.3); animation: menuIn .22s ease; }
 @keyframes menuIn { from { transform: translateX(30px); opacity: 0; } to { transform: none; opacity: 1; } }
@@ -109,13 +111,13 @@ html { scroll-behavior: smooth; }
 .menu-panel a.on { background: rgba(255,255,255,0.12); color: var(--dorado); }
 .menu-close { position: absolute; top: 16px; right: 16px; background: none; border: none; color: var(--crema); }
 .menu-mayo { margin-top: 8px; display: flex; align-items: center; justify-content: center; gap: 8px; background: var(--wa); color: #fff; border: none; border-radius: 10px; padding: 13px; font-weight: 700; font-size: 0.95rem; }
-/* En móvil: oculta el nav horizontal y muestra la hamburguesa */
+/* En mÃ³vil: oculta el nav horizontal y muestra la hamburguesa */
 @media (max-width: 640px) {
   .hdr-nav { display: none; }
   .hdr-burger { display: inline-flex; }
 }
 @media (max-width: 460px) { .hdr-sub { display: none; } }
-/* "Solo logo": oculta nombre y slogan en pantallas pequeñas (solo se ve el logo) */
+/* "Solo logo": oculta nombre y slogan en pantallas pequeÃ±as (solo se ve el logo) */
 @media (max-width: 640px) { .hdr.solo-logo .hdr-textos { display: none; } }
 
 /* ==================== BENEFICIOS ==================== */
@@ -128,7 +130,7 @@ html { scroll-behavior: smooth; }
 .benefits-sm .benefit { font-size: 0.68rem; }
 .benefits-md .benefit { font-size: 0.78rem; }
 .benefits-lg .benefit { font-size: 0.9rem; }
-/* En móvil: se acomodan en 2 filas centradas, sin scroll horizontal que se corte */
+/* En mÃ³vil: se acomodan en 2 filas centradas, sin scroll horizontal que se corte */
 @media (max-width: 560px) {
   .benefits { flex-wrap: wrap; overflow-x: visible; justify-content: center; gap: 6px 12px; padding: 8px 12px; }
   .benefit { font-size: 0.72rem; padding: 1px 2px; }
@@ -153,7 +155,7 @@ html { scroll-behavior: smooth; }
 
 /* ==================== NOSOTROS (bloques) ==================== */
 .nos-cuerpo { padding: 12px 16px 4px; display: flex; flex-direction: column; gap: 14px; }
-/* Edición en el lienzo (WYSIWYG) */
+/* EdiciÃ³n en el lienzo (WYSIWYG) */
 .edit-blk { position: relative; border: 2px dashed transparent; border-radius: 8px; margin: 4px 0; transition: border-color .12s ease; }
 .edit-blk:hover { border-color: color-mix(in srgb, var(--selva) 35%, transparent); }
 .edit-blk.sel { border-color: var(--selva); background: color-mix(in srgb, var(--selva) 5%, transparent); cursor: grab; }
@@ -182,7 +184,7 @@ body.arrastrando .edit-blk { transition: none; }
 .blk-col { flex: 1 1 240px; min-width: 0; display: flex; flex-direction: column; gap: 14px; }
 .blk { min-width: 0; }
 .blk-caja { box-shadow: var(--sombra-sm); }
-/* Edición: columnas, cajas y añadidos */
+/* EdiciÃ³n: columnas, cajas y aÃ±adidos */
 .edit-anidado { display: flex; flex-direction: column; gap: 10px; }
 .edit-caja { padding: 12px; border: 1px dashed color-mix(in srgb, var(--selva) 35%, transparent); border-radius: 12px; background: #fff; }
 .edit-caja.caja-over { border: 2px solid var(--dorado); background: color-mix(in srgb, var(--dorado) 10%, #fff); }
@@ -209,7 +211,7 @@ body.col-resizing { user-select: none; cursor: col-resize; }
 .nos-mapa iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 .nos-subtitulo { font-family: var(--fuente-titulos, 'Playfair Display'); font-size: 1.2rem; color: var(--selva); margin-bottom: 6px; }
 .nos-album-sub { color: var(--texto-suave); font-size: 0.9rem; margin: -2px 0 8px; }
-/* Botón CTA */
+/* BotÃ³n CTA */
 .nos-boton-wrap { display: flex; }
 .nos-boton { width: auto; padding: 12px 22px; box-shadow: var(--sombra-sm); }
 /* Video */
@@ -218,7 +220,7 @@ body.col-resizing { user-select: none; cursor: col-resize; }
 /* Verticales (TikTok / Reels): se limitan y centran para que no ocupen toda la pantalla */
 .nos-video-vert { max-width: 380px; margin-left: auto; margin-right: auto; background: transparent; }
 @media (max-width: 480px) { .nos-video-vert { max-width: 100%; } }
-/* Galería / álbum */
+/* GalerÃ­a / Ã¡lbum */
 .nos-galeria { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
 @media (min-width: 640px) { .nos-galeria { grid-template-columns: repeat(3, 1fr); } }
 @media (min-width: 1024px) { .nos-galeria { grid-template-columns: repeat(4, 1fr); } }
@@ -229,7 +231,7 @@ body.col-resizing { user-select: none; cursor: col-resize; }
 .nos-gitem figcaption strong { font-size: 0.82rem; }
 .nos-gitem figcaption span { font-size: 0.7rem; opacity: 0.85; }
 
-/* ==================== GALERÍA (Pinterest) ==================== */
+/* ==================== GALERÃA (Pinterest) ==================== */
 .alb-masonry { columns: 2; column-gap: 12px; }
 @media (min-width: 700px) { .alb-masonry { columns: 3; } }
 @media (min-width: 1024px) { .alb-masonry { columns: 4; } }
@@ -298,7 +300,7 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 .hero-emoji { height: 230px; display: flex; align-items: center; justify-content: center; font-size: 5rem; color: var(--selva); opacity: .55; }
 .ph-fruto { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; color: var(--selva); opacity: .4; }
 .hero-yt { width: 100%; height: 230px; border: 0; display: block; pointer-events: none; }
-/* Caja de texto con degradado de opacidad largo que sube sobre la imagen (alto contraste según plantilla) */
+/* Caja de texto con degradado de opacidad largo que sube sobre la imagen (alto contraste segÃºn plantilla) */
 .hero-body { position: relative; z-index: 2; padding: 96px 20px 20px; margin-top: -110px;
   background: linear-gradient(to bottom, transparent 0%, color-mix(in srgb, var(--selva) 45%, transparent) 42%, var(--selva) 82%, var(--selva-medio) 100%); }
 .hero-cat { font-size: 0.72rem; color: var(--dorado); text-transform: uppercase; letter-spacing: 1.5px; font-weight: 800; text-shadow: 0 1px 6px rgba(0,0,0,0.35); }
@@ -314,7 +316,7 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 
 /* ==================== BANNER SECUNDARIO (centrado + contraste) ==================== */
 .bsec { position: relative; margin: 14px 16px; border-radius: var(--radio); overflow: hidden; box-shadow: var(--sombra); background: linear-gradient(135deg, var(--selva), var(--selva-medio)); display: flex; }
-/* Conserva la proporción del recorte del banner secundario (320×100) */
+/* Conserva la proporciÃ³n del recorte del banner secundario (320Ã—100) */
 .bsec-media { width: 100%; aspect-ratio: 320 / 100; height: auto; object-fit: cover; display: block; border: 0; pointer-events: none; filter: brightness(0.78) saturate(1.05); }
 .bsec-ph { background: linear-gradient(135deg, var(--selva), var(--selva-medio)); }
 /* Banner sin textos: imagen a full color (sin oscurecer) */
@@ -327,14 +329,14 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 .bsec-grupo { position: relative; }
 .bsec-grupo .hero-dots { bottom: 14px; }
 
-/* En móvil los textos de los banners son pequeños: protagonizan las imágenes */
+/* En mÃ³vil los textos de los banners son pequeÃ±os: protagonizan las imÃ¡genes */
 @media (max-width: 767px) {
   .hero-body { padding-top: 66px; margin-top: -78px; }
   .hero-name { font-size: 1.05rem; margin: 2px 0 4px; }
   .hero-price { font-size: 0.92rem; }
   .hero-cat { font-size: 0.6rem; letter-spacing: 1px; }
   .hero-cta { margin-top: 8px; font-size: 0.7rem; padding: 6px 13px; }
-  /* En móvil el banner secundario se recorta un poco más (320×70) */
+  /* En mÃ³vil el banner secundario se recorta un poco mÃ¡s (320Ã—70) */
   .bsec-media { aspect-ratio: 320 / 70; }
   .bsec-overlay { padding: 14px; gap: 4px; }
   .bsec-title { font-size: 1.1rem; }
@@ -415,7 +417,7 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 .popup-x { position: absolute; top: 12px; right: 12px; background: none; border: none; color: var(--texto-suave); }
 .popup-skip { background: none; border: none; color: var(--texto-suave); font-size: 0.82rem; margin-top: 10px; text-decoration: underline; }
 
-/* ==================== PÁGINA PRODUCTO ==================== */
+/* ==================== PÃGINA PRODUCTO ==================== */
 .prod { padding-bottom: 8px; }
 .volver { background: none; border: none; color: var(--selva); font-weight: 700; display: inline-flex; align-items: center; gap: 6px; padding: 0; }
 .icon-round { width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid var(--crema-oscuro); background: #fff; color: var(--selva); display: inline-flex; align-items: center; justify-content: center; transition: all .15s ease; }
@@ -425,13 +427,13 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 
 .det-media { position: relative; aspect-ratio: 1 / 1; max-height: 60vh; background: var(--crema-oscuro); display: flex; align-items: center; justify-content: center; font-size: 5rem; overflow: hidden; }
 .det-media img { width: 100%; height: 100%; object-fit: cover; }
-/* Tira deslizante de la galería del producto */
+/* Tira deslizante de la galerÃ­a del producto */
 .det-track { display: flex; width: 100%; height: 100%; flex: 0 0 100%; align-self: stretch; will-change: transform; backface-visibility: hidden; }
 .det-slide { flex: 0 0 100%; width: 100%; height: 100%; overflow: hidden; }
 .det-slide img { width: 100%; height: 100%; object-fit: cover; display: block; user-select: none; -webkit-user-drag: none; }
-/* Puntos de la galería del producto (deslizar en táctiles) */
+/* Puntos de la galerÃ­a del producto (deslizar en tÃ¡ctiles) */
 .det-dots { position: absolute; bottom: 12px; left: 0; right: 0; display: flex; gap: 6px; justify-content: center; z-index: 2; }
-.det-dots .dot { width: 8px; height: 8px; border-radius: 50%; background: rgba(255,255,255,0.65); box-shadow: 0 1px 4px rgba(0,0,0,0.35); cursor: pointer; transition: all .2s ease; }
+.det-dots .dot { width: 8px; height: 8px; border-radius: 50%; border: none; padding: 0; background: rgba(255,255,255,0.65); box-shadow: 0 1px 4px rgba(0,0,0,0.35); cursor: pointer; transition: all .2s ease; }
 .det-dots .dot.on { background: var(--dorado); width: 22px; border-radius: 4px; }
 .zoom-hint { position: absolute; bottom: 12px; right: 12px; background: rgba(0,0,0,0.55); color: #fff; font-size: 0.72rem; font-weight: 600; padding: 5px 11px; border-radius: 999px; display: inline-flex; align-items: center; gap: 5px; }
 .det-thumbs { display: flex; gap: 8px; overflow-x: auto; padding: 10px 16px 0; scrollbar-width: none; }
@@ -449,7 +451,7 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 .det-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin-top: 6px; padding-top: 12px; border-top: 1px solid var(--crema-oscuro); font-size: 0.8rem; color: var(--texto-suave); }
 .det-meta-tag { display: inline-flex; align-items: center; gap: 4px; background: var(--crema); border: 1px solid var(--crema-oscuro); border-radius: 999px; padding: 3px 9px; color: var(--tierra); }
 
-/* Descripción enriquecida */
+/* DescripciÃ³n enriquecida */
 .rich-content h1 { font-family: 'Playfair Display', serif; font-size: 1.4rem; color: var(--selva); margin: 12px 0 4px; }
 .rich-content h2 { font-family: 'Playfair Display', serif; font-size: 1.15rem; color: var(--selva); margin: 12px 0 4px; }
 .rich-content p { margin: 7px 0; }
@@ -474,7 +476,7 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 .btn-wa:hover { filter: brightness(1.06); }
 .btn-ghost { background: #fff; color: var(--selva); border: 1.5px solid var(--crema-oscuro); }
 
-/* Carrito ítems */
+/* Carrito Ã­tems */
 .citem { display: flex; gap: 12px; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--crema-oscuro); }
 .citem-media { width: 56px; height: 56px; border-radius: var(--radio-sm); background: var(--crema-oscuro); display: flex; align-items: center; justify-content: center; font-size: 1.6rem; flex-shrink: 0; overflow: hidden; }
 .citem-media img { width: 100%; height: 100%; object-fit: cover; }
@@ -556,11 +558,11 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
   .prod-grid { padding: 4px 28px 0; }
 }
 
-/* Móvil (por debajo de tablet): el texto va abajo y la caja de imágenes ocupa TODO el ancho */
+/* MÃ³vil (por debajo de tablet): el texto va abajo y la caja de imÃ¡genes ocupa TODO el ancho */
 .prod-media-col, .det-media { width: 100%; }
 .det-media { max-height: none; }
 
-/* Tablet en adelante (≥700px): imagen a la izquierda y texto al lado (2 columnas) */
+/* Tablet en adelante (â‰¥700px): imagen a la izquierda y texto al lado (2 columnas) */
 @media (min-width: 700px) {
   .prod-grid { display: grid; grid-template-columns: minmax(0, 40%) 1fr; gap: 22px; align-items: start; padding: 4px 16px 0; }
   .prod-media-col { position: sticky; top: 84px; }
@@ -573,6 +575,9 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
   .card:hover { transform: translateY(-4px); box-shadow: var(--sombra); }
   .hero:hover { box-shadow: var(--sombra-lg); }
 }
+
+/* Ficha Atelier / Stitch: themes/atelier.css */
+
 @media (prefers-reduced-motion: reduce) {
   * { animation-duration: .001ms !important; transition-duration: .001ms !important; scroll-behavior: auto !important; }
 }

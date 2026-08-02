@@ -86,9 +86,12 @@ function ProtectedLayout() {
   // Empleado vinculado al usuario (por nombre). Los admin no fichan asistencia.
   // En "vista de rol" se usa el rol EFECTIVO para reflejar lo que ese rol vería.
   const esEmpleadoFichable = !!profile && rolEfectivo !== 'admin'
+  // Consulta idéntica a la de Nómina para compartir su caché (misma clave, mismo select y
+  // mismo orden). Si difiere aunque sea en el .order(), ambas se sobrescriben en vez de
+  // reutilizarse.
   const { data: empleados = [] } = useQuery({
     queryKey: ['empleados'],
-    queryFn: async () => { const { data } = await supabase.from('employees').select('*'); return data || [] },
+    queryFn: async () => { const { data } = await supabase.from('employees').select('*').order('nombre'); return data || [] },
     enabled: esEmpleadoFichable,
   })
   const empVinculado = esEmpleadoFichable ? empleados.find(e => e.nombre === profile?.nombre) : null

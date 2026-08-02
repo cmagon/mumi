@@ -3,8 +3,10 @@ import { useNavigate, useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, uploadFile, beginSilentWrites, endSilentWrites } from '../lib/supabase'
 import { startDownload, updateDownload, endDownload, isDownloadCanceled } from '../lib/downloadProgress'
-import { reservarPEPS, liberarReservaLotes, consumirReservaLotes, estadoLote, crearLoteEntrada, costoPEPS, revertirLotesDeOrden } from '../lib/lotes'
+import { reservarPEPS, liberarReservaLotes, consumirReservaLotes, consumirPEPS, reponerPEPS, estadoLote, crearLoteEntrada, costoPEPS, revertirLotesDeOrden } from '../lib/lotes'
 import { writeOrQueue } from '../lib/offlineQueue'
+import { encolarEfectos, aplicarEfectos, contarEfectos, onEfectosChange, ordenesConEfectosPendientes } from '../lib/efectosPendientes'
+import { puedeVerSeccion } from '../lib/permisos'
 import { getConfig } from '../lib/appConfig'
 import { useReorder } from '../hooks/useReorder'
 import TimeField from '../components/ui/TimeField'
@@ -12,6 +14,8 @@ import BuscadorSelect from '../components/ui/BuscadorSelect'
 import { fFecha, fNum, fCOP, componerSurtido } from '../lib/businessLogic'
 import { setBusy } from '../lib/busy'
 import Cargando from '../components/ui/Cargando'
+import PaginacionTabla from '../components/ui/PaginacionTabla'
+import { usePaginacion } from '../hooks/usePaginacion'
 import { useToast } from '../hooks/useToast'
 import { useConfirm, usePrompt } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
@@ -114,6 +118,9 @@ export default function OrdenesProduccion() {
   const { profile } = useAuth()
   const esAdmin = profile?.rol === 'admin'
   const esOperario = profile?.rol === 'operario'
+  // Secciones configurables en Usuarios → Permisos (antes crear/ejecutar miraban solo el rol).
+  const puedeCrearOrdenes = puedeVerSeccion(profile?.rol, 'ordenes', 'crear')
+  const puedeResultados   = puedeVerSeccion(profile?.rol, 'ordenes', 'resultados')
   const fotoRef = useRef()
 
   const [modalNueva, setModalNueva] = useState(false)
@@ -292,14 +299,17 @@ export default function OrdenesProduccion() {
   })
   const cargandoOrdenes = loadingOrdenes || (fetchingOrdenes && !okOrdenes)
 
-  // Lotes de MP en stock (para sugerencia PEPS y alertas de vencimiento al crear la orden)
+  // Sub-clave 'con_stock': solo lotes con existencia. La clave ['raw_material_lots'] la usa
+  // Inventario para TODOS los lotes, incluidos los agotados; compartirla le escondía esos
+  // lotes de su kardex. El prefijo mantiene vigentes los invalidateQueries de siempre.
   const { data: lotesMP = [] } = useQuery({
-    queryKey: ['raw_material_lots'],
+    queryKey: ['raw_material_lots', 'con_stock'],
     queryFn: async () => { const { data } = await supabase.from('raw_material_lots').select('*').gt('cantidad_actual', 0); return data || [] },
   })
-  // Catálogo de productos terminados (para elegir el nombre del surtido — no texto libre)
+  // Catálogo de productos terminados (para elegir el nombre del surtido — no texto libre).
+  // Misma consulta que en Producción → comparten esta sub-clave y una sola descarga.
   const { data: terminados = [] } = useQuery({
-    queryKey: ['finished_products'],
+    queryKey: ['finished_products', 'activos'],
     queryFn: async () => { const { data } = await supabase.from('finished_products').select('id, nombre, tipo, activo').eq('activo', true).order('nombre'); return data || [] },
   })
 
@@ -499,8 +509,10 @@ export default function OrdenesProduccion() {
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state])
+  // Sub-clave 'ordenes': subconjunto de columnas. La dueña de ['products_costing'] es
+  // Costos, que trae la ficha completa.
   const { data: productos = [] } = useQuery({
-    queryKey: ['products_costing'],
+    queryKey: ['products_costing', 'ordenes'],
     queryFn: async () => { const { data } = await supabase.from('products_costing').select('id, nombre, tipo, bache, costo_final, costo_variable, activo, mp_id').order('nombre'); return data || [] },
   })
   const { data: recetas = [] } = useQuery({
@@ -508,19 +520,71 @@ export default function OrdenesProduccion() {
     queryFn: async () => { const { data } = await supabase.from('recipes').select('id, nombre').order('nombre'); return data || [] },
   })
   const { data: empleados = [] } = useQuery({
-    queryKey: ['empleados'],
+    queryKey: ['empleados', 'activos'],
     queryFn: async () => { const { data } = await supabase.from('employees').select('*').eq('estado','activo'); return data || [] },
   })
+  // `precio` es necesario para valorar la parte de un consumo que no queda cubierta por lotes
+  // (costoPEPS usa el precio promedio como referencia); sin él esa salida se valoraba en 0.
   const { data: mps = [] } = useQuery({
-    queryKey: ['raw_materials'],
-    queryFn: async () => { const { data } = await supabase.from('raw_materials').select('id, nombre, unidad, stock').order('nombre'); return data || [] },
+    queryKey: ['raw_materials', 'ordenes'],
+    queryFn: async () => { const { data } = await supabase.from('raw_materials').select('id, nombre, unidad, stock, precio').order('nombre'); return data || [] },
   })
-  // Registros de producción vinculados a órdenes (para habilitar "Enviar y cerrar")
+  // Registros de producción vinculados a órdenes (para habilitar "Enviar y cerrar").
+  // Sub-clave 'ordenes': subconjunto de columnas, sin 'fecha' ni 'aprobado'. La dueña de
+  // ['production_records'] es la pantalla de Producción (y el tablero), que necesita la
+  // fila completa; con la clave compartida su registro diario se quedaba sin fecha ni
+  // estado de aprobación al venir de aquí.
   const { data: prodRecords = [] } = useQuery({
-    queryKey: ['production_records'],
+    queryKey: ['production_records', 'ordenes'],
     queryFn: async () => { const { data } = await supabase.from('production_records').select('id, orden_id, completado, cantidad, lote, producto, empaque, vence, surtido, producto_surtido, lote_mezcla, cant_subporciones, peso_subporcion'); return data || [] },
   })
   const recordsDeOrden = (id) => prodRecords.filter(r => r.orden_id === id)
+
+  // ===== RECONCILIACIÓN DE CIERRES OFFLINE =====
+  // Una orden cerrada sin conexión guarda sus movimientos de inventario como pendientes. Aquí se
+  // aplican en cuanto vuelve la conexión y ya están cargadas las materias primas (se necesitan
+  // para valorar el consumo). Hasta entonces la orden queda marcada y no se puede aprobar.
+  const [ordenesPendInv, setOrdenesPendInv] = useState(new Set())
+  const refrescarPendInv = () => ordenesConEfectosPendientes().then(setOrdenesPendInv)
+
+  const reconciliarInventario = async () => {
+    if (!navigator.onLine || !mps.length) return
+    if (!(await contarEfectos())) return
+    setBusy(true)
+    try {
+      const { aplicados, fallidos } = await aplicarEfectos(async (ef) => {
+        // Se relee la orden: la cola genérica ya envió su estado y hay que partir del dato real.
+        const { data: fresca, error } = await supabase.from('production_orders').select('*').eq('id', ef.ordenId).maybeSingle()
+        if (error) throw error
+        if (!fresca) return   // la orden ya no existe: el pendiente se descarta
+        await aplicarEfectosCierre(fresca, ef.datos)
+        try { await supabase.from('production_orders').update({ inventario_pendiente: false }).eq('id', ef.ordenId) } catch { /* columna opcional */ }
+      })
+      if (aplicados) {
+        qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['raw_materials'] })
+        qc.invalidateQueries({ queryKey: ['raw_material_lots'] }); qc.invalidateQueries({ queryKey: ['inventory_movements'] })
+        qc.invalidateQueries({ queryKey: ['mezcla_saldos'] }); qc.invalidateQueries({ queryKey: ['finished_products'] })
+        toast(`Inventario al día: se aplicaron los movimientos de ${aplicados} orden(es) cerrada(s) sin conexión ✓`)
+      }
+      if (fallidos) toast(`${fallidos} orden(es) cerrada(s) sin conexión no pudieron descontar inventario. Se reintentará; revísalas antes de aprobar.`, 'error')
+    } finally { setBusy(false); refrescarPendInv() }
+  }
+
+  useEffect(() => {
+    refrescarPendInv()
+    const unsub = onEfectosChange(refrescarPendInv)
+    const alVolver = () => { reconciliarInventario() }
+    window.addEventListener('online', alVolver)
+    return () => { unsub(); window.removeEventListener('online', alVolver) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  // Intento al entrar al módulo (o al terminar de cargar las MP), por si quedaron pendientes de
+  // una sesión anterior en la que nunca se disparó el evento 'online'.
+  useEffect(() => {
+    if (mps.length) reconciliarInventario()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mps.length])
   // Últimos 5 lotes guardados (para empaque surtido/mezclado)
   const ultimos5Lotes = [...new Set(ordenes.map(o => o.lote).concat(prodRecords.map(r => r.lote)).filter(Boolean))].slice(0, 5)
   // Mapa lote → producto (para el surtido: filtrar por tipo de producto y mostrar el nombre).
@@ -1361,6 +1425,173 @@ export default function OrdenesProduccion() {
     setModalConfirmEnvio(true)
   }
 
+  // Aplica los movimientos de inventario que produce el CIERRE de una orden: consumo definitivo
+  // de la MP reservada, ajustes de receta hechos en planta, empaque, entrada de subproducto,
+  // stock de producto terminado y saldos de mezcla.
+  //
+  // Está extraída del cierre para poder ejecutarla también al RECONECTAR: si la orden se cerró
+  // sin conexión, estos pasos quedaron pendientes (antes simplemente no ocurrían y el inventario
+  // se quedaba sin descontar, en silencio). Recibe solo datos serializables para poder guardarse
+  // en la cola de pendientes; `orden` debe ser la fila fresca de la base.
+  const aplicarEfectosCierre = async (orden, d) => {
+    const o = orden
+    // 1) Consumo definitivo de la MP reservada
+    try { await consumirMP(o) } catch (e) { console.warn('No se pudo consumir MP:', e) }
+
+    // 2) Ajustes de ingredientes hechos en planta: la reserva descontó lo que decía la receta,
+    //    así que aquí solo se mueve la DIFERENCIA. Además de stock, se mueven lotes PEPS
+    //    (extra → consumirPEPS; sobró → reponer a los lotes de la orden) para no descuadrar.
+    const ajustesIngs = d.ajustesIngs || []
+    if (ajustesIngs.length) {
+      try {
+        const trazaOrden = Array.isArray(o.lotes_mp) && o.lotes_mp.length
+          ? o.lotes_mp
+          : (Array.isArray(o.lotes_reservados) ? o.lotes_reservados : [])
+        for (const a of ajustesIngs) {
+          if (a.mp_id == null) continue   // ingrediente sin MP enlazada: no hay stock que mover
+          const mp = mps.find(m => String(m.id) === String(a.mp_id))
+          const deltaMP = gramosAUnidadMP(a.delta, mp?.unidad)   // a la unidad en que se guarda el stock
+          if (!(Math.abs(deltaMP) > 0)) continue
+          const extraMov = { orden_id: o.id, ajuste_ingrediente: true, previsto: a.previsto, real: a.real }
+          let costoMov = mp?.precio || 0
+          if (deltaMP > 0) {
+            // Se usó de más: consumir lotes PEPS + stock en la misma RPC (v138)
+            const r = await consumirPEPS({ mp_id: a.mp_id, cantidad: deltaMP, ajustarStock: true })
+            if (r.consumidos?.length) extraMov.lotes_consumidos = r.consumidos
+            if (r.faltante > 0) extraMov.faltante_sin_lote = r.faltante
+            if (!r.stockAjustado) await supabase.rpc('ajustar_stock_mp', { p_mp_id: a.mp_id, p_delta: -deltaMP })
+            const cp = costoPEPS(r.consumidos || [], r.faltante || 0, mp?.precio || 0)
+            costoMov = cp.costoUnitario
+            extraMov.costo_peps_total = Math.round(cp.costoTotal)
+          } else {
+            // Sobró: devolver a los lotes que usó esta orden (preferidos) y subir stock
+            const prefer = []
+            for (const it of trazaOrden) {
+              if (String(it.mp_id) !== String(a.mp_id)) continue
+              for (const l of (it.lotes || [])) {
+                if (l.id) prefer.push({ id: l.id, cantidad: l.cantidad })
+              }
+            }
+            const r = await reponerPEPS({
+              mp_id: a.mp_id, cantidad: Math.abs(deltaMP), preferLotes: prefer, ajustarStock: true,
+            })
+            if (r.repuestos?.length) extraMov.lotes_repuestos = r.repuestos
+            if (!r.stockAjustado) await supabase.rpc('ajustar_stock_mp', { p_mp_id: a.mp_id, p_delta: Math.abs(deltaMP) })
+          }
+          const movBase = {
+            mp_id: a.mp_id, tipo: deltaMP > 0 ? 'salida' : 'entrada', cantidad: Math.abs(deltaMP),
+            fecha: d.fechaIni, responsable: d.responsable || o.operario || '',
+            obs: `Ajuste en planta · orden #${opNum(o.id)} (${o.producto}) — receta ${fCant(a.previsto)} g, usado ${fCant(a.real)} g`,
+            extra: extraMov,
+          }
+          const { error: mErr } = await supabase.from('inventory_movements').insert({ ...movBase, costo_unitario: costoMov })
+          if (mErr) await supabase.from('inventory_movements').insert(movBase)
+        }
+        // Se guardan en la orden para poder auditarlos y para reabrir el modal con las cantidades reales
+        try { await supabase.from('production_orders').update({ ajustes_ingredientes: ajustesIngs }).eq('id', o.id) } catch { /* columna v131 opcional */ }
+      } catch (e) { console.warn('No se pudieron aplicar los ajustes de ingredientes:', e) }
+    }
+
+    // 3) Descuento del EMPAQUE realmente usado (bolsas por porción, cajas por surtido).
+    //    Al reconectar el plan se recalcula: el guardado puede llevar horas y el stock cambió.
+    let plan = d.empaquePlan
+    if (!plan) {
+      const rec = await prepararEmpaque(o, {
+        unidadesEmpacadas: d.unidadesTotal || 0, subpTotal: parseFloat(o.cant_subporciones) || 0,
+        surtidoUnid: parseFloat(d.surtidoCantidad) || 0,
+        esPorcionado: !!o.cant_subporciones, esSurtido: !!d.surtido,
+      })
+      plan = rec.plan
+    }
+    try { await aplicarEmpaque(o, plan) } catch (e) { console.warn('No se pudo descontar empaque:', e) }
+
+    // 4) Si un subproducto se auto-aprueba (admin), genera la entrada de inventario MP igual que al aprobar.
+    //    Misma rutina que al aprobar: movimiento + lote PEPS + stock atómico + costo ponderado.
+    //    Se usa `unidadesTotal` (incluye lotes empacados adicionales), igual que cantidad_result.
+    if (d.autoAprob && o.es_subproducto && o.mp_id) {
+      try {
+        await registrarEntradaSubproducto(o, {
+          cantidad: d.unidadesTotal, lote: d.lote, vence: d.vence,
+          fecha: d.fechaIni, responsable: o.operario || d.creadoPor || '',
+        })
+      } catch (e) { console.warn('No se pudo sumar el subproducto a inventario:', e) }
+    }
+
+    // 5) Si el admin auto-aprueba un producto terminado, súmalo al inventario de terminados.
+    //    En surtido: el stock es la cantidad empacada surtida y el lote de la caja = último lote combinado.
+    if (d.autoAprob) {
+      const esSurt = d.surtido && d.productoSurtido
+      let cantStock, nombreStock, loteStock
+      if (esSurt) { cantStock = parseFloat(d.surtidoCantidad) || 0; nombreStock = d.productoSurtido; loteStock = loteCaja(d.loteMezcla, d.lote) || d.lote }
+      // Producto base/porcionado: se suma la CANTIDAD FINAL (unidades/cajas), igual que el
+      // registro diario (cantidad_result). Para porcionados, prepUnidades ya viene convertido a
+      // cajas/unidades de venta; el sobrante de mezcla va a saldo aparte (no descuenta cajas).
+      else { cantStock = d.unidadesTotal; nombreStock = o.producto; loteStock = d.lote }
+      await sumarProductoTerminado(o, cantStock, nombreStock, loteStock)
+    }
+
+    // 6) Saldos de mezcla en proceso: descontar los consumidos y crear el sobrante nuevo
+    try {
+      // a) Descontar de los saldos consumidos (cualquier fila con saldo y consumo, tenga o no unidades)
+      for (const ex of (d.lotesExtra || [])) {
+        if (!ex.saldo_id) continue
+        const consumido = parseFloat(ex.peso_consumido) || 0
+        if (consumido <= 0) continue
+        const { data: sal } = await supabase.from('mezcla_saldos').select('peso, lote, producto').eq('id', ex.saldo_id).single()
+        const restante = Math.max(0, (sal?.peso || 0) - consumido)
+        await supabase.from('mezcla_saldos').update({ peso: restante, estado: restante <= 0 ? 'agotado' : 'disponible' }).eq('id', ex.saldo_id)
+        // Si este lote extra (que estaba en saldo, de una orden ya cerrada) se empaca surtido,
+        // se marca y enlaza automáticamente su registro original con esta caja surtida.
+        if (ex.surtido && sal?.lote) {
+          try {
+            const nombreSurtido = autoSurtido(o.producto, ex.lote_mezcla) || d.productoSurtido || null
+            let q = supabase.from('production_records').update({
+              surtido: true, producto_surtido: nombreSurtido, lote_mezcla: d.lote || null,
+            }).eq('lote', sal.lote)
+            if (sal.producto) q = q.eq('producto', sal.producto)
+            await q
+          } catch (e) { console.warn('No se pudo enlazar el lote extra en saldo con el surtido:', e) }
+        }
+      }
+      // a2) Descontar de los saldos de los lotes combinados en el surtido
+      for (const sc of (d.surtidoConsumos || [])) {
+        const { data: sal } = await supabase.from('mezcla_saldos').select('peso, lote, producto, orden_origen').eq('id', sc.saldo_id).single()
+        const rest = Math.max(0, (sal?.peso || 0) - sc.cantidad)
+        await supabase.from('mezcla_saldos').update({ peso: rest, estado: rest <= 0 ? 'agotado' : 'disponible' }).eq('id', sc.saldo_id)
+        // Conectar el lote YA CERRADO (que estaba en saldo) con este surtido: aunque su orden ya
+        // estuviera cerrada y enviada, se marca automáticamente que TAMBIÉN se empacó surtido y se
+        // enlaza con esta caja, para que ambos queden conectados en el registro de producción.
+        if (sal?.lote) {
+          try {
+            let q = supabase.from('production_records').update({
+              surtido: true, producto_surtido: d.productoSurtido || null, lote_mezcla: d.lote || null,
+            }).eq('lote', sal.lote)
+            if (sal.producto) q = q.eq('producto', sal.producto)
+            await q
+          } catch (e) { console.warn('No se pudo enlazar el lote en saldo con el surtido:', e) }
+        }
+      }
+      // b) Crear el saldo nuevo con el sobrante de esta orden.
+      //    En empaque de saldo NO se crea: el remanente ya quedó en el lote original (paso a), sería duplicar.
+      const sobrante = parseFloat(d.sobrantePeso) || 0
+      if (d.haySobrante && sobrante > 0 && !o.empaque_saldo) {
+        const saldoBase = {
+          producto: o.producto, origen_id: o.origen_id || null, lote: d.lote || '', vencimiento: d.vence || null,
+          peso: sobrante, unidad: d.sobranteUnidad, orden_origen: o.id, estado: 'disponible', creado_por: d.creadoPor || '',
+        }
+        // Valor del producto en proceso: la mezcla ya costó MP + mano de obra + CIF
+        const cu = await costoUnitSaldo(o.origen_id, d.sobranteUnidad)
+        const { error: sErr } = await supabase.from('mezcla_saldos').insert({ ...saldoBase, costo_unitario: cu })
+        // La columna es de la migración v128; si no está, se guarda el saldo sin valorar
+        if (sErr && /costo_unitario/i.test(sErr.message || '')) await supabase.from('mezcla_saldos').insert(saldoBase)
+      }
+    } catch (e) { console.warn('No se pudieron actualizar los saldos de mezcla:', e) }
+
+    // 7) La reserva de saldo ya se descontó arriba: se limpia para no restarla doble si la orden
+    //    volviera a proceso. Escritura aparte y tolerante (columna v83 opcional).
+    try { await supabase.from('production_orders').update({ saldos_reservados: null }).eq('id', o.id) } catch { /* columna opcional */ }
+  }
+
   // Confirmar y enviar: crea el registro de producción y cierra la orden (a aprobación)
   const confirmarEnviar = async () => {
     const o = ordenPrep; if (!o) return
@@ -1462,9 +1693,6 @@ export default function OrdenesProduccion() {
         obs_result: prepObs || '', foto_url, fecha_envio: new Date().toISOString(),
         destajo: prepDestajo.filter(d => d.nombre?.trim() || d.cantidad || d.tarifa),
       } })
-      // Al cerrar ya se descuenta el saldo (más abajo): se limpia la RESERVA para no restarlo doble
-      // si la orden volviera a proceso. Escritura aparte y tolerante (columna v83 opcional).
-      if (!r.queued) { try { await supabase.from('production_orders').update({ saldos_reservados: null }).eq('id', o.id) } catch { /* columna opcional */ } }
       try { await supabase.from('production_orders').update({ campos_extra: prepCamposExtra.filter(c => (c.nombre || '').trim()).map(c => ({ nombre: c.nombre, valor: c.valor || '' })) }).eq('id', o.id) } catch { /* columna opcional */ }
       // (8) Si se empacó surtido con otro(s) lote(s), marca también ESA orden como empacada surtida
       //     con este lote — aunque ya esté cerrada. Solo en línea.
@@ -1479,115 +1707,28 @@ export default function OrdenesProduccion() {
           }
         } catch (e) { console.warn('No se pudo marcar el lote combinado como surtido:', e) }
       }
-      // Consumo definitivo de la MP reservada (solo en línea; offline se reconcilia al sincronizar)
-      if (!r.queued) { try { await consumirMP(o) } catch (e) { console.warn('No se pudo consumir MP:', e) } }
-      // Ajustes de ingredientes hechos en planta: la reserva descontó lo que decía la receta,
-      // así que aquí solo se mueve la DIFERENCIA (se gastó de más → se descuenta; sobró → se
-      // devuelve). Se registra un movimiento de inventario por cada ajuste, para que quede
-      // el rastro de por qué el stock no cuadra con la receta.
+      // ===== EFECTOS DE INVENTARIO DEL CIERRE =====
+      // MP, ajustes de planta, empaque, subproducto, terminado y saldos. En línea se aplican ya;
+      // sin conexión se guardan como pendientes y se aplican al reconectar (ver efectosPendientes).
       const ajustesIngs = calcAjustes()
-      if (!r.queued && ajustesIngs.length) {
-        try {
-          for (const a of ajustesIngs) {
-            if (a.mp_id == null) continue   // ingrediente sin MP enlazada: no hay stock que mover
-            const mp = mps.find(m => String(m.id) === String(a.mp_id))
-            const deltaMP = gramosAUnidadMP(a.delta, mp?.unidad)   // a la unidad en que se guarda el stock
-            await supabase.rpc('ajustar_stock_mp', { p_mp_id: a.mp_id, p_delta: -deltaMP })
-            const movBase = {
-              mp_id: a.mp_id, tipo: a.delta > 0 ? 'salida' : 'entrada', cantidad: Math.abs(deltaMP),
-              fecha: fechaIni, responsable: prepResp || o.operario || '',
-              obs: `Ajuste en planta · orden #${opNum(o.id)} (${o.producto}) — receta ${fCant(a.previsto)} g, usado ${fCant(a.real)} g`,
-              extra: { orden_id: o.id, ajuste_ingrediente: true, previsto: a.previsto, real: a.real },
-            }
-            const { error: mErr } = await supabase.from('inventory_movements').insert({ ...movBase, costo_unitario: mp?.precio || 0 })
-            if (mErr) await supabase.from('inventory_movements').insert(movBase)
-          }
-          // Se guardan en la orden para poder auditarlos y para reabrir el modal con las cantidades reales
-          try { await supabase.from('production_orders').update({ ajustes_ingredientes: ajustesIngs }).eq('id', o.id) } catch { /* columna v131 opcional */ }
-        } catch (e) { console.warn('No se pudieron aplicar los ajustes de ingredientes:', e) }
+      const efectos = {
+        fechaIni, unidadesTotal, empaquePlan, ajustesIngs, surtidoConsumos, autoAprob,
+        lotesExtra: prepLotesExtra.map(e => ({ saldo_id: e.saldo_id || null, peso_consumido: e.peso_consumido, surtido: !!e.surtido, lote_mezcla: e.lote_mezcla || null })),
+        lote: prepLote, vence: prepVence || null, loteMezcla: prepLoteMezcla || '',
+        surtido: !!prepSurtido, productoSurtido: prepProductoSurtido || null,
+        surtidoCantidad: prepSurtidoCantidad, haySobrante: !!prepHaySobrante,
+        sobrantePeso: prepSobrantePeso, sobranteUnidad: prepSobranteUnidad,
+        responsable: prepResp || o.operario || '', creadoPor: profile?.nombre || '',
       }
-      // Descuento del EMPAQUE realmente usado (bolsas por porción, cajas por surtido). Ya se verificó stock.
-      if (!r.queued) { try { await aplicarEmpaque(o, empaquePlan) } catch (e) { console.warn('No se pudo descontar empaque:', e) } }
-      // Si un subproducto se auto-aprueba (admin), genera la entrada de inventario MP igual que al aprobar
-      if (!r.queued && autoAprob && o.es_subproducto && o.mp_id) {
-        try {
-          // Misma rutina que al aprobar: movimiento + lote PEPS + stock atómico + costo ponderado.
-          // Se usa `unidadesTotal` (incluye lotes empacados adicionales), igual que cantidad_result.
-          await registrarEntradaSubproducto(o, {
-            cantidad: unidadesTotal, lote: prepLote, vence: prepVence,
-            fecha: fechaIni, responsable: o.operario || profile?.nombre || '',
-          })
-        } catch (e) { console.warn('No se pudo sumar el subproducto a inventario:', e) }
-      }
-      // Si el admin auto-aprueba un producto terminado, súmalo al inventario de terminados.
-      // En surtido: el stock es la cantidad empacada surtida y el lote de la caja = último lote combinado.
-      if (!r.queued && autoAprob) {
-        const esSurt = prepSurtido && prepProductoSurtido
-        let cantStock, nombreStock, loteStock
-        if (esSurt) { cantStock = parseFloat(prepSurtidoCantidad) || 0; nombreStock = prepProductoSurtido; loteStock = loteCaja(prepLoteMezcla, prepLote) || prepLote }
-        // Producto base/porcionado: se suma la CANTIDAD FINAL (unidades/cajas), igual que el
-        // registro diario (cantidad_result). Para porcionados, prepUnidades ya viene convertido a
-        // cajas/unidades de venta; el sobrante de mezcla va a saldo aparte (no descuenta cajas).
-        else { cantStock = unidadesTotal; nombreStock = o.producto; loteStock = prepLote }
-        await sumarProductoTerminado(o, cantStock, nombreStock, loteStock)
-      }
-      // Saldos de mezcla en proceso (solo en línea): descontar los consumidos y crear el sobrante nuevo
-      if (!r.queued) {
-        try {
-          // a) Descontar de los saldos consumidos (cualquier fila con saldo y consumo, tenga o no unidades)
-          for (const ex of prepLotesExtra) {
-            if (!ex.saldo_id) continue
-            const consumido = parseFloat(ex.peso_consumido) || 0
-            if (consumido <= 0) continue
-            const { data: sal } = await supabase.from('mezcla_saldos').select('peso, lote, producto').eq('id', ex.saldo_id).single()
-            const restante = Math.max(0, (sal?.peso || 0) - consumido)
-            await supabase.from('mezcla_saldos').update({ peso: restante, estado: restante <= 0 ? 'agotado' : 'disponible' }).eq('id', ex.saldo_id)
-            // Si este lote extra (que estaba en saldo, de una orden ya cerrada) se empaca surtido,
-            // se marca y enlaza automáticamente su registro original con esta caja surtida.
-            if (ex.surtido && sal?.lote) {
-              try {
-                const nombreSurtido = autoSurtido(o.producto, ex.lote_mezcla) || prepProductoSurtido || null
-                let q = supabase.from('production_records').update({
-                  surtido: true, producto_surtido: nombreSurtido, lote_mezcla: prepLote || null,
-                }).eq('lote', sal.lote)
-                if (sal.producto) q = q.eq('producto', sal.producto)
-                await q
-              } catch (e) { console.warn('No se pudo enlazar el lote extra en saldo con el surtido:', e) }
-            }
-          }
-          // a2) Descontar de los saldos de los lotes combinados en el surtido
-          for (const sc of surtidoConsumos) {
-            const { data: sal } = await supabase.from('mezcla_saldos').select('peso, lote, producto, orden_origen').eq('id', sc.saldo_id).single()
-            const rest = Math.max(0, (sal?.peso || 0) - sc.cantidad)
-            await supabase.from('mezcla_saldos').update({ peso: rest, estado: rest <= 0 ? 'agotado' : 'disponible' }).eq('id', sc.saldo_id)
-            // Conectar el lote YA CERRADO (que estaba en saldo) con este surtido: aunque su orden ya
-            // estuviera cerrada y enviada, se marca automáticamente que TAMBIÉN se empacó surtido y se
-            // enlaza con esta caja, para que ambos queden conectados en el registro de producción.
-            if (sal?.lote) {
-              try {
-                let q = supabase.from('production_records').update({
-                  surtido: true, producto_surtido: prepProductoSurtido || null, lote_mezcla: prepLote || null,
-                }).eq('lote', sal.lote)
-                if (sal.producto) q = q.eq('producto', sal.producto)
-                await q
-              } catch (e) { console.warn('No se pudo enlazar el lote en saldo con el surtido:', e) }
-            }
-          }
-          // b) Crear el saldo nuevo con el sobrante de esta orden.
-          //    En empaque de saldo NO se crea: el remanente ya quedó en el lote original (paso a), sería duplicar.
-          const sobrante = parseFloat(prepSobrantePeso) || 0
-          if (prepHaySobrante && sobrante > 0 && !o.empaque_saldo) {
-            const saldoBase = {
-              producto: o.producto, origen_id: o.origen_id || null, lote: prepLote || '', vencimiento: prepVence || null,
-              peso: sobrante, unidad: prepSobranteUnidad, orden_origen: o.id, estado: 'disponible', creado_por: profile?.nombre || '',
-            }
-            // Valor del producto en proceso: la mezcla ya costó MP + mano de obra + CIF
-            const cu = await costoUnitSaldo(o.origen_id, prepSobranteUnidad)
-            const { error: sErr } = await supabase.from('mezcla_saldos').insert({ ...saldoBase, costo_unitario: cu })
-            // La columna es de la migración v128; si no está, se guarda el saldo sin valorar
-            if (sErr && /costo_unitario/i.test(sErr.message || '')) await supabase.from('mezcla_saldos').insert(saldoBase)
-          }
-        } catch (e) { console.warn('No se pudieron actualizar los saldos de mezcla:', e) }
+      if (r.queued) {
+        // Sin el plan de empaque: se recalcula al aplicarlo, porque entre el cierre offline y la
+        // reconexión pueden pasar horas y el stock de bolsas/cajas ya no es el mismo.
+        await encolarEfectos({ ordenId: o.id, datos: { ...efectos, empaquePlan: null } })
+        // Bandera visible: mientras esté puesta, la orden no se puede aprobar (el inventario
+        // todavía no refleja la producción). Va con la cola para que sobreviva al cierre offline.
+        await writeOrQueue({ table: 'production_orders', action: 'update', match: { id: o.id }, payload: { inventario_pendiente: true } })
+      } else {
+        await aplicarEfectosCierre(o, efectos)
       }
       if (!r.queued) {
         // Si hubo cambios de receta en planta, el admin debe enterarse SIN tener que abrir la orden:
@@ -1712,14 +1853,103 @@ export default function OrdenesProduccion() {
     return new Date() <= limite
   }
 
-  // Anular envío → vuelve a 'en_proceso' para corregir y reenviar (solo dentro de la ventana)
+  // Revierte TODO lo que el cierre de una orden movió en inventario, dejándola como estaba
+  // justo antes de enviarse: MP de vuelta a RESERVADA, empaque devuelto al stock, ajustes de
+  // planta deshechos, saldos de mezcla repuestos y el sobrante creado eliminado.
+  //
+  // Es la base compartida de "Anular envío" (operario, dentro de la ventana) y "Devolver orden"
+  // (admin). Antes solo existía dentro de "Devolver orden" y "Anular envío" se limitaba a cambiar
+  // el estado, así que la MP quedaba consumida y el empaque descontado: al corregir y reenviar se
+  // descontaba por segunda vez. Devuelve los lotes para volver a marcarlos como reservados.
+  const revertirConsumosOrden = async (o) => {
+    // 1) Eliminar el saldo (sobrante de mezcla) que creó esta orden
+    await supabase.from('mezcla_saldos').delete().eq('orden_origen', o.id)
+
+    // 2) Reponer los saldos que esta orden CONSUMIÓ (surtido / empaque de saldo)
+    if (Array.isArray(o.saldos_consumidos)) {
+      for (const sc of o.saldos_consumidos) {
+        if (!sc.saldo_id || !(Number(sc.cantidad) > 0)) continue
+        const { data: sal } = await supabase.from('mezcla_saldos').select('peso').eq('id', sc.saldo_id).maybeSingle()
+        if (sal) await supabase.from('mezcla_saldos').update({ peso: Number(sal.peso || 0) + Number(sc.cantidad), estado: 'disponible' }).eq('id', sc.saldo_id)
+      }
+    }
+
+    // 3) La MP vuelve a estado RESERVADA. El stock general no se toca: bajó al reservar, no al
+    //    consumir, así que devolverlo aquí lo duplicaría.
+    let lotesReservados = null
+    if (Array.isArray(o.lotes_mp) && o.lotes_mp.length) {
+      for (const it of o.lotes_mp) {
+        for (const l of (it.lotes || [])) {
+          if (!l.id) continue
+          const { data: lote } = await supabase.from('raw_material_lots').select('cantidad_reservada').eq('id', l.id).single()
+          await supabase.from('raw_material_lots').update({ cantidad_reservada: (lote?.cantidad_reservada || 0) + (l.cantidad || 0) }).eq('id', l.id)
+        }
+      }
+      lotesReservados = o.lotes_mp
+    }
+
+    // 4) Deshacer los movimientos de stock que sí salieron directo del inventario al cerrar:
+    //    · empaque: salió del stock (no se reserva) → se devuelve
+    //    · ajustes de ingredientes en planta: movieron la DIFERENCIA contra la receta → signo opuesto
+    //    · subproducto: entró a inventario de MP → se retira
+    //    El consumo de MP no entra aquí (ya volvió a reservado en el paso 3).
+    try {
+      const { data: movsOrden } = await supabase.from('inventory_movements')
+        .select('mp_id, cantidad, tipo, extra').eq('extra->>orden_id', String(o.id))
+      for (const m of (movsOrden || [])) {
+        if (!m.mp_id) continue
+        const cant = Number(m.cantidad) || 0
+        const signo = m.tipo === 'salida' ? 1 : -1        // salida → devolver; entrada → retirar
+        if (m.extra?.empaque || m.extra?.ajuste_ingrediente) {
+          await supabase.rpc('ajustar_stock_mp', { p_mp_id: m.mp_id, p_delta: signo * cant })
+        } else if (m.tipo === 'entrada' && o.es_subproducto) {
+          await supabase.rpc('ajustar_stock_mp', { p_mp_id: m.mp_id, p_delta: -cant })
+        }
+      }
+    } catch (e) { console.warn('No se pudo revertir el stock de la orden:', e) }
+
+    // 5) Eliminar los lotes que generó la orden (subproducto) y avisar si ya se consumieron
+    if (o.es_subproducto) {
+      try {
+        const { noRevertible } = await revertirLotesDeOrden(o.id)
+        if (noRevertible > 0) toast(`Atención: ${fNum(noRevertible)} del lote producido ya se había consumido y no se pudo revertir`, 'warning')
+      } catch (e) { console.warn('No se pudieron revertir los lotes de la orden:', e) }
+    }
+
+    // 6) Borrar los movimientos de inventario de esta orden (se vuelven a crear al reenviar)
+    try { await supabase.from('inventory_movements').delete().eq('extra->>orden_id', String(o.id)) } catch { /* sin soporte de filtro jsonb */ }
+
+    // 7) Limpiar el rastro de los ajustes ya deshechos. Va aparte porque la columna es de la
+    //    migración v131: si no está, el resto de la reversión no debe fallar.
+    try { await supabase.from('production_orders').update({ ajustes_ingredientes: null }).eq('id', o.id) } catch { /* columna opcional */ }
+
+    return lotesReservados
+  }
+
+  // Anular envío → vuelve a 'en_proceso' para corregir y reenviar (solo dentro de la ventana).
+  // Revierte el inventario igual que "Devolver orden": si solo se cambiara el estado, la MP
+  // quedaría consumida y el empaque descontado, y al reenviar se descontaría dos veces.
   const anularEnvio = useMutation({
+    meta: { label: 'Anulando envío y devolviendo inventario…' },
     mutationFn: async (o) => {
       if (!dentroVentanaEdicion(o)) throw new Error('Ya pasó el plazo de 1 día hábil para anular el envío')
-      const { error } = await supabase.from('production_orders').update({ estado: 'en_proceso' }).eq('id', o.id)
+      if (o.estado !== 'ejecutada') throw new Error('Solo se puede anular un envío que está esperando aprobación')
+      // La reversión toca inventario en varios pasos: sin conexión quedaría a medias.
+      if (!navigator.onLine) throw new Error('Necesitas conexión para anular el envío (hay que devolver la MP y el empaque)')
+      const lotesReservados = await revertirConsumosOrden(o)
+      // El registro de producción se elimina: al reenviar se vuelve a crear con los datos corregidos.
+      await supabase.from('production_records').delete().eq('orden_id', o.id)
+      const { error } = await supabase.from('production_orders').update({
+        estado: 'en_proceso', fecha_envio: null,
+        lotes_reservados: lotesReservados, lotes_mp: null, saldos_consumidos: null,
+      }).eq('id', o.id)
       if (error) throw error
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['production_orders'] }); toast('Envío anulado — puedes corregir y reenviar') },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['production_records'] })
+      qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] }); qc.invalidateQueries({ queryKey: ['mezcla_saldos'] })
+      toast('Envío anulado — MP e insumos devueltos; puedes corregir y reenviar ✓')
+    },
     onError: (e) => toast(e.message, 'error'),
   })
 
@@ -1739,60 +1969,15 @@ export default function OrdenesProduccion() {
         if (fp?.alegra_item_id) { try { await supabase.functions.invoke('alegra-push-stock', { body: { finished_id: fpId } }) } catch { /* offline */ } }
       }
       await supabase.from('finished_movements').delete().eq('ref', String(o.id)).eq('origen', 'produccion')
-      // 2) Eliminar el saldo (sobrante) que creó esta orden
-      await supabase.from('mezcla_saldos').delete().eq('orden_origen', o.id)
-      // 2b) Reponer los saldos que esta orden había CONSUMIDO (surtido / empaque de saldo)
-      if (Array.isArray(o.saldos_consumidos)) {
-        for (const sc of o.saldos_consumidos) {
-          if (!sc.saldo_id || !(Number(sc.cantidad) > 0)) continue
-          const { data: sal } = await supabase.from('mezcla_saldos').select('peso').eq('id', sc.saldo_id).maybeSingle()
-          if (sal) await supabase.from('mezcla_saldos').update({ peso: Number(sal.peso || 0) + Number(sc.cantidad), estado: 'disponible' }).eq('id', sc.saldo_id)
-        }
-      }
-      // 3) Borrar los registros de producción de la orden
+      // 2) Borrar los registros de producción de la orden
       await supabase.from('production_records').delete().eq('orden_id', o.id)
-      // 4) Devolver la MP a estado RESERVADA (revierte el consumo definitivo, para que al reeditar no se duplique)
-      let lotesReservados = null
-      if (Array.isArray(o.lotes_mp) && o.lotes_mp.length) {
-        for (const it of o.lotes_mp) {
-          for (const l of (it.lotes || [])) {
-            if (!l.id) continue
-            const { data: lote } = await supabase.from('raw_material_lots').select('cantidad_reservada').eq('id', l.id).single()
-            await supabase.from('raw_material_lots').update({ cantidad_reservada: (lote?.cantidad_reservada || 0) + (l.cantidad || 0) }).eq('id', l.id)
-          }
-        }
-        lotesReservados = o.lotes_mp
-      }
-      // 4b) Reponer el EMPAQUE que descontó esta orden. A diferencia de la MP, el empaque no se
-      // reserva: sale directo del stock al cerrar. Antes solo se borraba el movimiento y el stock
-      // no volvía, así que al reeditar y cerrar de nuevo se descontaba por segunda vez.
-      // 4c) Si era un SUBPRODUCTO, revertir también la entrada que sumó a inventario de MP.
-      try {
-        const { data: movsOrden } = await supabase.from('inventory_movements')
-          .select('mp_id, cantidad, tipo, extra').eq('extra->>orden_id', String(o.id))
-        for (const m of (movsOrden || [])) {
-          if (!m.mp_id) continue
-          const cant = Number(m.cantidad) || 0
-          if (m.tipo === 'salida' && m.extra?.empaque) {
-            await supabase.rpc('ajustar_stock_mp', { p_mp_id: m.mp_id, p_delta: cant })          // devuelve el empaque
-          } else if (m.tipo === 'entrada' && o.es_subproducto) {
-            await supabase.rpc('ajustar_stock_mp', { p_mp_id: m.mp_id, p_delta: -cant })         // retira el subproducto
-          }
-        }
-      } catch (e) { console.warn('No se pudo revertir el stock de la orden:', e) }
-      // Elimina los lotes que generó la orden (subproducto) y avisa si ya se consumieron
-      if (o.es_subproducto) {
-        try {
-          const { noRevertible } = await revertirLotesDeOrden(o.id)
-          if (noRevertible > 0) toast(`Atención: ${fNum(noRevertible)} del lote producido ya se había consumido y no se pudo revertir`, 'warning')
-        } catch (e) { console.warn('No se pudieron revertir los lotes de la orden:', e) }
-      }
-      // Elimina los movimientos de inventario que generó esta orden (MP, empaque y subproducto)
-      try { await supabase.from('inventory_movements').delete().eq('extra->>orden_id', String(o.id)) } catch { /* sin soporte de filtro jsonb */ }
-      // 5) Regresar la orden a 'en_proceso' para reeditarla, con la MP de nuevo reservada
+      // 3) Revertir todo el inventario que movió el cierre: saldos, MP a reservada, empaque,
+      //    ajustes de planta y lotes de subproducto (lógica compartida con "Anular envío").
+      const lotesReservados = await revertirConsumosOrden(o)
+      // 4) Regresar la orden a 'en_proceso' para reeditarla, con la MP de nuevo reservada
       const { error } = await supabase.from('production_orders').update({
         estado: 'en_proceso', fecha_envio: null, aprobado_por: null, fecha_aprob: null,
-        lotes_reservados: lotesReservados, lotes_mp: null,
+        lotes_reservados: lotesReservados, lotes_mp: null, saldos_consumidos: null,
       }).eq('id', o.id)
       if (error) throw error
     },
@@ -2179,6 +2364,14 @@ export default function OrdenesProduccion() {
   const aprobar = useMutation({
     meta: { label: 'Aprobando orden y sincronizando inventario…' },
     mutationFn: async (o) => {
+      // Si la orden se cerró sin conexión, sus movimientos de inventario todavía están pendientes:
+      // aprobarla ahora sumaría producto terminado sin haber descontado la MP ni el empaque.
+      if (o.inventario_pendiente || ordenesPendInv.has(String(o.id))) {
+        await reconciliarInventario()
+        if ((await ordenesConEfectosPendientes()).has(String(o.id))) {
+          throw new Error('Esta orden se cerró sin conexión y su inventario aún no se ha descontado. Sincroniza (o revisa la conexión) antes de aprobarla.')
+        }
+      }
       // 1. Marcar aprobada
       const { error } = await supabase.from('production_orders').update({
         estado: 'aprobada', aprobado_por: profile?.nombre || 'admin', fecha_aprob: new Date().toISOString(),
@@ -2260,6 +2453,7 @@ export default function OrdenesProduccion() {
 
   // Admin y operario ven todas; el auxiliar solo las que se le asignaron
   const visibles = (esAdmin || esOperario) ? ordenes : ordenes.filter(o => o.operario === profile?.nombre)
+  const pagOrdenes = usePaginacion(visibles, { resetDeps: [profile?.nombre, esAdmin, esOperario, ordenes.length] })
   const pendientesAprob = ordenes.filter(o => o.estado === 'ejecutada').length
 
   // Abrir el modal para EDITAR una orden pendiente (no tomada)
@@ -2357,7 +2551,7 @@ export default function OrdenesProduccion() {
           {esAdmin && pendientesAprob > 0 && <span className="badge badge-dorado" style={{ alignSelf: 'center' }}>{pendientesAprob} por aprobar</span>}
           {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalAudit(true)}><Ico as={ScrollText} size={14} />Registro de creación</button>}
           <button className="btn btn-secondary btn-sm" title="Descargar un PDF con todas las órdenes visibles (cada una en su hoja)" onClick={() => descargarOrdenesPDF(visibles)}><Ico as={Download} size={14} />Descargar órdenes</button>
-          {(esAdmin || esOperario) && <button className="btn btn-primary btn-sm" onClick={() => { setEditOrdenId(null); setForm({ ...EMPTY_ORDEN, operario: esOperario ? (profile?.nombre || '') : '' }); setProdReceta(null); setIngIdx(''); setIngDisp(''); setEmpacarSaldo(null); setSaldoSelId(''); setSaldoCant(''); setModalNueva(true) }}><Ico as={Plus} size={14} />Nueva Orden</button>}
+          {puedeCrearOrdenes && <button className="btn btn-primary btn-sm" onClick={() => { setEditOrdenId(null); setForm({ ...EMPTY_ORDEN, operario: esOperario ? (profile?.nombre || '') : '' }); setProdReceta(null); setIngIdx(''); setIngDisp(''); setEmpacarSaldo(null); setSaldoSelId(''); setSaldoCant(''); setModalNueva(true) }}><Ico as={Plus} size={14} />Nueva Orden</button>}
         </div>
       </div>
 
@@ -2404,9 +2598,9 @@ export default function OrdenesProduccion() {
           <table className="tabla-ordenes">
             <thead><tr><th>#</th><th className="col-opcional">Emitida</th><th>Producto</th><th>Lote</th><th>Vence</th><th className="col-opcional movil-hide">Tipo</th><th className="movil-hide">Cant. plan</th><th className="col-opcional-2 movil-hide">Operario</th><th>Estado</th><th className="col-opcional-2 movil-hide">Resultado</th><th>Acciones</th></tr></thead>
             <tbody>
-              {visibles.length === 0
+              {pagOrdenes.slice.length === 0
                 ? <tr><td colSpan={11} className="empty-table">No hay órdenes</td></tr>
-                : visibles.map(o => {
+                : pagOrdenes.slice.map(o => {
                   const est = ESTADO_LABEL[o.estado] || ESTADO_LABEL.pendiente
                   const esMia = o.operario === profile?.nombre
                   return (
@@ -2419,7 +2613,16 @@ export default function OrdenesProduccion() {
                       <td className="col-opcional movil-hide">{o.es_prueba ? <span className="badge badge-dorado" style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}><FlaskConical size={11} aria-hidden="true" /> Prueba</span> : o.es_subproducto ? <span className="badge badge-dorado">Subproducto</span> : <span className="badge badge-azul">Terminado</span>}</td>
                       <td className="td-number movil-hide">{fNum(o.cantidad_plan)} {o.unidad}</td>
                       <td className="col-opcional-2 movil-hide">{o.operario}</td>
-                      <td><span className={`badge ${est.badge}`}>{est.txt}</span>{o.estado === 'rechazada' && o.motivo_rechazo && <div style={{ fontSize: '0.72rem', color: 'var(--rojo)' }}>{o.motivo_rechazo}</div>}</td>
+                      <td>
+                        <span className={`badge ${est.badge}`}>{est.txt}</span>
+                        {o.estado === 'rechazada' && o.motivo_rechazo && <div style={{ fontSize: '0.72rem', color: 'var(--rojo)' }}>{o.motivo_rechazo}</div>}
+                        {(o.inventario_pendiente || ordenesPendInv.has(String(o.id))) && (
+                          <div style={{ fontSize: '0.7rem', color: 'var(--rojo)', display: 'flex', alignItems: 'center', gap: 3, marginTop: 3 }}
+                            title="Se cerró sin conexión: la materia prima y el empaque aún no se han descontado. Se aplicará al sincronizar.">
+                            <AlertTriangle size={11} aria-hidden="true" /> Inventario sin descontar
+                          </div>
+                        )}
+                      </td>
                       <td className="td-number col-opcional-2 movil-hide">{o.cantidad_result != null ? `${fNum(o.cantidad_result)}` : '—'}</td>
                       <td className="celda-acciones" onClick={e => e.stopPropagation()}>
                         <div className="ordenes-acciones" style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
@@ -2435,21 +2638,21 @@ export default function OrdenesProduccion() {
                             {esMovil && <button className="btn btn-xs btn-secondary" title="Compartir orden (PDF)" aria-label="Compartir orden (PDF)" onClick={() => compartirOrden(o)}><Share2 size={13} aria-hidden="true" /></button>}
                           </>}
                           {/* Quien ejecuta la orden: el operario dueño */}
-                          {esMia && o.estado === 'pendiente' && <button className="btn btn-xs btn-primary" onClick={() => tomarOrden.mutate(o)}><Ico as={Play} size={13} />Tomar</button>}
+                          {puedeResultados && esMia && o.estado === 'pendiente' && <button className="btn btn-xs btn-primary" onClick={() => tomarOrden.mutate(o)}><Ico as={Play} size={13} />Tomar</button>}
                           {/* Los ingredientes se ven en "Detalles" y en el modal de proceso, por eso ya no hay botón aparte */}
-                          {esMia && (o.estado === 'en_proceso' || o.estado === 'rechazada') && (
+                          {puedeResultados && esMia && (o.estado === 'en_proceso' || o.estado === 'rechazada') && (
                             <button className="btn btn-xs btn-primary" onClick={() => openProceso(o)}><Ico as={Play} size={13} />Iniciar proceso</button>
                           )}
                           {/* (El botón "Imprimir" se quitó de aquí: los ingredientes se ven en Detalles y en el modal de proceso) */}
                           {/* El admin puede diligenciar el proceso de órdenes de OTROS (en las suyas ya tiene "Iniciar proceso") */}
-                          {esAdmin && !esMia && (o.estado === 'pendiente' || o.estado === 'en_proceso' || o.estado === 'rechazada') && (
+                          {esAdmin && puedeResultados && !esMia && (o.estado === 'pendiente' || o.estado === 'en_proceso' || o.estado === 'rechazada') && (
                             <button className="btn btn-xs btn-primary" title="Diligenciar proceso, cerrar y enviar (se aprueba automáticamente)" onClick={() => adminDiligenciar(o)}><Ico as={Play} size={13} />Diligenciar proceso</button>
                           )}
                           {/* Editar la orden mientras esté pendiente (no tomada) */}
-                          {(esAdmin || esOperario) && o.estado === 'pendiente' && <button className="btn btn-xs btn-secondary" title="Modificar orden" onClick={() => openEditarOrden(o)}><Pencil size={13} aria-hidden="true" />Editar</button>}
+                          {puedeCrearOrdenes && o.estado === 'pendiente' && <button className="btn btn-xs btn-secondary" title="Modificar orden" onClick={() => openEditarOrden(o)}><Pencil size={13} aria-hidden="true" />Editar</button>}
                           {/* Ventana de 1 día hábil para corregir el envío (no-admin) */}
-                          {!esAdmin && esMia && o.estado === 'ejecutada' && dentroVentanaEdicion(o) && (
-                            <button className="btn btn-xs btn-secondary" title="Anular el envío para corregirlo (1 día hábil)" onClick={() => confirmar('¿Anular el envío para corregir el registro?').then(ok => ok && anularEnvio.mutate(o))}><Ico as={Undo2} size={13} />Anular envío</button>
+                          {puedeResultados && !esAdmin && esMia && o.estado === 'ejecutada' && dentroVentanaEdicion(o) && (
+                            <button className="btn btn-xs btn-secondary" disabled={anularEnvio.isPending} title="Anular el envío para corregirlo (1 día hábil)" onClick={() => confirmar('¿Anular el envío para corregir el registro?\n\nSe DEVUELVE la materia prima a reservada, el empaque al inventario y los saldos de mezcla consumidos. El registro de producción se elimina y se vuelve a crear al reenviar.').then(ok => ok && anularEnvio.mutate(o))}><Ico as={Undo2} size={13} />Anular envío</button>
                           )}
                           {!esAdmin && esMia && o.estado === 'ejecutada' && !dentroVentanaEdicion(o) && (
                             <span style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>En revisión (plazo de edición vencido)</span>
@@ -2481,6 +2684,7 @@ export default function OrdenesProduccion() {
           </table>
         </div>
         )}
+        {!cargandoOrdenes && <PaginacionTabla {...pagOrdenes} />}
       </div>
 
       {/* Modal Nueva / Editar Orden (admin) */}

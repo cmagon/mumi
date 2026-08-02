@@ -7,6 +7,7 @@
 //   SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, SUPABASE_ANON_KEY
 // ============================================================
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
+import { requireAdmin } from '../_shared/auth.ts'
 
 const cors = {
   'Access-Control-Allow-Origin': '*',
@@ -18,19 +19,10 @@ Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
 
   try {
-    const url = Deno.env.get('SUPABASE_URL')!
-    const anon = Deno.env.get('SUPABASE_ANON_KEY')!
-    const service = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
+    // 1) Verificar que quien llama es un admin autenticado y activo
+    const guard = await requireAdmin(req); if (guard.resp) return guard.resp
 
-    // 1) Verificar que quien llama es un admin autenticado
-    const authHeader = req.headers.get('Authorization') || ''
-    const asUser = createClient(url, anon, { global: { headers: { Authorization: authHeader } } })
-    const { data: { user }, error: uErr } = await asUser.auth.getUser()
-    if (uErr || !user) return json({ error: 'No autenticado' }, 401)
-
-    const admin = createClient(url, service)
-    const { data: perfil } = await admin.from('user_profiles').select('rol').eq('id', user.id).single()
-    if (perfil?.rol !== 'admin') return json({ error: 'Solo administradores' }, 403)
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
 
     // 2) Cambiar la contraseña del usuario objetivo
     const { user_id, password } = await req.json()

@@ -1,6 +1,6 @@
 // ============================================================
 // Roles y permisos
-// Roles: admin | operario | auxiliar
+// Roles: admin | operario | auxiliar (+ roles personalizados)
 // El admin puede personalizar, por rol, qué módulos y qué secciones
 // de cada módulo son visibles (se guardan en la tabla role_permissions).
 // ============================================================
@@ -11,41 +11,45 @@ export const ROLES = {
   auxiliar: 'Auxiliar de Producción',
 }
 
-// Catálogo de módulos y sus secciones (para la pestaña de gestión de permisos)
+// Catálogo de módulos y sus secciones (para la pestaña de gestión de permisos).
+// Los `id` de sección son los que consulta el código con puedeVerSeccion(...).
+// Si añades una sección aquí y nadie la consulta, la UI miente: cableala en la pantalla.
 export const CATALOGO_MODULOS = [
   { modulo: 'dashboard',  label: 'Tablero Principal',       secciones: [] },
   { modulo: 'costos',     label: 'Calculadora de Costos',   secciones: [
-      { id: 'receta',     label: 'Ficha de Producto' },
-      { id: 'cif',        label: 'Costos Indirectos (CIF)' },
-      { id: 'resultados', label: 'Resultados / Análisis' },
+      { id: 'resultados', label: 'Fichas de producto (lista y edición)' },
+      { id: 'receta',     label: 'Recetas rápidas / prueba' },
+      { id: 'cif',        label: 'Costos indirectos (CIF) y gastos' },
+      { id: 'mps',        label: 'Materias primas (desde costos)' },
   ] },
   { modulo: 'inventario', label: 'Inventario MP',           secciones: [
-      { id: 'stock',      label: 'Stock / Listado' },
-      { id: 'movimientos',label: 'Movimientos (entradas/salidas)' },
+      { id: 'stock',      label: 'Ver stock / listado' },
+      { id: 'movimientos',label: 'Registrar movimientos y editar MP' },
   ] },
   { modulo: 'ordenes',    label: 'Órdenes de Producción',   secciones: [
-      { id: 'crear',      label: 'Crear órdenes' },
-      { id: 'resultados', label: 'Enviar/ver resultados' },
+      { id: 'crear',      label: 'Crear / editar órdenes' },
+      { id: 'resultados', label: 'Ejecutar y enviar resultados' },
   ] },
   { modulo: 'produccion', label: 'Registro de Producción',  secciones: [
       { id: 'registrar',  label: 'Registrar producción' },
       { id: 'analisis',   label: 'Análisis / Histórico' },
   ] },
   { modulo: 'nomina',     label: 'Asistencia & Nómina',     secciones: [
-      { id: 'asistencia', label: 'Asistencia' },
+      { id: 'asistencia', label: 'Asistencia (propia)' },
       { id: 'asistencia_otros', label: 'Registrar asistencia de otras personas' },
       { id: 'empleados',  label: 'Empleados' },
-      { id: 'liquidacion',label: 'Liquidación' },
+      { id: 'liquidacion',label: 'Liquidación de nómina' },
   ] },
   { modulo: 'terminados', label: 'Producto Terminado',       secciones: [
       { id: 'stock',      label: 'Stock / Catálogo' },
       { id: 'ajustes',    label: 'Ajustes de stock' },
+      { id: 'analisis',   label: 'Análisis mensual' },
   ] },
   { modulo: 'porempacar', label: 'Productos por Empacar',    secciones: [] },
   { modulo: 'clientes',   label: 'Clientes',                secciones: [] },
   { modulo: 'catalogo',   label: 'Catálogo público',        secciones: [
       { id: 'productos',  label: 'Publicar productos' },
-      { id: 'config',     label: 'Configuración del catálogo' },
+      { id: 'config',     label: 'Personalizar / configuración / mensajes' },
       { id: 'metricas',   label: 'Métricas / pedidos' },
   ] },
   { modulo: 'galeria',    label: 'Galería Fotográfica',     secciones: [] },
@@ -62,6 +66,30 @@ export const MODULOS_POR_ROL = {
   admin:    ['dashboard', 'costos', 'inventario', 'terminados', 'porempacar', 'ordenes', 'produccion', 'nomina', 'clientes', 'catalogo', 'galeria', 'documentos', 'registros', 'calidad', 'capacitacion', 'configuracion', 'usuarios'],
   operario: ['dashboard', 'costos', 'inventario', 'porempacar', 'ordenes', 'produccion', 'nomina', 'documentos', 'registros', 'calidad', 'capacitacion'],
   auxiliar: ['dashboard', 'costos', 'inventario', 'ordenes', 'nomina', 'documentos', 'registros', 'calidad', 'capacitacion'],
+}
+
+// Secciones visibles por rol cuando el admin NO ha configurado un override de secciones.
+// Sin esto, puedeVerSeccion devolvería "todo visible" y un operario vería CIF/liquidación
+// aunque la UI histórica se los ocultaba. Los defaults replican ese comportamiento previo.
+export const SECCIONES_POR_ROL = {
+  operario: {
+    costos:     ['receta'],
+    inventario: ['stock', 'movimientos'],
+    ordenes:    ['crear', 'resultados'],
+    produccion: ['registrar', 'analisis'],
+    nomina:     ['asistencia', 'empleados'],
+    terminados: ['stock'],
+    catalogo:   ['productos'],
+  },
+  auxiliar: {
+    costos:     ['receta'],
+    inventario: ['stock'],
+    ordenes:    ['resultados'],
+    produccion: ['registrar'],
+    nomina:     ['asistencia'],
+    terminados: ['stock'],
+    catalogo:   ['productos'],
+  },
 }
 
 // Mapa ruta → módulo
@@ -110,14 +138,16 @@ export function puedeVer(rolArg, modulo) {
 }
 
 // ¿El rol puede ver una sección concreta de un módulo?
-// Si no hay override de secciones definido → visible por defecto (siempre que vea el módulo).
+// Orden: admin → módulo denegado → override en BD → default por rol → visible.
 export function puedeVerSeccion(rolArg, modulo, seccion) {
   const rol = rolEfectivoPerm(rolArg)
   if (rol === 'admin') return true
   if (!puedeVer(rol, modulo)) return false
   const sec = _override?.[rol]?.secciones?.[modulo]
-  if (!sec) return true                                 // sin restricción de secciones
-  return sec.includes(seccion)
+  if (Array.isArray(sec)) return sec.includes(seccion)
+  const def = SECCIONES_POR_ROL[rol]?.[modulo]
+  if (Array.isArray(def)) return def.includes(seccion)
+  return true                                 // sin restricción conocida
 }
 
 // Permiso de sección ESTRICTO (opt-in): true SOLO si el admin la otorgó explícitamente al rol.
