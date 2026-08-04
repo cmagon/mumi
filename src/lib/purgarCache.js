@@ -19,31 +19,30 @@ export async function purgarCacheYRecargar() {
       await Promise.all(ks.map(k => caches.delete(k)))
     }
   } catch { /* noop */ }
-  // Navegación limpia tras quitar el SW: pide HTML al servidor (no al precaché viejo).
-  const url = new URL(window.location.href)
-  url.searchParams.delete('_v')
-  window.location.replace(`${url.pathname}${url.search}${url.hash}`)
+  // reload() sí fuerza recarga; replace(misma URL) a menudo no hace nada → pantalla en blanco.
+  window.location.reload()
 }
 
 /**
  * Si el build del servidor no coincide con el guardado en el cliente, purga
  * cachés y recarga una sola vez (evita bucles con sessionStorage).
+ * No bloquea el montaje de React: si la recarga falla, la app sigue usable.
  */
 export function asegurarBuildActual(buildId) {
-  if (!buildId || typeof window === 'undefined') return false
+  if (!buildId || typeof window === 'undefined') return
+  if (buildId.length > 80 || !/^[a-zA-Z0-9._-]+$/.test(buildId)) return
   const KEY = 'mumi-app-build'
   const prev = localStorage.getItem(KEY)
-  if (prev === buildId) return false
+  if (prev === buildId) return
 
   localStorage.setItem(KEY, buildId)
   // Primera visita: solo guarda el id, no purga.
-  if (!prev) return false
+  if (!prev) return
 
-  // Evita bucle si la purga falla a medias.
+  // Evita bucle si la purga/recarga falla a medias.
   const flag = 'mumi-purga-build'
-  if (sessionStorage.getItem(flag) === buildId) return false
+  if (sessionStorage.getItem(flag) === buildId) return
   sessionStorage.setItem(flag, buildId)
 
   void purgarCacheYRecargar()
-  return true
 }

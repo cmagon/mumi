@@ -15,8 +15,9 @@ import './index.css'
 /* global __MUMI_BUILD__ — inyectado en vite.config.js en cada deploy */
 const MUMI_BUILD = typeof __MUMI_BUILD__ !== 'undefined' ? __MUMI_BUILD__ : 'dev'
 
-// Deploy nuevo → purga SW + caches + React Query y recarga (no monta la app vieja).
-const purgandoPorBuild = asegurarBuildActual(MUMI_BUILD)
+// Deploy nuevo → purga SW + caches + React Query y recarga.
+// No bloquea el montaje: si reload falla, la app no queda en blanco.
+asegurarBuildActual(MUMI_BUILD)
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -88,30 +89,28 @@ window.addEventListener('vite:preloadError', (e) => {
   window.location.reload()
 })
 
-if (!purgandoPorBuild) {
-  ReactDOM.createRoot(document.getElementById('root')).render(
-    <React.StrictMode>
-      <BrowserRouter>
-        <PersistQueryClientProvider
-          client={queryClient}
-          persistOptions={{
-            persister,
-            // Al cambiar el build, React Query descarta el IndexedDB persistido.
-            buster: MUMI_BUILD,
-            maxAge: 1000 * 60 * 60 * 24 * 7,   // 7 días
-            dehydrateOptions: {
-              shouldDehydrateQuery: (q) =>
-                q.state.status === 'success' && !SIN_PERSISTIR.has(String(q.queryKey?.[0])),
-            },
-          }}
-        >
-          <AuthProvider>
-            <ConfirmProvider>
-              <App />
-            </ConfirmProvider>
-          </AuthProvider>
-        </PersistQueryClientProvider>
-      </BrowserRouter>
-    </React.StrictMode>
-  )
-}
+ReactDOM.createRoot(document.getElementById('root')).render(
+  <React.StrictMode>
+    <BrowserRouter>
+      <PersistQueryClientProvider
+        client={queryClient}
+        persistOptions={{
+          persister,
+          // Al cambiar el build, React Query descarta el IndexedDB persistido.
+          buster: MUMI_BUILD,
+          maxAge: 1000 * 60 * 60 * 24 * 7,   // 7 días
+          dehydrateOptions: {
+            shouldDehydrateQuery: (q) =>
+              q.state.status === 'success' && !SIN_PERSISTIR.has(String(q.queryKey?.[0])),
+          },
+        }}
+      >
+        <AuthProvider>
+          <ConfirmProvider>
+            <App />
+          </ConfirmProvider>
+        </AuthProvider>
+      </PersistQueryClientProvider>
+    </BrowserRouter>
+  </React.StrictMode>
+)

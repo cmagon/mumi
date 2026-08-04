@@ -17,6 +17,7 @@
     <!--
       Detecta deploy nuevo sin depender del bundle cacheado: pide build-id.txt
       siempre a red. Si cambió, desregistra el SW, vacía caches y recarga.
+      Usa reload() (no replace a la misma URL): replace a menudo no navega y dejaba la app en blanco.
     -->
     <script>
       (function () {
@@ -26,18 +27,15 @@
           .then(function (r) { return r.ok ? r.text() : '' })
           .then(function (t) {
             var id = String(t || '').trim()
-            if (!id) return
+            // Evita tomar un HTML de error/404 como "build id" (rompería el arranque).
+            if (!id || id.length > 80 || !/^[a-zA-Z0-9._-]+$/.test(id)) return
             var prev = localStorage.getItem(KEY)
             if (prev === id) return
             localStorage.setItem(KEY, id)
             if (!prev) return
             if (sessionStorage.getItem(FLAG) === id) return
             sessionStorage.setItem(FLAG, id)
-            var done = function () {
-              var u = new URL(location.href)
-              u.searchParams.delete('_v')
-              location.replace(u.pathname + u.search + u.hash)
-            }
+            var done = function () { location.reload() }
             var tasks = []
             try {
               if ('serviceWorker' in navigator) {
@@ -50,14 +48,6 @@
               if ('caches' in window) {
                 tasks.push(caches.keys().then(function (ks) {
                   return Promise.all(ks.map(function (k) { return caches.delete(k) }))
-                }))
-              }
-            } catch (e) {}
-            try {
-              if (indexedDB) {
-                tasks.push(new Promise(function (res) {
-                  var req = indexedDB.deleteDatabase('keyval-store')
-                  req.onsuccess = req.onerror = req.onblocked = function () { res() }
                 }))
               }
             } catch (e) {}
