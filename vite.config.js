@@ -4,11 +4,29 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// Id de build: con cada deploy (commit SHA en Vercel) el cliente detecta el cambio,
+// purga SW + Cache Storage + React Query y recarga. Sin SHA (build local) usa timestamp.
+const MUMI_BUILD =
+  process.env.VERCEL_GIT_COMMIT_SHA ||
+  process.env.CF_PAGES_COMMIT_SHA ||
+  `local-${Date.now()}`
+
 export default defineConfig({
+  define: {
+    __MUMI_BUILD__: JSON.stringify(MUMI_BUILD),
+  },
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
   plugins: [
+    {
+      // Archivo plano que el index.html pide con cache:'no-store' para detectar deploy
+      // aunque el service worker aún sirva un shell viejo.
+      name: 'mumi-build-id',
+      generateBundle() {
+        this.emitFile({ type: 'asset', fileName: 'build-id.txt', source: `${MUMI_BUILD}\n` })
+      },
+    },
     react(),
     tailwindcss(),
     VitePWA({
@@ -31,6 +49,9 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Fuerza activación inmediata del SW nuevo en todas las pestañas abiertas.
+        skipWaiting: true,
+        clientsClaim: true,
         // Se precachea SOLO el shell: index.html, el bundle de arranque, su CSS,
         // fuentes e iconos. Las consultas a Supabase siguen yendo a la red.
         //

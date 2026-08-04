@@ -14,6 +14,58 @@
   </head>
   <body>
     <div id="root"></div>
+    <!--
+      Detecta deploy nuevo sin depender del bundle cacheado: pide build-id.txt
+      siempre a red. Si cambió, desregistra el SW, vacía caches y recarga.
+    -->
+    <script>
+      (function () {
+        var KEY = 'mumi-app-build'
+        var FLAG = 'mumi-purga-build'
+        fetch('/build-id.txt', { cache: 'no-store' })
+          .then(function (r) { return r.ok ? r.text() : '' })
+          .then(function (t) {
+            var id = String(t || '').trim()
+            if (!id) return
+            var prev = localStorage.getItem(KEY)
+            if (prev === id) return
+            localStorage.setItem(KEY, id)
+            if (!prev) return
+            if (sessionStorage.getItem(FLAG) === id) return
+            sessionStorage.setItem(FLAG, id)
+            var done = function () {
+              var u = new URL(location.href)
+              u.searchParams.delete('_v')
+              location.replace(u.pathname + u.search + u.hash)
+            }
+            var tasks = []
+            try {
+              if ('serviceWorker' in navigator) {
+                tasks.push(navigator.serviceWorker.getRegistrations().then(function (rs) {
+                  return Promise.all(rs.map(function (r) { return r.unregister() }))
+                }))
+              }
+            } catch (e) {}
+            try {
+              if ('caches' in window) {
+                tasks.push(caches.keys().then(function (ks) {
+                  return Promise.all(ks.map(function (k) { return caches.delete(k) }))
+                }))
+              }
+            } catch (e) {}
+            try {
+              if (indexedDB) {
+                tasks.push(new Promise(function (res) {
+                  var req = indexedDB.deleteDatabase('keyval-store')
+                  req.onsuccess = req.onerror = req.onblocked = function () { res() }
+                }))
+              }
+            } catch (e) {}
+            Promise.all(tasks).then(done).catch(done)
+          })
+          .catch(function () {})
+      })()
+    </script>
     <script type="module" src="/src/main.jsx"></script>
   </body>
 </html>

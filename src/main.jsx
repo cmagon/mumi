@@ -7,9 +7,16 @@ import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persi
 import { get, set, del } from 'idb-keyval'
 import { AuthProvider } from './context/AuthContext'
 import { ConfirmProvider } from './context/ConfirmContext'
+import { asegurarBuildActual } from './lib/purgarCache'
 import App from './App'
 // index.css carga Tailwind (sin preflight) + el CSS propio en la capa `app` (ver index.css)
 import './index.css'
+
+/* global __MUMI_BUILD__ — inyectado en vite.config.js en cada deploy */
+const MUMI_BUILD = typeof __MUMI_BUILD__ !== 'undefined' ? __MUMI_BUILD__ : 'dev'
+
+// Deploy nuevo → purga SW + caches + React Query y recarga (no monta la app vieja).
+const purgandoPorBuild = asegurarBuildActual(MUMI_BUILD)
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -81,26 +88,30 @@ window.addEventListener('vite:preloadError', (e) => {
   window.location.reload()
 })
 
-ReactDOM.createRoot(document.getElementById('root')).render(
-  <React.StrictMode>
-    <BrowserRouter>
-      <PersistQueryClientProvider
-        client={queryClient}
-        persistOptions={{
-          persister,
-          maxAge: 1000 * 60 * 60 * 24 * 7,   // 7 días
-          dehydrateOptions: {
-            shouldDehydrateQuery: (q) =>
-              q.state.status === 'success' && !SIN_PERSISTIR.has(String(q.queryKey?.[0])),
-          },
-        }}
-      >
-        <AuthProvider>
-          <ConfirmProvider>
-            <App />
-          </ConfirmProvider>
-        </AuthProvider>
-      </PersistQueryClientProvider>
-    </BrowserRouter>
-  </React.StrictMode>
-)
+if (!purgandoPorBuild) {
+  ReactDOM.createRoot(document.getElementById('root')).render(
+    <React.StrictMode>
+      <BrowserRouter>
+        <PersistQueryClientProvider
+          client={queryClient}
+          persistOptions={{
+            persister,
+            // Al cambiar el build, React Query descarta el IndexedDB persistido.
+            buster: MUMI_BUILD,
+            maxAge: 1000 * 60 * 60 * 24 * 7,   // 7 días
+            dehydrateOptions: {
+              shouldDehydrateQuery: (q) =>
+                q.state.status === 'success' && !SIN_PERSISTIR.has(String(q.queryKey?.[0])),
+            },
+          }}
+        >
+          <AuthProvider>
+            <ConfirmProvider>
+              <App />
+            </ConfirmProvider>
+          </AuthProvider>
+        </PersistQueryClientProvider>
+      </BrowserRouter>
+    </React.StrictMode>
+  )
+}
