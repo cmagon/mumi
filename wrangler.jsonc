@@ -1,6 +1,8 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "mumi",
+  // Producción real: app.mumiamazonia.workers.dev (worker "app").
+  // "mumi" es un worker paralelo; los deploys deben ir a "app".
+  "name": "app",
   "compatibility_date": "2026-06-18",
   "compatibility_flags": ["nodejs_compat"],
   "assets": {
