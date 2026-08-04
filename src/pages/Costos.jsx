@@ -5,12 +5,16 @@ import { supabase } from '../lib/supabase'
 import {
   fCOP, fNum, fFecha, getCIFTotalMensual, getCIFMensual, getCostoMinuto,
   calcularCostosProducto, calcularReceta, getPEqMultiproducto,
-  getCostoNominaMensual, PARAMS_NOMINA_DEFAULT, GRUPOS_CIF, getGastosOperacionales,
+  getCostoNominaMensual, PARAMS_NOMINA_DEFAULT, GRUPOS_CIF, GRUPOS_EQUIPO, getGastosOperacionales,
   getTasaGastosOper, getPrecioSugerido, getPEqCaja, getCIFAbsorcion, presDeUnidad,
+  getDepreciacionMensualEquipo, getCostoTasaEquipo, getEquipoUnitProducto,
+  minutosProcesoOrden, calcularCostoProduccionOrden, codigoOrdenVisible,
 } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
 import { useReorder } from '../hooks/useReorder'
 import { usePantallaChica } from '../hooks/useMediaQuery'
+import { useNavTrail } from '../hooks/useNavTrail'
+import { useHistoryLayer } from '../hooks/useHistoryLayer'
 import { useAuth } from '../context/AuthContext'
 import { puedeVerSeccion } from '../lib/permisos'
 import Modal from '../components/ui/Modal'
@@ -21,7 +25,7 @@ import { useConfirm } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import Receta from './Receta'
 import { CATALOGO_PARAMS, PARAM_UNIDAD, PRESENTACIONES } from '../lib/calidad'
-import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Printer, Settings, ShoppingCart, Tag, Trash2, TrendingUp, Undo2, X, ChevronUp, ChevronDown, Plus } from 'lucide-react'
+import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Printer, Settings, ShoppingCart, Tag, Trash2, TrendingUp, Undo2, Wrench, X, ChevronUp, ChevronDown, Plus } from 'lucide-react'
 import { descargarFichaExcel } from '../lib/fichaExcel'
 import { getConfig } from '../lib/appConfig'
 import Select from '../components/ui/Select'
@@ -32,6 +36,7 @@ const EMPTY_PROD = {
   merma: 0, comision: 3, precio_mayor: 10000, precio_detal: 15000,
   presentacion: 'Unidad', activo: true, mp_id: '',
   vida_util_valor: '', vida_util_unidad: 'meses', descripcion: '',
+  empaca_surtido: false,
   // Precio: utilidad objetivo propia de este producto (vacío = usa la global) e impuestos
   // INDIRECTOS que se cobran al cliente sobre el precio (no son costo ni salen de tu utilidad).
   // ICUI se guarda en % (ad valorem); IBUA en pesos por unidad (impuesto específico por 100 ml)
@@ -39,7 +44,7 @@ const EMPTY_PROD = {
 }
 const EMPTY_ING = { mpId: '', nombre: '', modo: 'lista', precio: '', presentacion: 1000, pct: '', cantidad: '', tipo: 'normal', base: '' }
 
-export default function Costos() {
+export default function Costos({ vista = 'productos' }) {
   const toast = useToast()
   const confirmar = useConfirm()
   const qc = useQueryClient()
@@ -50,12 +55,11 @@ export default function Costos() {
   const rol = profile?.rol
   // Secciones configurables en Usuarios → Permisos. Sin override, SECCIONES_POR_ROL deja a
   // operario/auxiliar solo en "receta" (comportamiento histórico).
-  const puedeFicha  = puedeVerSeccion(rol, 'costos', 'resultados')
-  const puedeReceta = puedeVerSeccion(rol, 'costos', 'receta')
-  const puedeCif    = puedeVerSeccion(rol, 'costos', 'cif')
-  const puedeMps    = puedeVerSeccion(rol, 'costos', 'mps')
-  const soloReceta  = puedeReceta && !puedeFicha && !puedeCif && !puedeMps
-  const tabInicial = puedeFicha ? 'lista' : (puedeReceta ? 'receta' : (puedeCif ? 'cif' : (puedeMps ? 'mps' : 'lista')))
+  const puedeFicha  = vista === 'productos' && puedeVerSeccion(rol, 'productos', 'fichas')
+  const puedeCif    = vista === 'costos' && puedeVerSeccion(rol, 'costos_gastos', 'configuracion')
+  const tabInicial = vista === 'costos' ? 'cif' : 'lista'
+  const labelModulo = vista === 'costos' ? 'Costos y Gastos' : 'Productos'
+  const { pushTo, consumeArrival } = useNavTrail()
 
   // Secciones de la ficha: en pantalla chica se comportan como acordeón EXCLUSIVO (todas cerradas
   // al entrar y, al abrir una, el navegador cierra las demás gracias al atributo `name`). Así la
@@ -68,11 +72,12 @@ export default function Costos() {
 
   // ---- Tabs y modo ----
   const [tab, setTab] = useState(tabInicial)
+  const [costosSubtab, setCostosSubtab] = useState('costos')
   // Si el admin quita una sección, no dejar al usuario atrapado en una pestaña prohibida
   useEffect(() => {
-    const ok = { lista: puedeFicha, nuevo: puedeFicha, receta: puedeReceta, cif: puedeCif, mps: puedeMps }
+    const ok = { lista: puedeFicha, nuevo: puedeFicha, cif: puedeCif }
     if (!ok[tab]) setTab(tabInicial)
-  }, [puedeFicha, puedeReceta, puedeCif, puedeMps, tab, tabInicial])
+  }, [puedeFicha, puedeCif, tab, tabInicial])
   const [editingId, setEditingId] = useState(null)   // null = nuevo, number = editando producto existente
   const [selFuente, setSelFuente] = useState('')     // valor del selector: '' | prod-{id} | recipe-{id}
   const [modoMpVend, setModoMpVend] = useState(false)   // "calcular costos de una MP vendible"
@@ -88,6 +93,8 @@ export default function Costos() {
   // Costos adicionales personalizados (depreciación de máquinas, etc.) que suman al costo final.
   const [adicionales, setAdicionales] = useState([])
   const [adicOpen, setAdicOpen] = useState(false)
+  const [costosHora, setCostosHora] = useState([])
+  const [equipoForm, setEquipoForm] = useState({ id:null, nombre:'', descripcion:'', valor_adquisicion:'', valor_residual:'', vida_util_anos:5, allocation_mode:'general', rate_basis:'hora', capacidad_mes:176, grupo:'cif', categorias:[] })
 
   // ---- Imágenes del producto (galería): la PRIMERA es la principal (imagen_url) ----
   const [imagenes, setImagenes] = useState([])   // array de URLs públicas
@@ -141,6 +148,9 @@ export default function Costos() {
   // ---- Modales de lista ----
   const [verModal, setVerModal] = useState(false)
   const [verProd, setVerProd]   = useState(null)
+  const [detalleCosto, setDetalleCosto] = useState(null) // { producto, items: [...], foco?: ordenId }
+  const cerrarDetalleCostoRaw = useCallback(() => setDetalleCosto(null), [])
+  const closeDetalleCosto = useHistoryLayer(!!detalleCosto, cerrarDetalleCostoRaw, 'detalle-costo')
   // ---- Queries ----
   // Dueña de la clave ['raw_materials']: tabla completa ordenada por nombre. Las pantallas
   // que solo necesitan unas columnas usan sub-claves (['raw_materials','receta'], etc.).
@@ -156,6 +166,94 @@ export default function Costos() {
     queryKey: ['products_costing'],
     queryFn: async () => { const { data } = await supabase.from('products_costing').select('*').order('nombre'); return data || [] },
   })
+  const { data: equipos = [] } = useQuery({
+    queryKey: ['equipment_assets'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('equipment_assets').select('*').order('nombre')
+      if (error && /equipment_assets/i.test(error.message || '')) return []
+      if (error) throw error
+      return data || []
+    },
+  })
+  const { data: equipoLinks = [] } = useQuery({
+    queryKey: ['equipment_category_links'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('equipment_category_links').select('*')
+      if (error && /equipment_category_links/i.test(error.message || '')) return []
+      if (error) throw error
+      return data || []
+    },
+  })
+  // Producción del último mes calendario cerrado basada SOLO en órdenes. Los registros no se
+  // usan aquí porque pueden contener productos surtidos y distorsionar el producto base.
+  const mesAnterior = useMemo(() => {
+    const hoy = new Date()
+    const inicioActual = new Date(hoy.getFullYear(), hoy.getMonth(), 1)
+    const inicioAnterior = new Date(hoy.getFullYear(), hoy.getMonth() - 1, 1)
+    const fecha = (d) => {
+      const y = d.getFullYear()
+      const m = String(d.getMonth() + 1).padStart(2, '0')
+      const dia = String(d.getDate()).padStart(2, '0')
+      return `${y}-${m}-${dia}`
+    }
+    return {
+      desde: fecha(inicioAnterior),
+      hasta: fecha(inicioActual),
+      periodo: fecha(inicioAnterior).slice(0, 7),
+      label: inicioAnterior.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' }),
+    }
+  }, [])
+  const { data: ordenesProduccionAnalisis = [], isPending: cargandoProduccionMes } = useQuery({
+    queryKey: ['production_orders', 'costos-analisis'],
+    queryFn: async () => {
+      const base = 'id, producto, origen, origen_id, baches_plan, cantidad_plan, cantidad_result, fecha_prod, fecha_envio, created_at, estado, es_prueba, es_subproducto, surtido, producto_surtido, inicio, fin, procesos_tiempos, modo_avanzado, lotes_reservados'
+      const r = await supabase.from('production_orders').select(base + ', costo_snapshot, lotes_mp, destajo, costos_adicionales_hora').order('created_at', { ascending: false })
+      if (r.error && /costo_snapshot|costos_adicionales_hora/i.test(r.error.message || '')) {
+        const fallback = await supabase.from('production_orders').select(base).order('created_at', { ascending: false })
+        if (fallback.error) throw fallback.error
+        return fallback.data || []
+      }
+      if (r.error) throw r.error
+      return r.data || []
+    },
+  })
+  // Numeración visible OP-N (misma lógica que Órdenes / Producción)
+  const { data: ordenIdsData = [] } = useQuery({
+    queryKey: ['orden_ids'],
+    queryFn: async () => { const { data } = await supabase.from('production_orders').select('id').order('id'); return data || [] },
+  })
+  const { data: ordenStartCfg } = useQuery({
+    queryKey: ['app_config_orden_start'],
+    queryFn: async () => {
+      const { data } = await supabase.from('app_config').select('key, value').in('key', ['orden_start'])
+      const n = parseInt((data || []).find(r => r.key === 'orden_start')?.value)
+      if (!isNaN(n) && n > 0) { localStorage.setItem('mumi_orden_start', String(n)); return n }
+      return null
+    },
+    staleTime: 5 * 60 * 1000,
+  })
+  const ordenStartNum = ordenStartCfg || parseInt(localStorage.getItem('mumi_orden_start')) || 1
+  const opCodigo = (id) => codigoOrdenVisible(id, ordenIdsData, ordenStartNum)
+  const { data: alertasIgnoradas = [] } = useQuery({
+    queryKey: ['ficha_alert_dismissals', mesAnterior.periodo],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('ficha_alert_dismissals').select('product_id, alert_type, periodo').eq('periodo', mesAnterior.periodo)
+      if (error && /ficha_alert_dismissals/i.test(error.message || '')) return []
+      if (error) throw error
+      return data || []
+    },
+  })
+  const ignorarAlertaBaches = async (productId) => {
+    const { error } = await supabase.from('ficha_alert_dismissals').upsert({
+      product_id: productId,
+      alert_type: 'baches_mes',
+      periodo: mesAnterior.periodo,
+      dismissed_by: profile?.nombre || '',
+    }, { onConflict: 'product_id,alert_type,periodo' })
+    if (error) { toast('No se pudo ignorar la alerta: ' + error.message, 'error'); return }
+    qc.invalidateQueries({ queryKey: ['ficha_alert_dismissals'] })
+    toast('Alerta ignorada durante este mes')
+  }
   // 'activos' es una sub-clave, no la lista completa: la clave ['empleados'] la usan
   // Nómina y el tablero para TODOS los empleados. Compartirlas hacía que el tablero
   // contara como activos a todos (o Nómina perdiera a los inactivos) según cuál
@@ -240,7 +338,10 @@ export default function Costos() {
   // Solo la nómina de PRODUCCIÓN entra al CIF/costo-minuto; administración y ventas
   // van al gasto operacional (ver bloque de Gastos abajo y AUDITORIA_COSTOS.md).
   const costoNomina = getCostoNominaMensual(empleados, paramsNom, 'produccion')
-  const gastosOp = getGastosOperacionales(cifItems, empleados, paramsNom)
+  const depreciacionesGenerales = equipos
+    .filter(e => e.activo !== false && e.allocation_mode === 'general')
+    .map(e => ({ grupo: e.grupo || 'cif', valor: getDepreciacionMensualEquipo(e), frecuencia: 'mensual' }))
+  const gastosOp = getGastosOperacionales([...cifItems, ...depreciacionesGenerales], empleados, paramsNom)
   const esAdmin = profile?.rol === 'admin'
 
   // Márgenes de precios sugeridos (configurables por el admin)
@@ -259,30 +360,18 @@ export default function Costos() {
     if (error) { toast(error.message, 'error'); return }
     qc.invalidateQueries({ queryKey: ['costing_settings'] }); setEditMargenes(false); toast('Márgenes guardados ✓')
   }
-  // Parámetros del precio sugerido (utilidad objetivo, tarifa de ICA) — consulta aparte y
-  // tolerante: las columnas son de la migración v125 y puede no estar aplicada aún.
+  // Utilidad objetivo global (fallback si la ficha no trae la suya). El ICA no se usa en la ficha:
+  // es impuesto del período, no costo del producto (va en Costos y Gastos → Impuestos).
   const { data: precioParams } = useQuery({
     queryKey: ['costing_precio_params'],
     queryFn: async () => {
       try {
-        const { data } = await supabase.from('costing_settings').select('utilidad_objetivo, ica_por_mil').eq('id', 1).maybeSingle()
+        const { data } = await supabase.from('costing_settings').select('utilidad_objetivo').eq('id', 1).maybeSingle()
         return data || null
       } catch { return null }
     },
   })
   const utilidadObjetivo = precioParams?.utilidad_objetivo != null ? parseFloat(precioParams.utilidad_objetivo) : 30
-  // ICA en POR MIL sobre ventas brutas (ej. 7 = 0,7%). 0 = no aplicar.
-  const icaPorMil = precioParams?.ica_por_mil != null ? parseFloat(precioParams.ica_por_mil) : 0
-  const icaPct = icaPorMil / 10   // por mil → porcentaje
-  const guardarPrecioParam = async (campo, val, max = 99) => {
-    const n = parseFloat(val)
-    if (isNaN(n) || n < 0 || n >= max) { toast('Valor inválido', 'warning'); return }
-    const actual = campo === 'utilidad_objetivo' ? utilidadObjetivo : icaPorMil
-    if (n === actual) return
-    const { error } = await supabase.from('costing_settings').upsert({ id: 1, [campo]: n, updated_at: new Date().toISOString() }, { onConflict: 'id' })
-    if (error) { toast('No se pudo guardar (¿falta la migración v125?): ' + error.message, 'error'); return }
-    qc.invalidateQueries({ queryKey: ['costing_precio_params'] }); toast('Parámetro actualizado ✓')
-  }
   const { data: tiposProducto = [] } = useQuery({
     queryKey: ['product_types'],
     queryFn: async () => { const { data } = await supabase.from('product_types').select('*').order('nombre'); return data || [] },
@@ -306,6 +395,42 @@ export default function Costos() {
     await supabase.from('product_types').delete().eq('id', t.id)
     qc.invalidateQueries({ queryKey: ['product_types'] }); toast('Tipo eliminado')
   }
+  const limpiarEquipoForm = () => setEquipoForm({ id:null, nombre:'', descripcion:'', valor_adquisicion:'', valor_residual:'', vida_util_anos:5, allocation_mode:'general', rate_basis:'hora', capacidad_mes:176, grupo:'cif', categorias:[] })
+  const editarEquipo = (e) => setEquipoForm({
+    ...e,
+    categorias: equipoLinks.filter(l => String(l.equipment_id) === String(e.id)).map(l => l.categoria),
+  })
+  const guardarEquipo = async () => {
+    if (!equipoForm.nombre.trim()) { toast('Escribe el nombre del equipo', 'warning'); return }
+    const payload = {
+      nombre: equipoForm.nombre.trim(), descripcion: equipoForm.descripcion || '',
+      valor_adquisicion: parseFloat(equipoForm.valor_adquisicion) || 0,
+      valor_residual: parseFloat(equipoForm.valor_residual) || 0,
+      vida_util_anos: parseFloat(equipoForm.vida_util_anos) || 5,
+      allocation_mode: equipoForm.allocation_mode,
+      rate_basis: equipoForm.allocation_mode === 'categoria' ? equipoForm.rate_basis : null,
+      capacidad_mes: equipoForm.allocation_mode === 'categoria' ? (parseFloat(equipoForm.capacidad_mes) || 0) : null,
+      grupo: equipoForm.grupo || 'cif', activo: equipoForm.activo !== false, updated_at: new Date().toISOString(),
+    }
+    const r = equipoForm.id
+      ? await supabase.from('equipment_assets').update(payload).eq('id', equipoForm.id).select('id').single()
+      : await supabase.from('equipment_assets').insert(payload).select('id').single()
+    if (r.error) { toast(r.error.message, 'error'); return }
+    const id = r.data?.id || equipoForm.id
+    await supabase.from('equipment_category_links').delete().eq('equipment_id', id)
+    if (payload.allocation_mode === 'categoria' && equipoForm.categorias.length) {
+      const { error } = await supabase.from('equipment_category_links').insert(equipoForm.categorias.map(categoria => ({ equipment_id:id, categoria })))
+      if (error) { toast(error.message, 'error'); return }
+    }
+    qc.invalidateQueries({ queryKey: ['equipment_assets'] }); qc.invalidateQueries({ queryKey: ['equipment_category_links'] })
+    limpiarEquipoForm(); toast('Equipo guardado ✓')
+  }
+  const eliminarEquipo = async (e) => {
+    if (!await confirmar(`¿Eliminar el equipo "${e.nombre}"?`)) return
+    const { error } = await supabase.from('equipment_assets').delete().eq('id', e.id)
+    if (error) { toast(error.message, 'error'); return }
+    qc.invalidateQueries({ queryKey: ['equipment_assets'] }); qc.invalidateQueries({ queryKey: ['equipment_category_links'] }); toast('Equipo eliminado')
+  }
 
   // ---- CIF helpers ----
   // El CIF total = solo ítems clasificados como 'cif' (arriendo planta, servicios de producción...)
@@ -313,7 +438,10 @@ export default function Costos() {
   // pasivos NO entran aquí — se ven en el bloque de Gastos operacionales más abajo.
   const cifItemsCIF = cifItems.filter(c => (c.grupo || 'cif') === 'cif')
   const cifManual = getCIFTotalMensual(cifItemsCIF)
-  const cifTotal = cifManual + costoNomina.total
+  const depreciacionGeneral = equipos
+    .filter(e => e.activo !== false && e.allocation_mode === 'general' && (e.grupo || 'cif') === 'cif')
+    .reduce((s, e) => s + getDepreciacionMensualEquipo(e), 0)
+  const cifTotal = cifManual + costoNomina.total + depreciacionGeneral
   const empleadosProduccion = empleados.filter(e => (e.area_costeo || 'produccion') === 'produccion')
   const operariosActivos = (parseFloat(op.numOperarios) || 0) > 0 ? parseFloat(op.numOperarios) : (empleadosProduccion.length || 3)
   const costoMin = getCostoMinuto(cifTotal, operariosActivos, op.dias, op.jornadaHoras, op.improductividad)
@@ -366,6 +494,12 @@ export default function Costos() {
     const parse = (v) => { try { return Array.isArray(v) ? v : JSON.parse(v || '[]') } catch { return [] } }
     const otros = productosActivos.filter(x => x.id !== p.id)   // solo activos reparten CIF; evita doble conteo
     const ings = parse(p.ingredientes).map(i => ({ ...i, precio: precioActualIng(i) }))
+    const procesosProducto = parse(p.procesos)
+    const unidsBacheEquipo = (parseFloat(p.bache) || 0) * (1 - (parseFloat(p.merma) || 0) / 100)
+    const equipo = getEquipoUnitProducto({
+      equipos, links: equipoLinks, tipo: p.tipo, categorias: parse(p.categorias),
+      procesos: procesosProducto, unidsBache: unidsBacheEquipo, jornadaHoras: op.jornadaHoras,
+    })
     return calcularCostosProducto({
       bache:        parseFloat(p.bache)        || 1,
       bachesMes:    parseFloat(p.baches_mes)   || 1,
@@ -373,16 +507,18 @@ export default function Costos() {
       comision:     parseFloat(p.comision)      || 0,
       precioMayor:  parseFloat(p.precio_mayor)  || 0,
       precioDetal:  parseFloat(p.precio_detal)  || 0,
-      ingredientes: ings, procesos: parse(p.procesos), empaque: parse(p.empaque),
+      ingredientes: ings, procesos: procesosProducto, empaque: parse(p.empaque),
       cifTotal, productosGuardados: otros, cifUnidadesFallback, operariosActivos,
       diasHabiles: op.dias, jornadaHoras: op.jornadaHoras, improductividad: op.improductividad,
       adicionales: parse(p.costos_adicionales),
+      costosHora: parse(p.costos_hora),
+      equipoUnit: equipo.total,
     })
   }
 
   // Gastos FIJOS del período (admin, ventas, financieros). No encarecen el COSTO del producto,
-  // pero sí deben recuperarse en el precio y cubrirse en el punto de equilibrio. El ICA no va
-  // aquí: es un porcentaje de la venta y entra en el divisor del precio.
+  // pero sí deben recuperarse en el precio y cubrirse en el punto de equilibrio.
+  // El ICA va en Impuestos del período (no en la ficha ni en este total fijo).
   // Se declara antes de los cálculos que lo usan (punto de equilibrio y precio sugerido).
   const gastosFijosOper = gastosOp.administracion.total + gastosOp.ventas.total + gastosOp.financiero.total
 
@@ -403,18 +539,152 @@ export default function Costos() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productos, cifTotal, mps, gastosFijosOper])
 
+  const produccionMesPorProducto = useMemo(() => {
+    const normalizar = (v) => String(v || '').trim().toLocaleLowerCase('es')
+    const productoPorId = new Map(productos.map(p => [String(p.id), p]))
+    const productoPorNombre = new Map(productos.map(p => [normalizar(p.nombre), p]))
+    const acumulado = new Map()
+
+    const resolverProducto = (orden) => {
+      if (orden.origen === 'producto' && orden.origen_id != null) {
+        const porId = productoPorId.get(String(orden.origen_id))
+        if (porId) return porId
+      }
+      return productoPorNombre.get(normalizar(orden.producto))
+    }
+    const sumar = (producto, unidades, baches) => {
+      if (!producto) return
+      const actual = acumulado.get(String(producto.id)) || { unidades: 0, baches: 0, ordenes: 0 }
+      actual.unidades += unidades
+      actual.baches += baches
+      actual.ordenes += 1
+      acumulado.set(String(producto.id), actual)
+    }
+
+    // Cada orden cerrada se cuenta una sola vez. Si guardó baches_plan, ese es el dato más
+    // preciso; si no, se infiere desde el resultado real (o la cantidad planeada como respaldo).
+    for (const orden of ordenesProduccionAnalisis) {
+      if (orden.es_prueba || !['ejecutada', 'aprobada'].includes(orden.estado)) continue
+      const fechaOrden = String(orden.fecha_prod || orden.fecha_envio || orden.created_at || '').slice(0, 10)
+      if (fechaOrden < mesAnterior.desde || fechaOrden >= mesAnterior.hasta) continue
+      const producto = resolverProducto(orden)
+      if (!producto) continue
+      const bachesPlan = Number(orden.baches_plan) || 0
+      const unidades = Number(orden.cantidad_result) || Number(orden.cantidad_plan) || 0
+      const unidadesBache = (Number(producto.bache) || 0) * (1 - (Number(producto.merma) || 0) / 100)
+      const baches = bachesPlan > 0 ? bachesPlan : (unidadesBache > 0 ? unidades / unidadesBache : 0)
+      sumar(producto, unidades, baches)
+    }
+    return acumulado
+  }, [mesAnterior.desde, mesAnterior.hasta, ordenesProduccionAnalisis, productos])
+
+  const costosRecientesPorProducto = useMemo(() => {
+    const porProducto = new Map()
+    for (const orden of ordenesProduccionAnalisis) {
+      if (orden.es_prueba || !['ejecutada', 'aprobada'].includes(orden.estado) || orden.origen !== 'producto' || orden.origen_id == null) continue
+      const producto = productos.find(p => String(p.id) === String(orden.origen_id))
+      if (!producto) continue
+
+      const lotesUsados = Array.isArray(orden.lotes_mp) && orden.lotes_mp.length
+        ? orden.lotes_mp
+        : (Array.isArray(orden.lotes_reservados) ? orden.lotes_reservados : [])
+      const mpPepsTotal = lotesUsados.reduce((sum, item) => {
+        const lotes = Array.isArray(item.lotes) ? item.lotes : []
+        const costoLotes = lotes.reduce((s, l) => s + (Number(l.cantidad) || 0) * (Number(l.costo_unitario) || 0), 0)
+        const precioRef = Number(mps.find(mp => String(mp.id) === String(item.mp_id))?.precio) || 0
+        return sum + costoLotes + (Number(item.sin_lote_cantidad) || 0) * precioRef
+      }, 0)
+      const destajo = (Array.isArray(orden.destajo) ? orden.destajo : []).reduce((s, d) => s + (Number(d.cantidad) || 0) * (Number(d.tarifa) || 0), 0)
+      const tiempo = (Array.isArray(orden.costos_adicionales_hora) ? orden.costos_adicionales_hora : [])
+        .reduce((s, c) => s + (Number(c.total) || (Number(c.cantidad) || 0) * (Number(c.tarifa) || 0)), 0)
+      const cantidad = Number(orden.cantidad_result) || 0
+      if (!(cantidad > 0)) continue
+
+      // Baseline = COSTO DE PRODUCCIÓN/u de la ficha (MP + empaque + MO + CIF), recalculado en vivo.
+      const rc = recomputeProducto(producto)
+      const minutosReales = minutosProcesoOrden({
+        inicio: orden.inicio, fin: orden.fin,
+        procesos_tiempos: orden.procesos_tiempos, modo_avanzado: orden.modo_avanzado,
+      })
+      const calc = calcularCostoProduccionOrden({
+        cantidadObtenida: cantidad,
+        mpPepsTotal,
+        destajoTotal: destajo,
+        costosTiempoTotal: tiempo,
+        minutosReales,
+        mpUnit: rc.mpUnit, empUnit: rc.empUnit, moUnit: rc.moUnit,
+        adicUnit: rc.adicUnit, equipoUnit: rc.equipoUnit,
+        costoTotalUnit: rc.costoTotalUnit, totalMinutos: rc.totalMinutos, costoMin: rc.costoMin,
+        bache: parseFloat(producto.bache) || 0, merma: parseFloat(producto.merma) || 0,
+      })
+      if (!(calc.costo_real_unit > 0)) continue
+
+      const arr = porProducto.get(String(producto.id)) || []
+      if (arr.length < 3) {
+        const adicEqUnit = (Number(rc.adicUnit) || 0) + (Number(rc.equipoUnit) || 0)
+        arr.push({
+          ordenId: orden.id,
+          producto: orden.producto || producto.nombre,
+          costo: calc.costo_real_unit,
+          costoFicha: calc.costo_ficha_unit,
+          desviacion: Number.isFinite(calc.desviacion_pct) ? calc.desviacion_pct : 0,
+          fecha: orden.fecha_prod || orden.fecha_envio || orden.created_at,
+          cantidad,
+          cantidadPlan: Number(orden.cantidad_plan) || 0,
+          mpTotal: calc.mp_total,
+          empTotal: calc.emp_total,
+          moTotal: calc.mo_total,
+          adicTotal: calc.adic_total,
+          conversion: calc.conversion_total,
+          destajo: calc.destajo_total,
+          tiempo: calc.costos_tiempo_total,
+          minutosReales: calc.minutos_reales,
+          minutosEsperados: calc.minutos_esperados,
+          costoTotal: calc.costo_real_total,
+          // Desglose ficha (por unidad) para tabla comparativa
+          ficha: {
+            mp: Number(rc.mpUnit) || 0,
+            emp: Number(rc.empUnit) || 0,
+            mo: Number(rc.moUnit) || 0,
+            adic: adicEqUnit,
+            tiempo: Number(rc.tiempoUnit) || 0,
+            total: Number(rc.costoTotalUnit) || 0,
+            minutos: Number(rc.totalMinutos) || 0,
+          },
+          // Desglose orden (por unidad)
+          ordenU: {
+            mp: cantidad > 0 ? calc.mp_total / cantidad : 0,
+            emp: cantidad > 0 ? calc.emp_total / cantidad : 0,
+            mo: cantidad > 0 ? calc.mo_total / cantidad : 0,
+            adic: cantidad > 0 ? calc.adic_total / cantidad : 0,
+            destajo: cantidad > 0 ? calc.destajo_total / cantidad : 0,
+            tiempo: cantidad > 0 ? calc.costos_tiempo_total / cantidad : 0,
+            total: calc.costo_real_unit,
+          },
+          costosHora: Array.isArray(orden.costos_adicionales_hora) ? orden.costos_adicionales_hora : [],
+          destajoItems: Array.isArray(orden.destajo) ? orden.destajo : [],
+          lotesMp: lotesUsados,
+        })
+        porProducto.set(String(producto.id), arr)
+      }
+    }
+    return porProducto
+  // recomputeProducto depende de precios/CIF/equipos; estos deps cubren ese recálculo.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mps, ordenesProduccionAnalisis, productos, cifTotal, equipos, equipoLinks, operariosActivos, op.dias, op.jornadaHoras, op.improductividad])
+
   // Indicadores REALES de un producto guardado: costo pleno (producción + gastos del período) y
-  // utilidad neta (tras comisión e ICA). Es la misma cadena que muestra el Resumen de la ficha;
-  // se calcula aquí una sola vez para que el listado y la ficha nunca discrepen.
+  // utilidad neta (tras comisión). Sin ICA: ese impuesto es del período, no de la ficha.
   const indicadoresProducto = (p, rc) => {
     const pMayor = parseFloat(p.precio_mayor) || 0
     const cPleno = rc.costoTotalUnit * (1 + tasaGastosOper)
     const comU = pMayor * ((parseFloat(p.comision) || 0) / 100)
-    const icaU = pMayor * (icaPct / 100)
-    const utilNeta = pMayor - comU - icaU - cPleno
+    const utilNeta = pMayor - comU - cPleno
     const unidsMes = (parseFloat(p.bache) || 0) * (parseFloat(p.baches_mes) || 0) * (1 - (parseFloat(p.merma) || 0) / 100)
+    const utilidadBruta = pMayor - rc.costoTotalUnit
     return {
-      pMayor, cPleno, utilNeta, unidsMes,
+      pMayor, cPleno, utilNeta, unidsMes, utilidadBruta,
+      margenBrutoPct: pMayor > 0 ? (utilidadBruta / pMayor) * 100 : null,
       utilNetaPct: pMayor > 0 ? (utilNeta / pMayor) * 100 : null,
       utilMes: utilNeta * unidsMes,
     }
@@ -479,6 +749,11 @@ export default function Costos() {
   // Al editar, se EXCLUYE el propio producto del portafolio para no contarlo dos veces en U
   const recalcular = useCallback(() => {
     const portafolio = productosActivos.filter(p => p.id !== editingId)
+    const equipo = getEquipoUnitProducto({
+      equipos, links: equipoLinks, tipo: formProd.tipo, categorias, procesos,
+      unidsBache: (parseFloat(formProd.bache) || 0) * (1 - (parseFloat(formProd.merma) || 0) / 100),
+      jornadaHoras: op.jornadaHoras,
+    })
     setCalcResult(calcularCostosProducto({
       bache:        parseFloat(formProd.bache)       || 1,
       bachesMes:    parseFloat(formProd.baches_mes)  || 1,
@@ -491,23 +766,24 @@ export default function Costos() {
       cifUnidadesFallback, operariosActivos,
       diasHabiles: op.dias, jornadaHoras: op.jornadaHoras, improductividad: op.improductividad,
       adicionales,
+      costosHora,
+      equipoUnit: equipo.total,
     }))
-  }, [formProd, ingredientesEff, procesos, empaque, cifTotal, productos, editingId, cifUnidadesFallback, operariosActivos, op, adicionales])
+  }, [formProd, ingredientesEff, procesos, empaque, cifTotal, productos, editingId, cifUnidadesFallback, operariosActivos, op, adicionales, costosHora, categorias, equipos, equipoLinks])
 
   useEffect(() => { recalcular() }, [recalcular])
 
   // Al llegar desde una MP vendible: abre una ficha NUEVA prellenada con su nombre y precio de venta
   useEffect(() => {
     const st = location.state
-    if (st?.nuevaFichaNombre) {
-      setEditingId(null); setSelFuente('')
-      setIngredientes([]); setProcesos([]); setEmpaque([])
-      // Si viene de una MP vendible, la ficha se marca AUTOMÁTICAMENTE como tipo 'mp' y se vincula a la MP
-      setFormProd({ ...EMPTY_PROD, nombre: st.nuevaFichaNombre, precio_mayor: st.nuevaFichaPrecio || EMPTY_PROD.precio_mayor,
-        ...(st.nuevaFichaMpId ? { tipo: 'mp', mp_id: st.nuevaFichaMpId, presentacion: st.nuevaFichaUnidad || 'Unidad' } : {}) })
-      setTab('nuevo')
-      navigate(location.pathname, { replace: true, state: {} })
-    }
+    if (!st?.nuevaFichaNombre) return
+    setEditingId(null); setSelFuente('')
+    setIngredientes([]); setProcesos([]); setEmpaque([])
+    // Si viene de una MP vendible, la ficha se marca AUTOMÁTICAMENTE como tipo 'mp' y se vincula a la MP
+    setFormProd({ ...EMPTY_PROD, nombre: st.nuevaFichaNombre, precio_mayor: st.nuevaFichaPrecio || EMPTY_PROD.precio_mayor,
+      ...(st.nuevaFichaMpId ? { tipo: 'mp', mp_id: st.nuevaFichaMpId, presentacion: st.nuevaFichaUnidad || 'Unidad' } : {}) })
+    setTab('nuevo')
+    consumeArrival()
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [location.state])
 
@@ -519,9 +795,19 @@ export default function Costos() {
     setImagenes([]); setRendimiento(62); setDesperdicio(2); setPesoUnidad(1000)
     setPorciona(false); setPesoSubporcion(''); setModoIng('gramos'); setPesoBacheTotal('')
     setBrix(75); setBrixAplica(false); setParamsCalidad([]); setCamposExtra([])
-    setCategorias([]); setAdicionales([]); setAdicOpen(false); setImprimibles([])
+    setCategorias([]); setAdicionales([]); setAdicOpen(false); setCostosHora([]); setImprimibles([])
     setFichaFile(null); setFichaNombre(''); setFichaPath('')
     setEditingId(null); setSelFuente('')
+  }
+
+  const volverAListaFichas = () => { limpiarForm(); setTab('lista') }
+  // Editar/nueva ficha = subpágina: Atrás del navegador vuelve a la lista
+  const closeFicha = useHistoryLayer(tab === 'nuevo', volverAListaFichas, 'ficha-edit')
+
+  /** Abre el detalle de esa orden en Órdenes (reemplaza el modal actual en el historial) */
+  const abrirOrdenDesdeDetalle = (ordenId) => {
+    if (ordenId == null || ordenId === '') return
+    navigate('/ordenes', { replace: true, state: { verOrden: ordenId } })
   }
 
   // ---- Dispatcher del selector: producto (editar) o receta rápida (convertir a producto) ----
@@ -583,13 +869,15 @@ export default function Costos() {
     if (!p) return
     setEditingId(p.id)
     setSelFuente(`prod-${p.id}`)
-    setFormProd({ nombre: p.nombre, tipo: p.tipo, bache: p.bache, baches_mes: p.baches_mes, merma: p.merma, comision: p.comision, precio_mayor: p.precio_mayor, precio_detal: p.precio_detal, presentacion: p.presentacion || 'Unidad', activo: p.activo !== false, mp_id: p.mp_id || '', vida_util_valor: p.vida_util_valor || '', vida_util_unidad: p.vida_util_unidad || 'meses', descripcion: p.descripcion || '',
+    setFormProd({ nombre: p.nombre, tipo: p.tipo, bache: p.bache, baches_mes: p.baches_mes, merma: p.merma, comision: p.comision, precio_mayor: p.precio_mayor, precio_detal: p.precio_detal, presentacion: p.presentacion || 'Unidad', activo: p.activo !== false, mp_id: p.mp_id || '', vida_util_valor: p.vida_util_valor || '', vida_util_unidad: p.vida_util_unidad || 'meses', descripcion: p.descripcion || '', empaca_surtido: !!p.empaca_surtido,
       utilidad_objetivo: p.utilidad_objetivo ?? '', iva_pct: p.iva_pct ?? '', imp_saludable_pct: p.imp_saludable_pct ?? '', ibua_valor: p.ibua_valor ?? '' })
     setCamposExtra(parseJSON(p.campos_personalizados, []))
     setCategorias(parseJSON(p.categorias, []))
     const adic = parseJSON(p.costos_adicionales, [])
     setAdicionales(adic.map(a => ({ ...a, _id: Date.now() + Math.random() })))
-    setAdicOpen(adic.length > 0)
+    const horas = parseJSON(p.costos_hora, []).map(c => ({ ...c, _id: Date.now() + Math.random() }))
+    setCostosHora(horas)
+    setAdicOpen(adic.length > 0 || horas.length > 0)
     setIngredientes(parseJSON(p.ingredientes, []).map(i => ({ ...EMPTY_ING, _id: Date.now() + Math.random(), mpId: i.mpId||'', nombre: i.nombre||'', modo: i.mpId ? 'lista' : 'manual', precio: i.precio||'', precioOverride: !!i.precioOverride, presentacion: i.presentacion||1000, pct: i.pct||'', cantidad: i.cantidad||'', tipo: i.tipo||'normal', base: i.base||'' })))
     setProcesos(parseJSON(p.procesos, []).map(pr => ({ ...pr, _id: Date.now() + Math.random() })))
     setEmpaque(parseJSON(p.empaque, []).map(e => ({ ...e, _id: Date.now() + Math.random() })))
@@ -684,6 +972,7 @@ export default function Costos() {
       delete datos.iva_pct
       delete datos.imp_saludable_pct
       delete datos.ibua_valor
+      delete datos.empaca_surtido
 
       if (editingId) {
         // Detectar cambios en cantidades/costos de ingredientes para guardar histórico
@@ -724,6 +1013,9 @@ export default function Costos() {
         if (idFicha) await supabase.from('products_costing').update({
           categorias: categorias.filter(Boolean),
           costos_adicionales: adicionales.filter(a => a.descripcion?.trim() || a.valor).map(a => ({ descripcion: a.descripcion || '', valor: parseFloat(a.valor) || 0, base: a.base || 'unidad', ...(a.dep ? { dep: a.dep } : {}) })),
+          empaca_surtido: !!formProd.empaca_surtido,
+          costos_hora: costosHora.filter(c => c.nombre?.trim()).map(c => ({ nombre: c.nombre.trim(), unidad: c.unidad || 'hora', tarifa: parseFloat(c.tarifa) || 0, cantidad_default: parseFloat(c.cantidad_default) || 0 })),
+          equipo_unit: r.equipoUnit || 0,
         }).eq('id', idFicha)
       } catch { /* columnas opcionales: no bloquea el guardado */ }
       // Precio por ficha (utilidad objetivo propia, IVA, impuesto saludable) e imprimibles —
@@ -811,6 +1103,7 @@ export default function Costos() {
             cifTotal, productosGuardados: otros, cifUnidadesFallback, operariosActivos,
             diasHabiles: op.dias, jornadaHoras: op.jornadaHoras, improductividad: op.improductividad,
             adicionales: parseJSON(p.costos_adicionales, []),
+            costosHora: parseJSON(p.costos_hora, []),
           })
           await supabase.from('products_costing').update({
             ingredientes: JSON.stringify(nuevosIngs),
@@ -833,7 +1126,7 @@ export default function Costos() {
       if (res?.avisoV130) toast('La ficha se guardó, pero el IVA / utilidad objetivo / imprimibles NO: falta correr la migración v130. (' + res.avisoV130 + ')', 'warning')
       if (res?.mpSelf) toast(`Costo de "${res.mpSelf.nombre}" guardado en Inventario MP: $${fNum(res.mpSelf.nuevo)}/${res.mpSelf.unidad || 'u'}`, 'success')
       if (n > 0) toast(`Precio replicado a ${n} receta(s): ${res.recetasAfectadas.join(', ')}`, 'success')
-      limpiarForm(); setTab('lista')
+      closeFicha()
     },
     onError: (e) => toast(e.message, 'error'),
   })
@@ -1204,26 +1497,14 @@ export default function Costos() {
   return (
     <div>
       <div className="page-header">
-        <h1 className="page-title">{soloReceta ? 'Calcular Recetas Rápidas o de Prueba' : 'Calculadora de Costos'}</h1>
-        {!soloReceta && (
+        <h1 className="page-title">{labelModulo}</h1>
+        {vista === 'productos' && (
           <div className="page-actions">
-            <button className="btn btn-secondary btn-sm" title="Ir a Producto Terminado para agregar estos productos al catálogo vendible y enlazarlos con el software de facturación" onClick={() => navigate('/terminados')}><Ico as={Package} size={14} />Agregar / enlazar con facturación</button>
+            <button className="btn btn-secondary btn-sm" title="Ver existencias y configurar la integración del catálogo vendible" onClick={() => pushTo('/terminados')}><Ico as={Package} size={14} />Ver stock de producto terminado y configurar</button>
             {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalPapelera(true)}><Ico as={Trash2} size={14} />Papelera{papelera.length > 0 ? ` (${papelera.length})` : ''}</button>}
             <button className="btn btn-dorado btn-sm" onClick={() => { limpiarForm(); setTab('nuevo') }}>+ Nueva Ficha</button>
           </div>
         )}
-      </div>
-
-      <div className="tabs">
-        {[
-          puedeFicha  && ['lista', 'Productos'],
-          puedeFicha  && ['nuevo', '📝 Ficha de Producto'],
-          puedeReceta && ['receta', '🧪 Recetas Rápidas / Prueba'],
-          puedeCif    && ['cif', '💰 Costos y Gastos'],
-          puedeMps    && ['mps', 'Materias Primas'],
-        ].filter(Boolean).map(([id, lbl]) => (
-          <button key={id} className={`tab-btn ${tab === id ? 'active' : ''}`} onClick={() => setTab(id)}>{lbl}</button>
-        ))}
       </div>
 
       {/* ===== LISTA PRODUCTOS: listado acordeón agrupado por categoría (todos los anchos) ===== */}
@@ -1232,7 +1513,8 @@ export default function Costos() {
           <div className="card-title"><Ico as={Package} size={14} />Fichas de Productos</div>
           <div className="alert alert-info" style={{ fontSize:'0.82rem' }}>
             ℹ Todo se recalcula <strong>en vivo</strong> con el CIF y los precios de MP actuales. La <strong>utilidad neta</strong> ya
-            descuenta costo de producción, gastos de administración/ventas/financieros, comisión e ICA: es lo que de verdad te queda.
+            descuenta costo de producción, gastos de administración/ventas/financieros y comisión: es lo que de verdad te queda.
+            El ICA no se calcula en la ficha (es impuesto del período).
             Los valores <strong>guardados</strong> (los que usan Producto Terminado, Órdenes y el Tablero) solo cambian al guardar la
             ficha o con <strong>"↻ Aplicar a las fichas"</strong> en Costos y Gastos.
           </div>
@@ -1254,26 +1536,94 @@ export default function Costos() {
                     const pctCIF = totalUnidsPortafolio > 0 ? ind.unidsMes / totalUnidsPortafolio * 100 : 0
                     const colorUtil = ind.utilNeta >= 0 ? 'var(--selva)' : 'var(--rojo)'
                     const inactivo = p.activo === false
+                    const peq = peqMultiproducto.find(x => x.nombre === p.nombre)
+                    const produccionMes = produccionMesPorProducto.get(String(p.id))
+                    const bachesReales = produccionMes?.baches || 0
+                    const bachesFicha = Number(p.baches_mes) || 0
+                    const diferenciaBaches = bachesReales - bachesFicha
+                    const desviacionBachesPct = bachesFicha > 0 ? (diferenciaBaches / bachesFicha) * 100 : (bachesReales > 0 ? 100 : 0)
+                    const alertaBachesIgnorada = alertasIgnoradas.some(a => String(a.product_id) === String(p.id) && a.alert_type === 'baches_mes' && a.periodo === mesAnterior.periodo)
+                    const produccionDesviada = !cargandoProduccionMes && Math.abs(desviacionBachesPct) >= 10 && !alertaBachesIgnorada
+                    const costosRecientes = costosRecientesPorProducto.get(String(p.id)) || []
+                    const costoDesviado = costosRecientes.some(c => Math.abs(c.desviacion) > 10)
                     return (
                       <AccordionItem key={p.id}
                         titulo={<>
                           {p.imagen_url && <img src={p.imagen_url} alt="" style={{ width:24, height:24, borderRadius:3, objectFit:'cover', verticalAlign:'middle', marginRight:6 }} />}
                           {p.nombre}
                           {inactivo && <span className="badge badge-gris" style={{ marginLeft:6, fontSize:'0.65rem' }}><Ico as={Pause} size={12} />Inactivo</span>}
+                          {produccionDesviada && <span className="ficha-alerta-punto" title={`La producción de ${mesAnterior.label} difiere de la ficha`} aria-label="Alerta de producción" />}
+                          {costoDesviado && <span className="ficha-alerta-punto ficha-alerta-punto-costo" title="El costo de producción real (MP + empaque + MO + CIF) de una de las últimas tres órdenes difiere más de 10% vs la ficha" aria-label="Alerta de costo" />}
                         </>}
-                        sub={<>Costo pleno {fCOP(ind.cPleno)} · Utilidad neta <span style={{ color: colorUtil }}>{ind.utilNetaPct != null ? `${ind.utilNetaPct.toFixed(1)}%` : '—'}</span></>}
+                        sub={<>Costo pleno {fCOP(ind.cPleno)} · Margen bruto <span style={{ color: ind.utilidadBruta >= 0 ? 'var(--selva)' : 'var(--rojo)' }}>{ind.margenBrutoPct != null ? `${ind.margenBrutoPct.toFixed(1)}%` : '—'}</span></>}
                       >
                         <Fila et="Tipo">{grupo.label}{inactivo ? ' · inactivo' : ''}</Fila>
                         <Fila et="Unid/mes">{fNum(ind.unidsMes)} <small style={{ color:'var(--texto-suave)' }}>({pctCIF.toFixed(1)}% del portafolio)</small></Fila>
+                        <Fila et="Mínimo a vender (PE ponderado)">{!inactivo && peq?.mcu > 0 ? `${fNum(peq.pe)} unid/mes` : '—'}</Fila>
                         <Fila et="MP + empaque">{fCOP(rc.cvu)}</Fila>
                         <Fila et="Mano de obra + CIF">{fCOP(rc.moUnit)}</Fila>
                         <Fila et="Costo de producción/u">{fCOP(rc.costoTotalUnit)}</Fila>
                         <Fila et="Costo pleno/u (+ gastos)">{fCOP(ind.cPleno)}</Fila>
                         <Fila et="P. Mayor">{fCOP(p.precio_mayor)}</Fila>
-                        <Fila et="Utilidad neta/u"><span style={{ color: colorUtil }}>{fCOP(ind.utilNeta)}{ind.utilNetaPct != null ? ` (${ind.utilNetaPct.toFixed(1)}%)` : ''}</span></Fila>
+                        <Fila et="Margen bruto/u"><span style={{ color: ind.utilidadBruta >= 0 ? 'var(--selva)' : 'var(--rojo)' }}>{fCOP(ind.utilidadBruta)}{ind.margenBrutoPct != null ? ` (${ind.margenBrutoPct.toFixed(1)}%)` : ''}</span></Fila>
+                        <Fila et="Utilidad neta/u"><span style={{ color: colorUtil }}>{fCOP(ind.utilNeta)}</span></Fila>
                         <Fila et="Utilidad al mes"><span style={{ color: colorUtil }}>{fCOP(ind.utilMes)}</span></Fila>
+                        {produccionDesviada && (
+                          <div className="ficha-alerta-produccion" role="status">
+                            <span className="ficha-alerta-punto" aria-hidden="true" />
+                            <div>
+                              <strong>Revisa los baches configurados</strong>
+                              <div>
+                                En {mesAnterior.label} se produjeron aproximadamente <strong>{fNum(bachesReales)} baches</strong>,
+                                mientras la ficha indica <strong>{fNum(bachesFicha)} baches/mes</strong>
+                                ({diferenciaBaches > 0 ? `${fNum(diferenciaBaches)} más` : `${fNum(Math.abs(diferenciaBaches))} menos`}).
+                              </div>
+                              <small>
+                                Basado en {produccionMes?.ordenes || 0} orden(es) de producción cerrada(s). Los registros de producción no se incluyen.
+                              </small>
+                              <button type="button" className="btn btn-xs btn-secondary" style={{ marginTop:8 }} onClick={() => ignorarAlertaBaches(p.id)}>Ignorar hasta el próximo mes</button>
+                            </div>
+                          </div>
+                        )}
+                        {costosRecientes.length > 0 && (
+                          <div className={`ficha-alerta-costo ${costoDesviado ? 'activa' : ''}`} role="status">
+                            <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+                              <strong>{costoDesviado ? '⚠ Variación de costo de producción > 10%' : 'Costos de producción recientes'}</strong>
+                              {costoDesviado && (
+                                <button
+                                  type="button"
+                                  className="btn btn-xs btn-primary"
+                                  style={{ marginLeft:'auto' }}
+                                  onClick={() => setDetalleCosto({
+                                    producto: p,
+                                    items: costosRecientes,
+                                    foco: costosRecientes.find(c => Math.abs(c.desviacion) > 10)?.ordenId,
+                                  })}
+                                >
+                                  <Ico as={BarChart3} size={13} />Ver detalle de costos
+                                </button>
+                              )}
+                            </div>
+                            <div className="ficha-costos-recientes">
+                              {costosRecientes.map(c => (
+                                <button
+                                  key={c.ordenId}
+                                  type="button"
+                                  className="ficha-costo-chip"
+                                  title={`Ver detalle · ${opCodigo(c.ordenId)} · ${c.fecha ? fFecha(String(c.fecha).slice(0, 10)) : ''}`}
+                                  onClick={() => setDetalleCosto({ producto: p, items: costosRecientes, foco: c.ordenId })}
+                                >
+                                  <span className="ficha-costo-chip-op">{opCodigo(c.ordenId)}</span>
+                                  {fCOP(c.costo)} <small style={{ color: c.desviacion > 10 ? 'var(--rojo)' : c.desviacion < -10 ? 'var(--tierra)' : 'var(--texto-suave)' }}>{c.desviacion >= 0 ? '+' : ''}{c.desviacion.toFixed(1)}%</small>
+                                </button>
+                              ))}
+                            </div>
+                            <small>Comparado con el <strong>costo de producción/u</strong> (MP + empaque + MO + CIF): {fCOP(recomputeProducto(p).costoTotalUnit)}.</small>
+                          </div>
+                        )}
                         <div className="acordeon-acciones">
                           <button className="btn btn-xs btn-secondary" onClick={() => { setVerProd(p); setVerModal(true) }}>Ver</button>
+                          <button className="btn btn-xs btn-secondary" onClick={() => pushTo(p.empaca_surtido ? '/ordenes' : '/produccion', { filtrarProducto: p.nombre })}><Ico as={ClipboardList} size={13} />{p.empaca_surtido ? 'Órdenes relacionadas' : 'Registros'}</button>
                           <button className="btn btn-xs btn-primary" onClick={() => cargarProducto(p.id)}><Ico as={Pencil} size={14} />Editar</button>
                           <button className="btn btn-xs btn-secondary" onClick={() => duplicarProducto.mutate(p)} disabled={duplicarProducto.isPending}>⧉ Duplicar</button>
                           <button className={`btn btn-xs ${inactivo ? 'btn-success' : 'btn-secondary'}`} onClick={() => toggleActivoProducto.mutate(p)} disabled={toggleActivoProducto.isPending}>{inactivo ? '▶ Activar' : '⏸ Inactivar'}</button>
@@ -1316,6 +1666,9 @@ export default function Costos() {
       {/* ===== NUEVA / EDITAR FICHA ===== */}
       {tab === 'nuevo' && (
         <>
+          <div style={{ marginBottom: 12 }}>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={closeFicha}>← Volver a productos</button>
+          </div>
           {/* ── Selector: cargar producto (editar) o receta rápida (convertir a producto) ── */}
           <div className="card" style={{ padding:'14px 20px', marginBottom:16, background:'rgba(26,58,42,0.03)' }}>
             <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
@@ -1674,6 +2027,13 @@ export default function Costos() {
                   </small>
                 )}
               </div>
+              <div className="form-group">
+                <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:'0.85rem', cursor:'pointer', fontWeight:600, color:'var(--selva)', minHeight:'1.2rem' }}>
+                  <input type="checkbox" checked={!!formProd.empaca_surtido} onChange={e => setFormProd(f => ({ ...f, empaca_surtido: e.target.checked }))} />
+                  Se empaca surtido con otro producto
+                </label>
+                <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Habilita el campo “Empacó surtido” al diligenciar e imprimir la orden.</small>
+              </div>
             </div>
 
             {/* Parámetros de calidad (fisicoquímicos, reológicos, nutricionales...) */}
@@ -1822,21 +2182,18 @@ export default function Costos() {
             </div>
           </details>
 
-          {/* ── Costos adicionales personalizados (depreciación, etc.) — colapsable ── */}
+          {/* ── Costos adicionales personalizados — la depreciación se gestiona centralmente ── */}
           <div className="card">
             <div className="card-title" style={{ cursor:'pointer' }} onClick={() => setAdicOpen(o => !o)}>
-              <Ico as={DollarSign} size={14} />Costos Adicionales {adicionales.length > 0 ? `(${adicionales.length})` : ''}
+              <Ico as={DollarSign} size={14} />Costos Adicionales {(adicionales.length + costosHora.length) > 0 ? `(${adicionales.length + costosHora.length})` : ''}
               <button type="button" className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={(e) => { e.stopPropagation(); setAdicOpen(o => !o) }}><Ico as={adicOpen ? ChevronUp : ChevronDown} size={14} />{adicOpen ? 'Ocultar' : 'Mostrar'}</button>
             </div>
             {adicOpen && (
               <div>
-                <small style={{ color:'var(--texto-suave)', display:'block', marginBottom:8 }}>Costos extra personalizados (depreciación de máquinas, arriendo específico, etc.). Suman al <strong>costo final por unidad</strong> según su base.</small>
+                <small style={{ color:'var(--texto-suave)', display:'block', marginBottom:8 }}>Costos extra exclusivos de esta ficha. Suman al <strong>costo final por unidad</strong> según su base.</small>
                 <div className="alert alert-warning" style={{ fontSize:'0.8rem' }}>
-                  ⚠ <strong>Úsalo solo para lo que sea exclusivo de este producto.</strong> Si una máquina la usan varios productos,
-                  su depreciación va como ítem en <strong>Costos y Gastos → Costos de producción (CIF)</strong> (valor mensual) y se
-                  reparte sola entre todos. Si la registras en los dos lados, el costo queda inflado: se cuenta dos veces.
-                  La depreciación de equipos <em>administrativos</em> (computador de oficina, muebles) no es costo de producción: va como
-                  gasto administrativo.
+                  ⚠ <strong>Úsalo solo para valores exclusivos de este producto.</strong> La depreciación y asignación de máquinas
+                  se configura centralmente en <strong>Costos y Gastos → Depreciación y uso de equipos</strong>, para evitar contarla dos veces.
                 </div>
                 {adicionales.map((a, i) => {
                   const updA = (campos) => setAdicionales(arr => arr.map((x,idx) => idx===i ? { ...x, ...campos } : x))
@@ -1879,9 +2236,31 @@ export default function Costos() {
                 })}
                 <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
                   <button type="button" className="btn btn-sm btn-secondary" onClick={() => setAdicionales(arr => [...arr, { _id: Date.now()+Math.random(), descripcion:'', valor:'', base:'unidad' }])}><Ico as={Plus} size={13} /> Agregar costo</button>
-                  <button type="button" className="btn btn-sm btn-dorado" title="Calcula la depreciación según las horas que la máquina trabaja en cada bache" onClick={() => setAdicionales(arr => [...arr, { _id: Date.now()+Math.random(), descripcion:'', valor:'', base:'bache', dep: { valorMaquina:'', horasVida:'', horasBache:'' } }])}><Ico as={Clock} size={13} /> Depreciación por horas</button>
                 </div>
-                <small style={{ display:'block', marginTop:8, color:'var(--texto-suave)', fontSize:'0.72rem' }}>Base: <strong>por unidad</strong> suma directo; <strong>por bache</strong> se divide entre las unidades del bache; <strong>por mes</strong> se divide entre las unidades del mes. La <strong>depreciación por horas</strong> calcula sola el valor por bache: (valor máquina ÷ horas de vida útil) × horas que usa este producto por bache.</small>
+                <small style={{ display:'block', marginTop:8, color:'var(--texto-suave)', fontSize:'0.72rem' }}>Base: <strong>por unidad</strong> suma directo; <strong>por bache</strong> se divide entre las unidades del bache; <strong>por mes</strong> se divide entre las unidades del mes.</small>
+
+                {(formProd.tipo === 'mp' || formProd.tipo === 'subproducto') && (
+                  <div style={{ marginTop:16, paddingTop:14, borderTop:'1px solid var(--crema-oscuro)' }}>
+                    <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:8 }}>
+                      <strong style={{ color:'var(--selva)' }}><Ico as={Clock} size={14} />Costos adicionales por horas o días</strong>
+                      <button type="button" className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={() => setCostosHora(arr => [...arr, { _id: Date.now() + Math.random(), nombre:'', unidad:'hora', tarifa:'', cantidad_default:'' }])}>+ Agregar costo</button>
+                    </div>
+                    <small style={{ color:'var(--texto-suave)', display:'block', marginBottom:8 }}>
+                      Ejemplo: consumo energético del horno por hora. La <strong>cantidad sugerida × tarifa</strong> entra al costo de producto
+                      (repartida entre las unidades del bache). En cada orden se diligencia la cantidad real.
+                    </small>
+                    {costosHora.length === 0
+                      ? <p style={{ fontSize:'0.82rem', color:'var(--texto-suave)', margin:0 }}>Sin costos por tiempo. Agrégalos para que aparezcan al diligenciar la orden.</p>
+                      : costosHora.map((c, i) => (
+                        <div key={c._id || i} className="form-grid-4" style={{ marginBottom:8, alignItems:'end' }}>
+                          <div><label className="form-label">Concepto</label><input className="form-control" value={c.nombre || ''} onChange={e => setCostosHora(arr => arr.map((x, idx) => idx === i ? { ...x, nombre:e.target.value } : x))} placeholder="Energía horno" /></div>
+                          <div><label className="form-label">Unidad</label><Select className="form-control" value={c.unidad || 'hora'} onChange={e => setCostosHora(arr => arr.map((x, idx) => idx === i ? { ...x, unidad:e.target.value } : x))}><option value="hora">Hora</option><option value="dia">Día</option></Select></div>
+                          <div><label className="form-label">Tarifa</label><MoneyInput value={c.tarifa || ''} onChange={v => setCostosHora(arr => arr.map((x, idx) => idx === i ? { ...x, tarifa:v } : x))} /></div>
+                          <div style={{ display:'flex', gap:6, alignItems:'end' }}><div style={{ flex:1 }}><label className="form-label">Cantidad sugerida</label><input type="number" min="0" step="any" className="form-control" value={c.cantidad_default || ''} onChange={e => setCostosHora(arr => arr.map((x, idx) => idx === i ? { ...x, cantidad_default:e.target.value } : x))} /></div><button type="button" className="btn btn-xs btn-danger" onClick={() => setCostosHora(arr => arr.filter((_, idx) => idx !== i))}><X size={13} aria-hidden="true" /></button></div>
+                        </div>
+                      ))}
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1966,7 +2345,7 @@ export default function Costos() {
                 const comisionPct = parseFloat(formProd.comision) || 0
                 const sug = getPrecioSugerido({
                   costoProduccionUnit: calcResult.costoTotalUnit, tasaGastosOper,
-                  comisionPct, icaPct, utilidadPct: utilFicha,
+                  comisionPct, icaPct: 0, utilidadPct: utilFicha,
                 })
                 const precioActual = parseFloat(formProd.precio_mayor) || 0
                 const bajoMinimo = precioActual > 0 && precioActual < sug.precioMinimo
@@ -1978,18 +2357,13 @@ export default function Costos() {
                 // Utilidad BRUTA (antes de gastos) al precio objetivo = precio − costo de producción.
                 const utilBrutaUnit = sug.precioObjetivo - calcResult.costoTotalUnit
                 const utilBrutaPct = sug.precioObjetivo > 0 ? (utilBrutaUnit / sug.precioObjetivo) * 100 : 0
-                // Lo que realmente queda NETO con el precio actual, tras comisión, ICA y gastos operativos.
+                // Lo que realmente queda NETO con el precio actual, tras comisión y gastos operativos (sin ICA).
                 const utilRealUnit = precioActual > 0
-                  ? precioActual * (1 - comisionPct / 100 - icaPct / 100) - costoPlenoUnit : 0
+                  ? precioActual * (1 - comisionPct / 100) - costoPlenoUnit : 0
                 const utilRealPct = precioActual > 0 ? (utilRealUnit / precioActual) * 100 : 0
                 // Utilidad BRUTA con el precio actual (antes de gastos operativos).
                 const utilBrutaRealUnit = precioActual > 0 ? precioActual - calcResult.costoTotalUnit : 0
                 const utilBrutaRealPct = precioActual > 0 ? (utilBrutaRealUnit / precioActual) * 100 : 0
-                // Impuestos INDIRECTOS: los cobras al cliente sobre el precio y los giras a la DIAN.
-                // No son costo ni utilidad tuya, así que no entran al cálculo: solo al precio final.
-                const ivaP = parseFloat(formProd.iva_pct) || 0
-                const saludP = parseFloat(formProd.imp_saludable_pct) || 0
-                const precioConImp = precioActual * (1 + (ivaP + saludP) / 100)
                 return (
                   <div style={{ background:'#fff8e8', border:`1px solid ${color}`, borderRadius:'var(--radio)', padding:'12px', marginBottom:14 }}>
                     <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:8 }}>
@@ -2000,20 +2374,14 @@ export default function Costos() {
                         onChange={e => setFormProd(f => ({ ...f, utilidad_objetivo: e.target.value }))}
                         title={`Utilidad objetivo SOLO de este producto. Vacío = usa la de la empresa (${utilidadObjetivo}%). Se guarda con la ficha.`} />
                       <span style={{ fontSize:'0.8rem' }}>%</span>
-                      <span style={{ fontSize:'0.75rem', color:'var(--texto-suave)', marginLeft:6 }}>ICA</span>
-                      <input type="number" className="form-control" style={{ width:64, textAlign:'right', padding:'2px 6px' }}
-                        defaultValue={icaPorMil} min={0} max={99} step={0.1}
-                        onBlur={e => guardarPrecioParam('ica_por_mil', e.target.value)} disabled={!esAdmin}
-                        title="Tarifa de ICA de tu municipio y actividad, en POR MIL sobre ventas brutas. Ej: 7 = 0,7%. Este SÍ lo pagas tú, por eso afecta el precio. Es global para toda la empresa." />
-                      <span style={{ fontSize:'0.8rem' }} title="por mil sobre ventas">‰</span>
                     </div>
                     {!sug.viable
-                      ? <div className="alert alert-warning" style={{ fontSize:'0.8rem' }}>La comisión ({comisionPct}%), el ICA ({icaPct.toFixed(2)}%) y la utilidad objetivo ({utilFicha}%) suman 100% o más: no existe un precio que los cubra. Baja alguno.</div>
+                      ? <div className="alert alert-warning" style={{ fontSize:'0.8rem' }}>La comisión ({comisionPct}%) y la utilidad objetivo ({utilFicha}%) suman 100% o más: no existe un precio que los cubra. Baja alguno.</div>
                       : <>
                           <table style={{ fontSize:'0.84rem', width:'100%' }}>
                             <tbody>
                               <tr><td>Costo de producción/u <small style={{ color:'var(--texto-suave)' }}>(MP + empaque + CIF)</small></td><td className="td-number">{fCOP(calcResult.costoTotalUnit)}</td></tr>
-                              <tr style={{ color:'var(--tierra)' }}><td><strong>Precio mínimo</strong> <small>(cubre costo de producción + comisión{icaPct > 0 ? ' + ICA' : ''}, sin utilidad)</small></td><td className="td-number"><strong>{fCOP(sug.precioMinimo)}</strong></td></tr>
+                              <tr style={{ color:'var(--tierra)' }}><td><strong>Precio mínimo</strong> <small>(cubre costo de producción + comisión, sin utilidad)</small></td><td className="td-number"><strong>{fCOP(sug.precioMinimo)}</strong></td></tr>
                               <tr style={{ color:'var(--selva)' }}><td><strong>Precio objetivo</strong> <small>(con {utilFicha}% de utilidad bruta + %comisión)</small></td><td className="td-number"><strong style={{ fontSize:'1.05rem' }}>{fCOP(sug.precioObjetivo)}</strong ><br /> <small>Utilidad bruta real</small> <strong style={{ fontSize:'0.8rem' }}>{utilBrutaPct.toFixed(1)}%</strong ></td></tr>
                               <tr></tr>
                             </tbody>
@@ -2022,9 +2390,8 @@ export default function Costos() {
                           <table style={{ fontSize:'0.8rem', width:'100%', marginTop:6, color:'var(--texto-suave)' }}>
                             <tbody>
                               <tr><td>(−) Comisión de ventas <small>({comisionPct}%)</small></td><td className="td-number">{fCOP(sug.precioObjetivo * comisionPct / 100)}</td></tr>
-                              {icaPct > 0 && <tr><td>(−) ICA <small>({icaPct.toFixed(2)}%)</small></td><td className="td-number">{fCOP(sug.precioObjetivo * icaPct / 100)}</td></tr>}
                               <tr><td>(−) Gastos admin/ventas/financieros por u <small>({(tasaGastosOper*100).toFixed(1)}% del costo de producción · informativo)</small></td><td className="td-number">{fCOP(sug.gastosOperUnit)}</td></tr>
-                              <tr style={{ fontWeight:600, color:'var(--texto)' }}><td>= Utilidad neta estimada/u</td><td className="td-number">{fCOP(utilBrutaUnit - sug.precioObjetivo * (comisionPct + icaPct) / 100 - sug.gastosOperUnit)}</td></tr>
+                              <tr style={{ fontWeight:600, color:'var(--texto)' }}><td>= Utilidad neta estimada/u</td><td className="td-number">{fCOP(utilBrutaUnit - sug.precioObjetivo * comisionPct / 100 - sug.gastosOperUnit)}</td></tr>
                             </tbody>
                           </table>
                           <div style={{ marginTop:8, display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
@@ -2042,15 +2409,15 @@ export default function Costos() {
                               </div>
                               <div style={{ color:'var(--texto-suave)' }}>
                                 Utilidad <strong>bruta</strong> (precio − costo de producción): <strong style={{ color:'var(--selva)' }}>{fCOP(utilBrutaRealUnit)} ({utilBrutaRealPct.toFixed(1)}%)</strong>.<br />
-                                Neta, tras {comisionPct}% comisión{icaPct > 0 ? ` + ${icaPct.toFixed(2)}% ICA` : ''} y {fCOP(sug.gastosOperUnit)} de gastos operativos:
+                                Neta, tras {comisionPct}% comisión y {fCOP(sug.gastosOperUnit)} de gastos operativos:
                                 {' '}<strong style={{ color }}>{fCOP(utilRealUnit)} ({utilRealPct.toFixed(1)}%)</strong> por unidad.
                               </div>
                             </div>
                           )}
                           <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem', display:'block', marginTop:6 }}>
-                            Precio = costo de producción ÷ (1 − {comisionPct}% comisión {icaPct > 0 ? `− ${icaPct.toFixed(2)}% ICA ` : ''}− {utilFicha}% utilidad bruta). Se <strong>divide</strong>: son porcentajes del precio,
-                            no del costo (multiplicar por 1+margen deja menos utilidad de la que crees). Los gastos admin/ventas/financieros NO se suman al costo del producto (NIC 2): se muestran aparte y el margen bruto debe cubrirlos.
-                            {icaPorMil === 0 && <> El ICA está en 0: si conoces la tarifa de tu municipio, escríbela en ‰ para que el precio la contemple.</>}
+                            Precio = costo de producción ÷ (1 − {comisionPct}% comisión − {utilFicha}% utilidad bruta). Se <strong>divide</strong>: son porcentajes del precio,
+                            no del costo. Los gastos admin/ventas/financieros NO se suman al costo del producto (NIC 2): se muestran aparte.
+                            El ICA no entra en la ficha: es impuesto del período (Costos y Gastos → Impuestos).
                           </small>
                         </>}
                   </div>
@@ -2123,11 +2490,12 @@ export default function Costos() {
                 )}
                 <small style={{ display:'block', marginTop:6, color:'var(--texto-suave)', fontSize:'0.72rem' }}>
                   Los recaudas y los giras a la DIAN: no son tuyos, no son costo y por eso <strong>no cambian el precio sugerido</strong> —
-                  solo se suman encima para saber cuánto paga el cliente. Distinto del <strong>ICA</strong>, que sí sale de tu bolsillo.
+                  solo se suman encima para saber cuánto paga el cliente.
                   El <strong>ICUI</strong> (comestibles) y el <strong>IBUA</strong> (bebidas) no entran en la base del IVA: van
                   discriminados aparte en la factura (DIAN, Concepto 541 de 2024).
                   {' '}Si eres <strong>persona natural</strong> con ingresos brutos menores a 10.000 UVT en el año, no eres responsable
                   de estos impuestos saludables: déjalos en 0.
+                  El <strong>ICA</strong> no se calcula aquí: es del período (Costos y Gastos → Impuestos).
                 </small>
               </div>
                 )
@@ -2200,11 +2568,9 @@ export default function Costos() {
                 const cProd = calcResult.costoTotalUnit                       // costo de PRODUCCIÓN
                 const gastosU = cProd * tasaGastosOper                        // gastos del período prorrateados
                 const cPleno = cProd + gastosU                                // costo PLENO (lo que cuesta de verdad)
-                const icaU = pMayor * (icaPct / 100)
-                // Utilidad NETA: lo que queda tras comisión, ICA y todos los costos y gastos.
-                // Es la cifra que debe cuadrar con el panel de Precio sugerido.
-                const utilNeta = pMayor - calcResult.comUnit - icaU - cPleno
-                const utilNetaDetal = pDetal - (pDetal * icaPct / 100) - cPleno
+                // Utilidad NETA: tras comisión y gastos del período. Sin ICA (impuesto del período).
+                const utilNeta = pMayor - calcResult.comUnit - cPleno
+                const utilNetaDetal = pDetal - cPleno
                 // Utilidad BRUTA (antes de gastos) = precio − costo de PRODUCCIÓN. Es el margen, protagonista.
                 const utilBrutaMayor = pMayor - cProd
                 const utilBrutaMayorPct = pMayor > 0 ? (utilBrutaMayor / pMayor * 100) : 0
@@ -2216,6 +2582,8 @@ export default function Costos() {
                   <div className="row"><span>Empaque por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>({pct(calcResult.empUnit)})</small></span><span>{fCOP(calcResult.empUnit)}</span></div>
                   <div className="row"><span>+ Mano de obra y CIF por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>({calcResult.totalMinutos} min × {fCOP(calcResult.costoMin)}/min ÷ unid · {pct(calcResult.moUnit)})</small></span><span style={{color:'var(--dorado)'}}>{fCOP(calcResult.moUnit)}</span></div>
                   {(calcResult.adicUnit || 0) > 0 && <div className="row"><span>+ Costos adicionales por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>(depreciación, otros · {pct(calcResult.adicUnit)})</small></span><span style={{color:'var(--dorado)'}}>{fCOP(calcResult.adicUnit)}</span></div>}
+                  {(calcResult.tiempoUnit || 0) > 0 && <div className="row"><span>+ Costos por hora/día <small style={{opacity:0.6,fontSize:'0.72rem'}}>(cantidad sugerida × tarifa ÷ unid. bache · {pct(calcResult.tiempoUnit)})</small></span><span style={{color:'var(--dorado)'}}>{fCOP(calcResult.tiempoUnit)}</span></div>}
+                  {(calcResult.equipoUnit || 0) > 0 && <div className="row"><span>+ Equipos asignados por categoría <small style={{opacity:0.6,fontSize:'0.72rem'}}>({pct(calcResult.equipoUnit)})</small></span><span style={{color:'var(--dorado)'}}>{fCOP(calcResult.equipoUnit)}</span></div>}
                   <div className="row" style={{ borderTop:'1px solid rgba(245,240,232,0.25)', paddingTop:6, marginTop:4, fontWeight:600 }}>
                     <span>= COSTO DE PRODUCCIÓN por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>(MP + empaque + MO + CIF)</small></span><span>{fCOP(cProd)}</span>
                   </div>
@@ -2223,12 +2591,11 @@ export default function Costos() {
                     <div className="row"><span>Precio de venta por mayor</span><span>{fCOP(pMayor)}</span></div>
                     {/* Utilidad BRUTA (antes de gastos): el margen, protagonista y en grande. */}
                     <div className="row ganancia" style={{ fontWeight:800, borderTop:'1px solid rgba(245,240,232,0.25)', paddingTop:8, marginTop:2, alignItems:'baseline' }}>
-                      <span style={{ cursor:'help' }} title="Utilidad bruta = precio − costo de PRODUCCIÓN, antes de comisión, ICA y gastos de administración/ventas/financieros. Es el margen con el que la empresa paga esos gastos y deja utilidad.">UTILIDAD BRUTA (antes de gastos) ⓘ</span>
+                      <span style={{ cursor:'help' }} title="Utilidad bruta = precio − costo de PRODUCCIÓN, antes de comisión y gastos de administración/ventas/financieros. Es el margen con el que la empresa paga esos gastos y deja utilidad.">UTILIDAD BRUTA (antes de gastos) ⓘ</span>
                       <span style={{ color: utilBrutaMayor >= 0 ? 'var(--lima)' : 'var(--rojo)' }}><strong style={{ fontSize:'1.5rem' }}>{utilBrutaMayorPct.toFixed(1)}%</strong> <small style={{ opacity:0.85 }}>· {fCOP(utilBrutaMayor)}/u</small></span>
                     </div>
                     {/* Gastos del período, DESPUÉS del margen bruto (no se suman al costo del producto). */}
                     {(calcResult.comUnit || 0) > 0 && <div className="row"><span>− Comisión distribuidor <small style={{opacity:0.6,fontSize:'0.72rem'}}>({formProd.comision}%)</small></span><span style={{color:'var(--dorado)'}}>−{fCOP(calcResult.comUnit)}</span></div>}
-                    {icaU > 0 && <div className="row"><span>− ICA <small style={{opacity:0.6,fontSize:'0.72rem'}}>({icaPct.toFixed(2)}% de la venta)</small></span><span style={{color:'var(--dorado)'}}>−{fCOP(icaU)}</span></div>}
                     <div className="row"><span>− Gastos admin/ventas/financieros <small style={{opacity:0.6,fontSize:'0.72rem'}}>({(tasaGastosOper*100).toFixed(1)}% del costo de producción)</small></span><span style={{color:'var(--dorado)'}}>−{fCOP(gastosU)}</span></div>
                     <div className="row ganancia" style={{ fontWeight:700, borderTop:'1px solid rgba(245,240,232,0.25)', paddingTop:6 }}>
                       <span>= UTILIDAD NETA por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>{(calcResult.comUnit || 0) > 0 ? '(con comisión)' : ''}</small></span>
@@ -2491,7 +2858,72 @@ export default function Costos() {
             </div>
           </div>
 
-          {CAJAS.map(caja => {
+          <div className="tabs" style={{ marginBottom:14 }}>
+            <button className={`tab-btn ${costosSubtab === 'costos' ? 'active' : ''}`} onClick={() => setCostosSubtab('costos')}>Costos</button>
+            <button className={`tab-btn ${costosSubtab === 'gastos' ? 'active' : ''}`} onClick={() => setCostosSubtab('gastos')}>Gastos</button>
+            <button className={`tab-btn ${costosSubtab === 'analisis' ? 'active' : ''}`} onClick={() => setCostosSubtab('analisis')}>Análisis</button>
+          </div>
+
+          {costosSubtab === 'costos' && <div className="card">
+            <div className="card-title"><Ico as={Wrench} size={15} />Depreciación y uso de equipos</div>
+            <div className="alert alert-info" style={{ fontSize:'0.8rem' }}>
+              La depreciación se calcula por línea recta: <strong>(valor − residual) ÷ vida útil ÷ 12</strong>.
+              El método general entra al CIF mensual; por categoría se asigna según las horas o días del proceso de cada ficha.
+            </div>
+            <div className="form-grid-4" style={{ alignItems:'end' }}>
+              <div className="form-group"><label className="form-label">Equipo *</label><input className="form-control" value={equipoForm.nombre} onChange={e => setEquipoForm(f => ({ ...f, nombre:e.target.value }))} placeholder="Horno deshidratador" /></div>
+              <div className="form-group"><label className="form-label">Valor de adquisición</label><MoneyInput value={equipoForm.valor_adquisicion} onChange={v => setEquipoForm(f => ({ ...f, valor_adquisicion:v }))} /></div>
+              <div className="form-group"><label className="form-label">Valor residual</label><MoneyInput value={equipoForm.valor_residual} onChange={v => setEquipoForm(f => ({ ...f, valor_residual:v }))} /></div>
+              <div className="form-group"><label className="form-label">Vida útil (años)</label><input type="number" min="0.1" step="0.1" className="form-control" value={equipoForm.vida_util_anos} onChange={e => setEquipoForm(f => ({ ...f, vida_util_anos:e.target.value }))} /></div>
+              <div className="form-group"><label className="form-label">Asignación</label><Select className="form-control" value={equipoForm.allocation_mode} onChange={e => setEquipoForm(f => ({ ...f, allocation_mode:e.target.value }))}><option value="general">General (CIF mensual)</option><option value="categoria">Por categoría y uso</option></Select></div>
+              <div className="form-group">
+                <label className="form-label">Grupo contable</label>
+                <Select className="form-control" value={['cif','administracion','ventas'].includes(equipoForm.grupo) ? equipoForm.grupo : 'cif'} onChange={e => setEquipoForm(f => ({ ...f, grupo:e.target.value }))}>
+                  {GRUPOS_EQUIPO.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
+                </Select>
+                <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem', display:'block', marginTop:4 }}>
+                  Según el <strong>uso</strong> del equipo: planta → <strong>CIF</strong> (entra al costo del producto si es asignación general);
+                  oficina → <strong>Administración</strong>; entregas/comercial → <strong>Ventas</strong>.
+                  Si compraste a crédito, aquí solo va la depreciación del activo; los intereses del crédito son gasto financiero (en Gastos), no depreciación.
+                </small>
+              </div>
+              {equipoForm.allocation_mode === 'categoria' && <>
+                <div className="form-group"><label className="form-label">Base de uso</label><Select className="form-control" value={equipoForm.rate_basis} onChange={e => setEquipoForm(f => ({ ...f, rate_basis:e.target.value }))}><option value="hora">Hora</option><option value="dia">Día</option></Select></div>
+                <div className="form-group"><label className="form-label">Capacidad mensual ({equipoForm.rate_basis === 'dia' ? 'días' : 'horas'})</label><input type="number" min="0.1" step="any" className="form-control" value={equipoForm.capacidad_mes} onChange={e => setEquipoForm(f => ({ ...f, capacidad_mes:e.target.value }))} /></div>
+              </>}
+            </div>
+            {equipoForm.allocation_mode === 'categoria' && (
+              <div className="form-group">
+                <label className="form-label">Categorías a las que aplica</label>
+                <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+                  {[...new Set([...tiposProducto.map(t => t.nombre), 'subproducto', 'mp', 'otro'])].map(cat => (
+                    <label key={cat} className="check-row" style={{ padding:'5px 8px' }}><input type="checkbox" checked={equipoForm.categorias.includes(cat)} onChange={e => setEquipoForm(f => ({ ...f, categorias:e.target.checked ? [...f.categorias, cat] : f.categorias.filter(x => x !== cat) }))} /><span>{cat}</span></label>
+                  ))}
+                </div>
+              </div>
+            )}
+            <div style={{ display:'flex', gap:8, alignItems:'center', margin:'8px 0 14px' }}>
+              <button type="button" className="btn btn-primary" onClick={guardarEquipo}>{equipoForm.id ? 'Guardar cambios' : 'Agregar equipo'}</button>
+              {equipoForm.id && <button type="button" className="btn btn-secondary" onClick={limpiarEquipoForm}>Cancelar edición</button>}
+              <span style={{ marginLeft:'auto', color:'var(--texto-suave)', fontSize:'0.78rem' }}>
+                Depreciación mensual: <strong>{fCOP(getDepreciacionMensualEquipo(equipoForm))}</strong>
+                {equipoForm.allocation_mode === 'categoria' ? ` · ${fCOP(getCostoTasaEquipo(equipoForm))}/${equipoForm.rate_basis}` : ''}
+              </span>
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead><tr><th>Equipo</th><th>Método</th><th>Categorías</th><th>Depreciación/mes</th><th>Tasa</th><th></th></tr></thead>
+                <tbody>
+                  {equipos.length === 0 ? <tr><td colSpan={6} className="empty-table">Sin equipos configurados.</td></tr> : equipos.map(e => {
+                    const cats = equipoLinks.filter(l => String(l.equipment_id) === String(e.id)).map(l => l.categoria)
+                    return <tr key={e.id}><td><strong>{e.nombre}</strong></td><td>{e.allocation_mode === 'general' ? 'General' : 'Por categoría'}</td><td>{cats.join(', ') || '—'}</td><td className="td-number">{fCOP(getDepreciacionMensualEquipo(e))}</td><td className="td-number">{e.allocation_mode === 'categoria' ? `${fCOP(getCostoTasaEquipo(e))}/${e.rate_basis}` : '—'}</td><td><div className="table-actions"><button className="btn btn-xs btn-secondary" onClick={() => editarEquipo(e)}><Pencil size={12} aria-hidden="true" /></button><button className="btn btn-xs btn-danger" onClick={() => eliminarEquipo(e)}><Trash2 size={12} aria-hidden="true" /></button></div></td></tr>
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>}
+
+          {CAJAS.filter(caja => costosSubtab === 'costos' ? caja.g === 'cif' : costosSubtab === 'gastos' ? caja.g !== 'cif' : false).map(caja => {
             const items = cifItems.filter(c => (c.grupo || 'cif') === caja.g)
             return (
               <div key={caja.g} className="card" style={{ borderLeft: caja.afecta ? '4px solid var(--selva)' : '4px solid var(--crema-oscuro)' }}>
@@ -2531,13 +2963,14 @@ export default function Costos() {
             )
           })}
 
+          {costosSubtab === 'analisis' && <>
           <div className="card">
           <div className="card-title">⏱ Cálculo y reparto del CIF</div>
           {/* Desglose y simulador del costo por minuto de mano de obra */}
           <div style={{ marginTop:16, padding:16, background:'#fff8e8', border:'1px solid var(--dorado)', borderRadius:'var(--radio)' }}>
             <strong style={{ color:'var(--selva)' }}><Ico as={Clock} size={14} />Costo por minuto de mano de obra (producción)</strong>
             <div style={{ fontSize:'0.85rem', marginTop:8, display:'grid', gap:4 }}>
-              <div>Costos de producción (CIF) del mes: <strong>{fCOP(cifTotal)}</strong> <small style={{ color:'var(--texto-suave)' }}>(ítems CIF {fCOP(cifManual)} + nómina producción {fCOP(costoNomina.total)})</small></div>
+              <div>Costos de producción (CIF) del mes: <strong>{fCOP(cifTotal)}</strong> <small style={{ color:'var(--texto-suave)' }}>(ítems CIF {fCOP(cifManual)} + nómina producción {fCOP(costoNomina.total)} + depreciación general {fCOP(depreciacionGeneral)})</small></div>
               <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
                 <span>Operarios que aportan capacidad:</span>
                 {(() => {
@@ -2746,6 +3179,7 @@ export default function Costos() {
             )
           })()}
         </div>
+          </>}
         </>
         )
       })()}
@@ -2823,6 +3257,211 @@ export default function Costos() {
             </tbody>
           </table>
         </div>
+      </Modal>
+
+      <Modal
+        open={!!detalleCosto}
+        onClose={closeDetalleCosto}
+        title={`Detalle de costos — ${detalleCosto?.producto?.nombre || ''}`}
+        size="modal-lg"
+        footer={<button className="btn btn-secondary" onClick={closeDetalleCosto}>Cerrar</button>}
+      >
+        {detalleCosto && (() => {
+          const items = detalleCosto.items || []
+          const fichaCosto = Number(detalleCosto.items?.[0]?.costoFicha)
+            || (detalleCosto.producto ? recomputeProducto(detalleCosto.producto).costoTotalUnit : 0)
+            || Number(detalleCosto.producto?.costo_final) || 0
+          return (
+            <div className="detalle-costos-alerta">
+              <div className="alert alert-info" style={{ fontSize:'0.82rem' }}>
+                Comparación vs <strong>costo de producción/u</strong> de la ficha (MP + empaque + MO + CIF): <strong>{fCOP(fichaCosto)}</strong>.
+                La variación suele venir de tiempos de proceso (MO) o de ingredientes de más; producir más cantidad con proporciones normales no debería alarmar.
+              </div>
+              {items.map(c => {
+                const resalta = detalleCosto.foco != null && String(detalleCosto.foco) === String(c.ordenId)
+                const alarma = Math.abs(c.desviacion) > 10
+                const codigo = opCodigo(c.ordenId)
+                const f = c.ficha || {}
+                const o = c.ordenU || {}
+                const filas = [
+                  { key: 'mp', label: 'Materias primas', ficha: f.mp, orden: o.mp, hint: 'Si sube: ingredientes de más o precios PEPS distintos' },
+                  { key: 'emp', label: 'Empaque', ficha: f.emp, orden: o.emp, hint: 'Tarifa de ficha × unidades obtenidas' },
+                  { key: 'mo', label: 'MO / CIF (tiempo)', ficha: f.mo, orden: o.mo, hint: c.minutosReales > 0
+                    ? `${fNum(Math.round(c.minutosReales))} min reales vs ${fNum(Math.round(c.minutosEsperados || 0))} esp.`
+                    : 'Sin tiempos registrados → se usa tarifa de ficha' },
+                  { key: 'adic', label: 'Adicionales / equipos', ficha: f.adic, orden: o.adic, hint: 'Costos fijos de la ficha' },
+                  { key: 'destajo', label: 'Destajo (extra orden)', ficha: 0, orden: o.destajo, hint: 'Solo aparece en la orden' },
+                  { key: 'tiempo', label: 'Costos por hora/día', ficha: f.tiempo, orden: o.tiempo, hint: 'Ficha: cantidad sugerida × tarifa; orden: cantidad real diligenciada' },
+                ].filter(row => (Number(row.ficha) || 0) > 0 || (Number(row.orden) || 0) > 0 || ['mp', 'mo'].includes(row.key))
+                const fmtDiff = (fichaV, ordenV) => {
+                  const d = (Number(ordenV) || 0) - (Number(fichaV) || 0)
+                  const pct = (Number(fichaV) || 0) > 0 ? (d / Number(fichaV)) * 100 : ((Number(ordenV) || 0) > 0 ? 100 : 0)
+                  return { d, pct }
+                }
+                const plan = Number(c.cantidadPlan) || 0
+                const obtuvo = Number(c.cantidad) || 0
+                const diffUnd = obtuvo - plan
+                const pctUnd = plan > 0 ? (diffUnd / plan) * 100 : null
+                return (
+                  <div key={c.ordenId} className={`detalle-costo-orden ${resalta ? 'foco' : ''} ${alarma ? 'alarma' : ''}`}>
+                    <div className="detalle-costo-orden-head">
+                      <div>
+                        <strong>{codigo}</strong>
+                        <small> · {c.fecha ? fFecha(String(c.fecha).slice(0, 10)) : 'sin fecha'}</small>
+                      </div>
+                      <div style={{ textAlign:'right' }}>
+                        <div style={{ fontWeight:700, color: alarma ? (c.desviacion > 0 ? 'var(--rojo)' : 'var(--tierra)') : 'var(--selva)' }}>{fCOP(c.costo)}/u</div>
+                        <small style={{ color: c.desviacion > 10 ? 'var(--rojo)' : c.desviacion < -10 ? 'var(--tierra)' : 'var(--texto-suave)' }}>
+                          {c.desviacion >= 0 ? '+' : ''}{c.desviacion.toFixed(1)}% vs ficha ({fCOP(c.costoFicha || fichaCosto)}/u)
+                        </small>
+                      </div>
+                    </div>
+                    <div className="detalle-costo-unidades" style={{
+                      display:'grid', gridTemplateColumns:'repeat(auto-fit, minmax(120px, 1fr))', gap:8,
+                      margin:'10px 0 4px', padding:'10px 12px',
+                      background:'rgba(45,90,61,0.04)', border:'1px solid var(--crema-oscuro)', borderRadius:'var(--radio)',
+                      fontSize:'0.84rem',
+                    }}>
+                      <div>
+                        <div style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Debían salir</div>
+                        <div style={{ fontWeight:700, color:'var(--selva)' }}>{plan > 0 ? `${fNum(plan)} und` : '—'}</div>
+                        <small style={{ color:'var(--texto-suave)' }}>cantidad planeada</small>
+                      </div>
+                      <div>
+                        <div style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Salieron</div>
+                        <div style={{ fontWeight:700, color:'var(--selva)' }}>{obtuvo > 0 ? `${fNum(obtuvo)} und` : '—'}</div>
+                        <small style={{ color:'var(--texto-suave)' }}>cantidad obtenida</small>
+                      </div>
+                      <div>
+                        <div style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Variación de unidades</div>
+                        <div style={{
+                          fontWeight:700,
+                          color: plan <= 0 ? 'var(--texto-suave)'
+                            : diffUnd < -0.5 ? 'var(--rojo)'
+                              : diffUnd > 0.5 ? 'var(--tierra)'
+                                : 'var(--selva)',
+                        }}>
+                          {plan <= 0 ? '—' : `${diffUnd > 0 ? '+' : ''}${fNum(diffUnd)} und`}
+                          {pctUnd != null ? ` (${pctUnd >= 0 ? '+' : ''}${pctUnd.toFixed(1)}%)` : ''}
+                        </div>
+                        <small style={{ color:'var(--texto-suave)' }}>
+                          {plan <= 0 ? 'Sin plan en la orden'
+                            : diffUnd < -0.5 ? 'Salieron menos → el costo/u suele subir'
+                              : diffUnd > 0.5 ? 'Salieron más → el costo/u suele bajar'
+                                : 'Cantidad según lo planeado'}
+                        </small>
+                      </div>
+                    </div>
+                    <div className="table-wrap" style={{ marginTop:8 }}>
+                      <table className="tabla-comparativa-costos">
+                        <thead>
+                          <tr>
+                            <th>Concepto</th>
+                            <th className="td-number">Ficha /u</th>
+                            <th className="td-number">{codigo} /u</th>
+                            <th className="td-number">Diferencia</th>
+                            <th className="td-number">%</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filas.map(row => {
+                            const { d, pct } = fmtDiff(row.ficha, row.orden)
+                            const marca = Math.abs(pct) > 10 || (Math.abs(d) > 0 && !(Number(row.ficha) > 0) && (Number(row.orden) > 0))
+                            return (
+                              <tr key={row.key} className={marca ? 'fila-variacion' : undefined} title={row.hint || ''}>
+                                <td>
+                                  {row.label}
+                                  {row.key === 'mo' && c.minutosReales > 0 && (
+                                    <small style={{ display:'block', color:'var(--texto-suave)' }}>{row.hint}</small>
+                                  )}
+                                </td>
+                                <td className="td-number">{(Number(row.ficha) || 0) > 0 || row.key === 'mp' || row.key === 'emp' || row.key === 'mo' ? fCOP(row.ficha || 0) : '—'}</td>
+                                <td className="td-number">{fCOP(row.orden || 0)}</td>
+                                <td className="td-number" style={{ color: d > 0.5 ? 'var(--rojo)' : d < -0.5 ? 'var(--tierra)' : undefined }}>
+                                  {d === 0 ? '—' : `${d > 0 ? '+' : ''}${fCOP(d)}`}
+                                </td>
+                                <td className="td-number" style={{ color: pct > 10 ? 'var(--rojo)' : pct < -10 ? 'var(--tierra)' : 'var(--texto-suave)' }}>
+                                  {!(Number(row.ficha) > 0) && (Number(row.orden) || 0) > 0 ? 'nuevo' : (Math.abs(pct) < 0.05 ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`)}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                          {(() => {
+                            const { d, pct } = fmtDiff(f.total || c.costoFicha || fichaCosto, o.total || c.costo)
+                            return (
+                              <tr className="fila-total-comparativa">
+                                <td>= Costo de producción /u</td>
+                                <td className="td-number">{fCOP(f.total || c.costoFicha || fichaCosto)}</td>
+                                <td className="td-number">{fCOP(o.total || c.costo)}</td>
+                                <td className="td-number" style={{ color: d > 0 ? 'var(--rojo)' : d < 0 ? 'var(--tierra)' : undefined }}>
+                                  {d === 0 ? '—' : `${d > 0 ? '+' : ''}${fCOP(d)}`}
+                                </td>
+                                <td className="td-number" style={{ fontWeight:700, color: pct > 10 ? 'var(--rojo)' : pct < -10 ? 'var(--tierra)' : 'var(--selva)' }}>
+                                  {pct >= 0 ? '+' : ''}{pct.toFixed(1)}%
+                                </td>
+                              </tr>
+                            )
+                          })()}
+                        </tbody>
+                      </table>
+                    </div>
+                    <small style={{ display:'block', marginTop:6, color:'var(--texto-suave)', fontSize:'0.75rem' }}>
+                      Totales de la orden: MP {fCOP(c.mpTotal)} · Empaque {fCOP(c.empTotal || 0)} · MO/CIF {fCOP(c.moTotal || 0)}
+                      {(c.adicTotal || 0) > 0 ? ` · Adic. ${fCOP(c.adicTotal)}` : ''}
+                      {(c.destajo || 0) > 0 ? ` · Destajo ${fCOP(c.destajo)}` : ''}
+                      {(c.tiempo || 0) > 0 ? ` · Tiempo ${fCOP(c.tiempo)}` : ''}
+                      {' · '}Total {fCOP(c.costoTotal)}
+                    </small>
+                    {c.costosHora?.length > 0 && (
+                      <div style={{ marginTop:8, fontSize:'0.8rem' }}>
+                        <strong>Tiempo registrado en {codigo}:</strong>
+                        <ul style={{ margin:'4px 0 0 18px', padding:0 }}>
+                          {c.costosHora.map((h, i) => (
+                            <li key={i}>{h.nombre || 'Concepto'}: {fNum(h.cantidad || 0)} {h.unidad || 'hora'}(s) × {fCOP(h.tarifa || 0)} = {fCOP(h.total || (Number(h.cantidad) || 0) * (Number(h.tarifa) || 0))}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {c.destajoItems?.some(d => d.nombre?.trim() || d.cantidad || d.tarifa) && (
+                      <div style={{ marginTop:8, fontSize:'0.8rem' }}>
+                        <strong>Destajo en {codigo}:</strong>
+                        <ul style={{ margin:'4px 0 0 18px', padding:0 }}>
+                          {c.destajoItems.filter(d => d.nombre?.trim() || d.cantidad || d.tarifa).map((d, i) => (
+                            <li key={i}>{d.nombre || 'Operario'}: {fNum(d.cantidad || 0)} × {fCOP(d.tarifa || 0)} = {fCOP((Number(d.cantidad) || 0) * (Number(d.tarifa) || 0))}</li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
+                    {c.lotesMp?.length > 0 && (
+                      <div style={{ marginTop:8, fontSize:'0.8rem' }}>
+                        <strong>MP consumida ({codigo}):</strong>
+                        <ul style={{ margin:'4px 0 0 18px', padding:0 }}>
+                          {c.lotesMp.map((item, i) => {
+                            const lotes = Array.isArray(item.lotes) ? item.lotes : []
+                            const costoLotes = lotes.reduce((s, l) => s + (Number(l.cantidad) || 0) * (Number(l.costo_unitario) || 0), 0)
+                            const mp = mps.find(m => String(m.id) === String(item.mp_id))
+                            const sinLote = (Number(item.sin_lote_cantidad) || 0) * (Number(mp?.precio) || 0)
+                            return (
+                              <li key={i}>
+                                {item.nombre || mp?.nombre || `MP #${item.mp_id}`}: {fCOP(costoLotes + sinLote)}
+                                {lotes.length > 0 && <small style={{ color:'var(--texto-suave)' }}> · lotes {lotes.map(l => l.lote || 's/n').join(', ')}</small>}
+                              </li>
+                            )
+                          })}
+                        </ul>
+                      </div>
+                    )}
+                    <div style={{ marginTop:10, display:'flex', gap:8, flexWrap:'wrap' }}>
+                      <button type="button" className="btn btn-xs btn-primary" onClick={() => abrirOrdenDesdeDetalle(c.ordenId)}>
+                        Abrir {codigo}
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        })()}
       </Modal>
 
       <Modal open={verModal} onClose={() => setVerModal(false)} title={`Ficha — ${verProd?.nombre}`} size="modal-xl"
@@ -2921,6 +3560,7 @@ export default function Costos() {
                 <tr><td>Costo MP + empaque por unidad</td><td className="td-number">{fCOP(rc.cvu)}</td></tr>
                 <tr><td>(+) Mano de obra/overhead por unidad <small style={{ color:'var(--texto-suave)' }}>({rc.totalMinutos} min × {fCOP(rc.costoMin)}/min)</small></td><td className="td-number text-dorado">{fCOP(rc.moUnit)}</td></tr>
                 {(rc.adicUnit || 0) > 0 && <tr><td>(+) Costos adicionales por unidad</td><td className="td-number text-dorado">{fCOP(rc.adicUnit)}</td></tr>}
+                {(rc.equipoUnit || 0) > 0 && <tr><td>(+) Equipos asignados por categoría</td><td className="td-number text-dorado">{fCOP(rc.equipoUnit)}</td></tr>}
                 <tr style={{ fontWeight:700, borderTop:'2px solid var(--crema-oscuro)' }}><td>= COSTO TOTAL por unidad</td><td className="td-number">{fCOP(rc.costoTotalUnit)}</td></tr>
                 <tr style={{ color:'var(--selva-claro)' }}><td>Precio Mayor → Ganancia/u</td><td className="td-number">{fCOP(verProd.precio_mayor)} → {fCOP(rc.utilMayor)}</td></tr>
                 {(rc.comUnit || 0) > 0 && <tr style={{ color:'var(--tierra)' }}><td>(−) Comisión distribuidor → Ganancia neta/u</td><td className="td-number">{fCOP(rc.comUnit)} → {fCOP(rc.utilMayorNeto)}</td></tr>}

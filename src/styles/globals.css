@@ -1131,6 +1131,99 @@ details.card > .card-acc-body { padding: 20px 24px; }
   margin: 0 0 8px; color: var(--selva); font-size: 0.92rem;
 }
 .fichas-listado .acordeon-item { margin-bottom: 8px; }
+.ficha-alerta-punto {
+  display: inline-block;
+  width: 8px; height: 8px; margin-left: 7px;
+  border-radius: 50%;
+  background: #e67e22;
+  box-shadow: 0 0 0 3px rgba(230, 126, 34, 0.16);
+  flex: 0 0 auto;
+  vertical-align: middle;
+}
+.ficha-alerta-produccion {
+  display: flex; align-items: flex-start; gap: 10px;
+  margin-top: 10px; padding: 10px 12px;
+  border: 1px solid rgba(230, 126, 34, 0.38);
+  border-radius: 8px;
+  background: rgba(230, 126, 34, 0.08);
+  color: var(--texto);
+  font-size: 0.82rem;
+  line-height: 1.4;
+  min-width: 0;
+}
+.ficha-alerta-produccion .ficha-alerta-punto { margin: 5px 0 0; }
+.ficha-alerta-produccion strong { color: #9a4d0b; }
+.ficha-alerta-produccion small { color: var(--texto-suave); }
+.ficha-alerta-punto-costo {
+  background: var(--rojo);
+  box-shadow: 0 0 0 3px rgba(192, 57, 43, 0.16);
+}
+.ficha-alerta-costo {
+  margin-top: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--crema-oscuro);
+  border-radius: 8px;
+  background: rgba(45, 90, 61, 0.05);
+  font-size: 0.82rem;
+}
+.ficha-alerta-costo.activa {
+  border-color: rgba(192, 57, 43, 0.4);
+  background: rgba(192, 57, 43, 0.07);
+}
+.ficha-costos-recientes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 7px 0 4px;
+}
+.ficha-costos-recientes > span,
+.ficha-costo-chip {
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: var(--blanco);
+  border: 1px solid var(--crema-oscuro);
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.ficha-costo-chip:hover {
+  border-color: var(--selva);
+  background: rgba(45, 90, 61, 0.06);
+}
+.detalle-costos-alerta { display: grid; gap: 12px; }
+.detalle-costo-orden {
+  padding: 12px;
+  border: 1px solid var(--crema-oscuro);
+  border-radius: 8px;
+  background: rgba(45, 90, 61, 0.03);
+}
+.detalle-costo-orden.foco { box-shadow: 0 0 0 2px rgba(45, 90, 61, 0.25); }
+.detalle-costo-orden.alarma {
+  border-color: rgba(192, 57, 43, 0.35);
+  background: rgba(192, 57, 43, 0.05);
+}
+.detalle-costo-orden-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.detalle-costo-orden-head small { color: var(--texto-suave); }
+.ficha-costo-chip-op {
+  display: inline-block;
+  margin-right: 6px;
+  font-weight: 700;
+  color: var(--selva);
+  font-size: 0.78rem;
+}
+.tabla-comparativa-costos th { white-space: nowrap; }
+.tabla-comparativa-costos .fila-variacion td { background: rgba(192, 57, 43, 0.06); }
+.tabla-comparativa-costos .fila-total-comparativa td {
+  font-weight: 700;
+  background: rgba(45, 90, 61, 0.08);
+  border-top: 2px solid var(--crema-oscuro);
+}
 .fichas-total {
   display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
   gap: 8px 16px; padding: 12px 14px;

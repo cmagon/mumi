@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { fFecha, fNum, getEstadoStock } from '../lib/businessLogic'
@@ -8,6 +8,7 @@ import { useAuth } from '../context/AuthContext'
 import { puedeVerSeccion } from '../lib/permisos'
 import Modal from '../components/ui/Modal'
 import MoneyInput from '../components/ui/MoneyInput'
+import { useNavTrail } from '../hooks/useNavTrail'
 import { useConfirm, usePrompt } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import {
@@ -110,17 +111,19 @@ export default function Inventario() {
   // Si se llega desde "Convertir receta a producto" con ingredientes por registrar,
   // abre el modal de Nueva MP precargando el primero.
   const location = useLocation()
-  const navigate = useNavigate()
+  const { consumeArrival } = useNavTrail()
   useEffect(() => {
-    const nuevas = location.state?.nuevasMP
+    const st = location.state
+    if (!st?.nuevasMP) return
+    const nuevas = st.nuevasMP
     if (nuevas && nuevas.length && puedeEditarInv) {
       setFormMP({ ...EMPTY_MP, nombre: nuevas[0] })
       setEditMPId(null); setModalMP(true)
       if (nuevas.length > 1) toast(`Por registrar: ${nuevas.join(', ')}`, 'info')
-      navigate(location.pathname, { replace: true, state: {} })   // limpia el state
     }
+    consumeArrival()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [location.state])
   const [nuevaCat, setNuevaCat] = useState('')
 
   const { data: mps = [] } = useQuery({

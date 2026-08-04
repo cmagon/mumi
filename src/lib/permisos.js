@@ -16,11 +16,15 @@ export const ROLES = {
 // Si añades una sección aquí y nadie la consulta, la UI miente: cableala en la pantalla.
 export const CATALOGO_MODULOS = [
   { modulo: 'dashboard',  label: 'Tablero Principal',       secciones: [] },
-  { modulo: 'costos',     label: 'Calculadora de Costos',   secciones: [
-      { id: 'resultados', label: 'Fichas de producto (lista y edición)' },
-      { id: 'receta',     label: 'Recetas rápidas / prueba' },
-      { id: 'cif',        label: 'Costos indirectos (CIF) y gastos' },
-      { id: 'mps',        label: 'Materias primas (desde costos)' },
+  { modulo: 'productos',  label: 'Productos',                secciones: [
+      { id: 'fichas', label: 'Fichas de producto (lista y edición)' },
+      { id: 'stock', label: 'Stock terminado y configuración' },
+  ] },
+  { modulo: 'costos_gastos', label: 'Costos y Gastos',       secciones: [
+      { id: 'configuracion', label: 'Costos, gastos, depreciación y análisis' },
+  ] },
+  { modulo: 'utilidades', label: 'Utilidades',               secciones: [
+      { id: 'recetas', label: 'Recetas rápidas / prueba' },
   ] },
   { modulo: 'inventario', label: 'Inventario MP',           secciones: [
       { id: 'stock',      label: 'Ver stock / listado' },
@@ -40,11 +44,6 @@ export const CATALOGO_MODULOS = [
       { id: 'empleados',  label: 'Empleados' },
       { id: 'liquidacion',label: 'Liquidación de nómina' },
   ] },
-  { modulo: 'terminados', label: 'Producto Terminado',       secciones: [
-      { id: 'stock',      label: 'Stock / Catálogo' },
-      { id: 'ajustes',    label: 'Ajustes de stock' },
-      { id: 'analisis',   label: 'Análisis mensual' },
-  ] },
   { modulo: 'porempacar', label: 'Productos por Empacar',    secciones: [] },
   { modulo: 'clientes',   label: 'Clientes',                secciones: [] },
   { modulo: 'catalogo',   label: 'Catálogo público',        secciones: [
@@ -63,9 +62,9 @@ export const CATALOGO_MODULOS = [
 
 // Módulos visibles por rol — valores por defecto (si no hay override en BD)
 export const MODULOS_POR_ROL = {
-  admin:    ['dashboard', 'costos', 'inventario', 'terminados', 'porempacar', 'ordenes', 'produccion', 'nomina', 'clientes', 'catalogo', 'galeria', 'documentos', 'registros', 'calidad', 'capacitacion', 'configuracion', 'usuarios'],
-  operario: ['dashboard', 'costos', 'inventario', 'porempacar', 'ordenes', 'produccion', 'nomina', 'documentos', 'registros', 'calidad', 'capacitacion'],
-  auxiliar: ['dashboard', 'costos', 'inventario', 'ordenes', 'nomina', 'documentos', 'registros', 'calidad', 'capacitacion'],
+  admin:    ['dashboard', 'productos', 'costos_gastos', 'utilidades', 'inventario', 'porempacar', 'ordenes', 'produccion', 'nomina', 'clientes', 'catalogo', 'galeria', 'documentos', 'registros', 'calidad', 'capacitacion', 'configuracion', 'usuarios'],
+  operario: ['dashboard', 'utilidades', 'inventario', 'porempacar', 'ordenes', 'produccion', 'nomina', 'documentos', 'registros', 'calidad', 'capacitacion'],
+  auxiliar: ['dashboard', 'utilidades', 'inventario', 'ordenes', 'nomina', 'documentos', 'registros', 'calidad', 'capacitacion'],
 }
 
 // Secciones visibles por rol cuando el admin NO ha configurado un override de secciones.
@@ -73,21 +72,19 @@ export const MODULOS_POR_ROL = {
 // aunque la UI histórica se los ocultaba. Los defaults replican ese comportamiento previo.
 export const SECCIONES_POR_ROL = {
   operario: {
-    costos:     ['receta'],
+    utilidades: ['recetas'],
     inventario: ['stock', 'movimientos'],
     ordenes:    ['crear', 'resultados'],
     produccion: ['registrar', 'analisis'],
     nomina:     ['asistencia', 'empleados'],
-    terminados: ['stock'],
     catalogo:   ['productos'],
   },
   auxiliar: {
-    costos:     ['receta'],
+    utilidades: ['recetas'],
     inventario: ['stock'],
     ordenes:    ['resultados'],
     produccion: ['registrar'],
     nomina:     ['asistencia'],
-    terminados: ['stock'],
     catalogo:   ['productos'],
   },
 }
@@ -95,9 +92,12 @@ export const SECCIONES_POR_ROL = {
 // Mapa ruta → módulo
 export const RUTA_MODULO = {
   '/dashboard':  'dashboard',
-  '/costos':     'costos',
+  '/costos':     'costos_gastos',
+  '/productos':  'productos',
+  '/costos-gastos': 'costos_gastos',
+  '/utilidades': 'utilidades',
   '/inventario': 'inventario',
-  '/terminados': 'terminados',
+  '/terminados': 'productos',
   '/porempacar': 'porempacar',
   '/ordenes':    'ordenes',
   '/produccion': 'produccion',
@@ -134,7 +134,16 @@ export function puedeVer(rolArg, modulo) {
   const ov = _override?.[rol]?.modulos
   // Roles sin configuración conocida arrancan con acceso mínimo (solo Tablero)
   const lista = ov || MODULOS_POR_ROL[rol] || ['dashboard']
-  return lista.includes(modulo)
+  if (lista.includes(modulo)) return true
+  if (modulo === 'productos' && lista.includes('terminados')) return true
+  // Compatibilidad con permisos guardados antes de separar "Calculadora de Costos".
+  if (lista.includes('costos')) {
+    const seccionesViejas = _override?.[rol]?.secciones?.costos
+    if (modulo === 'productos') return !Array.isArray(seccionesViejas) || seccionesViejas.includes('resultados')
+    if (modulo === 'costos_gastos') return !Array.isArray(seccionesViejas) || seccionesViejas.includes('cif')
+    if (modulo === 'utilidades') return !Array.isArray(seccionesViejas) || seccionesViejas.includes('receta')
+  }
+  return false
 }
 
 // ¿El rol puede ver una sección concreta de un módulo?

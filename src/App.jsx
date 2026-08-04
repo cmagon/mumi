@@ -179,10 +179,13 @@ export default function App() {
       <Route element={<ProtectedLayout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
         <Route path="/dashboard"   element={<Dashboard />} />
-        <Route path="/costos"      element={<ModRoute modulo="costos"><Costos /></ModRoute>} />
-        <Route path="/receta"      element={<ModRoute modulo="costos"><Receta /></ModRoute>} />
+        <Route path="/costos"      element={<Navigate to="/costos-gastos" replace />} />
+        <Route path="/productos"   element={<ModRoute modulo="productos"><Costos vista="productos" /></ModRoute>} />
+        <Route path="/costos-gastos" element={<ModRoute modulo="costos_gastos"><Costos vista="costos" /></ModRoute>} />
+        <Route path="/utilidades"  element={<ModRoute modulo="utilidades"><Receta /></ModRoute>} />
+        <Route path="/receta"      element={<Navigate to="/utilidades" replace />} />
         <Route path="/inventario"  element={<ModRoute modulo="inventario"><Inventario /></ModRoute>} />
-        <Route path="/terminados"  element={<ModRoute modulo="terminados"><ProductosTerminados /></ModRoute>} />
+        <Route path="/terminados"  element={<ModRoute modulo="productos"><ProductosTerminados /></ModRoute>} />
         <Route path="/porempacar"  element={<ModRoute modulo="porempacar"><ProductosPorEmpacar /></ModRoute>} />
         <Route path="/produccion"  element={<ModRoute modulo="produccion"><Produccion /></ModRoute>} />
         <Route path="/ordenes"     element={<ModRoute modulo="ordenes"><OrdenesProduccion /></ModRoute>} />
