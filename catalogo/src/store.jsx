@@ -13,17 +13,26 @@ export const SECCIONES_DEFAULT = [
 
 export const CFG_DEFAULT = {
   whatsapp: '+573157702180', titulo_banner: 'Sabores de la selva',
-  subtitulo: 'Infusiones, galletas y dulces amazónicos', mostrar_mayor: false,
+  subtitulo: 'Productos naturales de la selva del Guaviare', mostrar_mayor: false,
   pedido_minimo: 30000, mostrar_stock: true, umbral_pocas: 10, umbral_ultimas: 3,
   categorias_orden: [], secciones: SECCIONES_DEFAULT,
-  nombre_tienda: null, slogan: null, logo_url: '', nosotros_texto: '', solo_logo: false, mostrar_filtro_frutos: false, mostrar_slogan: true,
+  nombre_tienda: null, slogan: null, logo_url: '', favicon_url: '', nosotros_texto: '', solo_logo: false, mostrar_filtro_frutos: false, mostrar_slogan: true,
   fuente_titulos: 'Playfair Display', fuente_subtitulos: 'Source Sans 3', fuente_texto: 'Source Sans 3',
   contacto_mapa: '', paginas: [], galeria_albumes: [], galeria_titulo: '', galeria_subtitulo: '', categorias_extra: [],
   envio_tarifa: null, envio_mensaje: '', avisos: [], pagos: [],
-  seo_titulo: '', seo_descripcion: '', seo_imagen: '',
+  seo_titulo: '', seo_descripcion: '', seo_imagen: '', seo_keywords: '', seo_verificacion: '', seo_indexar: true,
   mantenimiento_activo: false, mantenimiento_mensaje: '', terminos_texto: '', diseno: 'selva',
+  productos_vista: 'scroll',
   plantillas_guardadas: [],
   ficha_cta_fijo: true, ficha_mostrar_envio: true, ficha_titulo_relacionados: 'Combina bien con',
+  hero_cta_texto: 'Explorar catálogo', hero_cta_link: '/tienda', hero_cta2_texto: 'Nuestra historia',
+  hero_mostrar_cta2: true, hero_imagen: '',
+  impacto_activo: true, impacto_titulo: 'Impacto que florece',
+  impacto_texto: 'Cada producto apoya a comunidades recolectoras de la Amazonía colombiana: comercio justo y conservación de la biodiversidad.',
+  impacto_stat1_n: '45+', impacto_stat1_l: 'Productores', impacto_stat2_n: '10', impacto_stat2_l: 'Departamentos',
+  impacto_imagen: '', impacto_link_texto: 'Conoce más',
+  cosecha_eyebrow: 'Productos destacados', cosecha_titulo: 'Nuestra cosecha',
+  frutos_filtro_titulo: 'Explora por ingrediente',
   mayorista_activo: true, mayorista_clave: '', mayorista_pedido_minimo: 0,
   mayorista_mensaje: '¿Eres mayorista? Accede a precios especiales por volumen.',
   mayorista_wa_texto: 'Hola Mumi Amazonia, me interesa ser mayorista. ¿Me comparten los precios al por mayor?',
@@ -33,12 +42,30 @@ export function StoreProvider({ children }) {
   const [cfgBase, setCfgBase] = useState(CFG_DEFAULT)
   const [cfgPreview, setCfgPreview] = useState(null)   // override en vivo desde el panel (iframe)
   const [banners, setBanners] = useState([])
+  const [bannerDraft, setBannerDraft] = useState(null) // borrador del modal "Editar banner" (postMessage)
   const [carrito, setCarrito] = useState(() => { try { return JSON.parse(localStorage.getItem('mumi_carrito') || '[]') } catch { return [] } })
   const [favs, setFavs] = useState(() => { try { return JSON.parse(localStorage.getItem('mumi_favs') || '[]') } catch { return [] } })
   const [mayorista, setMayoristaState] = useState(() => { try { return localStorage.getItem('mumi_mayorista') === '1' } catch { return false } })
   const [edicion, setEdicion] = useState({ on: false, target: null })   // edición en el lienzo (desde el panel)
 
   const cfg = useMemo(() => ({ ...cfgBase, ...(cfgPreview || {}) }), [cfgBase, cfgPreview])
+
+  // Fusiona el borrador del editor de banners sobre la lista (vista previa en vivo)
+  const bannersEnVivo = useMemo(() => {
+    if (!bannerDraft) return banners
+    const draft = {
+      ...bannerDraft,
+      id: bannerDraft.id != null && bannerDraft.id !== '' ? bannerDraft.id : '__draft__',
+      activo: bannerDraft.activo !== false,
+    }
+    const i = banners.findIndex(x => String(x.id) === String(draft.id))
+    if (i >= 0) {
+      const next = banners.slice()
+      next[i] = { ...next[i], ...draft }
+      return next
+    }
+    return [draft, ...banners]
+  }, [banners, bannerDraft])
 
   const [extra, setExtra] = useState([])   // productos/combos adicionales (de config)
   const [base, setBase] = useState(null)   // productos de la vista (Productos Terminados)
@@ -81,13 +108,19 @@ export function StoreProvider({ children }) {
     return [...base, ...extras]
   }, [base, extra])
 
-  // Preview en vivo: el panel de administración manda la config por postMessage
+  // Preview en vivo: el panel de administración manda config / banners por postMessage
   useEffect(() => {
     const onMsg = (e) => {
       const d = e.data
-      if (d && d.type === 'mumi-preview' && d.cfg) setCfgPreview(d.cfg)
-      if (d && d.type === 'mumi-preview-mayorista') setMayoristaState(!!d.on)
-      if (d && d.type === 'mumi-edit-mode') setEdicion({ on: !!d.on, target: d.target || null })
+      if (!d || typeof d !== 'object') return
+      if (d.type === 'mumi-preview' && d.cfg) setCfgPreview(d.cfg)
+      if (d.type === 'mumi-preview-mayorista') setMayoristaState(!!d.on)
+      if (d.type === 'mumi-edit-mode') setEdicion({ on: !!d.on, target: d.target || null })
+      if (d.type === 'mumi-preview-banner') setBannerDraft(d.banner || null)
+      if (d.type === 'mumi-banners-refresh' && Array.isArray(d.banners)) {
+        setBanners(d.banners)
+        setBannerDraft(null)
+      }
     }
     window.addEventListener('message', onMsg)
     // avisa al panel que el preview está listo
@@ -130,9 +163,9 @@ export function StoreProvider({ children }) {
   const productoPorId = (id) => (productos || []).find(p => String(p.id) === String(id))
 
   const value = useMemo(() => ({
-    cfg, productos, banners, carrito, agregar, quitar, vaciar, enCarrito, total, nItems,
+    cfg, productos, banners: bannersEnVivo, carrito, agregar, quitar, vaciar, enCarrito, total, nItems,
     productoPorId, favs, toggleFav, esFav, mayorista, setMayorista, precio, pedidoMinimo,
-    enOferta, descuentoPct, edicion, esPreview: cfgPreview !== null,
-  }), [cfg, productos, banners, carrito, favs, mayorista, cfgPreview, edicion])
+    enOferta, descuentoPct, edicion, esPreview: cfgPreview !== null || bannerDraft !== null,
+  }), [cfg, productos, bannersEnVivo, carrito, favs, mayorista, cfgPreview, bannerDraft, edicion])
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

@@ -33,6 +33,9 @@ export const CATALOGO_MODULOS = [
   { modulo: 'ordenes',    label: 'Órdenes de Producción',   secciones: [
       { id: 'crear',      label: 'Crear / editar órdenes' },
       { id: 'resultados', label: 'Ejecutar y enviar resultados' },
+      // Opt-in (puedeSeccionExplicita): por defecto solo el asignado diligencia;
+      // el admin puede otorgar este permiso a un rol para diligenciar cualquier OP.
+      { id: 'diligenciar_todas', label: 'Diligenciar proceso de cualquier orden (no solo las asignadas)' },
   ] },
   { modulo: 'produccion', label: 'Registro de Producción',  secciones: [
       { id: 'registrar',  label: 'Registrar producción' },
@@ -104,6 +107,11 @@ export const RUTA_MODULO = {
   '/nomina':     'nomina',
   '/clientes':   'clientes',
   '/catalogo':   'catalogo',
+  '/catalogo/productos': 'catalogo',
+  '/catalogo/personalizar': 'catalogo',
+  '/catalogo/config': 'catalogo',
+  '/catalogo/mensajes': 'catalogo',
+  '/catalogo/metricas': 'catalogo',
   '/galeria':    'galeria',
   '/documentos': 'documentos',
   '/registros':  'registros',
@@ -157,6 +165,16 @@ export function puedeVerSeccion(rolArg, modulo, seccion) {
   const def = SECCIONES_POR_ROL[rol]?.[modulo]
   if (Array.isArray(def)) return def.includes(seccion)
   return true                                 // sin restricción conocida
+}
+
+// Secciones que NO se otorgan por defecto al marcar el módulo: hay que marcarlas a propósito.
+// Debe coincidir con lo que usa puedeSeccionExplicita (y con la UI en Usuarios → Permisos).
+export const SECCIONES_OPT_IN = {
+  nomina: ['asistencia_otros'],
+  ordenes: ['diligenciar_todas'],
+}
+export function esSeccionOptIn(modulo, seccion) {
+  return (SECCIONES_OPT_IN[modulo] || []).includes(seccion)
 }
 
 // Permiso de sección ESTRICTO (opt-in): true SOLO si el admin la otorgó explícitamente al rol.

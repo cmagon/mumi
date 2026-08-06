@@ -1,4 +1,5 @@
-import { useState, useEffect, useRef, useMemo } from 'react'
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import { NavLink, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { useToast } from '../hooks/useToast'
@@ -28,6 +29,8 @@ import FrutoIcon, { ICONOS_FRUTO } from '../components/ui/FrutoIcon'
 import MoneyInput from '../components/ui/MoneyInput'
 import { getConfig } from '../lib/appConfig'
 import Select from '../components/ui/Select'
+import { useUnsavedGuard, snapConfig } from '../hooks/useUnsavedGuard'
+import { useConfirm } from '../context/ConfirmContext'
 
 // Fuentes de Google disponibles para el catálogo (títulos, subtítulos, párrafos)
 const FUENTES = [
@@ -72,30 +75,59 @@ const detectarFrutos = (nombre, frutosCat) => {
 }
 const labelFrutoCat = (id, frutosCat) => (frutosCat || []).find(f => f.id === id)?.nombre || id
 
+const CATALOGO_TABS = ['productos', 'personalizar', 'config', 'mensajes', 'metricas']
+
 export default function Catalogo() {
   const toast = useToast()
   const qc = useQueryClient()
+  const navigate = useNavigate()
+  const { tab: tabParam } = useParams()
   const { profile } = useAuth()
   const rol = profile?.rol
   const puedeProductos = puedeVerSeccion(rol, 'catalogo', 'productos')
   const puedeConfig    = puedeVerSeccion(rol, 'catalogo', 'config')
   const puedeMetricas  = puedeVerSeccion(rol, 'catalogo', 'metricas')
   const tabInicialCat = puedeProductos ? 'productos' : (puedeConfig ? 'personalizar' : (puedeMetricas ? 'metricas' : 'productos'))
-  const [tab, setTab] = useState(tabInicialCat)
+  const okTab = {
+    productos: puedeProductos,
+    personalizar: puedeConfig,
+    config: puedeConfig,
+    mensajes: puedeConfig,
+    metricas: puedeMetricas,
+  }
+  const tab = CATALOGO_TABS.includes(tabParam) && okTab[tabParam] ? tabParam : null
+
+  const [dirtyMap, setDirtyMap] = useState({})
+  const reportDirty = useCallback((key, v) => {
+    setDirtyMap(m => (m[key] === !!v ? m : { ...m, [key]: !!v }))
+  }, [])
+  const dirty = Object.values(dirtyMap).some(Boolean)
+  useUnsavedGuard(dirty, {
+    message: 'Hay cambios sin guardar en el catálogo. Si sales ahora, se perderán.',
+    title: 'Cambios sin guardar',
+    confirmText: 'Salir sin guardar',
+    cancelText: 'Seguir editando',
+  })
+
   useEffect(() => {
-    const ok = { productos: puedeProductos, personalizar: puedeConfig, config: puedeConfig, mensajes: puedeConfig, metricas: puedeMetricas }
-    if (!ok[tab]) setTab(tabInicialCat)
-  }, [puedeProductos, puedeConfig, puedeMetricas, tab, tabInicialCat])
+    if (!tab) navigate(`/catalogo/${tabInicialCat}`, { replace: true })
+  }, [tab, tabInicialCat, navigate])
+
   const { data: cfgUrl } = useQuery({
     queryKey: ['catalogo_url'],
     queryFn: async () => { const { data } = await supabase.from('config_catalogo').select('url_publica').eq('id', 1).maybeSingle(); return data?.url_publica || '' },
   })
 
+  if (!tab) return <Navigate to={`/catalogo/${tabInicialCat}`} replace />
+
+  const tabCls = ({ isActive }) => `tab-btn${isActive ? ' active' : ''}`
+
   return (
-    <div>
+    <div className={`catalogo-page${tab === 'personalizar' || tab === 'config' ? ' catalogo-page--split' : ''}`}>
       <div className="page-header">
         <h1 className="page-title"><Ico as={Store} size={16} />Catálogo público</h1>
         <div className="page-actions">
+          {dirty && <span className="badge badge-dorado" style={{ fontWeight: 700 }}>● Sin guardar</span>}
           {cfgUrl
             ? <a className="btn btn-secondary btn-sm" href={cfgUrl} target="_blank" rel="noreferrer" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                 <ExternalLink size={14} /> Ver catálogo
@@ -105,16 +137,16 @@ export default function Catalogo() {
       </div>
 
       <div className="tabs">
-        {puedeProductos && <button className={`tab-btn ${tab === 'productos' ? 'active' : ''}`} onClick={() => setTab('productos')}><Ico as={Store} size={14} />Productos</button>}
-        {puedeConfig && <button className={`tab-btn ${tab === 'personalizar' ? 'active' : ''}`} onClick={() => setTab('personalizar')}><Ico as={Palette} size={14} />Personalizar</button>}
-        {puedeConfig && <button className={`tab-btn ${tab === 'config' ? 'active' : ''}`} onClick={() => setTab('config')}><Ico as={Settings} size={14} />Configuración</button>}
-        {puedeConfig && <button className={`tab-btn ${tab === 'mensajes' ? 'active' : ''}`} onClick={() => setTab('mensajes')}>✉️ Mensajes</button>}
-        {puedeMetricas && <button className={`tab-btn ${tab === 'metricas' ? 'active' : ''}`} onClick={() => setTab('metricas')}><Ico as={BarChart3} size={14} />Métricas</button>}
+        {puedeProductos && <NavLink to="/catalogo/productos" className={tabCls} end><Ico as={Store} size={14} />Productos</NavLink>}
+        {puedeConfig && <NavLink to="/catalogo/personalizar" className={tabCls} end><Ico as={Palette} size={14} />Personalizar</NavLink>}
+        {puedeConfig && <NavLink to="/catalogo/config" className={tabCls} end><Ico as={Settings} size={14} />Configuración</NavLink>}
+        {puedeConfig && <NavLink to="/catalogo/mensajes" className={tabCls} end>✉️ Mensajes</NavLink>}
+        {puedeMetricas && <NavLink to="/catalogo/metricas" className={tabCls} end><Ico as={BarChart3} size={14} />Métricas</NavLink>}
       </div>
 
-      {tab === 'productos' && puedeProductos && <TabProductos toast={toast} qc={qc} />}
-      {tab === 'personalizar' && puedeConfig && <TabPersonalizar toast={toast} qc={qc} cfgUrl={cfgUrl} />}
-      {tab === 'config' && puedeConfig && <TabConfig toast={toast} />}
+      {tab === 'productos' && puedeProductos && <TabProductos toast={toast} qc={qc} onDirtyChange={v => reportDirty('productos', v)} />}
+      {tab === 'personalizar' && puedeConfig && <TabPersonalizar toast={toast} qc={qc} cfgUrl={cfgUrl} onDirtyChange={v => reportDirty('personalizar', v)} />}
+      {tab === 'config' && puedeConfig && <TabConfig toast={toast} onDirtyChange={v => reportDirty('config', v)} />}
       {tab === 'mensajes' && puedeConfig && <TabMensajes />}
       {tab === 'metricas' && puedeMetricas && <TabMetricas />}
     </div>
@@ -122,9 +154,13 @@ export default function Catalogo() {
 }
 
 // ==================== PRODUCTOS ====================
-function TabProductos({ toast, qc }) {
+function TabProductos({ toast, qc, onDirtyChange }) {
   const [editar, setEditar] = useState(null)   // producto en edición
   const [gestFrutos, setGestFrutos] = useState(false)
+  const [dirtyExtra, setDirtyExtra] = useState(false)
+  const [dirtyEditor, setDirtyEditor] = useState(false)
+  useEffect(() => { onDirtyChange?.(!!(dirtyExtra || dirtyEditor)) }, [dirtyExtra, dirtyEditor, onDirtyChange])
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
   const { data: frutosCat = [] } = useQuery({
     queryKey: ['frutos_catalogo'],
     queryFn: async () => { const { data } = await supabase.from('frutos_catalogo').select('*').order('orden'); return data || [] },
@@ -196,24 +232,37 @@ function TabProductos({ toast, qc }) {
         </table>
       </div>
 
-      {editar && <EditorProducto producto={editar} frutosCat={frutosCat} toast={toast} qc={qc} onClose={() => setEditar(null)} />}
+      {editar && <EditorProducto producto={editar} frutosCat={frutosCat} toast={toast} qc={qc} onDirtyChange={setDirtyEditor} onClose={() => { setDirtyEditor(false); setEditar(null) }} />}
       {gestFrutos && <GestionFrutos frutos={frutosCat} toast={toast} qc={qc} onClose={() => setGestFrutos(false)} />}
     </div>
-    <ProductosExtra toast={toast} baseProductos={productos} />
+    <ProductosExtra toast={toast} baseProductos={productos} onDirtyChange={setDirtyExtra} />
     </>
   )
 }
 
 // ---- Productos y combos adicionales (no vienen de Productos Terminados) ----
 const EXTRA_VACIO = (tipo) => ({ id: 'x' + Date.now() + Math.random().toString(36).slice(2, 5), tipo, nombre: '', categoria: '', descripcion: '', imagenes: [], precio_detal: '', precio_oferta: '', precio_mayor: '', stock: '', componentes: [], destacado: false, novedad: false, visible: true })
-function ProductosExtra({ toast, baseProductos = [] }) {
+function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
   const [items, setItems] = useState(null)
   const [cats, setCats] = useState([])            // categorías creadas por el usuario
   const [catInput, setCatInput] = useState('')
   const [saving, setSaving] = useState(false)
   const [subiendo, setSubiendo] = useState(false)
   const [comp, setComp] = useState({})   // borrador de componente por combo
-  useEffect(() => { supabase.from('config_catalogo').select('productos_extra, categorias_extra').eq('id', 1).maybeSingle().then(({ data }) => { setItems(Array.isArray(data?.productos_extra) ? data.productos_extra : []); setCats(Array.isArray(data?.categorias_extra) ? data.categorias_extra : []) }) }, [])
+  const [savedSnap, setSavedSnap] = useState(null)
+  useEffect(() => {
+    supabase.from('config_catalogo').select('productos_extra, categorias_extra').eq('id', 1).maybeSingle().then(({ data }) => {
+      const it = Array.isArray(data?.productos_extra) ? data.productos_extra : []
+      const ct = Array.isArray(data?.categorias_extra) ? data.categorias_extra : []
+      setItems(it); setCats(ct)
+      setSavedSnap(snapConfig({ items: it, cats: ct }))
+    })
+  }, [])
+  useEffect(() => {
+    if (items == null || savedSnap == null) { onDirtyChange?.(false); return }
+    onDirtyChange?.(snapConfig({ items, cats }) !== savedSnap)
+  }, [items, cats, savedSnap, onDirtyChange])
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
   const catsConocidas = [...new Set([...baseProductos.map(p => p.categoria).filter(Boolean), ...cats, ...(items || []).map(x => x.categoria).filter(Boolean)])]
   const addCat = () => { const v = catInput.trim(); if (v && !cats.includes(v)) setCats(c => [...c, v]); setCatInput('') }
   const delCat = (c) => setCats(cs => cs.filter(x => x !== c))
@@ -244,6 +293,8 @@ function ProductosExtra({ toast, baseProductos = [] }) {
       }))
       const { error } = await supabase.from('config_catalogo').upsert({ id: 1, productos_extra: limpio, categorias_extra: cats, updated_at: new Date().toISOString() }, { onConflict: 'id' })
       if (error) throw error
+      setItems(limpio)
+      setSavedSnap(snapConfig({ items: limpio, cats }))
       toast('Productos adicionales guardados ✓')
     } catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
   }
@@ -327,7 +378,7 @@ function ProductosExtra({ toast, baseProductos = [] }) {
           </div>
         ))}
       </div>
-      <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={guardar} disabled={saving}><Ico as={Save} size={14} />{saving ? 'Guardando…' : 'Guardar productos adicionales'}</button>
+      <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={guardar} disabled={saving}><Ico as={Save} size={14} />{saving ? 'Guardando…' : 'Guardar productos adicionales'}</button>{savedSnap != null && items != null && snapConfig({ items, cats }) !== savedSnap && <span className="badge badge-dorado" style={{ marginLeft: 8 }}>Sin guardar</span>}
     </div>
   )
 }
@@ -372,7 +423,7 @@ function OrdenCategorias({ categorias, toast }) {
 }
 
 // ---- Editor de un producto del catálogo (modal) ----
-function EditorProducto({ producto, frutosCat = [], toast, qc, onClose }) {
+function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyChange }) {
   // Frutos: si ya tiene, se respetan; si no, se autodetectan desde el nombre del producto
   const [frutos, setFrutos] = useState(producto.catalogo_frutos?.length ? producto.catalogo_frutos : detectarFrutos(producto.nombre, frutosCat))
   const [beneficios, setBeneficios] = useState(Array.isArray(producto.catalogo_beneficios) ? producto.catalogo_beneficios : [])
@@ -391,6 +442,24 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose }) {
   const [nuevoFruto, setNuevoFruto] = useState(null)  // abre EditorFruto inline
   const [gestionFrutos, setGestionFrutos] = useState(false)  // abre gestor de frutos
   const [saving, setSaving] = useState(false)
+  const confirmar = useConfirm()
+  const formSnap = () => snapConfig({
+    frutos, beneficios, destacado, novedad, descripcion, precioOferta, seoTitulo, seoDesc, contenido, origen, imgs,
+  })
+  const savedEditor = useRef(null)
+  useEffect(() => { savedEditor.current = formSnap() }, [producto.id]) // eslint-disable-line react-hooks/exhaustive-deps
+  const editorDirty = savedEditor.current != null && formSnap() !== savedEditor.current
+  useEffect(() => { onDirtyChange?.(editorDirty) }, [editorDirty, onDirtyChange])
+  const forzarCerrar = () => { onDirtyChange?.(false); onClose() }
+  const cerrar = async () => {
+    if (editorDirty) {
+      const ok = await confirmar('Hay cambios sin guardar en este producto. ¿Cerrar sin guardar?', {
+        title: 'Cambios sin guardar', confirmText: 'Cerrar sin guardar', cancelText: 'Seguir editando', danger: true,
+      })
+      if (!ok) return
+    }
+    forzarCerrar()
+  }
 
   const toggleFruto = (id) => setFrutos(fs => fs.includes(id) ? fs.filter(x => x !== id) : [...fs, id])
   const moverImg = (i, d) => setImgs(a => { const b = [...a]; const j = i + d; if (j < 0 || j >= b.length) return a;[b[i], b[j]] = [b[j], b[i]]; return b })
@@ -432,15 +501,17 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose }) {
         try { await supabase.from('products_costing').update({ imagen_url, imagenes }).eq('id', producto.product_id) } catch { /* opcional */ }
       }
       qc.invalidateQueries({ queryKey: ['catalogo_admin_productos'] })
+      savedEditor.current = formSnap()
+      onDirtyChange?.(false)
       toast('Producto actualizado ✓'); onClose()
     } catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
   }
 
   return (
-    <Modal open onClose={onClose} size="modal-lg"
+    <Modal open onClose={forzarCerrar} size="modal-lg"
       title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Store size={18} /> {producto.nombre}</span>}
       footer={<>
-        <button className="btn btn-secondary" onClick={onClose}>Cancelar</button>
+        <button className="btn btn-secondary" onClick={cerrar}>Cancelar</button>
         <button className="btn btn-primary" onClick={guardar} disabled={saving || subiendo}><Ico as={Save} size={14} />{saving ? 'Guardando…' : 'Guardar'}</button>
       </>}
     >
@@ -470,12 +541,21 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose }) {
       </div>
 
       {/* SEO del producto */}
-      <div className="card-title" style={{ fontSize: '0.95rem' }}>🔎 SEO (al compartir el enlace)</div>
+      <div className="card-title" style={{ fontSize: '0.95rem' }}>🔎 SEO del producto (Google / WhatsApp)</div>
       <div className="form-grid-2">
-        <div className="form-group"><label className="form-label">Título SEO</label><input className="form-control" value={seoTitulo} onChange={e => setSeoTitulo(e.target.value)} placeholder={producto.nombre} /></div>
-        <div className="form-group"><label className="form-label">Descripción SEO</label><input className="form-control" value={seoDesc} onChange={e => setSeoDesc(e.target.value)} placeholder="Se toma de la descripción del producto" /></div>
+        <div className="form-group">
+          <label className="form-label">Título SEO <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({seoTitulo.length}/60)</small></label>
+          <input className="form-control" value={seoTitulo} maxLength={70} onChange={e => setSeoTitulo(e.target.value)} placeholder={producto.nombre} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Descripción SEO <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({seoDesc.length}/155)</small></label>
+          <input className="form-control" value={seoDesc} maxLength={200} onChange={e => setSeoDesc(e.target.value)} placeholder="Se toma de la descripción del producto" />
+        </div>
       </div>
-      <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginBottom: 12 }}>Si los dejas vacíos se usan el <strong>nombre</strong> y la <strong>descripción</strong> del producto.</small>
+      <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginBottom: 12 }}>
+        URL pública: <code>/producto/{(producto.nombre || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-').slice(0, 70) || '…'}</code>.
+        Si los dejas vacíos se usan el <strong>nombre</strong> y la <strong>descripción</strong>. Incluye datos estructurados (precio y disponibilidad).
+      </small>
 
       {/* Specs ficha Atelier */}
       <div className="card-title" style={{ fontSize: '0.95rem' }}>📦 Specs de ficha <span style={{ fontWeight: 400, fontSize: '0.78rem', color: 'var(--texto-suave)' }}>(diseño Atelier)</span></div>
@@ -826,14 +906,33 @@ function CampoPlantillaWA({ label, ayuda, value, onChange, tokens = TOKENS_WA, p
 }
 
 // ---- Aviso superior: hasta 3 mensajes cortos ----
-function AvisosEditor({ avisos = [], onChange }) {
+function ColorPick({ label, value, fallback, onChange, onClear }) {
+  const v = value || fallback || '#C8A94A'
+  return (
+    <div className="form-group" style={{ margin: 0 }}>
+      <label className="form-label">{label}</label>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <input type="color" className="form-control" style={{ height: 36, padding: 2, flex: 1 }} value={/^#[0-9a-fA-F]{6}$/.test(v) ? v : '#C8A94A'} onChange={e => onChange(e.target.value)} />
+        {value ? <button type="button" className="btn btn-xs btn-secondary" title="Usar color de la paleta" onClick={onClear}>Auto</button> : null}
+      </div>
+    </div>
+  )
+}
+
+function AvisosEditor({ avisos = [], onChange, colorBg, colorTexto, onColorBg, onColorTexto }) {
   const lista = avisos.map(a => (typeof a === 'string' ? a : a?.texto || ''))
   const upd = (i, v) => onChange(lista.map((t, k) => k === i ? v : t))
   const add = () => lista.length < 3 && onChange([...lista, ''])
   const del = (i) => onChange(lista.filter((_, k) => k !== i))
   const mover = (i, d) => { const a = [...lista]; const j = i + d; if (j < 0 || j >= a.length) return;[a[i], a[j]] = [a[j], a[i]]; onChange(a) }
+  const bg = colorBg || '#C8A94A'
+  const fg = colorTexto || '#1a3a2a'
   return (
     <div style={{ marginTop: 8 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+        <ColorPick label="Fondo del aviso" value={colorBg} fallback="#C8A94A" onChange={onColorBg} onClear={() => onColorBg('')} />
+        <ColorPick label="Texto del aviso" value={colorTexto} fallback="#1a3a2a" onChange={onColorTexto} onClear={() => onColorTexto('')} />
+      </div>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
         {lista.map((t, i) => (
           <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -848,7 +947,7 @@ function AvisosEditor({ avisos = [], onChange }) {
       {lista.filter(t => t.trim()).length > 0 && (
         <div style={{ marginTop: 10 }}>
           <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)', marginBottom: 4 }}>Vista previa:</div>
-          <div style={{ background: 'var(--dorado)', color: 'var(--selva)', fontSize: '0.78rem', fontWeight: 700, padding: '6px 12px', textAlign: 'center', borderRadius: 6 }}>{lista.find(t => t.trim())}</div>
+          <div style={{ background: bg, color: fg, fontSize: '0.78rem', fontWeight: 700, padding: '6px 12px', textAlign: 'center', borderRadius: 6 }}>{lista.find(t => t.trim())}</div>
         </div>
       )}
     </div>
@@ -946,22 +1045,65 @@ function BurbujaWA({ texto }) {
 }
 
 // ==================== CONFIGURACIÓN ====================
-function TabConfig({ toast }) {
+const SEO_PLACEHOLDER = {
+  titulo: 'Mumi Amazonia — Productos naturales de la selva del Guaviare',
+  desc: 'Catálogo de productos amazónicos: alimentos, snacks, bebidas e ingredientes del Guaviare. Origen sostenible y pedidos por WhatsApp en Colombia.',
+  keywords: 'Mumi Amazonia, productos amazónicos, Guaviare, alimentos naturales, snacks amazónicos, bebidas naturales, frutas amazónicas',
+}
+const SEO_PAGINAS_FIJAS = [
+  { key: 'tienda', label: 'Tienda / Inicio', hint: 'Si lo dejas vacío se usa el SEO principal de arriba.' },
+  { key: 'nosotros', label: 'Nosotros', hint: 'Aparece en /nosotros' },
+  { key: 'contacto', label: 'Contacto', hint: 'Aparece en /contacto' },
+  { key: 'galeria', label: 'Galería', hint: 'Aparece en /galeria' },
+]
+
+function TabConfig({ toast, onDirtyChange }) {
+  const qc = useQueryClient()
   const [cfg, setCfg] = useState(null)
   const [saving, setSaving] = useState(false)
   const [sec, setSec] = useState('general')     // sección abierta del acordeón
   const [waSel, setWaSel] = useState('stock')   // mensaje que se previsualiza
+  const [cropOg, setCropOg] = useState(null)
+  const [subiendoOg, setSubiendoOg] = useState(false)
+  const [savedSnap, setSavedSnap] = useState(null)
   useEffect(() => {
     supabase.from('config_catalogo').select('*').eq('id', 1).maybeSingle()
-      .then(({ data }) => setCfg(data || { id: 1 }))
+      .then(({ data }) => {
+        const c = data || { id: 1 }
+        setCfg(c)
+        setSavedSnap(snapConfig(c))
+      })
   }, [])
+  useEffect(() => {
+    if (!cfg || savedSnap == null) { onDirtyChange?.(false); return }
+    onDirtyChange?.(snapConfig(cfg) !== savedSnap)
+  }, [cfg, savedSnap, onDirtyChange])
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
   const set = (k, v) => setCfg(c => ({ ...c, [k]: v }))
+  const setSeoPagina = (key, campo, val) => setCfg(c => ({
+    ...c,
+    seo_paginas: { ...(c.seo_paginas || {}), [key]: { ...((c.seo_paginas || {})[key] || {}), [campo]: val } },
+  }))
+  const subirOg = async (blob) => {
+    setSubiendoOg(true)
+    try {
+      const path = `catalogo/og_${Date.now()}.jpg`
+      const { error } = await supabase.storage.from('product-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
+      if (error) throw error
+      const { data } = supabase.storage.from('product-images').getPublicUrl(path)
+      set('seo_imagen', data.publicUrl)
+      toast('Imagen Open Graph actualizada ✓')
+    } catch (e) { toast('No se pudo subir la imagen: ' + e.message, 'error') }
+    finally { setSubiendoOg(false) }
+  }
   const guardar = async () => {
     setSaving(true)
     try {
       const { error } = await supabase.from('config_catalogo').upsert({ ...cfg, id: 1, updated_at: new Date().toISOString() }, { onConflict: 'id' })
       if (error) throw error
+      setSavedSnap(snapConfig(cfg))
       toast('Configuración del catálogo guardada ✓')
+      qc.invalidateQueries({ queryKey: ['catalogo_url'] })
     } catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
   }
   if (!cfg) return <div className="card"><p className="empty-table">Cargando…</p></div>
@@ -970,8 +1112,8 @@ function TabConfig({ toast }) {
     <div className="pz-layout">
       {/* Panel de ajustes en acordeón */}
       <div className="pz-panel">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
-          <button className="btn btn-primary btn-sm" onClick={guardar} disabled={saving}><Ico as={Save} size={13} />{saving ? 'Guardando…' : 'Guardar configuración'}</button>
+        <div className="pz-panel-toolbar">
+          <button className="btn btn-primary btn-sm" onClick={guardar} disabled={saving}><Ico as={Save} size={13} />{saving ? 'Guardando…' : 'Guardar configuración'}</button>{savedSnap != null && snapConfig(cfg) !== savedSnap && <span className="badge badge-dorado" style={{ marginLeft: 8 }}>Sin guardar</span>}
           <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>La apariencia se edita en <strong>Personalizar</strong>.</small>
         </div>
 
@@ -997,14 +1139,99 @@ function TabConfig({ toast }) {
           <PagosEditor pagos={Array.isArray(cfg.pagos) ? cfg.pagos : []} onChange={v => set('pagos', v)} />
         </PzSec>
 
-        <PzSec abierto={sec} setAbierto={setSec} id="seo" titulo={<>🔎 SEO del sitio</>}>
-          <div className="form-group"><label className="form-label">Título</label><input className="form-control" value={cfg.seo_titulo || ''} onChange={e => set('seo_titulo', e.target.value)} placeholder={cfg.nombre_tienda || 'Mumi Amazonia'} /></div>
-          <div className="form-group"><label className="form-label">Descripción</label><textarea className="form-control" rows={2} value={cfg.seo_descripcion || ''} onChange={e => set('seo_descripcion', e.target.value)} placeholder={[cfg.nombre_tienda || 'Mumi Amazonia', cfg.slogan].filter(Boolean).join(' — ')} /></div>
-          <div className="form-group"><label className="form-label">Imagen para compartir (URL)</label><input className="form-control" value={cfg.seo_imagen || ''} onChange={e => set('seo_imagen', e.target.value)} placeholder="https://…/imagen.jpg" /></div>
-          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Si lo dejas vacío se usa <strong>nombre de la tienda + slogan</strong> y el logo. El SEO de cada producto se edita en <strong>Productos</strong>.</small>
+                <PzSec abierto={sec} setAbierto={setSec} id="seo" titulo={<>🔎 SEO del sitio (Google / redes)</>}>
+          <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', margin: '0 0 10px' }}>
+            Define cómo aparece el catálogo en Google y al compartir enlaces. Habla de la <strong>marca y todo el catálogo</strong> (no solo una categoría). Con la <strong>URL pública</strong> el sitio genera{' '}
+            {base ? <><a href={`${base}/sitemap.xml`} target="_blank" rel="noreferrer">sitemap.xml</a>, <a href={`${base}/robots.txt`} target="_blank" rel="noreferrer">robots.txt</a> y feed <a href={`${base}/feeds/google-merchant.txt`} target="_blank" rel="noreferrer">Google Shopping</a></> : <><code>sitemap.xml</code>, <code>robots.txt</code> y feed Shopping</>}.
+          </p>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.88rem', cursor: 'pointer', marginBottom: 10 }}>
+            <input type="checkbox" checked={cfg.seo_indexar !== false} onChange={e => set('seo_indexar', e.target.checked)} />
+            Permitir que Google y otros buscadores indexen el catálogo
+          </label>
+          <div className="form-group">
+            <label className="form-label">Título SEO <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({(cfg.seo_titulo || '').length}/60)</small></label>
+            <input className="form-control" value={cfg.seo_titulo || ''} maxLength={70} onChange={e => set('seo_titulo', e.target.value)} placeholder={SEO_PLACEHOLDER.titulo} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Meta descripción <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({(cfg.seo_descripcion || '').length}/155)</small></label>
+            <textarea className="form-control" rows={3} value={cfg.seo_descripcion || ''} maxLength={200} onChange={e => set('seo_descripcion', e.target.value)} placeholder={SEO_PLACEHOLDER.desc} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Palabras clave <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(separadas por coma)</small></label>
+            <input className="form-control" value={cfg.seo_keywords || ''} onChange={e => set('seo_keywords', e.target.value)} placeholder={SEO_PLACEHOLDER.keywords} />
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Incluye marca, origen (Guaviare), categorías amplias y canal (WhatsApp). No centres todo en una sola línea de producto.</small>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Imagen Open Graph (WhatsApp / redes)</label>
+            <div style={{ display: 'flex', gap: 10, alignItems: 'center', flexWrap: 'wrap' }}>
+              {cfg.seo_imagen ? <img src={cfg.seo_imagen} alt="" style={{ width: 160, height: 84, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--crema-oscuro)' }} /> : (
+                <div style={{ width: 160, height: 84, borderRadius: 8, border: '1px dashed var(--crema-oscuro)', display: 'grid', placeItems: 'center', fontSize: '0.7rem', color: 'var(--texto-suave)' }}>1200×630</div>
+              )}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                <label className="btn btn-sm btn-secondary" style={{ cursor: 'pointer' }}>
+                  <Upload size={14} /> {subiendoOg ? 'Subiendo…' : 'Subir y recortar'}
+                  <input type="file" accept="image/*" hidden onChange={e => { const f = e.target.files?.[0]; if (f) setCropOg(f); e.target.value = '' }} />
+                </label>
+                {cfg.seo_imagen ? <button type="button" className="btn btn-xs btn-danger" onClick={() => set('seo_imagen', '')}>Quitar imagen</button> : null}
+              </div>
+            </div>
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 6 }}>
+              Sube una foto y recórtala a <strong>1200×630</strong> (formato recomendado). Si está vacío se usa el logo. Favicon → Personalizar → Marca.
+            </small>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Verificación Google Search Console</label>
+            <input className="form-control" value={cfg.seo_verificacion || ''} onChange={e => set('seo_verificacion', e.target.value)} placeholder="ej. AbCdEf123… (solo el valor content)" />
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 4 }}>
+              <strong>¿Qué es?</strong> Google te pide demostrar que el sitio es tuyo. En Search Console eliges verificación por etiqueta HTML y te dan algo como{' '}
+              <code>&lt;meta name=&quot;google-site-verification&quot; content=&quot;ESTE_CÓDIGO&quot; /&gt;</code>.
+              Aquí pegas <strong>solo ESTE_CÓDIGO</strong> (sin la etiqueta). El catálogo lo publica en todas las páginas. Luego pulsa Verificar en Google y envía el sitemap.
+            </small>
+          </div>
+          <div style={{ background: 'var(--crema)', borderRadius: 10, padding: 12, marginTop: 4 }}>
+            <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--texto-suave)', marginBottom: 6 }}>Vista previa en Google</div>
+            <div style={{ fontSize: '1.05rem', color: '#1a0dab', lineHeight: 1.25 }}>{(cfg.seo_titulo || SEO_PLACEHOLDER.titulo).slice(0, 60)}</div>
+            <div style={{ fontSize: '0.78rem', color: '#006621' }}>{base || 'https://tu-catalogo…'}/</div>
+            <div style={{ fontSize: '0.82rem', color: '#545454', marginTop: 2 }}>{(cfg.seo_descripcion || SEO_PLACEHOLDER.desc).slice(0, 155)}</div>
+          </div>
+
+          <div style={{ marginTop: 16, borderTop: '1px solid var(--crema-oscuro)', paddingTop: 12 }}>
+            <div style={{ fontWeight: 700, fontSize: '0.85rem', marginBottom: 6 }}>SEO por página</div>
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginBottom: 10 }}>
+              Título y descripción propios para cada ruta fija. Las páginas personalizadas se editan en <strong>Personalizar → Páginas</strong>. Productos → pestaña Productos.
+            </small>
+            {SEO_PAGINAS_FIJAS.map(pg => {
+              const sp = (cfg.seo_paginas || {})[pg.key] || {}
+              return (
+                <div key={pg.key} style={{ border: '1px solid var(--crema-oscuro)', borderRadius: 10, padding: 10, marginBottom: 8 }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.8rem', marginBottom: 6 }}>{pg.label} <small style={{ fontWeight: 400, color: 'var(--texto-suave)' }}>{pg.hint}</small></div>
+                  <div className="form-group" style={{ marginBottom: 6 }}>
+                    <label className="form-label">Título</label>
+                    <input className="form-control" value={sp.titulo || ''} maxLength={70} onChange={e => setSeoPagina(pg.key, 'titulo', e.target.value)} placeholder={pg.key === 'tienda' ? SEO_PLACEHOLDER.titulo : pg.label} />
+                  </div>
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Descripción</label>
+                    <textarea className="form-control" rows={2} value={sp.desc || ''} maxLength={200} onChange={e => setSeoPagina(pg.key, 'desc', e.target.value)} placeholder={`Descripción SEO de ${pg.label.toLowerCase()}…`} />
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+
+          <div style={{ background: 'color-mix(in srgb, var(--selva) 8%, #fff)', border: '1px solid color-mix(in srgb, var(--selva) 25%, #fff)', borderRadius: 10, padding: 12, marginTop: 10 }}>
+            <div style={{ fontWeight: 700, fontSize: '0.8rem', color: 'var(--selva)', marginBottom: 4 }}>Google Shopping / Merchant Center</div>
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', lineHeight: 1.45 }}>
+              1) Crea una cuenta en <strong>Google Merchant Center</strong>. 2) Vincula tu dominio (URL pública). 3) Añade un feed de productos con esta URL:{' '}
+              {base ? <a href={`${base}/feeds/google-merchant.txt`} target="_blank" rel="noreferrer"><code>{base}/feeds/google-merchant.txt</code></a> : <code>…/feeds/google-merchant.txt</code>}
+              {' '}(se actualiza con tus productos del catálogo). 4) Completa políticas, envío e impuestos en Merchant Center. El JSON-LD de producto ayuda al SEO web; Shopping usa el feed + Merchant Center.
+            </small>
+          </div>
+
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 8 }}>Guarda esta sección y, tras desplegar el catálogo, envía el sitemap en Search Console.</small>
+          {cropOg && <ImageCropper file={cropOg} aspect={1200 / 630} salidaW={1200} salidaH={630} onCancel={() => setCropOg(null)} onCropped={(blob) => { setCropOg(null); void subirOg(blob) }} />}
         </PzSec>
 
-        <PzSec abierto={sec} setAbierto={setSec} id="terminos" titulo={<>📄 Términos y política de datos</>}>
+<PzSec abierto={sec} setAbierto={setSec} id="terminos" titulo={<>📄 Términos y política de datos</>}>
           <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Si escribes algo, aparece un enlace en el footer que abre este texto en un modal.</small>
           <div style={{ marginTop: 8 }}><RichEditor value={cfg.terminos_texto || ''} onChange={(html) => set('terminos_texto', html)} /></div>
         </PzSec>
@@ -1055,7 +1282,34 @@ function TabConfig({ toast }) {
             <div className="form-group"><label className="form-label">Clave de acceso <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(vacío = sin clave)</small></label><input className="form-control" value={cfg.mayorista_clave || ''} onChange={e => set('mayorista_clave', e.target.value)} placeholder="Ej: Mum1Mayor2026" /></div>
             <div className="form-group"><label className="form-label">Pedido mínimo mayorista (COP)</label><MoneyInput value={cfg.mayorista_pedido_minimo ?? 0} onChange={v => set('mayorista_pedido_minimo', v || 0)} /></div>
           </div>
-          {base && <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Enlace para mayoristas: <strong>{base}/mayorista</strong></small>}
+
+          <div style={{ marginTop: 14, borderTop: '1px solid var(--crema-oscuro)', paddingTop: 12 }}>
+            <div style={{ fontWeight: 700, fontSize: '0.82rem', marginBottom: 8 }}>Diseño de la barra de invitación</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+              <ColorPick label="Fondo de la barra" value={cfg.mayo_invita_color_bg || ''} fallback="#C8A94A" onChange={v => set('mayo_invita_color_bg', v)} onClear={() => set('mayo_invita_color_bg', null)} />
+              <ColorPick label="Color del texto" value={cfg.mayo_invita_color_texto || ''} fallback="#1a3a2a" onChange={v => set('mayo_invita_color_texto', v)} onClear={() => set('mayo_invita_color_texto', null)} />
+              <ColorPick label="Fondo del botón" value={cfg.mayo_invita_color_btn || ''} fallback="#1a3a2a" onChange={v => set('mayo_invita_color_btn', v)} onClear={() => set('mayo_invita_color_btn', null)} />
+              <ColorPick label="Texto del botón" value={cfg.mayo_invita_color_btn_texto || ''} fallback="#F5F0E6" onChange={v => set('mayo_invita_color_btn_texto', v)} onClear={() => set('mayo_invita_color_btn_texto', null)} />
+            </div>
+            <div className="form-group" style={{ marginBottom: 10 }}>
+              <label className="form-label">Tamaño del texto</label>
+              <select className="form-control" value={cfg.mayo_invita_tamano || 'md'} onChange={e => set('mayo_invita_tamano', e.target.value)}>
+                <option value="sm">Pequeño</option>
+                <option value="md">Mediano</option>
+                <option value="lg">Grande</option>
+              </select>
+            </div>
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginBottom: 12 }}>Con <strong>Auto</strong> usa la paleta del tema. La tipografía es la fuente de texto del catálogo (Personalizar → Tipografías).</small>
+
+            <div style={{ fontWeight: 700, fontSize: '0.82rem', marginBottom: 8 }}>Barra “precios de mayorista” (modo activo)</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+              <ColorPick label="Fondo" value={cfg.mayo_banner_color_bg || ''} fallback="#1a3a2a" onChange={v => set('mayo_banner_color_bg', v)} onClear={() => set('mayo_banner_color_bg', null)} />
+              <ColorPick label="Texto" value={cfg.mayo_banner_color_texto || ''} fallback="#F5F0E6" onChange={v => set('mayo_banner_color_texto', v)} onClear={() => set('mayo_banner_color_texto', null)} />
+              <ColorPick label="Resalte (palabra clave)" value={cfg.mayo_banner_color_acento || ''} fallback="#C8A94A" onChange={v => set('mayo_banner_color_acento', v)} onClear={() => set('mayo_banner_color_acento', null)} />
+            </div>
+          </div>
+
+          {base && <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 10 }}>Enlace para mayoristas: <strong>{base}/mayorista</strong></small>}
           <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 6 }}>El mensaje que se envía por WhatsApp se edita en <strong>Mensajes de WhatsApp → 4)</strong>.</small>
         </PzSec>
 
@@ -1134,11 +1388,29 @@ function TabConfig({ toast }) {
 
           {sec === 'mayorista' && (cfg.mayorista_activo !== false
             ? <div>
-                <div className="cfg-mayo-barra">
-                  <span>{cfg.mayorista_mensaje || '¿Eres mayorista? Accede a precios especiales por volumen.'}</span>
-                  <span className="cfg-mayo-btn">Quiero ser mayorista</span>
+                <div className="cfg-mayo-barra" style={{
+                  background: cfg.mayo_invita_color_bg || undefined,
+                  color: cfg.mayo_invita_color_texto || undefined,
+                  fontSize: cfg.mayo_invita_tamano === 'sm' ? '0.74rem' : cfg.mayo_invita_tamano === 'lg' ? '0.95rem' : '0.8rem',
+                }}>
+                  <span style={{ flex: 1 }}>{cfg.mayorista_mensaje || '¿Eres mayorista? Accede a precios especiales por volumen.'}</span>
+                  <span className="cfg-mayo-btn" style={{
+                    background: cfg.mayo_invita_color_btn || undefined,
+                    color: cfg.mayo_invita_color_btn_texto || undefined,
+                  }}>Quiero ser mayorista</span>
                 </div>
-                <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 8 }}>Así se ve la barra fija bajo el menú. {cfg.mayorista_clave ? 'El acceso pedirá clave.' : 'El acceso no pedirá clave.'}</small>
+                <div className="cfg-mayo-activa" style={{
+                  marginTop: 10,
+                  display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8,
+                  padding: '8px 12px', borderRadius: 8,
+                  background: cfg.mayo_banner_color_bg || 'var(--selva)',
+                  color: cfg.mayo_banner_color_texto || '#F5F0E6',
+                  fontSize: '0.78rem',
+                }}>
+                  <span>Estás viendo <strong style={{ color: cfg.mayo_banner_color_acento || 'var(--dorado)' }}>precios de mayorista</strong></span>
+                  <span style={{ opacity: 0.85, fontWeight: 700 }}>Salir</span>
+                </div>
+                <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 8 }}>Arriba: invitación. Abajo: barra cuando ya entró como mayorista. {cfg.mayorista_clave ? 'El acceso pedirá clave.' : 'El acceso no pedirá clave.'}</small>
               </div>
             : <p className="empty-table">La invitación a mayoristas está desactivada.</p>)}
 
@@ -1182,21 +1454,24 @@ const SECCIONES_DEFAULT = [
   { id: 'frutos', on: true }, { id: 'newsletter', on: true },
 ]
 const SECCION_LABEL = { hero: '🖼️ Banner principal (hero)', novedades: '✨ Novedades', categorias: '🛍️ Productos por categoría', frutos: '🌿 Frutos que nos inspiran', newsletter: '✉️ Suscripción (newsletter)' }
-// Estilos de diseño (formas/bordes), independientes del color
-const DISENOS = [
+// Familia web: atelier = layout completo; todo lo demás = catálogo clásico
+const familiaWeb = (diseno) => ((diseno || 'selva') === 'atelier' ? 'atelier' : 'clasico')
+
+// Formas del catálogo clásico (bordes/botones). No aplica cuando la plantilla web es Atelier.
+const ESTILOS_FORMA = [
   { id: 'selva', nombre: 'Selva', desc: 'Redondeado suave (clásico)', radio: 12, radioMini: 4 },
   { id: 'editorial', nombre: 'Editorial', desc: 'Elegante, esquinas rectas, líneas finas', radio: 0, radioMini: 0 },
   { id: 'organico', nombre: 'Orgánico', desc: 'Muy redondeado, botones píldora, suave', radio: 20, radioMini: 8 },
-  { id: 'atelier', nombre: 'Atelier', desc: 'Diseño Stitch completo: catálogo + ficha', radio: 22, radioMini: 12 },
 ]
-// Plantillas de diseño predefinidas (diseno + color + tipografía + opciones de ficha)
-const PLANTILLAS_DISENO = [
+
+// Las 2 plantillas web (estructura del sitio: inicio, ficha, menú). Independientes del color.
+const PLANTILLAS_WEB = [
   {
     id: 'clasico',
     nombre: 'Clásico Mumi',
-    desc: 'Diseño Selva actual: redondeado suave y tipografía Playfair',
+    desc: 'Catálogo clásico: hero, categorías y ficha tradicional',
     payload: {
-      diseno: 'selva', plantilla: 'amazonia', color_primario: '#1a3a2a', color_secundario: '#C8A94A',
+      diseno: 'selva', plantilla: 'amazonia', color_primario: '#1a3a2a', color_secundario: '#C8A94A', color_fondo: '#F5F0E8',
       fuente_titulos: 'Playfair Display', fuente_subtitulos: 'Source Sans 3', fuente_texto: 'Source Sans 3',
       ficha_cta_fijo: false, ficha_mostrar_envio: true, ficha_titulo_relacionados: 'También te puede gustar',
     },
@@ -1204,41 +1479,41 @@ const PLANTILLAS_DISENO = [
   {
     id: 'atelier',
     nombre: 'Atelier Amazonía',
-    desc: 'Home tipo Munay/Naturela: hero de marca, cosecha, impacto y ficha',
+    desc: 'Layout completo: hero de marca, cosecha, impacto y ficha Atelier',
     payload: {
-      diseno: 'atelier', plantilla: 'amazonia', color_primario: '#1A3A2A', color_secundario: '#CFB360',
+      diseno: 'atelier', plantilla: 'amazonia', color_primario: '#1A3A2A', color_secundario: '#CFB360', color_fondo: '#FAF9F6',
       fuente_titulos: 'Libre Caslon Text', fuente_subtitulos: 'Source Sans 3', fuente_texto: 'Source Sans 3',
       ficha_cta_fijo: true, ficha_mostrar_envio: true, ficha_titulo_relacionados: 'Combina bien con',
       mostrar_filtro_frutos: true, barra_activa: false,
       titulo_banner: 'Sabiduría de la selva, en cada sorbo.',
       subtitulo: 'Infusiones y superalimentos amazónicos, con respeto por la tierra y las comunidades.',
+      hero_cta_texto: 'Explorar catálogo', hero_cta_link: '/tienda',
+      hero_cta2_texto: 'Nuestra historia', hero_mostrar_cta2: true,
+      impacto_activo: true, impacto_titulo: 'Impacto que florece',
+      impacto_texto: 'Cada producto apoya a comunidades recolectoras de la Amazonía colombiana: comercio justo y conservación de la biodiversidad.',
+      impacto_stat1_n: '45+', impacto_stat1_l: 'Productores', impacto_stat2_n: '10', impacto_stat2_l: 'Departamentos',
+      impacto_link_texto: 'Conoce más',
+      cosecha_eyebrow: 'Productos destacados', cosecha_titulo: 'Nuestra cosecha',
+      frutos_filtro_titulo: 'Explora por ingrediente',
     },
   },
 ]
-const CAMPOS_PLANTILLA = [
-  'diseno', 'plantilla', 'color_primario', 'color_secundario',
+
+// Campos que se guardan al crear un “diseño guardado” (combinación plantilla + color + fuentes…)
+const CAMPOS_DISENO_GUARDADO = [
+  'diseno', 'plantilla', 'color_primario', 'color_secundario', 'color_fondo',
   'fuente_titulos', 'fuente_subtitulos', 'fuente_texto',
   'ficha_cta_fijo', 'ficha_mostrar_envio', 'ficha_titulo_relacionados', 'mostrar_mayor',
 ]
-const PLANTILLAS = [
-  { id: 'amazonia', nombre: 'Amazonia', primario: '#1a3a2a', secundario: '#C8A94A' },
-  { id: 'natural', nombre: 'Natural', primario: '#3d6b4a', secundario: '#7CB342' },
-  { id: 'noche', nombre: 'Noche selva', primario: '#0f261b', secundario: '#d9bd63' },
-  { id: 'tierra', nombre: 'Tierra', primario: '#5c3d2e', secundario: '#d99a4e' },
-  // Tonos pastel / suaves
-  { id: 'menta', nombre: 'Menta pastel', primario: '#5b8a72', secundario: '#a8d5ba' },
-  { id: 'durazno', nombre: 'Durazno', primario: '#c67b5c', secundario: '#f6c9a8' },
-  { id: 'lavanda', nombre: 'Lavanda', primario: '#6d5c8a', secundario: '#cdc0e6' },
-  { id: 'rosa', nombre: 'Rosa suave', primario: '#a35d6a', secundario: '#f3c6cf' },
-  { id: 'cielo', nombre: 'Cielo', primario: '#4a7c93', secundario: '#bfe0ec' },
-  { id: 'arena', nombre: 'Arena', primario: '#8a7a5c', secundario: '#ece2c8' },
-  // Vibrantes / oscuros
-  { id: 'vino', nombre: 'Vino & oro', primario: '#6b1f3a', secundario: '#d4af37' },
-  { id: 'oceano', nombre: 'Océano', primario: '#0e5a6e', secundario: '#3fb8c0' },
-  { id: 'chocolate', nombre: 'Chocolate', primario: '#4a2f24', secundario: '#c88a52' },
-  { id: 'coral', nombre: 'Coral', primario: '#c14b57', secundario: '#ffb4a2' },
-  { id: 'grafito', nombre: 'Grafito', primario: '#2f3640', secundario: '#b0883c' },
-  { id: 'uva', nombre: 'Uva', primario: '#4a2b6b', secundario: '#c9a8e6' },
+
+// Máx. 6 paletas. Roles UX: primario (marca) + acento + fondo de página (no triada decorativa).
+const PALETAS_COLOR = [
+  { id: 'amazonia', nombre: 'Amazonia', primario: '#1a3a2a', secundario: '#C8A94A', fondo: '#F5F0E8' },
+  { id: 'noche', nombre: 'Noche selva', primario: '#0f261b', secundario: '#d9bd63', fondo: '#F5F0E8' },
+  { id: 'tierra', nombre: 'Tierra', primario: '#5c3d2e', secundario: '#d99a4e', fondo: '#F7F1E8' },
+  { id: 'oceano', nombre: 'Océano', primario: '#0e5a6e', secundario: '#3fb8c0', fondo: '#F2F7F8' },
+  { id: 'nieve', nombre: 'Nieve & oro', primario: '#faf9f7', secundario: '#a67c2a', fondo: '#faf9f7' },
+  { id: 'papel', nombre: 'Papel & tinta', primario: '#ffffff', secundario: '#3d4a54', fondo: '#ffffff' },
 ]
 
 // Editor de chips de texto simples (para la barra de beneficios)
@@ -1541,6 +1816,14 @@ function PaginasEditor({ paginas = [], onChange, toast, lienzo, onLienzo }) {
                   <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Título</label><input className="form-control" value={p.titulo || ''} onChange={e => { const t = e.target.value; upd(i, 'titulo', t) }} /></div>
                   <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Dirección (slug)</label><input className="form-control" value={p.slug || ''} onChange={e => upd(i, 'slug', slugCat(e.target.value))} placeholder="galeria" /></div>
                 </div>
+                <div className="form-group" style={{ marginBottom: 6 }}>
+                  <label className="form-label">SEO — Título (opcional)</label>
+                  <input className="form-control" value={p.seo_titulo || ''} maxLength={70} onChange={e => upd(i, 'seo_titulo', e.target.value)} placeholder={p.titulo || 'Título en Google'} />
+                </div>
+                <div className="form-group" style={{ marginBottom: 6 }}>
+                  <label className="form-label">SEO — Descripción</label>
+                  <textarea className="form-control" rows={2} value={p.seo_desc || ''} maxLength={200} onChange={e => upd(i, 'seo_desc', e.target.value)} placeholder="Cómo aparece esta página en Google y al compartir…" />
+                </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                   <label className="form-label" style={{ margin: 0, flex: 1 }}>Contenido</label>
                   {onLienzo && p.slug && <button type="button" className={`btn btn-xs pz-solo-pc ${lienzo === `pagina:${p.slug}` ? 'btn-danger' : 'btn-primary'}`} onClick={() => onLienzo(`pagina:${p.slug}`)}>{lienzo === `pagina:${p.slug}` ? '✕ Salir del lienzo' : <><Pencil size={12} /> Editar en el lienzo</>}</button>}
@@ -1665,7 +1948,8 @@ const SEC_TIPOS = [
   { tipo: 'categoria', label: 'Categoría (una)' }, { tipo: 'categorias', label: 'Todas las categorías' },
   { tipo: 'combos', label: 'Combos' }, { tipo: 'novedades', label: 'Novedades' },
   { tipo: 'mosaico', label: 'Mosaico (tarjetas personalizables)' }, { tipo: 'frutos', label: 'Mis frutos (mosaico especial)' },
-  { tipo: 'banner', label: 'Banner' }, { tipo: 'newsletter', label: 'Suscripción' },
+  { tipo: 'banner', label: 'Banner' }, { tipo: 'impacto', label: 'Impacto (Atelier)' },
+  { tipo: 'newsletter', label: 'Suscripción' },
 ]
 function SeccionesEditor({ secciones = [], onChange, categorias = [], banners = [] }) {
   const [nuevo, setNuevo] = useState('categoria')
@@ -1909,15 +2193,24 @@ function PzSec({ id, titulo, abierto, setAbierto, children }) {
   )
 }
 
-function TabPersonalizar({ toast, qc, cfgUrl }) {
+function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
+  // Recupera scroll si un modal anterior dejó el body bloqueado
+  useEffect(() => {
+    document.body.style.overflow = ''
+  }, [])
   const [cfg, setCfg] = useState(null)
   const [saving, setSaving] = useState(false)
+  const [iframeBroken, setIframeBroken] = useState(false)
   const [cropLogo, setCropLogo] = useState(null)
   const [subiendoLogo, setSubiendoLogo] = useState(false)
+  const [cropFavicon, setCropFavicon] = useState(null)
+  const [subiendoFavicon, setSubiendoFavicon] = useState(false)
+  const [cropImpactoImg, setCropImpactoImg] = useState(null)
+  const [subiendoImpactoImg, setSubiendoImpactoImg] = useState(false)
   const [abierto, setAbierto] = useState('marca')       // sección abierta del acordeón
   const [gestionFrutos, setGestionFrutos] = useState(false)
   const [previewMayorista, setPreviewMayorista] = useState(false)
-  const [selPackId, setSelPackId] = useState(null)       // plantilla seleccionada (preview); Aplicar la confirma en cfg
+  const [selPackId, setSelPackId] = useState(null)       // plantilla web / diseño guardado seleccionado (preview)
   const [dispositivo, setDispositivo] = useState('desktop')   // desktop | tablet | mobile
   const [iframeEl, setIframeEl] = useState(null)
   const [lienzo, setLienzo] = useState(false)   // objetivo en edición de lienzo ('nosotros' | 'pagina:slug')
@@ -1939,41 +2232,71 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
   })
   const { data: bannersLista = [] } = useQuery({ queryKey: ['banners_catalogo'], queryFn: async () => { const { data } = await supabase.from('banners_catalogo').select('id, nombre, titulo, es_secundario, grupo').order('orden'); return data || [] } })
 
-  const packsDiseno = useMemo(() => [
-    ...PLANTILLAS_DISENO,
-    ...(Array.isArray(cfg?.plantillas_guardadas) ? cfg.plantillas_guardadas.filter(p => !PLANTILLAS_DISENO.some(b => b.id === p.id)) : []),
-  ], [cfg?.plantillas_guardadas])
-  const selPack = packsDiseno.find(p => p.id === selPackId) || null
-  const packPendiente = !!(selPack?.payload && (
-    (cfg?.diseno || 'selva') !== (selPack.payload.diseno || '')
-    || String(cfg?.color_primario || '').toLowerCase() !== String(selPack.payload.color_primario || '').toLowerCase()
-    || (cfg?.fuente_titulos || '') !== (selPack.payload.fuente_titulos || '')
-  ))
-  // Config que ve el iframe: plantilla seleccionada (aún no aplicada) se mezcla solo en preview
+  const diseñosGuardados = useMemo(() => (
+    Array.isArray(cfg?.plantillas_guardadas)
+      ? cfg.plantillas_guardadas.filter(p => p?.id && !PLANTILLAS_WEB.some(b => b.id === p.id))
+      : []
+  ), [cfg?.plantillas_guardadas])
+  const paletasGuardadas = useMemo(() => (
+    Array.isArray(cfg?.paletas_guardadas)
+      ? cfg.paletas_guardadas.filter(p => p?.id && p?.primario && p?.secundario)
+      : []
+  ), [cfg?.paletas_guardadas])
+  const paletasMostrar = useMemo(() => [...PALETAS_COLOR, ...paletasGuardadas], [paletasGuardadas])
+  const packsPreview = useMemo(() => [...PLANTILLAS_WEB, ...diseñosGuardados], [diseñosGuardados])
+  const selPack = packsPreview.find(p => p.id === selPackId) || null
+  const familiaActiva = familiaWeb(cfg?.diseno)
+  // Preview: mezcla payload solo al cambiar de plantilla web o al previsualizar un diseño guardado
+  const previewOverlay = useMemo(() => {
+    if (!cfg || !selPack?.payload) return null
+    if (selPack.custom) return selPack.payload
+    if (familiaWeb(selPack.payload.diseno) !== familiaWeb(cfg.diseno)) return selPack.payload
+    return null
+  }, [cfg, selPack])
+  const packPendiente = !!previewOverlay
   const cfgEnVivo = useMemo(() => {
     if (!cfg) return null
-    if (!packPendiente || !selPack?.payload) return cfg
-    return { ...cfg, ...selPack.payload }
-  }, [cfg, selPack, packPendiente])
+    return previewOverlay ? { ...cfg, ...previewOverlay } : cfg
+  }, [cfg, previewOverlay])
+  const packTotalmenteAplicado = (pack) => {
+    if (!cfg || !pack?.payload) return false
+    return CAMPOS_DISENO_GUARDADO.every(k => {
+      if (pack.payload[k] === undefined) return true
+      return String(cfg[k] ?? '').toLowerCase() === String(pack.payload[k] ?? '').toLowerCase()
+    })
+  }
 
+  const [savedSnap, setSavedSnap] = useState(null)
   useEffect(() => {
     supabase.from('config_catalogo').select('*').eq('id', 1).maybeSingle().then(({ data }) => {
       const base = data || { id: 1 }
       if (!Array.isArray(base.secciones) || !base.secciones.length) base.secciones = SECCIONES_DEFAULT
-      // Por defecto, las fuentes son las mismas que las configuradas en la app
+      // Por defecto: fuentes y logo de la app principal (si el catálogo no tiene los suyos)
       const app = getConfig()
       if (!base.fuente_titulos) base.fuente_titulos = app.fuente_titulos || 'Playfair Display'
       if (!base.fuente_subtitulos) base.fuente_subtitulos = app.fuente || 'Source Sans 3'
       if (!base.fuente_texto) base.fuente_texto = app.fuente || 'Source Sans 3'
+      if (base.favicon_url == null) base.favicon_url = ''
+      if (!(base.logo_url || '').trim() && (app.logo_url || '').trim()) base.logo_url = app.logo_url
       setCfg(base)
-      // Marca seleccionada la plantilla que coincida con el diseño guardado
-      const match = [...PLANTILLAS_DISENO, ...(Array.isArray(base.plantillas_guardadas) ? base.plantillas_guardadas : [])]
-        .find(p => p.payload?.diseno === (base.diseno || 'selva'))
-      if (match) setSelPackId(match.id)
+      setSavedSnap(snapConfig(base))
+      // Selecciona la plantilla web según la familia activa (no por color)
+      setSelPackId(familiaWeb(base.diseno) === 'atelier' ? 'atelier' : 'clasico')
     })
   }, [])
+  useEffect(() => {
+    if (!cfg || savedSnap == null) { onDirtyChange?.(false); return }
+    onDirtyChange?.(snapConfig(cfg) !== savedSnap)
+  }, [cfg, savedSnap, onDirtyChange])
+  useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
 
-  const set = (k, v) => { setSelPackId(null); setCfg(c => ({ ...c, [k]: v })) }
+  const syncSelPackAFamilia = (diseno) => setSelPackId(familiaWeb(diseno) === 'atelier' ? 'atelier' : 'clasico')
+  const set = (k, v) => {
+    if (k === 'diseno') syncSelPackAFamilia(v)
+    // Si ajustas color mientras previsualizas otra plantilla web, vuelve a la activa para ver el color
+    else if (['color_primario', 'color_secundario', 'color_fondo', 'plantilla'].includes(k)) syncSelPackAFamilia(cfg?.diseno)
+    setCfg(c => ({ ...c, [k]: v }))
+  }
 
   // Envía la config al preview (iframe) para verlo en vivo
   const enviarPreview = () => { try { iframeEl?.contentWindow?.postMessage({ type: 'mumi-preview', cfg: cfgEnVivo }, '*') } catch { /* noop */ } }
@@ -1983,8 +2306,9 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
     const on = lienzo === target ? null : target
     setLienzo(on)
     if (iframeEl) {
-      const base = (cfgUrl || '').replace(/\/+$/, '')
-      iframeEl.src = on === 'nosotros' ? `${base}/nosotros` : (on && on.startsWith('pagina:')) ? `${base}/p/${on.slice(7)}` : cfgUrl
+      const base = ((cfg?.url_publica || cfgUrl || '') + '').replace(/\/+$/, '')
+      if (!base) return
+      iframeEl.src = on === 'nosotros' ? `${base}/nosotros` : (on && on.startsWith('pagina:')) ? `${base}/p/${on.slice(7)}` : base
     }
   }
   useEffect(() => { if (iframeEl && cfgEnVivo) { const t = setTimeout(enviarPreview, 150); return () => clearTimeout(t) } }, [cfgEnVivo, iframeEl]) // eslint-disable-line
@@ -2015,36 +2339,88 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
     return () => ro.disconnect()
   }, [stageEl, dispositivo])
 
-  const subirLogo = async (blob) => {
+  const esSvgLogo = (file) => !!file && (file.type === 'image/svg+xml' || /\.svg$/i.test(file.name || ''))
+  const subirLogo = async (fileOrBlob, contentType = 'image/jpeg') => {
     setSubiendoLogo(true)
     try {
-      const path = `catalogo/logo_${Date.now()}.jpg`
-      const { error } = await supabase.storage.from('product-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
+      const ext = contentType.includes('svg') ? 'svg' : contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg'
+      const path = `catalogo/logo_${Date.now()}.${ext}`
+      const { error } = await supabase.storage.from('product-images').upload(path, fileOrBlob, { upsert: true, contentType })
       if (error) throw error
       const { data } = supabase.storage.from('product-images').getPublicUrl(path)
       set('logo_url', data.publicUrl)
     } catch (e) { toast('No se pudo subir el logo: ' + e.message, 'error') } finally { setSubiendoLogo(false) }
   }
-  const aplicarPlantilla = (p) => { setSelPackId(null); setCfg(c => ({ ...c, plantilla: p.id, color_primario: p.primario, color_secundario: p.secundario })) }
+  const onPickLogo = (file) => {
+    if (!file) return
+    if (esSvgLogo(file)) void subirLogo(file, 'image/svg+xml')
+    else setCropLogo(file)
+  }
+  const subirFavicon = async (blob) => {
+    setSubiendoFavicon(true)
+    try {
+      const path = `catalogo/favicon_${Date.now()}.jpg`
+      const { error } = await supabase.storage.from('product-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
+      if (error) throw error
+      const { data } = supabase.storage.from('product-images').getPublicUrl(path)
+      set('favicon_url', data.publicUrl)
+    } catch (e) { toast('No se pudo subir el favicon: ' + e.message, 'error') } finally { setSubiendoFavicon(false) }
+  }
+  const subirImgCfg = async (blob, campo, setBusy) => {
+    setBusy(true)
+    try {
+      const path = `catalogo/${campo}_${Date.now()}.jpg`
+      const { error } = await supabase.storage.from('product-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
+      if (error) throw error
+      const { data } = supabase.storage.from('product-images').getPublicUrl(path)
+      set(campo, data.publicUrl)
+    } catch (e) { toast('No se pudo subir la imagen: ' + e.message, 'error') } finally { setBusy(false) }
+  }
+  // Solo colores: no cambia la plantilla web; si había preview de otra web, vuelve a la activa
+  const aplicarPaleta = (p) => {
+    syncSelPackAFamilia(cfg?.diseno)
+    setCfg(c => ({
+      ...c,
+      plantilla: p.id,
+      color_primario: p.primario,
+      color_secundario: p.secundario,
+      color_fondo: p.fondo || c.color_fondo || '#F5F0E8',
+    }))
+  }
+  const guardarPaletaActual = () => {
+    const nombre = window.prompt('Nombre de la paleta', 'Mi paleta')
+    if (!nombre || !nombre.trim()) return
+    const prim = cfg.color_primario || '#1a3a2a'
+    const sec = cfg.color_secundario || '#C8A94A'
+    const fondo = cfg.color_fondo || '#F5F0E8'
+    const item = { id: `paleta_${Date.now()}`, nombre: nombre.trim(), primario: prim, secundario: sec, fondo, custom: true }
+    setCfg(c => ({ ...c, paletas_guardadas: [...(Array.isArray(c.paletas_guardadas) ? c.paletas_guardadas : []), item] }))
+    toast('Paleta guardada en el panel. Pulsa «Guardar cambios» para persistirla.')
+  }
+  const borrarPaletaGuardada = (id) => {
+    if (!window.confirm('¿Eliminar esta paleta guardada?')) return
+    setCfg(c => ({ ...c, paletas_guardadas: (c.paletas_guardadas || []).filter(p => p.id !== id) }))
+  }
   // Seleccionar = solo preview en el iframe (no escribe cfg hasta Aplicar)
-  const seleccionarPlantillaDiseno = (pack) => setSelPackId(pack.id)
-  const aplicarPlantillaDiseno = (pack) => {
+  const seleccionarPack = (pack) => setSelPackId(pack.id)
+  const aplicarPack = (pack) => {
     setCfg(c => ({ ...c, ...pack.payload }))
     setSelPackId(pack.id)
     toast(`${pack.nombre} aplicada en el panel. Pulsa «Guardar cambios» para publicarla.`)
   }
-  const guardarPlantillaActual = () => {
-    const nombre = window.prompt('Nombre de la plantilla guardada', 'Mi diseño')
+  const guardarDiseñoActual = () => {
+    const nombre = window.prompt('Nombre del diseño guardado', 'Mi combinación')
     if (!nombre || !nombre.trim()) return
     const payload = {}
-    CAMPOS_PLANTILLA.forEach(k => { if (cfg[k] !== undefined) payload[k] = cfg[k] })
-    const item = { id: `custom_${Date.now()}`, nombre: nombre.trim(), desc: 'Guardada desde Personalizar', payload, custom: true }
+    CAMPOS_DISENO_GUARDADO.forEach(k => { if (cfg[k] !== undefined) payload[k] = cfg[k] })
+    const item = { id: `custom_${Date.now()}`, nombre: nombre.trim(), desc: 'Combinación guardada (plantilla + colores + fuentes)', payload, custom: true }
     setCfg(c => ({ ...c, plantillas_guardadas: [...(Array.isArray(c.plantillas_guardadas) ? c.plantillas_guardadas : []), item] }))
-    toast('Plantilla añadida. Pulsa «Guardar cambios» para persistirla.')
+    toast('Diseño guardado en el panel. Pulsa «Guardar cambios» para persistirlo.')
   }
-  const borrarPlantillaGuardada = (id) => {
-    if (!window.confirm('¿Eliminar esta plantilla guardada?')) return
+  const borrarDiseñoGuardado = (id) => {
+    if (!window.confirm('¿Eliminar este diseño guardado?')) return
     setCfg(c => ({ ...c, plantillas_guardadas: (c.plantillas_guardadas || []).filter(p => p.id !== id) }))
+    if (selPackId === id) setSelPackId(familiaActiva === 'atelier' ? 'atelier' : 'clasico')
   }
   const moverSeccion = (i, d) => setCfg(c => { const a = [...(c.secciones || SECCIONES_DEFAULT)]; const j = i + d; if (j < 0 || j >= a.length) return c;[a[i], a[j]] = [a[j], a[i]]; return { ...c, secciones: a } })
   const toggleSeccion = (id) => setCfg(c => ({ ...c, secciones: (c.secciones || SECCIONES_DEFAULT).map(s => s.id === id ? { ...s, on: !(s.on !== false) } : s) }))
@@ -2052,32 +2428,50 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
   const guardar = async () => {
     setSaving(true)
     try {
-      const { error } = await supabase.from('config_catalogo').upsert({ ...cfg, id: 1, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+      // No pisar url_publica si el estado local la perdió
+      const payload = { ...cfg, id: 1, updated_at: new Date().toISOString() }
+      if (!(payload.url_publica || '').trim() && (cfgUrl || '').trim()) payload.url_publica = cfgUrl
+      const { error } = await supabase.from('config_catalogo').upsert(payload, { onConflict: 'id' })
       if (error) throw error
+      setSavedSnap(snapConfig(payload))
       toast('Personalización guardada ✓')
+      qc.invalidateQueries({ queryKey: ['catalogo_url'] })
       if (iframeEl) iframeEl.src = iframeEl.src   // recarga el preview con datos guardados
     } catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
   }
 
   if (!cfg) return <div className="card"><p className="empty-table">Cargando…</p></div>
   const secciones = cfg.secciones || SECCIONES_DEFAULT
+  // URL del iframe: cfg local o la query del padre (evita preview vacía si una falla)
+  const previewUrl = ((cfg.url_publica || cfgUrl || '') + '').trim().replace(/\/+$/, '')
 
   return (
     <div className="pz-layout">
       {/* Panel de controles */}
       <div className="pz-panel">
-        <div style={{ display: 'flex', gap: 8, marginBottom: 10 }}>
-          <button className="btn btn-primary btn-sm" onClick={guardar} disabled={saving}><Ico as={Save} size={13} />{saving ? 'Guardando…' : 'Guardar cambios'}</button>
+        <div className="pz-panel-toolbar">
+          <button className="btn btn-primary btn-sm" onClick={guardar} disabled={saving}><Ico as={Save} size={13} />{saving ? 'Guardando…' : 'Guardar cambios'}</button>{savedSnap != null && cfg && snapConfig(cfg) !== savedSnap && <span className="badge badge-dorado" style={{ marginLeft: 8 }}>Sin guardar</span>}
         </div>
 
-        <PzSec abierto={abierto} setAbierto={setAbierto} id="marca" titulo={<><ImageIcon size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Marca (logo, nombre, slogan)</>}>
+        <PzSec abierto={abierto} setAbierto={setAbierto} id="marca" titulo={<><ImageIcon size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Marca (logo, favicon, nombre, slogan)</>}>
           <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             <div style={{ textAlign: 'center' }}>
               <div style={{ width: 72, height: 72, borderRadius: 14, overflow: 'hidden', background: 'var(--crema)', border: '1px solid var(--crema-oscuro)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                {cfg.logo_url ? <img src={cfg.logo_url} alt="logo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: '0.66rem', color: 'var(--texto-suave)' }}>Sin logo</span>}
+                {cfg.logo_url ? <img src={cfg.logo_url} alt="logo" style={{ width: '100%', height: '100%', objectFit: 'contain' }} /> : <span style={{ fontSize: '0.66rem', color: 'var(--texto-suave)' }}>Sin logo</span>}
               </div>
-              <label className="btn btn-xs btn-secondary" style={{ marginTop: 6, cursor: 'pointer' }}><Upload size={12} /> {subiendoLogo ? '…' : 'Logo'}<input type="file" accept="image/*" hidden onChange={e => { const f = e.target.files?.[0]; if (f) setCropLogo(f); e.target.value = '' }} /></label>
+              <label className="btn btn-xs btn-secondary" style={{ marginTop: 6, cursor: 'pointer' }}><Upload size={12} /> {subiendoLogo ? '…' : 'Logo'}<input type="file" accept="image/*,.svg,image/svg+xml" hidden onChange={e => { const f = e.target.files?.[0]; onPickLogo(f); e.target.value = '' }} /></label>
               {cfg.logo_url && <button className="btn btn-xs btn-danger" style={{ marginTop: 4 }} onClick={() => set('logo_url', '')}>Quitar</button>}
+              {!cfg.logo_url && (getConfig().logo_url || '').trim() ? (
+                <button type="button" className="btn btn-xs btn-secondary" style={{ marginTop: 4 }} onClick={() => set('logo_url', getConfig().logo_url)}>Usar logo de la app</button>
+              ) : null}
+              <div style={{ fontSize: '0.66rem', color: 'var(--texto-suave)', marginTop: 4, maxWidth: 110, lineHeight: 1.3 }}>PNG, JPG o SVG. Sin logo no se muestra icono.</div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ width: 48, height: 48, borderRadius: 10, overflow: 'hidden', background: 'var(--crema)', border: '1px solid var(--crema-oscuro)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto' }}>
+                {cfg.favicon_url ? <img src={cfg.favicon_url} alt="favicon" style={{ width: '100%', height: '100%', objectFit: 'cover' }} /> : <span style={{ fontSize: '0.58rem', color: 'var(--texto-suave)', padding: 4, lineHeight: 1.2 }}>Sin favicon</span>}
+              </div>
+              <label className="btn btn-xs btn-secondary" style={{ marginTop: 6, cursor: 'pointer' }}><Upload size={12} /> {subiendoFavicon ? '…' : 'Favicon'}<input type="file" accept="image/*" hidden onChange={e => { const f = e.target.files?.[0]; if (f) setCropFavicon(f); e.target.value = '' }} /></label>
+              {cfg.favicon_url && <button className="btn btn-xs btn-danger" style={{ marginTop: 4 }} onClick={() => set('favicon_url', '')}>Quitar</button>}
             </div>
             <div style={{ flex: 1, minWidth: 180 }}>
               <div className="form-group"><label className="form-label">Nombre / imagotipo</label><input className="form-control" value={cfg.nombre_tienda || ''} onChange={e => set('nombre_tienda', e.target.value)} placeholder="Mumi Amazonia" /></div>
@@ -2095,72 +2489,152 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: 'pointer', margin: '10px 0 4px' }}>
             <input type="checkbox" checked={!!cfg.solo_logo} onChange={e => set('solo_logo', e.target.checked)} /> Mostrar solo el logo en pantallas pequeñas (ocultar nombre y slogan)
           </label>
-          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Si dejas el nombre o el slogan vacíos, se usa el valor por defecto de la app. El logo se recorta cuadrado (recomendado 400×400).</small>
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Si dejas el nombre o el slogan vacíos, se usa el valor por defecto de la app. Logo 400×400; favicon cuadrado 192×192 (vacío hasta que lo subas).</small>
         </PzSec>
 
-        <PzSec abierto={abierto} setAbierto={setAbierto} id="colores" titulo={<><Palette size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Colores y diseño</>}>
-          <label className="form-label">Plantillas de diseño <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(elige una para verla en la preview → Aplicar)</small></label>
+        <PzSec abierto={abierto} setAbierto={setAbierto} id="colores" titulo={<><Palette size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Plantilla web y colores</>}>
+          <small style={{ display: 'block', color: 'var(--texto-suave)', fontSize: '0.72rem', marginBottom: 12 }}>
+            La <strong>plantilla web</strong> define la estructura (inicio, ficha, menú). Los <strong>colores</strong> son independientes: puedes cambiar la paleta sin cambiar de plantilla.
+          </small>
+
+          <label className="form-label">1. Plantilla web <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(2 opciones · clic para previsualizar → Aplicar)</small></label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-            {packsDiseno.map(pack => {
+            {PLANTILLAS_WEB.map(pack => {
               const seleccionada = selPackId === pack.id
-              const aplicada = (cfg.diseno || 'selva') === (pack.payload?.diseno || '')
-                && String(cfg.color_primario || '').toLowerCase() === String(pack.payload?.color_primario || '').toLowerCase()
+              const activa = familiaWeb(pack.payload?.diseno) === familiaActiva
+              const completa = packTotalmenteAplicado(pack)
               return (
                 <div key={pack.id} role="button" tabIndex={0}
-                  onClick={() => seleccionarPlantillaDiseno(pack)}
-                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); seleccionarPlantillaDiseno(pack) } }}
-                  style={{ flex: '1 1 180px', minWidth: 160, borderRadius: 12, cursor: seleccionada ? '2px solid var(--selva)' : '1px solid var(--crema-oscuro)', background: seleccionada ? 'color-mix(in srgb, var(--selva) 6%, #fff)' : '#fff', padding: 10, cursor: 'pointer' }}>
+                  onClick={() => seleccionarPack(pack)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); seleccionarPack(pack) } }}
+                  style={{ flex: '1 1 180px', minWidth: 160, borderRadius: 12, border: seleccionada ? '2px solid var(--selva)' : '1px solid var(--crema-oscuro)', background: seleccionada ? 'color-mix(in srgb, var(--selva) 6%, #fff)' : '#fff', padding: 10, cursor: 'pointer' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 }}>
                     <div style={{ fontWeight: 700, fontSize: '0.84rem', color: 'var(--selva)' }}>{pack.nombre}</div>
-                    {aplicada && <span style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--selva)', opacity: 0.8 }}>Activa</span>}
+                    {activa && <span style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--selva)', opacity: 0.8 }}>Activa</span>}
                   </div>
                   <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)', margin: '4px 0 8px', minHeight: 28 }}>{pack.desc}</div>
                   <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }} onClick={e => e.stopPropagation()}>
-                    <button type="button" className={`btn btn-xs ${seleccionada && !aplicada ? 'btn-primary' : 'btn-secondary'}`}
-                      onClick={() => aplicarPlantillaDiseno(pack)} disabled={aplicada && seleccionada}>
-                      {aplicada && seleccionada ? 'Aplicada' : 'Aplicar'}
+                    <button type="button" className={`btn btn-xs ${packPendiente && seleccionada ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => aplicarPack(pack)} disabled={completa && seleccionada}
+                      title={completa ? 'Ya tienes esta plantilla con sus valores recomendados' : 'Aplica plantilla y valores recomendados (colores/fuentes)'}>
+                      {completa && seleccionada ? 'Aplicada' : (activa && !packPendiente ? 'Restaurar recomendada' : 'Aplicar')}
                     </button>
-                    {pack.custom && <button type="button" className="btn btn-xs btn-danger" onClick={() => borrarPlantillaGuardada(pack.id)}>Borrar</button>}
                   </div>
                 </div>
               )
             })}
           </div>
-          {packPendiente && selPack && (
-            <small style={{ display: 'block', marginBottom: 10, color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
-              Vista previa: <strong>{selPack.nombre}</strong>. Pulsa <strong>Aplicar</strong> y luego <strong>Guardar cambios</strong> para dejarla fija.
+          {packPendiente && selPack && !selPack.custom && (
+            <small style={{ display: 'block', marginBottom: 12, color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
+              Vista previa de <strong>{selPack.nombre}</strong>. Pulsa <strong>Aplicar</strong> y luego <strong>Guardar cambios</strong> para publicarla.
             </small>
           )}
-          <button type="button" className="btn btn-secondary btn-sm" style={{ marginBottom: 14 }} onClick={guardarPlantillaActual}>💾 Guardar diseño actual como plantilla</button>
 
-          <label className="form-label">Estilo de diseño <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(formas, bordes y botones)</small></label>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-            {DISENOS.map(d => (
-              <button key={d.id} type="button" onClick={() => set('diseno', d.id)} title={d.desc}
-                style={{ flex: '1 1 150px', textAlign: 'left', padding: 10, borderRadius: d.radio, cursor: 'pointer', background: '#fff', border: (cfg.diseno || 'selva') === d.id ? '2px solid var(--selva)' : '1px solid var(--crema-oscuro)' }}>
-                <div style={{ display: 'flex', gap: 5, marginBottom: 6 }}>
-                  <span style={{ width: 26, height: 16, background: 'var(--selva)', borderRadius: d.radioMini }} />
-                  <span style={{ width: 16, height: 16, background: 'var(--dorado)', borderRadius: d.radioMini }} />
+          {familiaActiva !== 'atelier' ? (
+            <>
+              <label className="form-label">2. Estilo de formas <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(solo plantilla Clásico · bordes y botones)</small></label>
+              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+                {ESTILOS_FORMA.map(d => (
+                  <button key={d.id} type="button" onClick={() => set('diseno', d.id)} title={d.desc}
+                    style={{ flex: '1 1 140px', textAlign: 'left', padding: 10, borderRadius: d.radio, cursor: 'pointer', background: '#fff', border: (cfg.diseno || 'selva') === d.id ? '2px solid var(--selva)' : '1px solid var(--crema-oscuro)' }}>
+                    <div style={{ display: 'flex', gap: 5, marginBottom: 6 }}>
+                      <span style={{ width: 26, height: 16, background: 'var(--selva)', borderRadius: d.radioMini }} />
+                      <span style={{ width: 16, height: 16, background: 'var(--dorado)', borderRadius: d.radioMini }} />
+                    </div>
+                    <div style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--selva)' }}>{d.nombre}</div>
+                    <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>{d.desc}</div>
+                  </button>
+                ))}
+              </div>
+            </>
+          ) : (
+            <small style={{ display: 'block', marginBottom: 14, color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
+              2. Estilo de formas: Atelier define sus propios bordes y botones. Cambia a <strong>Clásico Mumi</strong> si quieres Selva / Editorial / Orgánico.
+            </small>
+          )}
+
+          <label className="form-label">3. Paleta de colores <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(6 predefinidas + las tuyas)</small></label>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
+            {paletasMostrar.map(p => (
+              <div key={p.id} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <button type="button" onClick={() => aplicarPaleta(p)} title={p.nombre}
+                  style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 8, cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600,
+                    border: cfg.plantilla === p.id ? '2px solid var(--selva)' : '1px solid var(--crema-oscuro)', background: '#fff' }}>
+                  <span style={{ width: 14, height: 14, borderRadius: 4, background: p.primario, border: '1px solid rgba(0,0,0,0.08)' }} />
+                  <span style={{ width: 14, height: 14, borderRadius: 4, background: p.secundario, border: '1px solid rgba(0,0,0,0.08)' }} />
+                  <span style={{ width: 14, height: 14, borderRadius: 4, background: p.fondo || '#F5F0E8', border: '1px solid rgba(0,0,0,0.08)' }} />
+                  {p.nombre}
+                  {p.custom ? <span style={{ fontSize: '0.62rem', opacity: 0.65, fontWeight: 600 }}>tuya</span> : null}
+                </button>
+                {p.custom ? (
+                  <button type="button" className="btn btn-xs btn-danger" title="Borrar paleta" onClick={() => borrarPaletaGuardada(p.id)}><X size={12} /></button>
+                ) : null}
+              </div>
+            ))}
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: 10, marginBottom: 8 }}>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Primario <small style={{ fontWeight: 400, textTransform: 'none' }}>(marca / header)</small></label>
+              <input type="color" className="form-control" style={{ height: 40, padding: 4 }} value={cfg.color_primario || '#1a3a2a'} onChange={e => set('color_primario', e.target.value)} />
+            </div>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Acento <small style={{ fontWeight: 400, textTransform: 'none' }}>(CTAs / banners)</small></label>
+              <input type="color" className="form-control" style={{ height: 40, padding: 4 }} value={cfg.color_secundario || '#C8A94A'} onChange={e => set('color_secundario', e.target.value)} />
+            </div>
+            <div className="form-group" style={{ margin: 0 }}>
+              <label className="form-label">Fondo <small style={{ fontWeight: 400, textTransform: 'none' }}>(página)</small></label>
+              <input type="color" className="form-control" style={{ height: 40, padding: 4 }} value={cfg.color_fondo || '#F5F0E8'} onChange={e => set('color_fondo', e.target.value)} />
+            </div>
+          </div>
+          {/* Vista rápida de contraste: marca + acento sobre sus fondos reales */}
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+            <div style={{ flex: '1 1 120px', borderRadius: 10, padding: '10px 12px', background: cfg.color_primario || '#1a3a2a', color: '#fff', fontSize: '0.72rem', fontWeight: 700 }}>
+              Texto en primario
+            </div>
+            <div style={{ flex: '1 1 120px', borderRadius: 10, padding: '10px 12px', background: cfg.color_secundario || '#C8A94A', color: '#1a1a1a', fontSize: '0.72rem', fontWeight: 700 }}>
+              Texto en acento
+            </div>
+            <div style={{ flex: '1 1 120px', borderRadius: 10, padding: '10px 12px', background: cfg.color_fondo || '#F5F0E8', color: '#1a1a1a', border: '1px solid var(--crema-oscuro)', fontSize: '0.72rem', fontWeight: 700 }}>
+              Texto en fondo
+            </div>
+          </div>
+          <button type="button" className="btn btn-secondary btn-sm" style={{ marginBottom: 8 }} onClick={guardarPaletaActual}>💾 Guardar paleta actual</button>
+          <small style={{ display: 'block', color: 'var(--texto-suave)', fontSize: '0.72rem', marginBottom: 14 }}>
+            No hace falta una triada decorativa: con primario + acento + fondo alcanza. El catálogo calcula solo los textos (WCAG 4.5) para que siempre se lean bien.
+          </small>
+
+          <label className="form-label">4. Diseños guardados <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(tus combinaciones plantilla + color + fuentes)</small></label>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
+            {diseñosGuardados.length === 0 && (
+              <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Aún no hay diseños guardados.</small>
+            )}
+            {diseñosGuardados.map(pack => {
+              const seleccionada = selPackId === pack.id
+              const completa = packTotalmenteAplicado(pack)
+              return (
+                <div key={pack.id} role="button" tabIndex={0}
+                  onClick={() => seleccionarPack(pack)}
+                  onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); seleccionarPack(pack) } }}
+                  style={{ flex: '1 1 160px', minWidth: 140, borderRadius: 12, border: seleccionada ? '2px solid var(--selva)' : '1px solid var(--crema-oscuro)', background: seleccionada ? 'color-mix(in srgb, var(--selva) 6%, #fff)' : '#fff', padding: 10, cursor: 'pointer' }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--selva)' }}>{pack.nombre}</div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--texto-suave)', margin: '4px 0 8px' }}>{pack.desc || 'Combinación guardada'}</div>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }} onClick={e => e.stopPropagation()}>
+                    <button type="button" className={`btn btn-xs ${seleccionada && !completa ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => aplicarPack(pack)} disabled={completa && seleccionada}>
+                      {completa && seleccionada ? 'Aplicada' : 'Aplicar'}
+                    </button>
+                    <button type="button" className="btn btn-xs btn-danger" onClick={() => borrarDiseñoGuardado(pack.id)}>Borrar</button>
+                  </div>
                 </div>
-                <div style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--selva)' }}>{d.nombre}</div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>{d.desc}</div>
-              </button>
-            ))}
+              )
+            })}
           </div>
-          <label className="form-label">Plantillas de color</label>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
-            {PLANTILLAS.map(p => (
-              <button key={p.id} type="button" onClick={() => aplicarPlantilla(p)} title={p.nombre}
-                style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '6px 10px', borderRadius: 8, cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600,
-                  border: cfg.plantilla === p.id ? '2px solid var(--selva)' : '1px solid var(--crema-oscuro)', background: '#fff' }}>
-                <span style={{ width: 16, height: 16, borderRadius: 4, background: p.primario }} /><span style={{ width: 16, height: 16, borderRadius: 4, background: p.secundario }} />{p.nombre}
-              </button>
-            ))}
-          </div>
-          <div className="form-grid-2">
-            <div className="form-group"><label className="form-label">Color primario</label><input type="color" className="form-control" style={{ height: 40, padding: 4 }} value={cfg.color_primario || '#1a3a2a'} onChange={e => set('color_primario', e.target.value)} /></div>
-            <div className="form-group"><label className="form-label">Color de acento</label><input type="color" className="form-control" style={{ height: 40, padding: 4 }} value={cfg.color_secundario || '#C8A94A'} onChange={e => set('color_secundario', e.target.value)} /></div>
-          </div>
+          {packPendiente && selPack?.custom && (
+            <small style={{ display: 'block', marginBottom: 8, color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
+              Vista previa de <strong>{selPack.nombre}</strong>. Pulsa <strong>Aplicar</strong> para usarla en el panel.
+            </small>
+          )}
+          <button type="button" className="btn btn-secondary btn-sm" onClick={guardarDiseñoActual}>💾 Guardar combinación actual</button>
         </PzSec>
 
         <PzSec abierto={abierto} setAbierto={setAbierto} id="fuentes" titulo={<>🔤 Tipografía (Google Fonts)</>}>
@@ -2184,30 +2658,116 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
 
         <PzSec abierto={abierto} setAbierto={setAbierto} id="secciones" titulo={<><Layout size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Secciones del inicio</>}>
           <SeccionesEditor secciones={Array.isArray(cfg.secciones) ? cfg.secciones : SECCIONES_DEFAULT} onChange={(sx) => set('secciones', sx)} categorias={[...new Set([...categorias, ...(cfg.categorias_extra || []), ...(cfg.productos_extra || []).map(p => p.categoria).filter(Boolean)])]} banners={bannersLista} />
+          {familiaActiva !== 'atelier' && (
+            <div style={{ marginTop: 12, padding: 12, borderRadius: 10, border: '1px solid var(--crema-oscuro)', background: '#fff' }}>
+              <label className="form-label" style={{ marginBottom: 8, display: 'block' }}>Cómo mostrar los productos</label>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                {[
+                  { id: 'scroll', titulo: 'Scroll horizontal', desc: 'Fila deslizable (carrusel)' },
+                  { id: 'grid', titulo: 'Cuadrícula', desc: 'Sin scroll · todos visibles' },
+                ].map(opt => {
+                  const on = (cfg.productos_vista || 'scroll') === opt.id
+                  return (
+                    <button key={opt.id} type="button" onClick={() => set('productos_vista', opt.id)}
+                      style={{ textAlign: 'left', padding: '10px 12px', borderRadius: 8, cursor: 'pointer', background: on ? 'color-mix(in srgb, var(--selva) 10%, #fff)' : '#fff', border: on ? '2px solid var(--selva)' : '1px solid var(--crema-oscuro)' }}>
+                      <strong style={{ display: 'block', fontSize: '0.84rem', color: 'var(--selva)' }}>{opt.titulo}</strong>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>{opt.desc}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            </div>
+          )}
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: 'pointer', marginTop: 10 }}>
             <input type="checkbox" checked={!!cfg.mostrar_filtro_frutos} onChange={e => set('mostrar_filtro_frutos', e.target.checked)} /> Mostrar filtro por frutos en la tienda
           </label>
+          {familiaActiva === 'atelier' && !!cfg.mostrar_filtro_frutos && (
+            <div className="form-group" style={{ marginTop: 8, marginBottom: 0 }}>
+              <label className="form-label">Título del filtro de frutos</label>
+              <input className="form-control" value={cfg.frutos_filtro_titulo || ''} onChange={e => set('frutos_filtro_titulo', e.target.value)} placeholder="Explora por ingrediente" />
+            </div>
+          )}
         </PzSec>
+
+        {familiaActiva === 'atelier' && (
+          <PzSec abierto={abierto} setAbierto={setAbierto} id="impacto" titulo={<>🌍 Bloque Impacto (Atelier)</>}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: 'pointer', marginBottom: 8 }}>
+              <input type="checkbox" checked={cfg.impacto_activo !== false} onChange={e => set('impacto_activo', e.target.checked)} /> Mostrar bloque de impacto
+            </label>
+            <div className="form-group"><label className="form-label">Título</label>
+              <input className="form-control" value={cfg.impacto_titulo || ''} onChange={e => set('impacto_titulo', e.target.value)} placeholder="Impacto que florece" />
+            </div>
+            <div className="form-group"><label className="form-label">Texto</label>
+              <textarea className="form-control" rows={3} value={cfg.impacto_texto || ''} onChange={e => set('impacto_texto', e.target.value)} />
+            </div>
+            <div className="form-grid-2">
+              <div className="form-group"><label className="form-label">Dato 1 (número)</label>
+                <input className="form-control" value={cfg.impacto_stat1_n || ''} onChange={e => set('impacto_stat1_n', e.target.value)} placeholder="45+" />
+              </div>
+              <div className="form-group"><label className="form-label">Dato 1 (etiqueta)</label>
+                <input className="form-control" value={cfg.impacto_stat1_l || ''} onChange={e => set('impacto_stat1_l', e.target.value)} placeholder="Productores" />
+              </div>
+              <div className="form-group"><label className="form-label">Dato 2 (número)</label>
+                <input className="form-control" value={cfg.impacto_stat2_n || ''} onChange={e => set('impacto_stat2_n', e.target.value)} placeholder="10" />
+              </div>
+              <div className="form-group"><label className="form-label">Dato 2 (etiqueta)</label>
+                <input className="form-control" value={cfg.impacto_stat2_l || ''} onChange={e => set('impacto_stat2_l', e.target.value)} placeholder="Departamentos" />
+              </div>
+            </div>
+            <div className="form-group"><label className="form-label">Texto del enlace (vacío = ocultar)</label>
+              <input className="form-control" value={cfg.impacto_link_texto ?? 'Conoce más'} onChange={e => set('impacto_link_texto', e.target.value)} placeholder="Conoce más" />
+            </div>
+            <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ width: 120, height: 90, borderRadius: 10, overflow: 'hidden', background: 'var(--crema)', border: '1px solid var(--crema-oscuro)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                  {cfg.impacto_imagen
+                    ? <img src={cfg.impacto_imagen} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    : <span style={{ fontSize: '0.62rem', color: 'var(--texto-suave)' }}>Sin foto</span>}
+                </div>
+                <label className="btn btn-xs btn-secondary" style={{ marginTop: 6, cursor: 'pointer' }}>
+                  <Upload size={12} /> {subiendoImpactoImg ? '…' : 'Foto'}
+                  <input type="file" accept="image/*" hidden onChange={e => { const f = e.target.files?.[0]; if (f) setCropImpactoImg(f); e.target.value = '' }} />
+                </label>
+                {cfg.impacto_imagen && <button type="button" className="btn btn-xs btn-danger" style={{ marginTop: 4 }} onClick={() => set('impacto_imagen', '')}>Quitar</button>}
+              </div>
+            </div>
+          </PzSec>
+        )}
 
         <PzSec abierto={abierto} setAbierto={setAbierto} id="aviso" titulo={<><Megaphone size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Aviso superior</>}>
           <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
             Franja sobre el encabezado para anuncios breves (ej. <em>“🎉 10% de descuento por temporada”</em>). Puedes poner hasta <strong>3</strong> mensajes que van rotando. Si no configuras ninguno, no se muestra.
           </small>
-          <AvisosEditor avisos={Array.isArray(cfg.avisos) ? cfg.avisos : []} onChange={v => set('avisos', v)} />
+          <AvisosEditor
+            avisos={Array.isArray(cfg.avisos) ? cfg.avisos : []}
+            onChange={v => set('avisos', v)}
+            colorBg={cfg.aviso_color_bg || ''}
+            colorTexto={cfg.aviso_color_texto || ''}
+            onColorBg={v => set('aviso_color_bg', v || null)}
+            onColorTexto={v => set('aviso_color_texto', v || null)}
+          />
         </PzSec>
 
         <PzSec abierto={abierto} setAbierto={setAbierto} id="barra" titulo={<>📣 Barra de beneficios</>}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.86rem', cursor: 'pointer', marginBottom: 8 }}>
             <input type="checkbox" checked={cfg.barra_activa !== false} onChange={e => set('barra_activa', e.target.checked)} /> Mostrar la barra
           </label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+            <ColorPick label="Fondo de la barra" value={cfg.barra_color_bg || ''} fallback="#2d5a3d" onChange={v => set('barra_color_bg', v)} onClear={() => set('barra_color_bg', null)} />
+            <ColorPick label="Texto de la barra" value={cfg.barra_color_texto || ''} fallback="#F5F0E6" onChange={v => set('barra_color_texto', v)} onClear={() => set('barra_color_texto', null)} />
+          </div>
           <BarraItemsEditor items={Array.isArray(cfg.barra_items) ? cfg.barra_items : []} onChange={(v) => set('barra_items', v)} />
           <div className="form-group" style={{ marginTop: 8 }}><label className="form-label">Tamaño del texto</label>
             <Select className="form-control" value={cfg.barra_tamano || 'md'} onChange={e => set('barra_tamano', e.target.value)}><option value="sm">Pequeño</option><option value="md">Mediano</option><option value="lg">Grande</option></Select>
           </div>
-          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>El color de la barra depende de la <strong>plantilla</strong>. Aparece debajo de la de "¿Eres mayorista?".</small>
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Con <strong>Auto</strong> usa la paleta (primario). Personaliza fondo y texto si quieres otro contraste.</small>
         </PzSec>
 
         <PzSec abierto={abierto} setAbierto={setAbierto} id="footer" titulo={<>🔻 Pie de página (footer)</>}>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
+            <ColorPick label="Fondo del footer" value={cfg.footer_color_bg || ''} fallback="#1a3a2a" onChange={v => set('footer_color_bg', v)} onClear={() => set('footer_color_bg', null)} />
+            <ColorPick label="Texto del footer" value={cfg.footer_color_texto || ''} fallback="#F5F0E6" onChange={v => set('footer_color_texto', v)} onClear={() => set('footer_color_texto', null)} />
+          </div>
           <div className="form-group"><label className="form-label">Texto del footer</label><textarea className="form-control" rows={2} value={cfg.footer_texto || ''} onChange={e => set('footer_texto', e.target.value)} placeholder="Sabores artesanales de la selva del Guaviare. 100% natural." /></div>
           <div className="form-group"><label className="form-label">Tamaño</label>
             <Select className="form-control" value={cfg.footer_tamano || 'md'} onChange={e => set('footer_tamano', e.target.value)}><option value="sm">Pequeño</option><option value="md">Mediano</option><option value="lg">Grande</option></Select>
@@ -2222,8 +2782,12 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
         </PzSec>
 
         <PzSec abierto={abierto} setAbierto={setAbierto} id="banners" titulo={<>🖼️ Banners</>}>
-          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Los banners <strong>principales</strong> aparecen arriba (carrusel). Los <strong>secundarios</strong> se colocan donde quieras desde "Secciones del inicio".</small>
-          <TabBanners toast={toast} qc={qc} embed />
+          <small style={{ display: 'block', color: 'var(--texto-suave)', fontSize: '0.72rem', marginBottom: 8 }}>
+            {familiaActiva === 'atelier'
+              ? <>En <strong>Atelier</strong>, el <strong>primer banner principal</strong> (por orden ↑↓) es la <strong>portada</strong> (imagen/video y textos si los tiene). No hay carrusel de principales. Los <strong>secundarios</strong> se colocan desde “Secciones del inicio”.</>
+              : <>Los banners <strong>principales</strong> forman el carrusel de arriba. Los <strong>secundarios</strong> se colocan donde quieras desde “Secciones del inicio”.</>}
+          </small>
+          <TabBanners toast={toast} qc={qc} embed modoAtelier={familiaActiva === 'atelier'} />
         </PzSec>
 
         <PzSec abierto={abierto} setAbierto={setAbierto} id="nosotros" titulo={<>📖 Página "Nosotros" (bloques)</>}>
@@ -2249,7 +2813,9 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
           <PaginasEditor paginas={Array.isArray(cfg.paginas) ? cfg.paginas : []} onChange={(pgs) => set('paginas', pgs)} toast={toast} lienzo={lienzo} onLienzo={cfgUrl ? entrarLienzo : null} />
         </PzSec>
 
-        {cropLogo && <ImageCropper file={cropLogo} aspect={1} salidaW={400} salidaH={400} onCancel={() => setCropLogo(null)} onCropped={(blob) => { setCropLogo(null); subirLogo(blob) }} />}
+        {cropLogo && <ImageCropper file={cropLogo} aspect={1} salidaW={400} salidaH={400} onCancel={() => setCropLogo(null)} onCropped={(blob) => { setCropLogo(null); void subirLogo(blob, 'image/jpeg') }} />}
+        {cropFavicon && <ImageCropper file={cropFavicon} aspect={1} salidaW={192} salidaH={192} onCancel={() => setCropFavicon(null)} onCropped={(blob) => { setCropFavicon(null); subirFavicon(blob) }} />}
+        {cropImpactoImg && <ImageCropper file={cropImpactoImg} aspect={4 / 3} salidaW={1200} salidaH={900} onCancel={() => setCropImpactoImg(null)} onCropped={(blob) => { setCropImpactoImg(null); subirImgCfg(blob, 'impacto_imagen', setSubiendoImpactoImg) }} />}
         {gestionFrutos && <GestionFrutos frutos={frutosCat} toast={toast} qc={qc} onClose={() => setGestionFrutos(false)} />}
         {editCanvas && (() => {
           const blk = bloqueEnRuta(arbolDe(editCanvas.target, cfg), editCanvas.ruta)
@@ -2266,46 +2832,127 @@ function TabPersonalizar({ toast, qc, cfgUrl }) {
       {/* Vista previa en vivo */}
       <div className="pz-preview">
         <div className="pz-preview-bar">
-          <span><Eye size={14} style={{ verticalAlign: '-2px' }} /> Vista previa{selPack ? ` · ${selPack.nombre}` : ''}</span>
+          <span><Eye size={14} style={{ verticalAlign: '-2px' }} /> Vista previa{packPendiente && selPack ? ` · ${selPack.nombre}` : familiaActiva === 'atelier' ? ' · Atelier' : ' · Clásico'}</span>
           <div className="pz-devices">
-            <button className={dispositivo === 'desktop' ? 'on' : ''} onClick={() => setDispositivo('desktop')} title="PC"><Monitor size={15} /></button>
-            <button className={dispositivo === 'tablet' ? 'on' : ''} onClick={() => setDispositivo('tablet')} title="Tablet"><Tablet size={15} /></button>
-            <button className={dispositivo === 'mobile' ? 'on' : ''} onClick={() => setDispositivo('mobile')} title="Móvil"><Smartphone size={15} /></button>
+            <button type="button" className={dispositivo === 'desktop' ? 'on' : ''} onClick={() => setDispositivo('desktop')} title="PC"><Monitor size={15} /></button>
+            <button type="button" className={dispositivo === 'tablet' ? 'on' : ''} onClick={() => setDispositivo('tablet')} title="Tablet"><Tablet size={15} /></button>
+            <button type="button" className={dispositivo === 'mobile' ? 'on' : ''} onClick={() => setDispositivo('mobile')} title="Móvil"><Smartphone size={15} /></button>
           </div>
           <label style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: '0.76rem', cursor: 'pointer' }}>
             <input type="checkbox" checked={previewMayorista} onChange={e => setPreviewMayorista(e.target.checked)} /> mayorista
           </label>
-          <button className="btn btn-xs btn-secondary" onClick={() => { if (iframeEl) iframeEl.src = iframeEl.src }} title="Recargar"><RefreshCw size={13} /></button>
+          <button type="button" className="btn btn-xs btn-secondary" onClick={() => {
+            setIframeBroken(false)
+            if (iframeEl && previewUrl) iframeEl.src = previewUrl
+          }} title="Recargar"><RefreshCw size={13} /></button>
         </div>
-        {cfgUrl
+        {previewUrl
           ? <div ref={setStageEl} className={`pz-stage pz-stage-${dispositivo}`}>
-              {(() => { const H = stage.h || Math.round((typeof window !== 'undefined' ? window.innerHeight : 800) * 0.72)
+              {iframeBroken ? (
+                <div className="pz-frame-empty" style={{ border: 0, minHeight: 320 }}>
+                  No se pudo cargar el iframe.<br />
+                  <a href={previewUrl} target="_blank" rel="noreferrer" style={{ color: 'var(--selva)', fontWeight: 700 }}>Abrir catálogo ↗</a>
+                </div>
+              ) : (() => {
+                const H = stage.h || Math.round((typeof window !== 'undefined' ? window.innerHeight : 800) * 0.72)
                 return (
                   <div className="pz-device-frame" style={dispositivo === 'desktop' ? { width: Math.round(PC_W * escala), height: H, overflow: 'hidden', borderRadius: 8, boxShadow: 'var(--sombra, 0 8px 30px rgba(0,0,0,0.15))' } : undefined}>
-                    <iframe ref={setIframeEl} className="pz-frame" src={cfgUrl} title="Vista previa del catálogo"
-                      style={dispositivo === 'desktop' ? { width: PC_W, height: Math.round(H / escala), transform: `scale(${escala})`, transformOrigin: 'top left', border: 0 } : undefined} />
+                    <iframe
+                      key={previewUrl}
+                      ref={setIframeEl}
+                      className="pz-frame"
+                      src={previewUrl}
+                      title="Vista previa del catálogo"
+                      onError={() => setIframeBroken(true)}
+                      style={dispositivo === 'desktop' ? { width: PC_W, height: Math.round(H / Math.max(escala, 0.4)), transform: `scale(${escala})`, transformOrigin: 'top left', border: 0 } : undefined}
+                    />
                   </div>
-                ) })()}
+                )
+              })()}
             </div>
-          : <div className="pz-frame pz-frame-empty">Define la <strong>URL pública</strong> en Configuración para ver la vista previa en vivo.</div>}
+          : <div className="pz-frame pz-frame-empty">
+              Define la <strong>URL pública</strong> en <strong>Catálogo → Configuración</strong> (ej. https://catalogo.mumiamazonia.workers.dev) para ver la vista previa en vivo.
+            </div>}
       </div>
     </div>
   )
 }
 
 // ==================== BANNERS ====================
-const BANNER_VACIO = { nombre: '', tipo: 'imagen', imagen_url: '', youtube: '', titulo: '', subtitulo: '', boton_texto: '', boton_link: '', orden: 0, activo: true, es_secundario: false, grupo: '' }
+const BANNER_VACIO = {
+  nombre: '', tipo: 'imagen', imagen_url: '', imagen_tablet: '', imagen_mobile: '',
+  youtube: '', titulo: '', subtitulo: '', boton_texto: '', boton_link: '',
+  color_overlay: '', overlay_opacidad: 72, color_texto: '', color_boton: '',
+  orden: 0, activo: true, es_secundario: false, grupo: '',
+}
 
-function TabBanners({ toast, qc }) {
+const OVERLAY_PRESETS = [
+  { id: 'oscuro', label: 'Oscuro', color: '#111111', op: 72 },
+  { id: 'selva', label: 'Selva', color: '#1a3a2a', op: 68 },
+  { id: 'dorado', label: 'Dorado', color: '#C8A94A', op: 78 },
+  { id: 'crema', label: 'Crema', color: '#FAF9F6', op: 86 },
+]
+
+/** Contraste de tipografía sobre un hex (capa o botón). */
+function contrasteSobre(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec((hex || '').trim())
+  if (!m) return '#ffffff'
+  const n = parseInt(m[1], 16)
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255
+  const L = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+  return L > 0.55 ? '#1a1a1a' : '#ffffff'
+}
+
+/** Envía mensajes al iframe de vista previa del catálogo. */
+function postToCatalogPreview(msg) {
+  try {
+    document.querySelectorAll('iframe.pz-frame').forEach((f) => {
+      try { f.contentWindow?.postMessage(msg, '*') } catch { /* noop */ }
+    })
+  } catch { /* noop */ }
+}
+
+function normalizarBanner(raw = {}) {
+  const n = { ...BANNER_VACIO, ...raw }
+  if (n.id != null) n.id = raw.id
+  for (const k of ['imagen_url', 'imagen_tablet', 'imagen_mobile', 'youtube', 'titulo', 'subtitulo', 'boton_texto', 'boton_link', 'nombre', 'grupo', 'color_overlay', 'color_texto', 'color_boton']) {
+    n[k] = n[k] == null ? '' : String(n[k])
+  }
+  // Compat: color_fondo antiguo = capa del texto
+  if (!n.color_overlay && raw.color_fondo) n.color_overlay = String(raw.color_fondo)
+  const op = raw.overlay_opacidad
+  if (op == null || op === '') n.overlay_opacidad = 72
+  else {
+    const num = Number(op)
+    n.overlay_opacidad = Number.isFinite(num) ? (num <= 1 ? Math.round(num * 100) : Math.round(num)) : 72
+  }
+  n.activo = n.activo !== false
+  n.es_secundario = !!n.es_secundario
+  n.tipo = n.tipo === 'youtube' ? 'youtube' : 'imagen'
+  n.orden = parseInt(n.orden, 10) || 0
+  n._nuevo = !!raw._nuevo
+  return n
+}
+
+/** Slots de imagen del banner: web / tablet / móvil — todos con recorte recomendado. */
+const BANNER_IMG_SLOTS = [
+  { key: 'web', field: 'imagen_url', label: 'Web', icon: Monitor, hint: '16:9 · se recorta a 1600×900', crop: true, aspect: 16 / 9, w: 1600, h: 900, previewRatio: '16 / 9' },
+  { key: 'tablet', field: 'imagen_tablet', label: 'Tablet', icon: Tablet, hint: '4:3 · se recorta a 1200×900', crop: true, aspect: 4 / 3, w: 1200, h: 900, previewRatio: '4 / 3' },
+  { key: 'mobile', field: 'imagen_mobile', label: 'Móvil', icon: Smartphone, hint: '4:5 · se recorta a 1080×1350', crop: true, aspect: 4 / 5, w: 1080, h: 1350, previewRatio: '4 / 5' },
+]
+
+function TabBanners({ toast, qc, modoAtelier = false }) {
   const [edit, setEdit] = useState(null)
   const { data: banners = [], isLoading } = useQuery({
     queryKey: ['banners_catalogo'],
     queryFn: async () => { const { data } = await supabase.from('banners_catalogo').select('*').order('orden'); return data || [] },
   })
   const eliminar = async (b) => { if (!window.confirm('¿Eliminar este banner?')) return; try { await supabase.from('banners_catalogo').delete().eq('id', b.id); qc.invalidateQueries({ queryKey: ['banners_catalogo'] }); toast('Banner eliminado') } catch (e) { toast(e.message, 'error') } }
-  // Reordena dentro de su propio conjunto (principales entre sí; secundarios dentro de su grupo)
   const claveGrupo = (x) => `${x.es_secundario ? 1 : 0}|${(x.grupo || '').trim() || 'General'}`
   const pares = (b) => banners.filter(x => claveGrupo(x) === claveGrupo(b)).sort((x, y) => (x.orden || 0) - (y.orden || 0))
+  const portadaId = modoAtelier
+    ? (banners.filter(b => !b.es_secundario && b.activo !== false).sort((a, b) => (a.orden || 0) - (b.orden || 0))[0]?.id || null)
+    : null
   const mover = async (b, dir) => {
     const lista = pares(b)
     const i = lista.findIndex(x => x.id === b.id); const j = i + dir
@@ -2316,76 +2963,223 @@ function TabBanners({ toast, qc }) {
       qc.invalidateQueries({ queryKey: ['banners_catalogo'] })
     } catch (e) { toast(e.message, 'error') }
   }
+  const abrirEdicion = async (b) => {
+    if (!b?.id) { setEdit({ ...BANNER_VACIO, ...b, _nuevo: true }); return }
+    try {
+      const { data, error } = await supabase.from('banners_catalogo').select('*').eq('id', b.id).maybeSingle()
+      if (error) throw error
+      setEdit(data || b)
+    } catch {
+      setEdit(b)
+    }
+  }
   if (isLoading) return <div className="card"><p className="empty-table">Cargando…</p></div>
+  const ordenados = [...banners].sort((x, y) => (x.es_secundario ? 1 : 0) - (y.es_secundario ? 1 : 0) || String(x.grupo || '').localeCompare(String(y.grupo || '')) || (x.orden || 0) - (y.orden || 0))
   return (
     <div className="card">
-      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 12 }}>
-        <p style={{ fontSize: '0.85rem', color: 'var(--texto-suave)', margin: 0 }}>Los <strong>principales</strong> forman el carrusel de arriba. Los <strong>secundarios</strong> se agrupan: cada grupo es un banner independiente que colocas desde "Secciones del inicio".</p>
+      <div style={{ display: 'flex', alignItems: 'center', marginBottom: 10, gap: 10, flexWrap: 'wrap' }}>
+        <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', margin: 0, flex: 1 }}>
+          {modoAtelier
+            ? <>Portada = primer principal activo. </>
+            : <>Principales = carrusel. Secundarios = secciones del inicio. </>}
+          Sin textos → solo imagen. Sube Web / Tablet / Móvil con recorte.
+        </p>
         <button className="btn btn-primary btn-sm" style={{ marginLeft: 'auto' }} onClick={() => setEdit({ ...BANNER_VACIO, orden: banners.length, _nuevo: true })}><Plus size={14} /> Nuevo banner</button>
       </div>
       {banners.length === 0
         ? <p className="empty-table">Sin banners.</p>
-        : <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 12 }}>
-            {[...banners].sort((x, y) => (x.es_secundario ? 1 : 0) - (y.es_secundario ? 1 : 0) || String(x.grupo || '').localeCompare(String(y.grupo || '')) || (x.orden || 0) - (y.orden || 0)).map(b => {
+        : <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {ordenados.map(b => {
               const idx = pares(b).findIndex(x => x.id === b.id)
+              const esPortada = portadaId != null && b.id === portadaId
+              const thumb = b.imagen_url || b.imagen_tablet || b.imagen_mobile
+              const slots = [b.imagen_url && 'W', b.imagen_tablet && 'T', b.imagen_mobile && 'M'].filter(Boolean).join('·')
               return (
-                <div key={b.id} style={{ border: '1px solid var(--crema-oscuro)', borderRadius: 12, overflow: 'hidden', background: '#fff', opacity: b.activo ? 1 : 0.6, display: 'flex', flexDirection: 'column' }}>
-                  <div style={{ position: 'relative', aspectRatio: '16 / 9', background: 'var(--crema)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-                    {b.imagen_url
-                      ? <img src={b.imagen_url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
-                      : <span style={{ fontSize: '1.8rem' }}>{b.tipo === 'youtube' ? '▶️' : '🖼️'}</span>}
-                    <span style={{ position: 'absolute', top: 6, left: 6 }} className={`badge ${b.es_secundario ? 'badge-dorado' : 'badge-verde'}`}>
-                      {b.es_secundario ? `2° · ${(b.grupo || '').trim() || 'General'}` : 'Principal'}
-                    </span>
-                    {!b.activo && <span style={{ position: 'absolute', top: 6, right: 6 }} className="badge badge-gris">Oculto</span>}
+                <div key={b.id} style={{
+                  display: 'flex', alignItems: 'center', gap: 10, padding: '6px 8px',
+                  border: esPortada ? '1.5px solid var(--selva)' : '1px solid var(--crema-oscuro)',
+                  borderRadius: 8, background: '#fff', opacity: b.activo ? 1 : 0.55,
+                }}>
+                  <div style={{ width: 56, height: 36, borderRadius: 6, overflow: 'hidden', background: 'var(--crema)', flexShrink: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    {thumb
+                      ? <img src={thumb} alt="" referrerPolicy="no-referrer" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                      : <span style={{ fontSize: '0.85rem' }}>{b.tipo === 'youtube' ? '▶️' : '🖼️'}</span>}
                   </div>
-                  <div style={{ padding: '8px 10px', flex: 1 }}>
-                    <strong style={{ fontSize: '0.88rem', display: 'block' }}>{b.nombre || b.titulo || '(sin nombre)'}</strong>
-                    {b.titulo && b.nombre && <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>Título: {b.titulo}</div>}
-                    {b.subtitulo && <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>{b.subtitulo}</div>}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                      <strong style={{ fontSize: '0.84rem', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{b.nombre || b.titulo || '(sin nombre)'}</strong>
+                      <span className={`badge ${b.es_secundario ? 'badge-dorado' : 'badge-verde'}`} style={{ fontSize: '0.62rem' }}>
+                        {b.es_secundario ? `2° ${(b.grupo || '').trim() || 'General'}` : (esPortada ? 'Portada' : 'Principal')}
+                      </span>
+                      {!b.activo && <span className="badge badge-gris" style={{ fontSize: '0.62rem' }}>Oculto</span>}
+                      {b.tipo !== 'youtube' && slots && <span style={{ fontSize: '0.62rem', color: 'var(--texto-suave)' }}>{slots}</span>}
+                    </div>
+                    {(b.titulo || b.subtitulo) ? (
+                      <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                        {[b.titulo, b.subtitulo].filter(Boolean).join(' — ')}
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '0.68rem', color: 'var(--texto-suave)' }}>Solo imagen</div>
+                    )}
                   </div>
-                  <div style={{ display: 'flex', gap: 4, padding: '0 10px 10px', alignItems: 'center' }}>
+                  <div style={{ display: 'flex', gap: 3, alignItems: 'center', flexShrink: 0 }}>
                     <button className="btn btn-xs btn-secondary" title="Subir" disabled={idx === 0} onClick={() => mover(b, -1)}><ChevronUp size={13} /></button>
                     <button className="btn btn-xs btn-secondary" title="Bajar" disabled={idx === pares(b).length - 1} onClick={() => mover(b, 1)}><ChevronDown size={13} /></button>
-                    <button className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => setEdit(b)}><Pencil size={13} /></button>
+                    <button className="btn btn-xs btn-secondary" onClick={() => abrirEdicion(b)}><Pencil size={13} /></button>
                     <button className="btn btn-xs btn-danger" onClick={() => eliminar(b)}><Trash2 size={13} /></button>
                   </div>
                 </div>
               )
             })}
           </div>}
-      {edit && <EditorBanner banner={edit} toast={toast} qc={qc} onClose={() => setEdit(null)} />}
+      {edit && <EditorBanner key={edit.id || 'nuevo'} banner={edit} toast={toast} qc={qc} onClose={() => setEdit(null)} modoAtelier={modoAtelier} />}
     </div>
   )
 }
 
-function EditorBanner({ banner, toast, qc, onClose }) {
-  const [b, setB] = useState({ ...BANNER_VACIO, ...banner })
-  const [subiendo, setSubiendo] = useState(false)
-  const [cropFile, setCropFile] = useState(null)
+function EditorBanner({ banner, toast, qc, onClose, modoAtelier = false }) {
+  const [b, setB] = useState(() => normalizarBanner(banner))
+  const [subiendo, setSubiendo] = useState(null)
+  const [cropSlot, setCropSlot] = useState(null)
+  const [cargando, setCargando] = useState(!!(banner?.id && !banner?._nuevo))
+
+  useEffect(() => {
+    let cancel = false
+    ;(async () => {
+      if (banner?._nuevo || !banner?.id) {
+        setB(normalizarBanner(banner))
+        setCargando(false)
+        return
+      }
+      setCargando(true)
+      try {
+        const { data } = await supabase.from('banners_catalogo').select('*').eq('id', banner.id).maybeSingle()
+        if (!cancel) setB(normalizarBanner(data || banner))
+      } catch {
+        if (!cancel) setB(normalizarBanner(banner))
+      } finally {
+        if (!cancel) setCargando(false)
+      }
+    })()
+    return () => { cancel = true }
+  }, [banner?.id, banner?._nuevo])
+
+  // Vista previa en vivo: empuja el borrador al iframe; limpia al cerrar; reenvía si el iframe recarga
+  useEffect(() => {
+    if (cargando) return
+    const push = () => {
+      const opN = Math.min(100, Math.max(0, Number(b.overlay_opacidad)))
+      postToCatalogPreview({
+        type: 'mumi-preview-banner',
+        banner: {
+          ...b,
+          activo: true,
+          overlay_opacidad: Number.isFinite(opN) ? opN : 72,
+          color_overlay: (b.color_overlay || '').trim() || (b.color_fondo || '').trim() || '',
+        },
+      })
+    }
+    const t = setTimeout(push, 100)
+    const onMsg = (e) => { if (e.data?.type === 'mumi-preview-ready') push() }
+    window.addEventListener('message', onMsg)
+    return () => { clearTimeout(t); window.removeEventListener('message', onMsg) }
+  }, [b, cargando])
+  useEffect(() => () => postToCatalogPreview({ type: 'mumi-preview-banner', banner: null }), [])
+
   const set = (k, v) => setB(x => ({ ...x, [k]: v }))
-  const subirBlob = async (blob) => {
-    setSubiendo(true)
+  const setOpacidadCapa = (v) => {
+    const n = Math.min(100, Math.max(0, Number(v)))
+    setB(x => ({ ...x, overlay_opacidad: Number.isFinite(n) ? n : 72 }))
+  }
+  const aplicarCapa = (color, opacidad, forzarTexto = false) => {
+    setB(x => {
+      const opN = Math.min(100, Math.max(0, Number(opacidad)))
+      const next = {
+        ...x,
+        color_overlay: color || '',
+        overlay_opacidad: Number.isFinite(opN) ? opN : (x.overlay_opacidad ?? 72),
+      }
+      if (color && (forzarTexto || !x.color_texto)) next.color_texto = contrasteSobre(color)
+      if (!color && forzarTexto) next.color_texto = ''
+      return next
+    })
+  }
+  const subirArchivo = async (fileOrBlob, field, slotKey, contentType = 'image/jpeg') => {
+    setSubiendo(slotKey)
     try {
-      const path = `catalogo/banner_${Date.now()}.jpg`
-      const { error } = await supabase.storage.from('product-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
+      const ext = contentType.includes('png') ? 'png' : contentType.includes('webp') ? 'webp' : 'jpg'
+      const path = `catalogo/banner_${slotKey}_${Date.now()}.${ext}`
+      const { error } = await supabase.storage.from('product-images').upload(path, fileOrBlob, { upsert: true, contentType })
       if (error) throw error
       const { data } = supabase.storage.from('product-images').getPublicUrl(path)
-      set('imagen_url', data.publicUrl)
-    } catch (e) { toast('No se pudo subir: ' + e.message, 'error') } finally { setSubiendo(false) }
+      setB(x => ({ ...x, [field]: data.publicUrl }))
+    } catch (e) { toast('No se pudo subir: ' + e.message, 'error') } finally { setSubiendo(null) }
+  }
+  const onPickSlot = (slot, file) => {
+    if (!file) return
+    if (slot.crop) setCropSlot({ file, slot })
+    else void subirArchivo(file, slot.field, slot.key, file.type || 'image/jpeg')
   }
   const guardar = async () => {
     try {
-      const { _nuevo, id, ...rest } = b
-      const payload = { ...rest, orden: parseInt(b.orden) || 0 }
-      const { error } = id ? await supabase.from('banners_catalogo').update(payload).eq('id', id) : await supabase.from('banners_catalogo').insert(payload)
-      if (error) throw error
-      qc.invalidateQueries({ queryKey: ['banners_catalogo'] }); toast('Banner guardado ✓'); onClose()
+      const vacio = (v) => { const t = (v == null ? '' : String(v)).trim(); return t || null }
+      const core = {
+        nombre: vacio(b.nombre),
+        tipo: b.tipo === 'youtube' ? 'youtube' : 'imagen',
+        imagen_url: vacio(b.imagen_url),
+        imagen_tablet: vacio(b.imagen_tablet),
+        imagen_mobile: vacio(b.imagen_mobile),
+        youtube: vacio(b.youtube),
+        titulo: vacio(b.titulo),
+        subtitulo: vacio(b.subtitulo),
+        boton_texto: vacio(b.boton_texto),
+        boton_link: vacio(b.boton_link),
+        orden: parseInt(b.orden, 10) || 0,
+        activo: b.activo !== false,
+        es_secundario: !!b.es_secundario,
+        grupo: b.es_secundario ? (vacio(b.grupo) || 'General') : null,
+      }
+      let id = b.id
+      if (id) {
+        const { error } = await supabase.from('banners_catalogo').update(core).eq('id', id)
+        if (error) throw error
+      } else {
+        const { data, error } = await supabase.from('banners_catalogo').insert(core).select('id').single()
+        if (error) throw error
+        id = data.id
+      }
+      const overlay = vacio(b.color_overlay)
+      const estilo = {
+        color_overlay: overlay,
+        color_fondo: overlay, // compat catálogo / v147
+        overlay_opacidad: b.overlay_opacidad == null || b.overlay_opacidad === '' ? null : Math.min(100, Math.max(0, Number(b.overlay_opacidad) || 0)),
+        color_texto: vacio(b.color_texto),
+        color_boton: vacio(b.color_boton),
+      }
+      const { error: eEstilo } = await supabase.from('banners_catalogo').update(estilo).eq('id', id)
+      if (eEstilo) {
+        toast('Imágenes guardadas. Para colores/opacidad ejecuta migration_v148 en Supabase.', 'error')
+      } else {
+        toast('Banner guardado ✓')
+      }
+      const { data: todos } = await supabase.from('banners_catalogo').select('*').order('orden')
+      postToCatalogPreview({ type: 'mumi-banners-refresh', banners: todos || [] })
+      await qc.invalidateQueries({ queryKey: ['banners_catalogo'] })
+      onClose()
     } catch (e) { toast(e.message, 'error') }
   }
+  const faltanSlots = BANNER_IMG_SLOTS.filter(s => !b[s.field]).map(s => s.label)
+  const soloImagen = !(b.titulo?.trim() || b.subtitulo?.trim() || b.boton_texto?.trim())
+  const op = Math.min(100, Math.max(0, Number(b.overlay_opacidad) || 72))
+  const fgFallback = contrasteSobre(b.color_overlay || '#111111')
+  const btnFallback = '#ffffff'
+
   return (
-    <Modal open onClose={onClose} title={banner._nuevo ? 'Nuevo banner' : 'Editar banner'}
-      footer={<><button className="btn btn-secondary" onClick={onClose}>Cancelar</button><button className="btn btn-primary" onClick={guardar} disabled={subiendo}><Ico as={Save} size={14} />Guardar</button></>}>
+    <Modal open onClose={onClose} movable
+      title={banner._nuevo ? 'Nuevo banner' : 'Editar banner'}
+      footer={<><button className="btn btn-secondary" onClick={onClose}>Cancelar</button><button className="btn btn-primary" onClick={guardar} disabled={!!subiendo || cargando}><Ico as={Save} size={14} />Guardar</button></>}>
+      {cargando ? <p className="empty-table">Cargando banner…</p> : (
+      <>
       <div className="form-grid-2">
         <div className="form-group"><label className="form-label">Nombre interno <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(no se muestra en el catálogo)</small></label><input className="form-control" value={b.nombre || ''} onChange={e => set('nombre', e.target.value)} placeholder="Ej: Promo octubre" /></div>
         <div className="form-group"><label className="form-label">Tipo</label>
@@ -2393,27 +3187,123 @@ function EditorBanner({ banner, toast, qc, onClose }) {
         </div>
       </div>
       {b.tipo === 'youtube'
-        ? <div className="form-group"><label className="form-label">URL de YouTube</label><input className="form-control" value={b.youtube} onChange={e => set('youtube', e.target.value)} placeholder="https://youtu.be/XXXXXXXXXXX" /></div>
-        : <div className="form-group"><label className="form-label">Imagen</label>
-            <div style={{ display: 'flex', gap: 12, alignItems: 'center' }}>
-              {b.imagen_url && <img src={b.imagen_url} alt="" style={{ width: 120, height: 68, objectFit: 'cover', borderRadius: 8 }} />}
-              <label className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}>{subiendo ? 'Subiendo…' : <><Upload size={14} /> Subir imagen</>}<input type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files?.[0]; if (f) setCropFile(f); e.target.value = '' }} /></label>
+        ? <div className="form-group"><label className="form-label">URL de YouTube</label><input className="form-control" value={b.youtube || ''} onChange={e => set('youtube', e.target.value)} placeholder="https://youtu.be/XXXXXXXXXXX" /></div>
+        : (
+          <div className="form-group">
+            <label className="form-label">Imágenes por dispositivo</label>
+            <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', margin: '0 0 10px' }}>
+              Sube las <strong>tres versiones</strong> con recorte: <strong>Web</strong> 16:9, <strong>Tablet</strong> 4:3 y <strong>Móvil</strong> 4:5.
+            </p>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
+              {BANNER_IMG_SLOTS.map(slot => {
+                const url = (b[slot.field] || '').trim()
+                const Icon = slot.icon
+                const busy = subiendo === slot.key
+                return (
+                  <div key={slot.key} style={{ border: url ? '1.5px solid var(--selva)' : '1px dashed var(--crema-oscuro)', borderRadius: 10, padding: 10, background: '#fff' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, fontWeight: 700, fontSize: '0.82rem', color: 'var(--selva)' }}>
+                      <Icon size={15} /> {slot.label}
+                    </div>
+                    <div style={{ aspectRatio: slot.previewRatio, background: 'var(--crema)', borderRadius: 8, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
+                      {url
+                        ? <img
+                            key={url}
+                            src={url}
+                            alt=""
+                            referrerPolicy="no-referrer"
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          />
+                        : <span style={{ fontSize: '0.7rem', color: 'var(--texto-suave)', textAlign: 'center', padding: 6 }}>Sin imagen</span>}
+                    </div>
+                    <div style={{ fontSize: '0.66rem', color: 'var(--texto-suave)', marginBottom: 8, lineHeight: 1.35 }}>{slot.hint}</div>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                      <label className="btn btn-secondary btn-xs" style={{ cursor: busy ? 'wait' : 'pointer', flex: 1, display: 'inline-flex', justifyContent: 'center' }}>
+                        {busy ? '…' : <><Upload size={12} /> {url ? 'Cambiar' : 'Subir'}</>}
+                        <input type="file" accept="image/*" hidden disabled={busy || !!subiendo} onChange={e => { const f = e.target.files?.[0]; onPickSlot(slot, f); e.target.value = '' }} />
+                      </label>
+                      {url ? (
+                        <button type="button" className="btn btn-xs btn-danger" title="Quitar" onClick={() => set(slot.field, '')} disabled={!!subiendo}><X size={12} /></button>
+                      ) : null}
+                    </div>
+                  </div>
+                )
+              })}
             </div>
-            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Proporción <strong>16:9</strong> (se guarda a 1600×900). Los banners secundarios usan el mismo diseño y medidas que el principal.</small>
-            {cropFile && <ImageCropper file={cropFile} aspect={16 / 9} salidaW={1600} salidaH={900} onCancel={() => setCropFile(null)} onCropped={(blob) => { setCropFile(null); subirBlob(blob) }} />}
-          </div>}
+            {faltanSlots.length > 0 && faltanSlots.length < 3 && (
+              <small style={{ color: 'var(--tierra)', fontSize: '0.72rem', display: 'block', marginTop: 8 }}>
+                Falta: {faltanSlots.join(', ')}. Conviene subir las tres para un resultado óptimo.
+              </small>
+            )}
+            {cropSlot && (
+              <ImageCropper
+                file={cropSlot.file}
+                aspect={cropSlot.slot.aspect}
+                salidaW={cropSlot.slot.w}
+                salidaH={cropSlot.slot.h}
+                onCancel={() => setCropSlot(null)}
+                onCropped={(blob) => {
+                  const { slot } = cropSlot
+                  setCropSlot(null)
+                  void subirArchivo(blob, slot.field, slot.key, 'image/jpeg')
+                }}
+              />
+            )}
+          </div>
+        )}
       <div className="form-grid-2">
-        <div className="form-group"><label className="form-label">Título</label><input className="form-control" value={b.titulo} onChange={e => set('titulo', e.target.value)} /></div>
-        <div className="form-group"><label className="form-label">Subtítulo</label><input className="form-control" value={b.subtitulo} onChange={e => set('subtitulo', e.target.value)} /></div>
-        <div className="form-group"><label className="form-label">Texto del botón</label><input className="form-control" value={b.boton_texto} onChange={e => set('boton_texto', e.target.value)} placeholder="Ver productos" /></div>
-        <div className="form-group"><label className="form-label">Enlace del botón</label><input className="form-control" value={b.boton_link} onChange={e => set('boton_link', e.target.value)} placeholder="/tienda, /galeria o https://…" /></div>
+        <div className="form-group"><label className="form-label">Título <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(opcional)</small></label><input className="form-control" value={b.titulo || ''} onChange={e => set('titulo', e.target.value)} placeholder="Vacío = solo imagen" /></div>
+        <div className="form-group"><label className="form-label">Subtítulo <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(opcional)</small></label><input className="form-control" value={b.subtitulo || ''} onChange={e => set('subtitulo', e.target.value)} /></div>
+        <div className="form-group"><label className="form-label">Texto del botón</label><input className="form-control" value={b.boton_texto || ''} onChange={e => set('boton_texto', e.target.value)} placeholder="Ver productos" /></div>
+        <div className="form-group"><label className="form-label">Enlace del botón</label><input className="form-control" value={b.boton_link || ''} onChange={e => set('boton_link', e.target.value)} placeholder="/tienda, /galeria o https://…" /></div>
       </div>
+      {soloImagen ? (
+        <div style={{ background: 'color-mix(in srgb, var(--selva) 8%, #fff)', border: '1px solid var(--crema-oscuro)', borderRadius: 8, padding: '8px 10px', fontSize: '0.75rem', color: 'var(--selva)', marginBottom: 10 }}>
+          Sin título, subtítulo ni botón → <strong>solo imagen</strong> (sin panel/capa de texto). Arrastra el encabezado del modal para ver la vista previa.
+        </div>
+      ) : (
+      <div style={{ marginBottom: 12, padding: 12, borderRadius: 10, border: '1px solid var(--crema-oscuro)', background: '#fff' }}>
+        <label className="form-label" style={{ display: 'block', marginBottom: 6 }}>Colores del panel de texto</label>
+        <small style={{ display: 'block', color: 'var(--texto-suave)', fontSize: '0.72rem', marginBottom: 8 }}>
+          La <strong>capa</strong> es el panel (PC) / degradado (móvil) detrás del texto — no el fondo de la página.
+          El color del texto se ajusta solo al elegir un preset; puedes cambiarlo. Mira el resultado en la <strong>vista previa</strong> (arrastra este modal).
+        </small>
+        <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
+          {OVERLAY_PRESETS.map(p => (
+            <button key={p.id} type="button" className="btn btn-xs btn-secondary" onClick={() => aplicarCapa(p.color, p.op, true)}
+              style={{ borderColor: (b.color_overlay || '').toLowerCase() === p.color.toLowerCase() ? 'var(--selva)' : undefined }}>
+              <span style={{ width: 10, height: 10, borderRadius: 3, background: p.color, display: 'inline-block', marginRight: 5, verticalAlign: '-1px', border: '1px solid rgba(0,0,0,0.15)' }} />
+              {p.label}
+            </button>
+          ))}
+          <button type="button" className="btn btn-xs btn-secondary" onClick={() => aplicarCapa('', op, true)}>Auto (paleta)</button>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 10 }}>
+          <ColorPick label="Capa" value={b.color_overlay || ''} fallback="#111111"
+            onChange={v => aplicarCapa(v, op, false)}
+            onClear={() => aplicarCapa('', op, false)} />
+          <ColorPick label="Texto / tipografía" value={b.color_texto || ''} fallback={fgFallback}
+            onChange={v => set('color_texto', v)}
+            onClear={() => set('color_texto', '')} />
+          <ColorPick label="Botón" value={b.color_boton || ''} fallback={btnFallback}
+            onChange={v => set('color_boton', v)}
+            onClear={() => set('color_boton', '')} />
+        </div>
+        <div className="form-group" style={{ marginBottom: 0 }}>
+          <label className="form-label">Opacidad de la capa · {op}%</label>
+          <input type="range" min={0} max={100} step={1} value={op} onChange={e => setOpacidadCapa(e.target.value)} style={{ width: '100%' }} />
+          <small style={{ display: 'block', color: 'var(--texto-suave)', fontSize: '0.68rem', marginTop: 4 }}>
+            0% = transparente a la izquierda · 100% = color pleno desde la mitad del panel.
+          </small>
+        </div>
+      </div>
+      )}
+
       <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginBottom: 8 }}>El <strong>orden</strong> se ajusta con las flechas ↑↓ de la lista de banners.</small>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600, color: 'var(--selva)' }}><input type="checkbox" checked={!!b.activo} onChange={e => set('activo', e.target.checked)} /> Activo (visible en el catálogo)</label>
       <div className="form-group" style={{ marginTop: 10 }}>
         <label className="form-label">Ubicación</label>
         <Select className="form-control" value={b.es_secundario ? 'sec' : 'prin'} onChange={e => set('es_secundario', e.target.value === 'sec')}>
-          <option value="prin">Banner principal (slide de arriba)</option>
+          <option value="prin">{modoAtelier ? 'Banner principal (portada Atelier si es el 1º)' : 'Banner principal (slide de arriba)'}</option>
           <option value="sec">Banner secundario (dentro del inicio)</option>
         </Select>
       </div>
@@ -2421,10 +3311,18 @@ function EditorBanner({ banner, toast, qc, onClose }) {
         <div className="form-group">
           <label className="form-label">Grupo del banner secundario</label>
           <input className="form-control" value={b.grupo || ''} onChange={e => set('grupo', e.target.value)} placeholder="Ej: Promociones" />
-          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Los banners con el <strong>mismo grupo</strong> forman un solo banner. Con <strong>varias imágenes</strong> se vuelve slide; con una sola es estático. Grupos distintos no se combinan.</small>
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Los banners con el <strong>mismo grupo</strong> forman un solo banner. Con <strong>varias imágenes</strong> se vuelve slide; con una sola es estático.</small>
         </div>
       )}
-      {!b.es_secundario && <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Los banners principales forman el carrusel de arriba (todos juntos).</small>}
+      {!b.es_secundario && (
+        <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
+          {modoAtelier
+            ? <>En Atelier, el <strong>primer principal activo</strong> (orden ↑↓) es la portada del catálogo.</>
+            : <>Los banners principales forman el carrusel de arriba.</>}
+        </small>
+      )}
+      </>
+      )}
     </Modal>
   )
 }

@@ -3,7 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Calculator, Package, Tags, ClipboardList, Factory, Users, Handshake,
   Camera, FolderOpen, NotebookText, AlertTriangle, GraduationCap,
-  Clock, Leaf, Recycle, ChevronDown, Store,
+  Clock, Recycle, ChevronDown, Store,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { puedeVer, RUTA_MODULO } from '../../lib/permisos'
@@ -57,7 +57,7 @@ export default function Sidebar({ open, onClose, puedeFichar, onRegistrarAsisten
     <NavLink
       key={item.to}
       to={item.to}
-      className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+      className={({ isActive }) => `nav-item${isActive || (item.to !== '/' && location.pathname.startsWith(item.to + '/')) ? ' active' : ''}`}
       onClick={onClose}
     >
       <span className="nav-icon"><item.icon size={18} aria-hidden="true" /></span>
@@ -83,7 +83,7 @@ export default function Sidebar({ open, onClose, puedeFichar, onRegistrarAsisten
           >
             {cfg.logo_url
               ? <img src={cfg.logo_url} alt={`Logo de ${cfg.empresa || 'Mumi Amazonia'}`} style={{ maxWidth: 32, maxHeight: 32, objectFit: 'contain' }} />
-              : <Leaf size={22} aria-hidden="true" />}
+              : null}
             <span>{cfg.empresa || 'Mumi Amazonia'}</span>
           </NavLink>
         </div>

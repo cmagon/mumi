@@ -74,7 +74,11 @@ export const supabaseSignup = createClient(supabaseUrl, supabaseAnonKey, {
 
 // Helper: subir archivo a Storage y retornar URL pública
 export async function uploadFile(bucket, path, file) {
-  const { data, error } = await supabase.storage.from(bucket).upload(path, file, { upsert: true })
+  const contentType = file?.type || undefined
+  const { data, error } = await supabase.storage.from(bucket).upload(path, file, {
+    upsert: true,
+    ...(contentType ? { contentType } : {}),
+  })
   if (error) throw error
   const { data: urlData } = supabase.storage.from(bucket).getPublicUrl(data.path)
   return urlData.publicUrl

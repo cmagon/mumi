@@ -13,6 +13,82 @@ export function ytId(u) {
   return m ? m[1] : (/^[\w-]{11}$/.test(u) ? u : '')
 }
 
+/** Imagen de banner responsive: móvil ≤700 · tablet ≤1024 · web resto. Fallbacks encadenados. */
+export function BannerPicture({ b, className = '', alt = '' }) {
+  const web = (b?.imagen_url || '').trim()
+  const tablet = (b?.imagen_tablet || '').trim()
+  const mobile = (b?.imagen_mobile || '').trim()
+  const src = web || tablet || mobile
+  if (!src) return null
+  const hasTablet = !!tablet
+  return (
+    <picture>
+      {mobile ? <source media="(max-width: 700px)" srcSet={mobile} /> : null}
+      {tablet ? <source media="(min-width: 701px) and (max-width: 1024px)" srcSet={tablet} /> : null}
+      <img
+        className={className}
+        src={src}
+        alt={alt}
+        data-tablet={hasTablet ? '1' : undefined}
+      />
+    </picture>
+  )
+}
+
+function contrasteSobre(hex) {
+  const m = /^#?([0-9a-f]{6})$/i.exec((hex || '').trim())
+  if (!m) return '#1a1a1a'
+  const n = parseInt(m[1], 16)
+  const r = (n >> 16) & 255, g = (n >> 8) & 255, b = n & 255
+  const L = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+  return L > 0.55 ? '#1a1a1a' : '#ffffff'
+}
+
+function hexToRgba(hex, a) {
+  const m = /^#?([0-9a-f]{6})$/i.exec((hex || '').trim())
+  if (!m) return `rgba(0,0,0,${a})`
+  const n = parseInt(m[1], 16)
+  return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`
+}
+
+function opacidadBanner(v, def = 0.72) {
+  if (v == null || v === '') return def
+  const n = Number(v)
+  if (!Number.isFinite(n)) return def
+  return Math.min(1, Math.max(0, n > 1 ? n / 100 : n))
+}
+
+/** Colores propios del banner: capa del texto (overlay) + tipografía + botón. */
+export function estiloBanner(b) {
+  if (!b) return undefined
+  const s = {}
+  const ov = (b.color_overlay || b.color_fondo || '').trim()
+  const op = opacidadBanner(b.overlay_opacidad)
+  // Opacidad siempre (0–1). Degradado CSS: 0% izq → fill a ~50% del panel
+  s['--banner-overlay-op'] = String(op)
+  if (ov) {
+    s['--banner-capa'] = ov
+    s['--banner-bg'] = ov
+    s['--banner-bg-medio'] = ov
+    s['--banner-overlay-soft'] = hexToRgba(ov, op * 0.1)
+    s['--banner-overlay-mid'] = hexToRgba(ov, op * 0.38)
+    s['--banner-overlay-fill'] = hexToRgba(ov, op)
+  }
+  // Tipografía: color explícito, o contraste automático sobre la capa
+  const fg = (b.color_texto || '').trim() || (ov ? contrasteSobre(ov) : '')
+  if (fg) s['--banner-fg'] = fg
+  const btn = (b.color_boton || '').trim()
+  if (btn) {
+    s['--banner-cta-bg'] = btn
+    s['--banner-cta-fg'] = contrasteSobre(btn)
+  }
+  return Object.keys(s).length ? s : undefined
+}
+
+export function bannerConTexto(b) {
+  return !!(b?.titulo?.trim() || b?.subtitulo?.trim() || b?.boton_texto?.trim())
+}
+
 // ---- Tarjeta de producto ----
 export function Card({ p, cfg, n = 0, onOpen, onAdd }) {
   const { esFav, toggleFav, precio, mayorista, enOferta, descuentoPct } = useStore()
@@ -72,35 +148,53 @@ export function Card({ p, cfg, n = 0, onOpen, onAdd }) {
   )
 }
 
-// ---- Hero de marca (Atelier / Munay-style): no usa productos como banner ----
+// ---- Hero de marca (Atelier): banner principal tiene prioridad; resto = Personalizar → Portada ----
 export function BrandHero({ cfg, banner }) {
   const nav = useNavigate()
-  const img = banner?.imagen_url || ''
+  const tieneMediaBanner = !!(banner?.imagen_url || banner?.imagen_tablet || banner?.imagen_mobile)
+  const fallbackHero = (!tieneMediaBanner && cfg.hero_imagen) ? { imagen_url: cfg.hero_imagen } : null
+  const mediaBanner = tieneMediaBanner ? banner : fallbackHero
   const yt = banner?.tipo === 'youtube' ? ytId(banner.youtube) : ''
-  const title = (banner?.titulo || cfg.titulo_banner || 'Sabiduría de la selva, en cada sorbo.').trim()
-  const sub = (banner?.subtitulo || cfg.subtitulo || cfg.slogan || 'Infusiones y superalimentos de frutos amazónicos, cultivados con respeto por la tierra y las comunidades.').trim()
-  const cta = (banner?.boton_texto || 'Explorar catálogo').trim()
-  const link = (banner?.boton_link || '/tienda').trim()
+  // Banner con media y sin título/subtítulo/botón → solo imagen (sin capa de texto)
+  const soloMedia = !!(tieneMediaBanner && banner && !bannerConTexto(banner))
+  // Si hay banner: solo sus textos (sin rellenar con defaults de Personalizar)
+  const title = soloMedia ? '' : (tieneMediaBanner
+    ? (banner?.titulo || '').trim()
+    : (cfg.titulo_banner || 'Sabiduría de la selva, en cada sorbo.').trim())
+  const sub = soloMedia ? '' : (tieneMediaBanner
+    ? (banner?.subtitulo || '').trim()
+    : (cfg.subtitulo || cfg.slogan || '').trim())
+  const cta = soloMedia ? '' : (tieneMediaBanner
+    ? (banner?.boton_texto || '').trim()
+    : (cfg.hero_cta_texto || 'Explorar catálogo').trim())
+  const link = (banner?.boton_link || cfg.hero_cta_link || '/tienda').trim()
+  const cta2 = (cfg.hero_cta2_texto || 'Nuestra historia').trim()
+  const mostrarCta2 = !soloMedia && !tieneMediaBanner && cfg.hero_mostrar_cta2 !== false
   const tieneNosotros = !!(cfg?.nosotros_texto?.trim() || (Array.isArray(cfg?.nosotros_bloques) && cfg.nosotros_bloques.length))
+  const mostrarCopy = !soloMedia && !!(title || sub || cta)
   return (
-    <section className="brand-hero" aria-label="Portada">
+    <section className={`brand-hero${soloMedia ? ' brand-hero-solo-media' : ''}`} aria-label="Portada" style={soloMedia ? undefined : estiloBanner(banner)}>
       <div className="brand-hero-media">
         {yt
-          ? <iframe className="brand-hero-img" src={`https://www.youtube.com/embed/${yt}?autoplay=1&mute=1&loop=1&playlist=${yt}&controls=0&modestbranding=1&playsinline=1`} title={title} allow="autoplay; encrypted-media" />
-          : (img
-            ? <img className="brand-hero-img" src={img} alt="" />
+          ? <iframe className="brand-hero-img" src={`https://www.youtube.com/embed/${yt}?autoplay=1&mute=1&loop=1&playlist=${yt}&controls=0&modestbranding=1&playsinline=1`} title={title || 'Portada'} allow="autoplay; encrypted-media" />
+          : (mediaBanner
+            ? <BannerPicture b={mediaBanner} className="brand-hero-img" alt="" />
             : <div className="brand-hero-ph" aria-hidden />)}
       </div>
-      <div className="brand-hero-overlay">
-        <div className="brand-hero-copy">
-          <h1 className="serif brand-hero-title">{title}</h1>
-          {sub && <p className="brand-hero-sub">{sub}</p>}
-          <div className="brand-hero-ctas">
-            <button type="button" className="btn btn-selva" onClick={() => irEnlace(nav, link)}>{cta}</button>
-            {tieneNosotros && <Link to="/nosotros" className="btn btn-ghost brand-hero-ghost">Nuestra historia</Link>}
+      {mostrarCopy && (
+        <div className="brand-hero-overlay">
+          <div className="brand-hero-copy">
+            {title ? <h1 className="serif brand-hero-title">{title}</h1> : null}
+            {sub ? <p className="brand-hero-sub">{sub}</p> : null}
+            <div className="brand-hero-ctas">
+              {cta ? <button type="button" className="btn btn-selva" onClick={() => irEnlace(nav, link)}>{cta}</button> : null}
+              {mostrarCta2 && tieneNosotros && cta2 && (
+                <Link to="/nosotros" className="btn btn-ghost brand-hero-ghost">{cta2}</Link>
+              )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </section>
   )
 }
@@ -125,7 +219,9 @@ export function Impacto({ cfg }) {
             <div className="impacto-stat"><strong>{s1n}</strong><span>{s1l}</span></div>
             <div className="impacto-stat"><strong>{s2n}</strong><span>{s2l}</span></div>
           </div>
-          <Link to="/nosotros" className="impacto-link">Conoce más <ChevronRight size={16} /></Link>
+          {(cfg.impacto_link_texto !== '') && (
+            <Link to="/nosotros" className="impacto-link">{(cfg.impacto_link_texto || 'Conoce más').trim()} <ChevronRight size={16} /></Link>
+          )}
         </div>
         {img ? (
           <div className="impacto-media"><img src={img} alt="" /></div>
@@ -153,41 +249,56 @@ export function HeroSlider({ slides, onOpen }) {
   useEffect(() => { if (n <= 1) return; const t = setInterval(() => setI(x => (x + 1) % n), 6000); return () => clearInterval(t) }, [n])
   const go = (d) => setI(x => (x + d + n) % n)
   const s = slides[i]
-  const esBanner = !!s.tipo
+  const esBanner = !!s?.tipo
   const yt = esBanner && s.tipo === 'youtube' ? ytId(s.youtube) : ''
+  const tieneMedia = !!(s?.imagen_url || s?.imagen_tablet || s?.imagen_mobile || yt)
+  // Banner sin título/subtítulo/botón → solo media (sin panel/capa de texto en móvil ni PC)
+  const conTexto = esBanner ? bannerConTexto(s) : true
+  const limpio = esBanner && !conTexto && tieneMedia
 
-  const contenido = esBanner ? (
-    <>
-      {yt
-        ? <iframe className="hero-yt" src={`https://www.youtube.com/embed/${yt}?autoplay=1&mute=1&loop=1&playlist=${yt}&controls=0&modestbranding=1&playsinline=1`} title={s.titulo || 'video'} allow="autoplay; encrypted-media" frameBorder="0" />
-        : (s.imagen_url ? <img className="hero-img" src={s.imagen_url} alt={s.titulo || ''} /> : <div className="hero-emoji"><FrutoIcon name="hoja" size={90} /></div>)}
-      {(s.titulo || s.subtitulo || s.boton_texto) && (
-        <div className="hero-body">
-          {s.titulo && <div className="hero-name serif">{s.titulo}</div>}
-          {s.subtitulo && <div style={{ opacity: 0.9, marginTop: 4 }}>{s.subtitulo}</div>}
-          {s.boton_texto && <span className="hero-cta">{s.boton_texto} →</span>}
-        </div>
-      )}
-    </>
-  ) : (
-    <>
-      {s.imagen_url ? <img className="hero-img" src={s.imagen_url} alt={s.nombre} /> : <div className="hero-emoji"><FrutoIcon name={iconoDe(s.frutos)} size={90} /></div>}
+  const media = esBanner
+    ? (yt
+      ? <iframe className="hero-yt" src={`https://www.youtube.com/embed/${yt}?autoplay=1&mute=1&loop=1&playlist=${yt}&controls=0&modestbranding=1&playsinline=1`} title={s.titulo || 'video'} allow="autoplay; encrypted-media" frameBorder="0" />
+      : (tieneMedia
+        ? <BannerPicture b={s} className="hero-img" alt={s.titulo || ''} />
+        : <div className="hero-emoji"><FrutoIcon name="hoja" size={90} /></div>))
+    : (s.imagen_url
+      ? <img className="hero-img" src={s.imagen_url} alt={s.nombre} />
+      : <div className="hero-emoji"><FrutoIcon name={iconoDe(s.frutos)} size={90} /></div>)
+
+  const panelTexto = esBanner
+    ? (conTexto ? (
+      <div className="hero-body">
+        {s.titulo?.trim() ? <div className="hero-name serif">{s.titulo.trim()}</div> : null}
+        {s.subtitulo?.trim() ? <div className="hero-sub">{s.subtitulo.trim()}</div> : null}
+        {s.boton_texto?.trim() ? <span className="hero-cta">{s.boton_texto.trim()} →</span> : null}
+      </div>
+    ) : null)
+    : (
       <div className="hero-body">
         <div className="hero-cat">{labelCategoria(s.categoria)}</div>
         <div className="hero-name serif">{s.nombre}</div>
         <div className="hero-price">{fCOP(precio(s))}</div>
         <span className="hero-cta">Ver producto →</span>
       </div>
-    </>
-  )
+    )
 
   const onClick = () => { if (esBanner) irEnlace(nav, s.boton_link); else onOpen(s) }
-  // Deslizar en pantallas táctiles para cambiar de slide
   const swipe = useSwipeable({ onSwipedLeft: () => n > 1 && go(1), onSwipedRight: () => n > 1 && go(-1), preventScrollOnSwipe: true, trackTouch: true, trackMouse: false, delta: 30 })
 
   return (
-    <div className="hero" {...swipe} onClick={onClick} style={{ cursor: (esBanner && !s.boton_link) ? 'default' : 'pointer', touchAction: n > 1 ? 'pan-y' : undefined }}>
-      {contenido}
+    <div
+      className={`hero${limpio ? ' hero-limpio' : ''}${conTexto ? ' hero-con-texto' : ''}`}
+      {...swipe}
+      onClick={onClick}
+      style={{
+        cursor: (esBanner && !s.boton_link) ? 'default' : 'pointer',
+        touchAction: n > 1 ? 'pan-y' : undefined,
+        ...(esBanner && conTexto ? (estiloBanner(s) || {}) : {}),
+      }}
+    >
+      {media}
+      {panelTexto}
       {n > 1 && <>
         <button className="hero-nav left" onClick={e => { e.stopPropagation(); go(-1) }} aria-label="Anterior"><ChevronLeft size={22} /></button>
         <button className="hero-nav right" onClick={e => { e.stopPropagation(); go(1) }} aria-label="Siguiente"><ChevronRight size={22} /></button>
@@ -203,20 +314,22 @@ export function BannerSecundario({ b }) {
   const yt = b.tipo === 'youtube' ? ytId(b.youtube) : ''
   const clickable = !!b.boton_link
   const onClick = () => irEnlace(nav, b.boton_link)
-  // Sin textos ni botón: la imagen se muestra a full color, sin oscurecer ni overlay
-  const conTexto = !!(b.titulo || b.subtitulo || b.boton_texto)
+  // Sin título/subtítulo/botón → solo imagen (sin capa de contraste)
+  const conTexto = bannerConTexto(b)
   return (
-    <div className={`bsec ${conTexto ? '' : 'bsec-limpio'}`} onClick={onClick} style={{ cursor: clickable ? 'pointer' : 'default' }}>
+    <div className={`bsec${conTexto ? ' bsec-con-texto' : ' bsec-limpio'}`} onClick={onClick} style={{ cursor: clickable ? 'pointer' : 'default', ...(conTexto ? (estiloBanner(b) || {}) : {}) }}>
       {yt
         ? <iframe className="bsec-media" src={`https://www.youtube.com/embed/${yt}?autoplay=1&mute=1&loop=1&playlist=${yt}&controls=0&modestbranding=1&playsinline=1`} title={b.titulo || 'video'} allow="autoplay; encrypted-media" frameBorder="0" />
-        : (b.imagen_url ? <img className="bsec-media" src={b.imagen_url} alt={b.titulo || ''} /> : <div className="bsec-media bsec-ph" />)}
-      {conTexto && (
+        : ((b.imagen_url || b.imagen_tablet || b.imagen_mobile)
+          ? <BannerPicture b={b} className="bsec-media" alt={b.titulo || ''} />
+          : <div className="bsec-media bsec-ph" />)}
+      {conTexto ? (
         <div className="bsec-overlay">
-          {b.titulo && <div className="bsec-title serif">{b.titulo}</div>}
-          {b.subtitulo && <div className="bsec-sub">{b.subtitulo}</div>}
-          {b.boton_texto && <span className="bsec-btn">{b.boton_texto}</span>}
+          {b.titulo?.trim() ? <div className="bsec-title serif">{b.titulo.trim()}</div> : null}
+          {b.subtitulo?.trim() ? <div className="bsec-sub">{b.subtitulo.trim()}</div> : null}
+          {b.boton_texto?.trim() ? <span className="bsec-btn">{b.boton_texto.trim()}</span> : null}
         </div>
-      )}
+      ) : null}
     </div>
   )
 }

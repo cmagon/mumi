@@ -59,18 +59,21 @@ export default function ImageCropper({
   }
 
   return (
-    <Modal open onClose={onCancel} title={`Recortar imagen (${etiqueta})`}
+    <Modal open onClose={onCancel} title={`Recortar imagen (${etiqueta})`} size="modal-lg" guard={false}
       footer={<>
-        <button className="btn btn-secondary" onClick={() => cropperRef.current?.rotate(90)}><RotateCw size={14} /> Girar</button>
-        <button className="btn btn-secondary" onClick={onCancel}>Cancelar</button>
-        <button className="btn btn-primary" onClick={usar} disabled={procesando}><Check size={14} /> {procesando ? 'Recortando…' : 'Recortar y usar'}</button>
+        <button type="button" className="btn btn-secondary" onClick={() => cropperRef.current?.rotate(90)}><RotateCw size={14} /> Girar</button>
+        <button type="button" className="btn btn-secondary" onClick={onCancel}>Cancelar</button>
+        <button type="button" className="btn btn-primary" onClick={usar} disabled={procesando}><Check size={14} /> {procesando ? 'Recortando…' : 'Recortar y usar'}</button>
       </>}>
       <p style={{ fontSize: '0.82rem', color: 'var(--texto-suave)', marginBottom: 10 }}>
         Arrastra y haz zoom para encuadrar. Se genera{lista.length > 1 ? 'n' : ''} {etiqueta}.
         {lista.length > 1 && <> Versión <strong>web</strong> y <strong>móvil</strong> del mismo recorte.</>}
         {guia > 0 && <> El marco punteado indica lo que se verá en <strong>móvil</strong>: deja ahí lo importante.</>}
       </p>
-      <div className={guia > 0 ? 'crop-guia' : ''} style={{ maxHeight: '60vh', background: '#f0ece2', ...(guia > 0 ? { ['--guia-h']: `${guia}%` } : {}) }}>
+      <div
+        className={`crop-stage${guia > 0 ? ' crop-guia' : ''}`}
+        style={guia > 0 ? { ['--guia-h']: `${guia}%` } : undefined}
+      >
         {src && <img ref={imgRef} src={src} alt="" style={{ maxWidth: '100%', display: 'block' }} />}
       </div>
     </Modal>

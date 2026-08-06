@@ -191,7 +191,8 @@ export default function App() {
         <Route path="/ordenes"     element={<ModRoute modulo="ordenes"><OrdenesProduccion /></ModRoute>} />
         <Route path="/nomina"      element={<ModRoute modulo="nomina"><Nomina /></ModRoute>} />
         <Route path="/clientes"    element={<ModRoute modulo="clientes"><Clientes /></ModRoute>} />
-        <Route path="/catalogo"    element={<ModRoute modulo="catalogo"><Catalogo /></ModRoute>} />
+        <Route path="/catalogo" element={<Navigate to="/catalogo/productos" replace />} />
+        <Route path="/catalogo/:tab" element={<ModRoute modulo="catalogo"><Catalogo /></ModRoute>} />
         <Route path="/galeria"     element={<ModRoute modulo="galeria"><Galeria /></ModRoute>} />
         <Route path="/documentos"  element={<ModRoute modulo="documentos"><Documentos /></ModRoute>} />
         <Route path="/registros"   element={<ModRoute modulo="registros"><Registros /></ModRoute>} />

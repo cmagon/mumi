@@ -140,15 +140,150 @@ export function stockLabel(stock, cfg) {
   return { texto: 'Disponible', tono: 'ok' }
 }
 
-// ---- SEO: título + meta description + Open Graph (cliente; para social real conviene prerender) ----
-export function setSEO({ title, desc, image } = {}) {
-  document.title = title ? `${title} · Mumi Amazonia` : 'Mumi Amazonia — Catálogo'
-  const meta = (sel, attr, key, val) => { let e = document.head.querySelector(sel); if (!e) { e = document.createElement('meta'); e.setAttribute(attr, key); document.head.appendChild(e) } if (val != null) e.setAttribute('content', val) }
-  meta('meta[name="description"]', 'name', 'description', desc || 'Infusiones, galletas y dulces amazónicos.')
-  meta('meta[property="og:title"]', 'property', 'og:title', title || 'Mumi Amazonia')
-  meta('meta[property="og:description"]', 'property', 'og:description', desc || 'Sabores de la selva del Guaviare.')
-  meta('meta[property="og:type"]', 'property', 'og:type', 'website')
-  if (image) meta('meta[property="og:image"]', 'property', 'og:image', image)
+// ---- Favicon (vacío por defecto; se configura en Personalizar → Marca) ----
+export function setFavicon(url) {
+  const href = (url || '').trim()
+  let link = document.head.querySelector('link[rel="icon"][data-mumi-favicon]')
+  if (!href) {
+    if (link) link.remove()
+    return
+  }
+  if (!link) {
+    link = document.createElement('link')
+    link.rel = 'icon'
+    link.setAttribute('data-mumi-favicon', '1')
+    document.head.appendChild(link)
+  }
+  link.href = href
+}
+
+// ---- SEO: título, description, canonical, Open Graph, Twitter, robots, JSON-LD ----
+function upsertMeta(attr, key, val) {
+  if (val == null || val === '') return
+  const sel = attr === 'property' ? `meta[property="${key}"]` : `meta[name="${key}"]`
+  let e = document.head.querySelector(sel)
+  if (!e) { e = document.createElement('meta'); e.setAttribute(attr, key); document.head.appendChild(e) }
+  e.setAttribute('content', val)
+}
+function upsertLink(rel, href) {
+  let e = document.head.querySelector(`link[rel="${rel}"]`)
+  if (!href) { if (e) e.remove(); return }
+  if (!e) { e = document.createElement('link'); e.setAttribute('rel', rel); document.head.appendChild(e) }
+  e.setAttribute('href', href)
+}
+function upsertJsonLd(data) {
+  const id = 'mumi-jsonld'
+  let e = document.getElementById(id)
+  if (!data) { if (e) e.remove(); return }
+  if (!e) { e = document.createElement('script'); e.id = id; e.type = 'application/ld+json'; document.head.appendChild(e) }
+  e.textContent = JSON.stringify(data)
+}
+
+/** @param {{ title?: string, desc?: string, image?: string, url?: string, type?: string, siteName?: string, noindex?: boolean, keywords?: string, verification?: string, jsonLd?: object|object[]|null }} opts */
+export function setSEO({
+  title, desc, image, url, type = 'website', siteName,
+  noindex = false, keywords, verification, jsonLd,
+} = {}) {
+  const marca = (siteName || 'Mumi Amazonia').trim() || 'Mumi Amazonia'
+  const fullTitle = title
+    ? (String(title).includes(marca) ? String(title) : `${title} · ${marca}`)
+    : `${marca} — Catálogo`
+  const description = (desc || 'Productos naturales de la selva del Guaviare. Alimentos, snacks y bebidas amazónicas. Pedidos por WhatsApp en Colombia.').slice(0, 320)
+  const pageUrl = url || (typeof window !== 'undefined' ? window.location.href.split('?')[0].split('#')[0] : '')
+  const img = image || ''
+
+  document.title = fullTitle
+  upsertMeta('name', 'description', description)
+  upsertMeta('name', 'robots', noindex ? 'noindex, nofollow' : 'index, follow, max-image-preview:large')
+  if (keywords) upsertMeta('name', 'keywords', keywords)
+  if (verification) upsertMeta('name', 'google-site-verification', verification)
+
+  upsertLink('canonical', pageUrl)
+
+  upsertMeta('property', 'og:title', fullTitle)
+  upsertMeta('property', 'og:description', description)
+  upsertMeta('property', 'og:type', type || 'website')
+  upsertMeta('property', 'og:site_name', marca)
+  upsertMeta('property', 'og:locale', 'es_CO')
+  if (pageUrl) upsertMeta('property', 'og:url', pageUrl)
+  if (img) upsertMeta('property', 'og:image', img)
+
+  upsertMeta('name', 'twitter:card', img ? 'summary_large_image' : 'summary')
+  upsertMeta('name', 'twitter:title', fullTitle)
+  upsertMeta('name', 'twitter:description', description)
+  if (img) upsertMeta('name', 'twitter:image', img)
+
+  upsertJsonLd(jsonLd || null)
+}
+
+/** JSON-LD Organization + WebSite para la home */
+export function jsonLdSitio(cfg) {
+  const base = baseUrl(cfg)
+  const marca = (cfg?.nombre_tienda || 'Mumi Amazonia').trim()
+  const logo = cfg?.seo_imagen || cfg?.logo_url || undefined
+  const org = {
+    '@type': 'Organization',
+    name: marca,
+    url: base || undefined,
+    logo: logo || undefined,
+    description: cfg?.seo_descripcion || cfg?.slogan || undefined,
+    telephone: cfg?.whatsapp || undefined,
+    address: cfg?.pais ? { '@type': 'PostalAddress', addressCountry: cfg.pais } : undefined,
+  }
+  const site = {
+    '@type': 'WebSite',
+    name: marca,
+    url: base || undefined,
+    description: cfg?.seo_descripcion || undefined,
+    inLanguage: 'es-CO',
+    publisher: { '@type': 'Organization', name: marca },
+    potentialAction: base ? {
+      '@type': 'SearchAction',
+      target: `${base}/tienda?q={search_term_string}`,
+      'query-input': 'required name=search_term_string',
+    } : undefined,
+  }
+  return { '@context': 'https://schema.org', '@graph': [org, site].map(stripUndefined) }
+}
+
+/** JSON-LD Product para ficha */
+export function jsonLdProducto(cfg, p) {
+  if (!p) return null
+  const base = baseUrl(cfg)
+  const url = `${base}${rutaProducto(p)}`
+  const precio = p.precio_oferta > 0 && p.precio_oferta < (p.precio_detal || 0) ? p.precio_oferta : (p.precio_detal || 0)
+  const available = (p.stock ?? 1) > 0 ? 'https://schema.org/InStock' : 'https://schema.org/OutOfStock'
+  return stripUndefined({
+    '@context': 'https://schema.org',
+    '@type': 'Product',
+    name: p.seo_titulo || p.nombre,
+    description: sinHtml(p.seo_desc || p.descripcion).slice(0, 500) || undefined,
+    image: p.imagen_url ? [p.imagen_url] : undefined,
+    url,
+    brand: { '@type': 'Brand', name: cfg?.nombre_tienda || 'Mumi Amazonia' },
+    category: p.categoria || undefined,
+    offers: {
+      '@type': 'Offer',
+      url,
+      priceCurrency: 'COP',
+      price: precio > 0 ? String(precio) : undefined,
+      availability: available,
+      seller: { '@type': 'Organization', name: cfg?.nombre_tienda || 'Mumi Amazonia' },
+    },
+  })
+}
+
+function stripUndefined(obj) {
+  if (Array.isArray(obj)) return obj.map(stripUndefined)
+  if (obj && typeof obj === 'object') {
+    const out = {}
+    for (const [k, v] of Object.entries(obj)) {
+      if (v === undefined || v === null || v === '') continue
+      out[k] = stripUndefined(v)
+    }
+    return out
+  }
+  return obj
 }
 
 // ---- Compartir (Web Share API, fallback: copiar enlace) ----
@@ -195,7 +330,7 @@ export function baseUrl(cfg) {
   if (u) return u
   try { return window.location.origin } catch { return '' }
 }
-export const urlProducto = (cfg, p) => `${baseUrl(cfg)}/producto/${p.id}`
+export const urlProducto = (cfg, p) => `${baseUrl(cfg)}${rutaProducto(p)}`
 
 // Nota breve de disponibilidad por ítem (según stock relativo)
 function notaStock(i, cfg) {

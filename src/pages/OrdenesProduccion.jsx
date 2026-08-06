@@ -4,9 +4,10 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, uploadFile, beginSilentWrites, endSilentWrites } from '../lib/supabase'
 import { startDownload, updateDownload, endDownload, isDownloadCanceled } from '../lib/downloadProgress'
 import { reservarPEPS, liberarReservaLotes, consumirReservaLotes, consumirPEPS, reponerPEPS, estadoLote, crearLoteEntrada, costoPEPS, revertirLotesDeOrden } from '../lib/lotes'
+import { sugerirSiguienteLote, normalizarMetodoLoteo } from '../lib/loteoProducto'
 import { writeOrQueue } from '../lib/offlineQueue'
 import { encolarEfectos, aplicarEfectos, contarEfectos, onEfectosChange, ordenesConEfectosPendientes } from '../lib/efectosPendientes'
-import { puedeVerSeccion } from '../lib/permisos'
+import { puedeVerSeccion, puedeSeccionExplicita } from '../lib/permisos'
 import { getConfig } from '../lib/appConfig'
 import { useReorder } from '../hooks/useReorder'
 import TimeField from '../components/ui/TimeField'
@@ -124,6 +125,10 @@ export default function OrdenesProduccion() {
   // Secciones configurables en Usuarios → Permisos (antes crear/ejecutar miraban solo el rol).
   const puedeCrearOrdenes = puedeVerSeccion(profile?.rol, 'ordenes', 'crear')
   const puedeResultados   = puedeVerSeccion(profile?.rol, 'ordenes', 'resultados')
+  // Opt-in en Usuarios → Permisos: diligenciar OPs que no están asignadas a este usuario.
+  // Admin siempre lo tiene (puedeSeccionExplicita). Operarios sin este flag siguen solo con las suyas.
+  const puedeDiligenciarTodas = puedeSeccionExplicita(profile?.rol, 'ordenes', 'diligenciar_todas')
+  const [abriendoProcesoId, setAbriendoProcesoId] = useState(null)
   const fotoRef = useRef()
   const [filtroLote, setFiltroLote] = useState('')
   const [filtroCategoria, setFiltroCategoria] = useState('')
@@ -143,6 +148,7 @@ export default function OrdenesProduccion() {
   const [prepFechaInicio, setPrepFechaInicio] = useState('')
   // Vida útil configurada en la ficha del producto de la orden en curso (para precargar/sugerir el vencimiento)
   const [prepVidaUtil, setPrepVidaUtil] = useState(null)   // { valor, unidad } | null
+  const [prepMetodoLoteo, setPrepMetodoLoteo] = useState(null) // config de ficha (v150) | null = no sugerir
   const [prepProcesos, setPrepProcesos] = useState([{ nombre: '', inicio: '', fin: '' }])
   const ordProc = useReorder(setPrepProcesos)
   // Modo de tiempos: básico (solo hora inicio/fin) o avanzado (todos los procesos)
@@ -458,23 +464,6 @@ export default function OrdenesProduccion() {
   }
   const fmtVence = (v) => v ? new Date(v + 'T00:00:00').toLocaleDateString('es-CO') : '—'
 
-  // Estructura del lote: NN+AA (consecutivo del año + año a 2 dígitos). Ej: 0126 = lote 01 de 2026.
-  const ultimoLoteOrden = (ordenes.find(o => (o.lote || '').trim()) || {}).lote || ''
-  const anioYY = String(new Date().getFullYear()).slice(2)
-  // Mayor consecutivo del año actual entre los lotes de las órdenes (formato NN+AA).
-  // Se EXCLUYE la orden que se está diligenciando: así, al usar/guardar su propio lote, la
-  // sugerencia no salta al siguiente número (sigue sugiriendo el mismo hasta crear otra orden).
-  const maxSeqAnio = ordenes
-    .filter(o => o.id !== ordenPrep?.id)
-    .map(o => (o.lote || '').trim())
-    .filter(l => /^\d{3,4}$/.test(l) && l.slice(-2) === anioYY)
-    .map(l => parseInt(l.slice(0, -2)))
-    .filter(n => !isNaN(n))
-    .reduce((mx, n) => Math.max(mx, n), 0)
-  const siguienteLoteSugerido = String(maxSeqAnio + 1).padStart(2, '0') + anioYY
-  // Lote por FECHA (ddmmaa) para materias primas / subproductos internos
-  const loteFechaHoy = (() => { const d = new Date(), p2 = (n) => String(n).padStart(2, '0'); return p2(d.getDate()) + p2(d.getMonth() + 1) + String(d.getFullYear()).slice(2) })()
-
   // Numeración visible de órdenes: secuencial (1,2,3…) por orden de creación, con inicio configurable
   const ordenIdsSorted = useMemo(() => [...ordenes].map(o => o.id).sort((a, b) => a - b), [ordenes])
   const opNum = (id) => {
@@ -483,15 +472,6 @@ export default function OrdenesProduccion() {
   }
   // Cantidad con decimales (para saldos en Kg/g; fNum redondea a entero y no sirve para Kg)
   const fCant = (n) => Number(n || 0).toLocaleString('es-CO', { maximumFractionDigits: 3 })
-  // Producto de un lote (para autocompletar el nombre del surtido según el lote combinado)
-  const productoDeLote = (lote) => {
-    const k = String(lote || '').trim().split(/[,;]/)[0].trim()
-    if (!k) return ''
-    const r = prodRecords.find(x => String(x.lote || '').trim() === k)
-    if (r?.producto) return r.producto
-    const o = ordenes.find(x => String(x.lote || '').trim() === k)
-    return o?.producto || ''
-  }
   const autoSurtido = (base, loteMezcla) => { const otro = productoDeLote(loteMezcla); return otro ? componerSurtido(base, otro) : '' }
   // Lote de la caja (rótulo final) = el lote MÁS RECIENTE entre el propio y los combinados.
   // Formato NNAA (numeroaño): los últimos 2 dígitos son el año y el resto el consecutivo.
@@ -590,6 +570,40 @@ export default function OrdenesProduccion() {
     queryFn: async () => { const { data } = await supabase.from('production_records').select('id, orden_id, completado, cantidad, lote, producto, empaque, vence, surtido, producto_surtido, lote_mezcla, cant_subporciones, peso_subporcion'); return data || [] },
   })
   const recordsDeOrden = (id) => prodRecords.filter(r => r.orden_id === id)
+
+  // Producto de un lote (para autocompletar el nombre del surtido según el lote combinado)
+  const productoDeLote = (lote) => {
+    const k = String(lote || '').trim().split(/[,;]/)[0].trim()
+    if (!k) return ''
+    const r = prodRecords.find(x => String(x.lote || '').trim() === k)
+    if (r?.producto) return r.producto
+    const o = ordenes.find(x => String(x.lote || '').trim() === k)
+    return o?.producto || ''
+  }
+
+  // Autosugerencia de lote según metodo_loteo de la ficha (solo si está configurado).
+  // Consecutivo por PRODUCTO (órdenes + registros), excluyendo la orden en curso.
+  const siguienteLoteSugerido = useMemo(() => {
+    const cfg = normalizarMetodoLoteo(prepMetodoLoteo)
+    if (!cfg || !ordenPrep) return null
+    const mismoProducto = (o) => {
+      if (ordenPrep.origen_id && o.origen_id != null) return String(o.origen_id) === String(ordenPrep.origen_id)
+      return (o.producto || '') === (ordenPrep.producto || '')
+    }
+    const lotesOrdenes = ordenes
+      .filter(o => o.id !== ordenPrep.id && mismoProducto(o))
+      .map(o => (o.lote || '').trim())
+      .filter(Boolean)
+    const lotesRecs = prodRecords
+      .filter(r => {
+        if (r.orden_id === ordenPrep.id) return false
+        if (ordenPrep.producto) return (r.producto || '') === ordenPrep.producto
+        return false
+      })
+      .map(r => (r.lote || '').trim())
+      .filter(Boolean)
+    return sugerirSiguienteLote(cfg, [...lotesOrdenes, ...lotesRecs])
+  }, [prepMetodoLoteo, ordenPrep, ordenes, prodRecords])
 
   // ===== RECONCILIACIÓN DE CIERRES OFFLINE =====
   // Una orden cerrada sin conexión guarda sus movimientos de inventario como pendientes. Aquí se
@@ -716,6 +730,7 @@ export default function OrdenesProduccion() {
     setPrepLote(o.lote || ''); setPrepVence(o.vence || '')
     setPrepFechaInicio(o.fecha_inicio || '')
     setPrepVidaUtil(null)
+    setPrepMetodoLoteo(null)
     setPrepModoAvanzado(!!o.modo_avanzado); setPrepHoraInicio(o.inicio || ''); setPrepHoraFin(o.fin || '')
     setPrepDestajo(Array.isArray(o.destajo) ? o.destajo : [])
     // Para recetas (sin ficha) se usan los tiempos guardados; para productos se arman desde la ficha más abajo
@@ -731,10 +746,13 @@ export default function OrdenesProduccion() {
       let prod = null
       {
         const sel = 'bache, peso_unidad, rendimiento, desperdicio, ingredientes, procesos, porciona, peso_subporcion, ficha_url, ficha_nombre, tipo, vida_util_valor, vida_util_unidad'
-        const r1 = await supabase.from('products_costing').select(sel + ', imprimibles, costos_hora, empaca_surtido').eq('id', o.origen_id).single()
-        if (r1.error && /imprimibles|costos_hora|empaca_surtido/i.test(r1.error.message || '')) {
-          const r2 = await supabase.from('products_costing').select(sel).eq('id', o.origen_id).single()
-          prod = r2.data
+        const r1 = await supabase.from('products_costing').select(sel + ', imprimibles, costos_hora, empaca_surtido, metodo_loteo').eq('id', o.origen_id).single()
+        if (r1.error && /imprimibles|costos_hora|empaca_surtido|metodo_loteo/i.test(r1.error.message || '')) {
+          const r2 = await supabase.from('products_costing').select(sel + ', imprimibles, costos_hora, empaca_surtido').eq('id', o.origen_id).single()
+          if (r2.error && /imprimibles|costos_hora|empaca_surtido/i.test(r2.error.message || '')) {
+            const r3 = await supabase.from('products_costing').select(sel).eq('id', o.origen_id).single()
+            prod = r3.data
+          } else prod = r2.data
         } else prod = r1.data
       }
       setPrepImprimibles(parse(prod?.imprimibles))
@@ -746,6 +764,7 @@ export default function OrdenesProduccion() {
           ? o.costos_adicionales_hora
           : parse(prod.costos_hora).map(c => ({ ...c, cantidad: c.cantidad_default || '' })))
         if (prod.vida_util_valor) setPrepVidaUtil({ valor: parseFloat(prod.vida_util_valor), unidad: prod.vida_util_unidad || 'meses' })
+        setPrepMetodoLoteo(normalizarMetodoLoteo(prod.metodo_loteo))
         setPrepPorciona(!!prod.porciona)
         setPrepPesoSubp(o.peso_subporcion || prod.peso_subporcion || '')
         // Subprocesos = ÚNICAMENTE los de la mano de obra de la ficha; se conservan las horas ya guardadas (por nombre)
@@ -889,6 +908,32 @@ export default function OrdenesProduccion() {
     })
   }
 
+  // Une al usuario actual en la lista de quienes diligenciaron el proceso (uno o varios).
+  const mergeDiligenciador = (lista, nombre) => {
+    const n = String(nombre || '').trim()
+    if (!n) return Array.isArray(lista) ? lista : []
+    const prev = Array.isArray(lista) ? lista : []
+    const ahora = new Date().toISOString()
+    const idx = prev.findIndex(x => String(x?.nombre || '').trim() === n)
+    if (idx >= 0) {
+      return prev.map((x, i) => i === idx ? { ...x, nombre: n, ultima_vez: ahora } : x)
+    }
+    return [...prev, { nombre: n, primera_vez: ahora, ultima_vez: ahora }]
+  }
+  const registrarDiligenciador = async (o) => {
+    const nombre = profile?.nombre || ''
+    const next = mergeDiligenciador(o?.diligenciado_por, nombre)
+    if (!o?.id || !nombre) return { ...o, diligenciado_por: next }
+    try {
+      const { error } = await supabase.from('production_orders').update({ diligenciado_por: next }).eq('id', o.id)
+      if (error) {
+        if (/diligenciado_por/i.test(error.message || '')) return o // migración v149 aún no aplicada
+        throw error
+      }
+      return { ...o, diligenciado_por: next }
+    } catch { return { ...o, diligenciado_por: next } }
+  }
+
   // Abre el modal de Iniciar proceso (fecha de inicio + tiempos por subproceso, con autoguardado)
   const openProceso = async (o) => {
     setAutoSavedAt('')
@@ -919,21 +964,47 @@ export default function OrdenesProduccion() {
     await prepararDatos(o); setModalProceso(true)
   }
 
-  // El admin diligencia el proceso de una orden abierta. Si aún está pendiente, la pone en
-  // proceso y reserva la MP (PEPS) antes de abrir el modal; al confirmar se auto-aprueba.
-  const adminDiligenciar = async (o) => {
+  // Abre proceso con feedback visual y anti doble-clic (prepararDatos puede tardar varios segundos).
+  const openProcesoConGuard = async (o) => {
+    if (abriendoProcesoId != null) return
+    setAbriendoProcesoId(o.id)
+    setBusy(true)
     try {
+      const conReg = await registrarDiligenciador(o)
+      await openProceso(conReg)
+    } catch (e) {
+      toast(e?.message || 'No se pudo abrir el proceso', 'error')
+    } finally {
+      setAbriendoProcesoId(null)
+      setBusy(false)
+    }
+  }
+
+  // Diligenciar proceso de una orden NO asignada (admin o rol con permiso diligenciar_todas).
+  // Si aún está pendiente, la pone en proceso y reserva MP antes de abrir el modal.
+  // Al confirmar: admin auto-aprueba; el resto envía a aprobación como cualquier operario.
+  const diligenciarOtra = async (o) => {
+    if (abriendoProcesoId != null) return
+    setAbriendoProcesoId(o.id)
+    setBusy(true)
+    try {
+      let ord = o
       if (o.estado === 'pendiente') {
         const { error } = await supabase.from('production_orders').update({ estado: 'en_proceso' }).eq('id', o.id)
         if (error) throw error
         try { await reservarMP(o) } catch (e) { console.warn('No se pudo reservar MP:', e) }
         qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
-        // Trae la orden FRESCA (con lotes_reservados ya escrito por reservarMP) — si se usa la copia
-        // local vieja, al cerrar la orden consumirMP no encuentra nada que pasar a lotes_mp.
-        try { const { data: fresh } = await supabase.from('production_orders').select('*').eq('id', o.id).single(); if (fresh) o = fresh } catch { o = { ...o, estado: 'en_proceso' } }
+        // Trae la orden FRESCA (con lotes_reservados ya escrito por reservarMP).
+        try { const { data: fresh } = await supabase.from('production_orders').select('*').eq('id', o.id).single(); if (fresh) ord = fresh } catch { ord = { ...o, estado: 'en_proceso' } }
       }
-    } catch (e) { toast(e.message, 'error'); return }
-    await openProceso(o)
+      ord = await registrarDiligenciador(ord)
+      await openProceso(ord)
+    } catch (e) {
+      toast(e?.message || 'No se pudo abrir el proceso', 'error')
+    } finally {
+      setAbriendoProcesoId(null)
+      setBusy(false)
+    }
   }
 
   // Imprimir la orden con los ingredientes — ajustado a UNA sola página
@@ -1845,7 +1916,9 @@ export default function OrdenesProduccion() {
         computed_at: new Date().toISOString(),
         basis: 'costo_produccion_ficha',
       }
-      const r = await writeOrQueue({ table: 'production_orders', action: 'update', match: { id: o.id }, payload: {
+      // Quién(es) diligenciaron: asegura que quien envía quede registrado (uno o varios a lo largo del proceso).
+      const diligenciadoPor = mergeDiligenciador(o.diligenciado_por, profile?.nombre)
+      const payloadCierre = {
         estado: autoAprob ? 'aprobada' : 'ejecutada',
         ...(autoAprob ? { aprobado_por: profile?.nombre || 'admin', fecha_aprob: new Date().toISOString() } : {}),
         cantidad_result: unidadesTotal, lote: prepLote, vence: prepVence || null,
@@ -1862,7 +1935,18 @@ export default function OrdenesProduccion() {
         destajo: prepDestajo.filter(d => d.nombre?.trim() || d.cantidad || d.tarifa),
         costos_adicionales_hora: prepCostosHora.filter(c => c.nombre && Number(c.cantidad) > 0).map(c => ({ ...c, tarifa: Number(c.tarifa) || 0, cantidad: Number(c.cantidad) || 0, total: (Number(c.tarifa) || 0) * (Number(c.cantidad) || 0) })),
         costo_snapshot: costoSnapshot,
-      } })
+        diligenciado_por: diligenciadoPor,
+      }
+      let r
+      try {
+        r = await writeOrQueue({ table: 'production_orders', action: 'update', match: { id: o.id }, payload: payloadCierre })
+      } catch (e) {
+        // Columna v149 opcional: si aún no existe, reintenta sin ella.
+        if (/diligenciado_por/i.test(e?.message || '')) {
+          const { diligenciado_por: _d, ...sinDil } = payloadCierre
+          r = await writeOrQueue({ table: 'production_orders', action: 'update', match: { id: o.id }, payload: sinDil })
+        } else throw e
+      }
       try { await supabase.from('production_orders').update({ campos_extra: prepCamposExtra.filter(c => (c.nombre || '').trim()).map(c => ({ nombre: c.nombre, valor: c.valor || '' })) }).eq('id', o.id) } catch { /* columna opcional */ }
       // (8) Si se empacó surtido con otro(s) lote(s), marca también ESA orden como empacada surtida
       //     con este lote — aunque ya esté cerrada. Solo en línea.
@@ -2007,7 +2091,12 @@ export default function OrdenesProduccion() {
 
   const tomarOrden = useMutation({
     mutationFn: async (o) => {
-      const { error } = await supabase.from('production_orders').update({ estado: 'en_proceso' }).eq('id', o.id); if (error) throw error
+      const diligenciado_por = mergeDiligenciador(o.diligenciado_por, profile?.nombre)
+      const { error } = await supabase.from('production_orders').update({ estado: 'en_proceso', diligenciado_por }).eq('id', o.id)
+      if (error && /diligenciado_por/i.test(error.message || '')) {
+        const { error: e2 } = await supabase.from('production_orders').update({ estado: 'en_proceso' }).eq('id', o.id)
+        if (e2) throw e2
+      } else if (error) throw error
       // Reserva la MP de los lotes (PEPS) al iniciar producción
       try { await reservarMP(o) } catch (e) { console.warn('No se pudo reservar MP:', e) }
     },
@@ -2635,7 +2724,11 @@ export default function OrdenesProduccion() {
   }
 
   // Admin y operario ven todas; el auxiliar solo las que se le asignaron
-  const ordenesPermitidas = (esAdmin || esOperario) ? ordenes : ordenes.filter(o => o.operario === profile?.nombre)
+  // Admin, operario y quien tenga "diligenciar_todas" ven el listado completo;
+  // el resto (p. ej. auxiliar sin ese permiso) solo ve las asignadas a su nombre.
+  const ordenesPermitidas = (esAdmin || esOperario || puedeDiligenciarTodas)
+    ? ordenes
+    : ordenes.filter(o => o.operario === profile?.nombre)
   const categoriasOrdenes = [...new Set(productos.map(p => p.tipo).filter(Boolean))].sort()
   const visibles = ordenesPermitidas.filter(o => {
     if (filtroProductoExacto && o.producto !== filtroProductoExacto && o.producto_surtido !== filtroProductoExacto) return false
@@ -2855,16 +2948,28 @@ export default function OrdenesProduccion() {
                             <button className="btn btn-xs btn-secondary" title="Imprimir orden" aria-label="Imprimir orden" onClick={() => imprimirOrden('print', o)}><Printer size={13} aria-hidden="true" /></button>
                             {esMovil && <button className="btn btn-xs btn-secondary" title="Compartir orden (PDF)" aria-label="Compartir orden (PDF)" onClick={() => compartirOrden(o)}><Share2 size={13} aria-hidden="true" /></button>}
                           </>}
-                          {/* Quien ejecuta la orden: el operario dueño */}
-                          {puedeResultados && esMia && o.estado === 'pendiente' && <button className="btn btn-xs btn-primary" onClick={() => tomarOrden.mutate(o)}><Ico as={Play} size={13} />Tomar</button>}
-                          {/* Los ingredientes se ven en "Detalles" y en el modal de proceso, por eso ya no hay botón aparte */}
-                          {puedeResultados && esMia && (o.estado === 'en_proceso' || o.estado === 'rechazada') && (
-                            <button className="btn btn-xs btn-primary" onClick={() => openProceso(o)}><Ico as={Play} size={13} />Iniciar proceso</button>
+                          {/* Quien ejecuta la orden: el operario asignado */}
+                          {puedeResultados && esMia && o.estado === 'pendiente' && (
+                            <button className="btn btn-xs btn-primary" disabled={tomarOrden.isPending || abriendoProcesoId === o.id}
+                              onClick={() => tomarOrden.mutate(o)}>
+                              <Ico as={Play} size={13} />{tomarOrden.isPending ? 'Tomando…' : 'Tomar'}
+                            </button>
                           )}
-                          {/* (El botón "Imprimir" se quitó de aquí: los ingredientes se ven en Detalles y en el modal de proceso) */}
-                          {/* El admin puede diligenciar el proceso de órdenes de OTROS (en las suyas ya tiene "Iniciar proceso") */}
-                          {esAdmin && puedeResultados && !esMia && (o.estado === 'pendiente' || o.estado === 'en_proceso' || o.estado === 'rechazada') && (
-                            <button className="btn btn-xs btn-primary" title="Diligenciar proceso, cerrar y enviar (se aprueba automáticamente)" onClick={() => adminDiligenciar(o)}><Ico as={Play} size={13} />Diligenciar proceso</button>
+                          {puedeResultados && esMia && (o.estado === 'en_proceso' || o.estado === 'rechazada') && (
+                            <button className="btn btn-xs btn-primary" disabled={abriendoProcesoId === o.id}
+                              onClick={() => openProcesoConGuard(o)}>
+                              <Ico as={Play} size={13} />{abriendoProcesoId === o.id ? 'Abriendo…' : 'Iniciar proceso'}
+                            </button>
+                          )}
+                          {/* Admin o rol con permiso "diligenciar_todas": proceso de órdenes de OTROS */}
+                          {puedeDiligenciarTodas && puedeResultados && !esMia && (o.estado === 'pendiente' || o.estado === 'en_proceso' || o.estado === 'rechazada') && (
+                            <button className="btn btn-xs btn-primary" disabled={abriendoProcesoId === o.id}
+                              title={esAdmin
+                                ? 'Diligenciar proceso de esta orden (al enviar se aprueba automáticamente)'
+                                : 'Diligenciar proceso aunque la orden no esté asignada a ti'}
+                              onClick={() => diligenciarOtra(o)}>
+                              <Ico as={Play} size={13} />{abriendoProcesoId === o.id ? 'Abriendo…' : 'Diligenciar proceso'}
+                            </button>
                           )}
                           {/* Editar la orden mientras esté pendiente (no tomada) */}
                           {puedeCrearOrdenes && o.estado === 'pendiente' && <button className="btn btn-xs btn-secondary" title="Modificar orden" onClick={() => openEditarOrden(o)}><Pencil size={13} aria-hidden="true" />Editar</button>}
@@ -3524,17 +3629,22 @@ export default function OrdenesProduccion() {
                   <button type="button" className="btn btn-xs btn-secondary" disabled={!!prepFechaInicio} onClick={() => setPrepFechaInicio(hoyISO())}>Hoy</button>
                 </div>
               </div>
-              {(() => { const loteSug = ordenPrep?.es_subproducto ? loteFechaHoy : siguienteLoteSugerido; return (
-              <div className="form-group" style={{ margin: 0 }}><label className="form-label">Lote *</label><input className="form-control" value={prepLote} onChange={e => setPrepLote(e.target.value)} placeholder={`Sugerido: ${loteSug}`} />
-                {/* La sugerencia SOLO aparece si el lote está vacío. Si ya se puso un lote, no se sugiere
-                    (evita confusión cuando hay varias órdenes en proceso). */}
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Lote *</label>
+                <input
+                  className="form-control"
+                  value={prepLote}
+                  onChange={e => setPrepLote(e.target.value)}
+                  placeholder={siguienteLoteSugerido ? `Sugerido: ${siguienteLoteSugerido}` : 'Escribe el lote'}
+                />
                 <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 3 }}>
-                  {prepLote.trim() === ''
-                    ? <button type="button" className="btn btn-xs btn-secondary" onClick={() => setPrepLote(loteSug)}>Usar sugerido: {loteSug}</button>
-                    : <span style={{ color: 'var(--selva)' }}>✓ Lote: {prepLote.trim()}</span>}
+                  {prepLote.trim() !== ''
+                    ? <span style={{ color: 'var(--selva)' }}>✓ Lote: {prepLote.trim()}</span>
+                    : siguienteLoteSugerido
+                      ? <button type="button" className="btn btn-xs btn-secondary" onClick={() => setPrepLote(siguienteLoteSugerido)}>Usar sugerido: {siguienteLoteSugerido}</button>
+                      : <span>Sin método de loteo en la ficha — escribe el lote manualmente (Fichas → Parámetros de producción).</span>}
                 </small>
               </div>
-              )})()}
               <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de vencimiento *</label><input type="date" className="form-control" value={prepVence} onChange={e => setPrepVence(e.target.value)} disabled={!prepFechaInicio} />
                 {prepVidaUtil?.valor && <small style={{ display: 'block', color: 'var(--selva)', fontSize: '0.72rem', marginTop: 2 }}>ℹ Según su ficha, este producto tiene {prepVidaUtil.valor} {prepVidaUtil.unidad === 'dias' ? 'día(s)' : 'mes(es)'} de vida útil.</small>}
                 {prepFechaInicio ? <QuickVence opts={venceOpts} onEdit={editarVenceOpts} onPick={setPrepVence} base={prepFechaInicio} disabled={!!prepVence} /> : <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Llena primero la fecha de fabricación.</small>}
@@ -4001,7 +4111,20 @@ export default function OrdenesProduccion() {
                 <D et="Tipo">{o.es_subproducto ? 'Subproducto interno' : 'Producto terminado'}</D>
                 <D et="Cantidad planificada">{fNum(o.cantidad_plan)} {o.unidad}</D>
                 <D et="Cantidad resultante">{o.cantidad_result != null ? fNum(o.cantidad_result) : '—'}</D>
-                <D et="Operario">{o.operario || '—'}</D>
+                <D et="Operario asignado">{o.operario || '—'}</D>
+                {Array.isArray(o.diligenciado_por) && o.diligenciado_por.length > 0 && (
+                  <div style={{ gridColumn: '1 / -1' }}>
+                    <strong style={{ color: 'var(--selva)' }}>Diligenciado por:</strong>{' '}
+                    {o.diligenciado_por.map((p, i) => (
+                      <span key={i} className="badge badge-gris" style={{ marginRight: 6 }} title={p.ultima_vez ? `Última vez: ${new Date(p.ultima_vez).toLocaleString('es-CO')}` : undefined}>
+                        {p?.nombre || '—'}
+                      </span>
+                    ))}
+                    {o.diligenciado_por.length > 1 && (
+                      <small style={{ color: 'var(--texto-suave)' }}> ({o.diligenciado_por.length} personas)</small>
+                    )}
+                  </div>
+                )}
                 <D et="Origen">{o.origen === 'receta' ? 'Receta rápida' : 'Producto / ficha'}</D>
                 <D et="Lote">{o.lote || '—'}</D>
                 <D et="Vencimiento">{o.vence ? fFecha(o.vence) : '—'}</D>

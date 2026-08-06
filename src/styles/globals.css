@@ -1,4 +1,4 @@
-﻿@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Source+Sans+3:wght@300;400;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=Source+Sans+3:wght@300;400;600&display=swap');
 /* Catálogo de Google Fonts seleccionable desde Configuración (texto y títulos) */
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Roboto:wght@400;500;700&family=Open+Sans:wght@400;600;700&family=Lato:wght@400;700&family=Montserrat:wght@400;500;600;700&family=Poppins:wght@400;500;600;700&family=Nunito:wght@400;600;700&family=Raleway:wght@400;600;700&family=Work+Sans:wght@400;500;600&family=DM+Sans:wght@400;500;700&family=Manrope:wght@400;500;700&family=Rubik:wght@400;500;700&family=Quicksand:wght@400;500;600;700&family=Josefin+Sans:wght@400;600&family=Oswald:wght@400;500;600&family=Bebas+Neue&family=Merriweather:wght@400;700&family=Lora:wght@400;600;700&family=PT+Serif:wght@400;700&family=Roboto+Slab:wght@400;600;700&family=Cormorant+Garamond:wght@400;600;700&display=swap');
 
@@ -493,11 +493,22 @@ tr:hover td { background: rgba(26,58,42,0.03); }
 
 /* ==================== MODAL ==================== */
 .modal-overlay {
-  display: none; position: fixed; inset: 0; z-index: 1000;
+  display: none; position: fixed; inset: 0; z-index: 1200;
   background: rgba(0,0,0,0.5);
   align-items: center; justify-content: center; padding: 20px;
 }
 .modal-overlay.active { display: flex; }
+/* Modal flotante (banners): por debajo del overlay normal (recorte, etc.) */
+.modal-float-root {
+  position: fixed;
+  z-index: 1100;
+  left: 16px;
+  top: calc(var(--header-h, 64px) + 12px);
+  width: min(420px, calc(100vw - 32px));
+  max-height: calc(100vh - var(--header-h, 64px) - 24px);
+  pointer-events: none;
+}
+.modal-float-root .modal { pointer-events: auto; width: 100%; max-height: inherit; }
 .modal {
   background: var(--blanco); border-radius: 8px;
   width: min(600px, 100%); max-height: 90vh;
@@ -508,6 +519,12 @@ tr:hover td { background: rgba(26,58,42,0.03); }
   animation: modalIn 0.25s ease;
   position: relative;
 }
+.modal.modal-movable {
+  animation: none;
+  will-change: transform;
+  box-shadow: 0 16px 48px rgba(0,0,0,0.28);
+  border: 1px solid var(--crema-oscuro, #e8e0d4);
+}
 @keyframes modalIn { from { opacity: 0; transform: translateY(-20px) scale(0.97); } to { opacity: 1; transform: none; } }
 .modal-lg { width: min(820px, 100%); }
 .modal-xl { width: min(1000px, 100%); }
@@ -517,7 +534,15 @@ tr:hover td { background: rgba(26,58,42,0.03); }
   display: flex; align-items: center; justify-content: space-between;
   flex-shrink: 0;
 }
-.modal-title { font-family: var(--fuente-titulos, 'Playfair Display'), serif; font-size: 1.2rem; color: var(--selva); }
+.modal-header.modal-header-drag {
+  cursor: grab;
+  gap: 8px;
+  user-select: none;
+  touch-action: none;
+}
+.modal-header.modal-header-drag:active { cursor: grabbing; }
+.modal-drag-grip { color: var(--texto-suave); flex-shrink: 0; }
+.modal-title { font-family: var(--fuente-titulos, 'Playfair Display'), serif; font-size: 1.2rem; color: var(--selva); flex: 1; min-width: 0; }
 .modal-close { background: none; border: none; font-size: 1.4rem; cursor: pointer; color: var(--texto-suave); padding: 4px; }
 .modal-close:hover { color: var(--rojo); }
 .modal-body { padding: 24px; overflow-x: hidden; overflow-y: auto; flex: 1 1 auto; -webkit-overflow-scrolling: touch; }   /* nada se sale horizontalmente; el cuerpo hace scroll vertical */
@@ -533,7 +558,10 @@ tr:hover td { background: rgba(26,58,42,0.03); }
   color: var(--texto-suave); cursor: pointer;
   border-bottom: 2px solid transparent; margin-bottom: -2px;
   white-space: nowrap; transition: var(--transicion);
+  display: inline-flex; align-items: center; gap: 6px;
+  text-decoration: none;
 }
+a.tab-btn { color: var(--texto-suave); }
 .tab-btn:hover { color: var(--selva); }
 .tab-btn.active { color: var(--selva); border-bottom-color: var(--selva); }
 .tab-panel { display: none; }
@@ -1014,31 +1042,129 @@ details.card > .card-acc-body { padding: 20px 24px; }
 
 
 /* ==================== PERSONALIZAR (catálogo) ==================== */
-.pz-layout { display: grid; grid-template-columns: 1fr; gap: 16px; }
-@media (min-width: 1000px) { .pz-layout { grid-template-columns: minmax(320px, 460px) 1fr; align-items: start; } }
-.pz-panel { display: flex; flex-direction: column; gap: 10px; }
-.pz-sec { border: 1px solid var(--borde, #e5e5e5); border-radius: 12px; overflow: hidden; background: #fff; }
+.pz-layout {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  width: 100%;
+  min-width: 0;
+}
+@media (min-width: 1000px) {
+  /* Página split: panel scrollea; preview fijo (sin tapar el acordeón) */
+  .catalogo-page--split {
+    display: flex;
+    flex-direction: column;
+    height: calc(100vh - var(--header-h, 64px) - 32px);
+    max-height: calc(100vh - var(--header-h, 64px) - 32px);
+    overflow: hidden;
+    min-height: 0;
+  }
+  .catalogo-page--split .page-header { flex-shrink: 0; margin-bottom: 12px; }
+  .catalogo-page--split .tabs { flex-shrink: 0; margin-bottom: 12px; }
+  .catalogo-page--split .pz-layout {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+    grid-template-columns: minmax(0, 420px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    align-items: stretch;
+  }
+  /* min-height:0 en hijos de grid: si no, crecen con el contenido y el overflow:hidden del padre los recorta sin scroll */
+  .catalogo-page--split .pz-layout > * {
+    min-width: 0;
+    min-height: 0;
+    max-height: 100%;
+  }
+  .catalogo-page--split .pz-panel {
+    position: relative;
+    z-index: 2;
+    overflow-x: hidden;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    height: 100%;
+    padding-right: 6px;
+    background: var(--crema, #f5f2eb);
+  }
+  .catalogo-page--split .pz-preview {
+    position: relative;
+    top: auto;
+    z-index: 0;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: transparent;
+  }
+  .catalogo-page--split .pz-stage,
+  .catalogo-page--split .pz-frame-empty,
+  .catalogo-page--split .cfg-preview {
+    flex: 1 1 auto;
+    height: auto !important;
+    min-height: 0 !important;
+    max-height: none;
+  }
+  .pz-layout {
+    grid-template-columns: minmax(300px, 420px) minmax(360px, 1fr);
+    align-items: stretch;
+  }
+}
+.pz-panel { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.pz-panel-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  margin: 0 0 4px;
+  padding: 8px 0 10px;
+  background: linear-gradient(to bottom, var(--crema, #f5f2eb) 70%, transparent);
+}
+.pz-sec { border: 1px solid var(--borde, #e5e5e5); border-radius: 12px; overflow: hidden; background: #fff; flex-shrink: 0; }
 .pz-sec-hd { width: 100%; display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; background: none; border: none; cursor: pointer; font-weight: 700; font-size: 0.9rem; color: var(--selva, #1a3a2a); text-align: left; }
 .pz-sec-hd.open { border-bottom: 1px solid var(--borde, #e5e5e5); }
 .pz-sec-body { padding: 14px; }
-/* La vista previa queda fija justo debajo del header de la app */
-.pz-preview { position: sticky; top: calc(var(--header-h, 64px) + 10px); min-width: 0; max-width: 100%; overflow: hidden; }
-.pz-preview-bar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--selva, #1a3a2a); color: #fff; border-radius: 12px 12px 0 0; font-size: 0.82rem; font-weight: 600; }
+.pz-preview {
+  position: sticky;
+  top: calc(var(--header-h, 64px) + 10px);
+  min-width: 0;
+  width: 100%;
+  max-width: 100%;
+  overflow: hidden;
+  align-self: stretch;
+  z-index: 1;
+}
+.pz-preview-bar { display: flex; align-items: center; gap: 12px; padding: 8px 12px; background: var(--selva, #1a3a2a); color: #fff; border-radius: 12px 12px 0 0; font-size: 0.82rem; font-weight: 600; flex-shrink: 0; }
 .pz-preview-bar > span:first-child { flex: 1; }
 .pz-devices { display: inline-flex; gap: 2px; background: rgba(255,255,255,0.14); border-radius: 999px; padding: 2px; }
 .pz-devices button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 24px; padding: 0; border: none; background: none; color: #fff; opacity: 0.7; border-radius: 999px; cursor: pointer; }
 .pz-devices button.on { background: #fff; color: var(--selva, #1a3a2a); opacity: 1; }
-/* Alto ajustado al viewport restando header + barra del preview, para que quepa completo */
 .pz-stage { height: calc(100vh - var(--header-h, 64px) - 96px); min-height: 460px; max-width: 100%; border: 1px solid var(--borde, #e5e5e5); border-top: none; border-radius: 0 0 12px 12px; background: #eceae6; overflow: auto; display: flex; justify-content: center; align-items: flex-start; padding: 0; }
 .pz-stage-desktop .pz-device-frame { max-width: 100%; }
 .pz-stage-tablet, .pz-stage-mobile { padding: 20px 16px; }
-/* Escritorio: el iframe llena el escenario */
 .pz-stage-desktop .pz-device-frame { width: 100%; height: 100%; background: #fff; }
-/* Tablet y móvil: dimensiones fijas (proporción real de dispositivo), el escenario hace scroll */
 .pz-stage-tablet .pz-device-frame { width: 744px; max-width: 100%; height: 1000px; border-radius: 18px; box-shadow: 0 10px 34px rgba(0,0,0,0.22); overflow: hidden; border: 10px solid #1e1e1e; background: #fff; flex-shrink: 0; }
 .pz-stage-mobile .pz-device-frame { width: 375px; height: 760px; border-radius: 34px; box-shadow: 0 10px 34px rgba(0,0,0,0.22); overflow: hidden; border: 10px solid #1e1e1e; background: #fff; flex-shrink: 0; }
 .pz-frame { width: 100%; height: 100%; border: none; background: #fff; display: block; }
 .pz-frame-empty { height: calc(100vh - var(--header-h, 64px) - 96px); min-height: 460px; border: 1px solid var(--borde, #e5e5e5); border-top: none; border-radius: 0 0 12px 12px; display: flex; align-items: center; justify-content: center; text-align: center; padding: 40px; color: var(--texto-suave, #666); }
+
+/* Escenario de recorte: altura acotada para que header + footer del modal siempre quepan */
+.crop-stage {
+  height: min(42vh, 360px);
+  max-height: min(42vh, 360px);
+  overflow: hidden;
+  background: #f0ece2;
+  border-radius: 8px;
+}
+.crop-stage .cropper-container {
+  max-height: min(42vh, 360px) !important;
+}
+.modal.modal-lg.modal-crop,
+.modal.modal-lg:has(.crop-stage) {
+  max-height: min(88vh, 720px);
+  width: min(720px, 100%);
+}
 
 /* Guía del área visible en móvil dentro del recorte (ImageCropper) */
 .crop-guia .cropper-crop-box::after {

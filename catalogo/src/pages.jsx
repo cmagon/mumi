@@ -11,7 +11,7 @@ import 'yet-another-react-lightbox/plugins/thumbnails.css'
 import { supabase } from './supabase'
 import { useStore } from './store'
 import { Card, HeroSlider, BrandHero, Impacto, BannerGrupo, Newsletter, ModalNombre } from './ui'
-import { fCOP, labelCategoria, getFrutos, iconoDe, iconoFruto, labelFruto, stockLabel, imgsDe, imgSrc, textoEnvio, sinTildes, sinHtml, registrarVisita, confirmarPedidoWA, setSEO, compartir, rutaProducto, buscarPorSlug, abrirWA, mensajeSolicitudMayorista, getCliente, setCliente, FAVORITOS, BUSCADOR, videoEmbed, videoThumb, detectRed, formatoRed, paginaPorSlug, postCanvas } from './utils'
+import { fCOP, labelCategoria, getFrutos, iconoDe, iconoFruto, labelFruto, stockLabel, imgsDe, imgSrc, textoEnvio, sinTildes, sinHtml, registrarVisita, confirmarPedidoWA, setSEO, compartir, rutaProducto, buscarPorSlug, abrirWA, mensajeSolicitudMayorista, getCliente, setCliente, FAVORITOS, BUSCADOR, videoEmbed, videoThumb, detectRed, formatoRed, paginaPorSlug, postCanvas, baseUrl, jsonLdSitio, jsonLdProducto } from './utils'
 import FrutoIcon from './FrutoIcon'
 
 // ==================== MIGAS DE PAN ====================
@@ -86,12 +86,20 @@ export function Home() {
   useEffect(() => {
     registrarVisita(null)
     const marca = cfg.nombre_tienda || 'Mumi Amazonia'
+    const path = typeof window !== 'undefined' && window.location.pathname.startsWith('/tienda') ? '/tienda' : '/'
+    const sp = (cfg.seo_paginas || {}).tienda || {}
     setSEO({
-      title: cfg.seo_titulo || '',
-      desc: cfg.seo_descripcion || [marca, cfg.slogan || cfg.subtitulo].filter(Boolean).join(' — '),
+      title: sp.titulo || cfg.seo_titulo || '',
+      desc: sp.desc || cfg.seo_descripcion || [marca, cfg.slogan || cfg.subtitulo].filter(Boolean).join(' — '),
       image: cfg.seo_imagen || cfg.logo_url,
+      url: `${baseUrl(cfg)}${path}`,
+      siteName: marca,
+      keywords: cfg.seo_keywords || '',
+      verification: cfg.seo_verificacion || '',
+      noindex: cfg.seo_indexar === false || !!cfg.mantenimiento_activo,
+      jsonLd: jsonLdSitio(cfg),
     })
-  }, [cfg.seo_titulo, cfg.seo_descripcion, cfg.seo_imagen, cfg.nombre_tienda, cfg.slogan])
+  }, [cfg.seo_titulo, cfg.seo_descripcion, cfg.seo_imagen, cfg.seo_keywords, cfg.seo_verificacion, cfg.seo_indexar, cfg.seo_paginas, cfg.nombre_tienda, cfg.slogan, cfg.subtitulo, cfg.url_publica, cfg.mantenimiento_activo])
 
   const [buscando, setBuscando] = useState(!!q)
   const abrir = (p) => nav(rutaProducto(p))
@@ -125,9 +133,12 @@ export function Home() {
 
   const atelier = (cfg.diseno || 'selva') === 'atelier'
   const cardProps = (p) => ({ p, cfg, n: enCarrito(p.id), onOpen: () => abrir(p), onAdd: () => agregar(p, 1) })
-  const listaCls = atelier ? 'grid' : 'row'
+  // Clásico: scroll (fila) o cuadrícula; Atelier siempre grid
+  const vistaProductos = (cfg.productos_vista || 'scroll') === 'grid' ? 'grid' : 'row'
+  const listaCls = atelier ? 'grid' : vistaProductos
   const frutosLista = getFrutos()
-  const mostrarFrutos = atelier ? frutosLista.length > 0 : (cfg.mostrar_filtro_frutos && frutosLista.length > 0)
+  // Ambos diseños respetan el switch de Personalizar
+  const mostrarFiltroFrutos = !!cfg.mostrar_filtro_frutos && frutosLista.length > 0
   const cosecha = destacados.length ? destacados : (productos || []).slice(0, 6)
 
   const secHead = (eyebrow, titulo, linkTo, linkTxt) => (
@@ -148,11 +159,11 @@ export function Home() {
         : (heroSlides.length > 0 && <HeroSlider slides={heroSlides} onOpen={abrir} />))}
 
       {/* Filtro por frutos: círculos en Atelier, chips en Selva */}
-      {mostrarFrutos && (
+      {mostrarFiltroFrutos && (
         atelier ? (
           <section className="fruto-filter">
             <div className="sec-head sec-head-center">
-              <h2 className="sec-title serif">Explora por ingrediente</h2>
+              <h2 className="sec-title serif">{cfg.frutos_filtro_titulo || 'Explora por ingrediente'}</h2>
             </div>
             <div className="frutos">
               <button type="button" className={`fruto ${!fFruto ? 'on' : ''}`} onClick={() => setFFruto('')}>
@@ -219,7 +230,7 @@ export function Home() {
           {/* Atelier: cosecha destacada primero (como “Los más vendidos” en Munay) */}
           {atelier && cosecha.length > 0 && (
             <section className="sec-cosecha">
-              {secHead('Productos destacados', 'Nuestra cosecha', '/tienda?orden=rel', 'Ver todo')}
+              {secHead(cfg.cosecha_eyebrow || 'Productos destacados', cfg.cosecha_titulo || 'Nuestra cosecha', '/tienda?orden=rel', 'Ver todo')}
               <div className="grid">{cosecha.map(p => <Card key={p.id} {...cardProps(p)} />)}</div>
             </section>
           )}
@@ -275,7 +286,7 @@ export function Home() {
                 // En atelier los círculos ya filtran arriba; el mosaico decorativo se omite para no duplicar
                 return atelier ? null : <Mosaico key={key} s={s} />
               case 'impacto':
-                return atelier ? <Impacto key={key} cfg={cfg} /> : null
+                return (atelier && cfg.impacto_activo !== false) ? <Impacto key={key} cfg={cfg} /> : null
               case 'newsletter':
                 return <Newsletter key={key} />
               default:
@@ -283,8 +294,9 @@ export function Home() {
             }
           })}
 
-          {/* Impacto al final si Atelier y no hay sección impacto en config */}
-          {atelier && !(cfg.secciones || []).some(s => (s.tipo || s.id) === 'impacto' && s.on !== false) && (
+          {/* Impacto al final si Atelier lo tiene activo y no hay sección impacto en el orden */}
+          {atelier && cfg.impacto_activo !== false
+            && !(cfg.secciones || []).some(s => (s.tipo || s.id) === 'impacto') && (
             <Impacto cfg={cfg} />
           )}
         </>
@@ -339,11 +351,25 @@ export function Producto() {
   useEffect(() => {
     setImg(0)
     setCant(1)
-    if (p) {
-      registrarVisita(p.nombre)
-      setSEO({ title: p.seo_titulo || p.nombre, desc: p.seo_desc || sinHtml(p.descripcion).slice(0, 160), image: p.imagen_url })
+    if (!p) {
+      setSEO({ title: 'Producto no encontrado', noindex: true, jsonLd: null, siteName: cfg.nombre_tienda || 'Mumi Amazonia' })
+      return
     }
-  }, [param, p?.nombre])
+    registrarVisita(p.nombre)
+    const marca = cfg.nombre_tienda || 'Mumi Amazonia'
+    setSEO({
+      title: p.seo_titulo || p.nombre,
+      desc: p.seo_desc || sinHtml(p.descripcion).slice(0, 160),
+      image: p.imagen_url || cfg.seo_imagen || cfg.logo_url,
+      url: `${baseUrl(cfg)}${rutaProducto(p)}`,
+      type: 'product',
+      siteName: marca,
+      keywords: cfg.seo_keywords || '',
+      verification: cfg.seo_verificacion || '',
+      noindex: cfg.seo_indexar === false,
+      jsonLd: jsonLdProducto(cfg, p),
+    })
+  }, [param, p?.nombre, p?.id, cfg.nombre_tienda, cfg.url_publica, cfg.seo_imagen, cfg.logo_url, cfg.seo_keywords, cfg.seo_verificacion, cfg.seo_indexar])
 
   useEffect(() => {
     if (!atelier) return
@@ -395,7 +421,7 @@ export function Producto() {
         {/* App bar móvil (Stitch) */}
         <header className={`ficha-top ${hdrScrolled ? 'ficha-top-solid' : ''}`}>
           <button type="button" className="icon-round" onClick={() => nav(-1)} aria-label="Volver"><ArrowLeft size={18} /></button>
-          <h1 className="serif ficha-top-title">Detalle</h1>
+          <div className="serif ficha-top-title">Detalle</div>
           <div className="ficha-top-actions">
             {FAVORITOS && <button type="button" className={`icon-round ${fav ? 'on' : ''}`} onClick={() => toggleFav(p.id)} aria-label="Favorito"><Heart size={18} fill={fav ? 'currentColor' : 'none'} /></button>}
             <button type="button" className="icon-round" onClick={compartirProd} aria-label="Compartir"><Share2 size={18} /></button>
@@ -677,7 +703,15 @@ export function Producto() {
 export function Favoritos() {
   const { productos, favs, cfg, enCarrito, agregar } = useStore()
   const nav = useNavigate()
-  useEffect(() => { setSEO({ title: 'Favoritos' }) }, [])
+  useEffect(() => {
+    setSEO({
+      title: 'Favoritos',
+      url: `${baseUrl(cfg)}/favoritos`,
+      siteName: cfg.nombre_tienda || 'Mumi Amazonia',
+      noindex: true,
+      jsonLd: null,
+    })
+  }, [cfg.nombre_tienda, cfg.url_publica])
   if (productos === null) return <div className="spin" />
   const lista = (productos || []).filter(p => favs.includes(p.id))
   return (
@@ -980,7 +1014,21 @@ function BloquesEditable({ bloques, onChange, nivel = 0, ruta = [], target }) {
 
 export function Nosotros() {
   const { cfg, edicion } = useStore()
-  useEffect(() => { setSEO({ title: 'Nosotros', desc: sinHtml(cfg.nosotros_texto).slice(0, 160) || 'Sabores artesanales de la selva.' }) }, [cfg.nosotros_texto])
+  useEffect(() => {
+    const marca = cfg.nombre_tienda || 'Mumi Amazonia'
+    const sp = (cfg.seo_paginas || {}).nosotros || {}
+    setSEO({
+      title: sp.titulo || 'Nosotros',
+      desc: sp.desc || sinHtml(cfg.nosotros_texto).slice(0, 160) || 'Productos con origen en la selva del Guaviare.',
+      image: cfg.seo_imagen || cfg.logo_url,
+      url: `${baseUrl(cfg)}/nosotros`,
+      siteName: marca,
+      keywords: cfg.seo_keywords || '',
+      verification: cfg.seo_verificacion || '',
+      noindex: cfg.seo_indexar === false,
+      jsonLd: null,
+    })
+  }, [cfg.nosotros_texto, cfg.nombre_tienda, cfg.url_publica, cfg.seo_imagen, cfg.logo_url, cfg.seo_keywords, cfg.seo_verificacion, cfg.seo_indexar, cfg.seo_paginas])
   const editando = edicion?.on && edicion.target === 'nosotros'
   const bloques = Array.isArray(cfg.nosotros_bloques) && cfg.nosotros_bloques.length
     ? cfg.nosotros_bloques
@@ -1000,7 +1048,21 @@ export function Pagina() {
   const { cfg, edicion } = useStore()
   const pag = paginaPorSlug(cfg.paginas, slug)
   const editando = edicion?.on && edicion.target === `pagina:${slug}`
-  useEffect(() => { if (pag) setSEO({ title: pag.titulo }) }, [pag?.titulo])
+  useEffect(() => {
+    if (!pag) return
+    const marca = cfg.nombre_tienda || 'Mumi Amazonia'
+    setSEO({
+      title: pag.seo_titulo || pag.titulo,
+      desc: sinHtml(pag.seo_desc || pag.subtitulo || '').slice(0, 160) || cfg.seo_descripcion || '',
+      image: pag.seo_imagen || cfg.seo_imagen || cfg.logo_url,
+      url: `${baseUrl(cfg)}/p/${encodeURIComponent(pag.slug)}`,
+      siteName: marca,
+      keywords: cfg.seo_keywords || '',
+      verification: cfg.seo_verificacion || '',
+      noindex: cfg.seo_indexar === false,
+      jsonLd: null,
+    })
+  }, [pag?.titulo, pag?.seo_titulo, pag?.slug, pag?.seo_desc, pag?.seo_imagen, pag?.subtitulo, cfg.nombre_tienda, cfg.url_publica, cfg.seo_imagen, cfg.logo_url, cfg.seo_descripcion, cfg.seo_keywords, cfg.seo_verificacion, cfg.seo_indexar])
   if (cfg.paginas == null) return <div className="spin" />
   if (!pag) return <div className="empty">Página no encontrada. <Link to="/tienda" className="sec-link">Volver a la tienda</Link></div>
   return (
@@ -1022,7 +1084,15 @@ export function Mayorista() {
   const [clave, setClave] = useState('')
   const [err, setErr] = useState('')
   const [pidiendo, setPidiendo] = useState(false)   // modal que pide el nombre
-  useEffect(() => { setSEO({ title: 'Acceso mayorista' }) }, [])
+  useEffect(() => {
+    setSEO({
+      title: 'Acceso mayorista',
+      url: `${baseUrl(cfg)}/mayorista`,
+      siteName: cfg.nombre_tienda || 'Mumi Amazonia',
+      noindex: true,
+      jsonLd: null,
+    })
+  }, [cfg.nombre_tienda, cfg.url_publica])
   const entrar = (e) => {
     e?.preventDefault()
     const req = (cfg.mayorista_clave || '').trim()
@@ -1118,7 +1188,21 @@ export function Galeria() {
   const { cfg } = useStore()
   const { albumId } = useParams()
   const nav = useNavigate()
-  useEffect(() => { setSEO({ title: cfg.galeria_titulo || 'Galería' }) }, [cfg.galeria_titulo])
+  useEffect(() => {
+    const marca = cfg.nombre_tienda || 'Mumi Amazonia'
+    const sp = (cfg.seo_paginas || {}).galeria || {}
+    setSEO({
+      title: sp.titulo || cfg.galeria_titulo || 'Galería',
+      desc: sp.desc || cfg.galeria_subtitulo || cfg.seo_descripcion || '',
+      image: cfg.seo_imagen || cfg.logo_url,
+      url: `${baseUrl(cfg)}${typeof window !== 'undefined' ? window.location.pathname : '/galeria'}`,
+      siteName: marca,
+      keywords: cfg.seo_keywords || '',
+      verification: cfg.seo_verificacion || '',
+      noindex: cfg.seo_indexar === false,
+      jsonLd: null,
+    })
+  }, [cfg.galeria_titulo, cfg.galeria_subtitulo, cfg.nombre_tienda, cfg.url_publica, cfg.seo_imagen, cfg.logo_url, cfg.seo_descripcion, cfg.seo_keywords, cfg.seo_verificacion, cfg.seo_indexar, cfg.seo_paginas])
   const albumes = Array.isArray(cfg.galeria_albumes) ? cfg.galeria_albumes.filter(a => (a.items || []).length || a.titulo) : []
   const abierto = albumId ? albumes.find(a => String(a.id) === String(albumId)) : null
   return (
@@ -1142,7 +1226,21 @@ export function Galeria() {
 // ==================== CONTACTO ====================
 export function Contacto() {
   const { cfg } = useStore()
-  useEffect(() => { setSEO({ title: 'Contacto' }) }, [])
+  useEffect(() => {
+    const marca = cfg.nombre_tienda || 'Mumi Amazonia'
+    const sp = (cfg.seo_paginas || {}).contacto || {}
+    setSEO({
+      title: sp.titulo || 'Contacto',
+      desc: sp.desc || `Contacta a ${marca}. Pedidos, mayoristas y alianzas por WhatsApp.`,
+      image: cfg.seo_imagen || cfg.logo_url,
+      url: `${baseUrl(cfg)}/contacto`,
+      siteName: marca,
+      keywords: cfg.seo_keywords || '',
+      verification: cfg.seo_verificacion || '',
+      noindex: cfg.seo_indexar === false,
+      jsonLd: null,
+    })
+  }, [cfg.nombre_tienda, cfg.url_publica, cfg.seo_imagen, cfg.logo_url, cfg.seo_keywords, cfg.seo_verificacion, cfg.seo_indexar, cfg.seo_paginas])
   const [f, setF] = useState({ nombre: '', email: '', telefono: '', mensaje: '' })
   const [ok, setOk] = useState(false)
   const [err, setErr] = useState('')
@@ -1173,6 +1271,32 @@ export function Contacto() {
           </form>}
       {cfg.contacto_mapa && <div className="nos-mapa" style={{ marginTop: 18 }}><iframe src={cfg.contacto_mapa} title="Ubicación" loading="lazy" allowFullScreen referrerPolicy="no-referrer-when-downgrade" /></div>}
       </div>
+      <div className="footer-space" />
+    </div>
+  )
+}
+
+/** 404 real (evita soft-404 indexable al redirigir todo a Home) */
+export function NoEncontrado() {
+  const { cfg } = useStore()
+  const nav = useNavigate()
+  useEffect(() => {
+    const marca = cfg.nombre_tienda || 'Mumi Amazonia'
+    setSEO({
+      title: 'Página no encontrada',
+      desc: 'La página que buscas no existe en el catálogo.',
+      url: typeof window !== 'undefined' ? window.location.href.split('?')[0] : '',
+      siteName: marca,
+      noindex: true,
+      jsonLd: null,
+    })
+  }, [cfg.nombre_tienda])
+  return (
+    <div className="page" style={{ textAlign: 'center', padding: '48px 20px' }}>
+      <div style={{ fontSize: '2.4rem', fontWeight: 800, color: 'var(--selva)', opacity: 0.35 }}>404</div>
+      <h1 className="serif" style={{ fontSize: '1.5rem', color: 'var(--selva)', marginTop: 8 }}>Página no encontrada</h1>
+      <p style={{ color: 'var(--texto-suave)', margin: '10px auto 18px', maxWidth: '36ch' }}>El enlace no existe o ya no está disponible.</p>
+      <button type="button" className="btn btn-selva" style={{ width: 'auto', margin: '0 auto' }} onClick={() => nav('/tienda')}>Ir a la tienda</button>
       <div className="footer-space" />
     </div>
   )

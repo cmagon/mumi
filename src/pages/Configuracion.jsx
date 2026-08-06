@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react'
 import { uploadFile } from '../lib/supabase'
 import { getConfig, saveConfig, aplicarTema, DEFAULT_CFG, PALETAS } from '../lib/appConfig'
 import { useToast } from '../hooks/useToast'
-import { Settings, Building2, Palette, Leaf, Upload, RotateCcw, Save, Trash2 } from 'lucide-react'
+import { Settings, Building2, Palette, Upload, RotateCcw, Save, Trash2 } from 'lucide-react'
 import Select from '../components/ui/Select'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
@@ -70,12 +70,12 @@ export default function Configuracion() {
           <div style={{ flex: '0 0 auto', textAlign: 'center' }}>
             <label className="form-label" style={{ display: 'block' }}>Logo</label>
             <div style={{ width: 120, height: 120, border: '1px dashed var(--crema-oscuro)', borderRadius: 10, display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', background: '#fff', margin: '0 auto 8px' }}>
-              {logoPrev ? <img src={logoPrev} alt="logo" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /> : <Leaf size={38} aria-hidden="true" style={{ opacity: 0.35, color: 'var(--selva)' }} />}
+              {logoPrev ? <img src={logoPrev} alt="logo" style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }} /> : <span style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Sin logo</span>}
             </div>
-            <input id="logo-file" type="file" accept="image/*" style={{ display: 'none' }} onChange={e => { const f = e.target.files[0]; if (f) { setLogoFile(f); setLogoPrev(URL.createObjectURL(f)) } }} />
+            <input id="logo-file" type="file" accept="image/*,.svg,image/svg+xml" style={{ display: 'none' }} onChange={e => { const f = e.target.files[0]; if (f) { setLogoFile(f); setLogoPrev(URL.createObjectURL(f)) } }} />
             <label htmlFor="logo-file" className="btn btn-secondary btn-sm" style={{ cursor: 'pointer' }}><Ico as={Upload} /> Subir logo</label>
             {logoPrev && <button type="button" className="btn btn-xs btn-danger" style={{ marginTop: 6, display: 'inline-flex', width: '100%', justifyContent: 'center' }} onClick={() => { setLogoFile(null); setLogoPrev(''); set('logo_url', '') }}><Ico as={Trash2} size={13} /> Quitar</button>}
-            <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', marginTop: 6, maxWidth: 120 }}>Se usa en el header y las impresiones.</div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', marginTop: 6, maxWidth: 120 }}>PNG, JPG o SVG. Se usa en el header, el catálogo y las impresiones.</div>
           </div>
 
           {/* Nombre + demás datos */}

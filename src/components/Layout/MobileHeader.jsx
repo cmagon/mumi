@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Leaf, Menu, Settings, User, ShieldCheck, LogOut, ChevronDown, Users, RefreshCw } from 'lucide-react'
+import { Menu, Settings, User, ShieldCheck, LogOut, ChevronDown, Users, RefreshCw } from 'lucide-react'
 import NotificationBell from '../NotificationBell'
 import DevUserSwitch from '../DevUserSwitch'
 import ProfileModal from '../ProfileModal'
@@ -32,7 +32,7 @@ export default function MobileHeader({ onMenuClick, onLogout }) {
       <Link to="/dashboard" className="mobile-brand" title="Ir al Tablero Principal" aria-label="Ir al Tablero Principal" style={{ textDecoration: 'none' }}>
         {cfg.logo_url
           ? <img src={cfg.logo_url} alt="logo" style={{ maxWidth: 26, maxHeight: 26, objectFit: 'contain' }} />
-          : <Leaf size={20} aria-hidden="true" />}
+          : null}
         <span>{cfg.empresa || 'Mumi Amazonia'}</span>
       </Link>
 

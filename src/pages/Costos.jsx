@@ -29,6 +29,17 @@ import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSp
 import { descargarFichaExcel } from '../lib/fichaExcel'
 import { getConfig } from '../lib/appConfig'
 import Select from '../components/ui/Select'
+import {
+  FICHAS_LOTEO,
+  normalizarMetodoLoteo,
+  configDesdePartes,
+  agregarParte,
+  quitarParte,
+  actualizarParte,
+  etiquetaParte,
+  ejemploLote,
+  sugerirSiguienteLote,
+} from '../lib/loteoProducto'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const EMPTY_PROD = {
@@ -37,6 +48,8 @@ const EMPTY_PROD = {
   presentacion: 'Unidad', activo: true, mp_id: '',
   vida_util_valor: '', vida_util_unidad: 'meses', descripcion: '',
   empaca_surtido: false,
+  // Método de loteo (v150): null = no autosugerir lote en órdenes
+  metodo_loteo: null,
   // Precio: utilidad objetivo propia de este producto (vacío = usa la global) e impuestos
   // INDIRECTOS que se cobran al cliente sobre el precio (no son costo ni salen de tu utilidad).
   // ICUI se guarda en % (ad valorem); IBUA en pesos por unidad (impuesto específico por 100 ml)
@@ -869,7 +882,7 @@ export default function Costos({ vista = 'productos' }) {
     if (!p) return
     setEditingId(p.id)
     setSelFuente(`prod-${p.id}`)
-    setFormProd({ nombre: p.nombre, tipo: p.tipo, bache: p.bache, baches_mes: p.baches_mes, merma: p.merma, comision: p.comision, precio_mayor: p.precio_mayor, precio_detal: p.precio_detal, presentacion: p.presentacion || 'Unidad', activo: p.activo !== false, mp_id: p.mp_id || '', vida_util_valor: p.vida_util_valor || '', vida_util_unidad: p.vida_util_unidad || 'meses', descripcion: p.descripcion || '', empaca_surtido: !!p.empaca_surtido,
+    setFormProd({ nombre: p.nombre, tipo: p.tipo, bache: p.bache, baches_mes: p.baches_mes, merma: p.merma, comision: p.comision, precio_mayor: p.precio_mayor, precio_detal: p.precio_detal, presentacion: p.presentacion || 'Unidad', activo: p.activo !== false, mp_id: p.mp_id || '', vida_util_valor: p.vida_util_valor || '', vida_util_unidad: p.vida_util_unidad || 'meses', descripcion: p.descripcion || '', empaca_surtido: !!p.empaca_surtido, metodo_loteo: normalizarMetodoLoteo(p.metodo_loteo),
       utilidad_objetivo: p.utilidad_objetivo ?? '', iva_pct: p.iva_pct ?? '', imp_saludable_pct: p.imp_saludable_pct ?? '', ibua_valor: p.ibua_valor ?? '' })
     setCamposExtra(parseJSON(p.campos_personalizados, []))
     setCategorias(parseJSON(p.categorias, []))
@@ -1018,6 +1031,20 @@ export default function Costos({ vista = 'productos' }) {
           equipo_unit: r.equipoUnit || 0,
         }).eq('id', idFicha)
       } catch { /* columnas opcionales: no bloquea el guardado */ }
+      // Método de loteo (v150) — escritura aparte y tolerante.
+      try {
+        const idFicha = editingId || datos._newId
+        if (idFicha) {
+          const { error: eLoteo } = await supabase.from('products_costing')
+            .update({ metodo_loteo: normalizarMetodoLoteo(formProd.metodo_loteo) })
+            .eq('id', idFicha)
+          if (eLoteo && /metodo_loteo/i.test(eLoteo.message || '')) {
+            datos._avisoLoteo = 'No se guardó el método de loteo: aplica la migración v150 en Supabase.'
+          } else if (eLoteo) throw eLoteo
+        }
+      } catch (e) {
+        if (/metodo_loteo/i.test(e?.message || '')) datos._avisoLoteo = 'No se guardó el método de loteo: aplica la migración v150 en Supabase.'
+      }
       // Precio por ficha (utilidad objetivo propia, IVA, impuesto saludable) e imprimibles —
       // escritura aparte y tolerante (columnas v130 opcionales).
       try {
@@ -1114,7 +1141,7 @@ export default function Costos({ vista = 'productos' }) {
         }
       }
       const mpSelf = (cambiosMP || []).find(c => c.esSelf)
-      return { recetasAfectadas, mpSelf, avisoV130: datos._avisoV130 }
+      return { recetasAfectadas, mpSelf, avisoV130: datos._avisoV130, avisoLoteo: datos._avisoLoteo }
     },
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['products_costing'] })
@@ -1124,6 +1151,7 @@ export default function Costos({ vista = 'productos' }) {
       const n = res?.recetasAfectadas?.length || 0
       toast(editingId ? 'Producto actualizado ✓' : 'Producto guardado ✓')
       if (res?.avisoV130) toast('La ficha se guardó, pero el IVA / utilidad objetivo / imprimibles NO: falta correr la migración v130. (' + res.avisoV130 + ')', 'warning')
+      if (res?.avisoLoteo) toast(res.avisoLoteo, 'warning')
       if (res?.mpSelf) toast(`Costo de "${res.mpSelf.nombre}" guardado en Inventario MP: $${fNum(res.mpSelf.nuevo)}/${res.mpSelf.unidad || 'u'}`, 'success')
       if (n > 0) toast(`Precio replicado a ${n} receta(s): ${res.recetasAfectadas.join(', ')}`, 'success')
       closeFicha()
@@ -2034,6 +2062,189 @@ export default function Costos({ vista = 'productos' }) {
                 </label>
                 <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Habilita el campo “Empacó surtido” al diligenciar e imprimir la orden.</small>
               </div>
+            </div>
+
+            {/* Método de loteo — constructor por fichas (click → arma el patrón) */}
+            <div style={{ marginTop:14, paddingTop:12, borderTop:'1px solid var(--crema-oscuro)' }}>
+              <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', marginBottom:6 }}>
+                <Ico as={Tag} size={14} />Método de loteo
+              </div>
+              <p style={{ fontSize:'0.78rem', color:'var(--texto-suave)', margin:'0 0 10px' }}>
+                Arma el lote con las fichas de abajo. Si dejas el campo vacío, en las órdenes <strong>no se autosugiere</strong> lote.
+                Con numeración, el consecutivo sube solo (ej. 0126 → 10026 → 10126).
+              </p>
+
+              {(() => {
+                const cfg = normalizarMetodoLoteo(formProd.metodo_loteo)
+                const partes = cfg?.partes || []
+                const setPartes = (next) => setFormProd(f => ({ ...f, metodo_loteo: configDesdePartes(next) }))
+                const clickFicha = (ficha) => {
+                  // Texto / separador: se agrega la ficha y se edita el valor en el chip
+                  if (ficha.tipo === 'texto') {
+                    setPartes(agregarParte(partes, ficha, 'X'))
+                    return
+                  }
+                  if (ficha.tipo === 'sep') {
+                    setPartes(agregarParte(partes, ficha, ficha.defaultValor || '-'))
+                    return
+                  }
+                  setPartes(agregarParte(partes, ficha))
+                }
+                const ej = cfg ? ejemploLote(cfg) : '—'
+                const sig = cfg && ej !== '—' ? (sugerirSiguienteLote(cfg, [ej]) || '—') : '—'
+
+                return (
+                  <>
+                    <label className="form-label">Plantilla del lote</label>
+                    <div
+                      style={{
+                        minHeight: 48,
+                        padding: '8px 10px',
+                        border: '1.5px solid var(--crema-oscuro)',
+                        borderRadius: 'var(--radio)',
+                        background: 'var(--crema)',
+                        display: 'flex',
+                        flexWrap: 'wrap',
+                        gap: 6,
+                        alignItems: 'center',
+                      }}
+                    >
+                      {partes.length === 0 ? (
+                        <span style={{ color: 'var(--texto-suave)', fontSize: '0.82rem' }}>
+                          Sin método — haz clic en las fichas para armar el lote…
+                        </span>
+                      ) : partes.map((p, i) => (
+                        <span
+                          key={`${p.tipo}-${i}`}
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: 4,
+                            padding: '5px 8px',
+                            borderRadius: 8,
+                            background: 'rgba(45,90,61,0.1)',
+                            border: '1px solid rgba(45,90,61,0.25)',
+                            color: 'var(--selva)',
+                            fontSize: '0.8rem',
+                            fontWeight: 600,
+                          }}
+                        >
+                          {etiquetaParte(p)}
+                          {p.tipo === 'seq' && (
+                            <select
+                              value={String(p.ancho || 2)}
+                              onChange={e => setPartes(actualizarParte(partes, i, { ancho: parseInt(e.target.value, 10) || 2 }))}
+                              title="Ceros a la izquierda"
+                              style={{
+                                marginLeft: 2,
+                                border: 'none',
+                                background: 'transparent',
+                                color: 'var(--selva)',
+                                fontWeight: 700,
+                                fontSize: '0.75rem',
+                                cursor: 'pointer',
+                              }}
+                            >
+                              <option value="1">1 dig</option>
+                              <option value="2">2 dig</option>
+                              <option value="3">3 dig</option>
+                              <option value="4">4 dig</option>
+                            </select>
+                          )}
+                          {(p.tipo === 'texto' || p.tipo === 'sep') && (
+                            <input
+                              value={p.valor || ''}
+                              onChange={e => setPartes(actualizarParte(partes, i, {
+                                valor: p.tipo === 'texto' ? e.target.value.toUpperCase() : e.target.value,
+                              }))}
+                              style={{
+                                width: Math.max(28, (p.valor || '').length * 10 + 16),
+                                border: 'none',
+                                borderBottom: '1px dashed var(--selva)',
+                                background: 'transparent',
+                                color: 'var(--selva)',
+                                fontWeight: 700,
+                                fontSize: '0.78rem',
+                                padding: '0 2px',
+                              }}
+                              maxLength={p.tipo === 'sep' ? 3 : 12}
+                            />
+                          )}
+                          <button
+                            type="button"
+                            onClick={() => setPartes(quitarParte(partes, i))}
+                            title="Quitar"
+                            style={{
+                              border: 'none',
+                              background: 'transparent',
+                              color: 'var(--rojo)',
+                              cursor: 'pointer',
+                              padding: 0,
+                              lineHeight: 1,
+                              fontSize: '0.95rem',
+                            }}
+                          >
+                            ×
+                          </button>
+                        </span>
+                      ))}
+                      {partes.length > 0 && (
+                        <button
+                          type="button"
+                          className="btn btn-xs btn-secondary"
+                          style={{ marginLeft: 'auto' }}
+                          onClick={() => setFormProd(f => ({ ...f, metodo_loteo: null }))}
+                        >
+                          Limpiar
+                        </button>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginTop: 10 }}>
+                      {FICHAS_LOTEO.map(ficha => {
+                        const activa = partes.some(p =>
+                          ficha.grupoAnio
+                            ? (p.tipo === 'aa' || p.tipo === 'aaaa') && p.tipo === ficha.tipo
+                            : p.tipo === ficha.tipo && ficha.unica
+                        )
+                        return (
+                          <button
+                            key={ficha.id}
+                            type="button"
+                            onClick={() => clickFicha(ficha)}
+                            style={{
+                              minWidth: 92,
+                              padding: '10px 12px',
+                              borderRadius: 10,
+                              border: activa
+                                ? '1.5px solid var(--selva)'
+                                : '1.5px solid var(--crema-oscuro)',
+                              background: activa ? 'rgba(124,179,66,0.15)' : 'var(--blanco, #fff)',
+                              cursor: 'pointer',
+                              textAlign: 'left',
+                              boxShadow: '0 1px 2px rgba(0,0,0,0.04)',
+                            }}
+                          >
+                            <div style={{ fontWeight: 700, fontSize: '0.8rem', color: 'var(--selva)' }}>{ficha.label}</div>
+                            <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)', marginTop: 2 }}>{ficha.hint}</div>
+                          </button>
+                        )
+                      })}
+                    </div>
+
+                    {cfg ? (
+                      <div style={{ marginTop: 10, padding: '8px 12px', background: 'rgba(124,179,66,0.08)', borderRadius: 'var(--radio)', fontSize: '0.82rem' }}>
+                        Vista previa: <strong style={{ color: 'var(--selva)', letterSpacing: 0.5 }}>{ej}</strong>
+                        {' · '}Siguiente: <strong>{sig}</strong>
+                      </div>
+                    ) : (
+                      <small style={{ display: 'block', marginTop: 8, color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
+                        Tip: Numeración + Año aa → lotes tipo 0126, 10026, 10126…
+                      </small>
+                    )}
+                  </>
+                )
+              })()}
             </div>
 
             {/* Parámetros de calidad (fisicoquímicos, reológicos, nutricionales...) */}

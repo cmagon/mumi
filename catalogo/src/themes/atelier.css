@@ -56,13 +56,13 @@
   border-bottom: 1px solid color-mix(in srgb, var(--outline) 35%, transparent);
   padding: 14px var(--margin-m);
 }
-.dis-atelier .hdr-title { color: var(--selva); }
-.dis-atelier .hdr-sub { color: color-mix(in srgb, var(--selva) 55%, transparent); }
-.dis-atelier .hdr-nav a { color: var(--selva); opacity: 0.72; }
+.dis-atelier .hdr-title { color: var(--header-fg, var(--selva)); }
+.dis-atelier .hdr-sub { color: var(--header-fg-soft, var(--texto-suave)); }
+.dis-atelier .hdr-nav a { color: var(--header-fg, var(--selva)); opacity: var(--nav-opacity, 1); }
 .dis-atelier .hdr-nav a.on,
 .dis-atelier .hdr-nav a:hover {
   background: color-mix(in srgb, var(--selva) 8%, transparent);
-  color: var(--selva);
+  color: var(--header-fg, var(--selva));
   opacity: 1;
 }
 .dis-atelier .hdr-burger { color: var(--selva); }
@@ -70,9 +70,9 @@
 .dis-atelier .hdr-logo { color: var(--selva); }
 .dis-atelier .menu-panel { background: var(--selva); }
 
-.dis-atelier .aviso-top { background: var(--araza); color: var(--selva); }
-.dis-atelier .mayo-invita,
-.dis-atelier .mayo-banner { background: color-mix(in srgb, var(--selva) 92%, #000); }
+.dis-atelier .aviso-top { background: var(--dorado, var(--araza)); color: var(--on-acento, var(--selva)); }
+.dis-atelier .mayo-invita { background: var(--mayo-invita-bg, color-mix(in srgb, var(--selva) 92%, #000)); }
+.dis-atelier .mayo-banner { background: var(--mayo-banner-bg, color-mix(in srgb, var(--selva) 92%, #000)); }
 .dis-atelier .benefits { background: var(--moss); }
 
 /* ---------- Header tools ---------- */
@@ -94,8 +94,16 @@
   min-height: 68vh;
   max-height: 820px;
   overflow: hidden;
-  background: var(--sand);
+  background: var(--banner-bg, var(--sand));
 }
+.dis-atelier .brand-hero-solo-media {
+  min-height: 42vh;
+}
+.dis-atelier .brand-hero-solo-media .brand-hero-media {
+  position: relative;
+}
+/* Sin textos: no hay overlay / capa de texto */
+.dis-atelier .brand-hero-solo-media .brand-hero-overlay { display: none; }
 .dis-atelier .brand-hero-media,
 .dis-atelier .brand-hero-img,
 .dis-atelier .brand-hero-ph {
@@ -106,10 +114,16 @@
   object-fit: cover;
   border: 0;
 }
+@media (min-width: 701px) and (max-width: 1024px) {
+  .dis-atelier .brand-hero-img[data-tablet="1"] {
+    object-fit: cover;
+    background: color-mix(in srgb, var(--banner-bg, var(--dorado)) 40%, #1a1a1a);
+  }
+}
 .dis-atelier .brand-hero-ph {
   background:
-    radial-gradient(ellipse at 30% 40%, color-mix(in srgb, var(--moss) 45%, transparent), transparent 55%),
-    linear-gradient(135deg, #2a4a38, #1A3A2A 60%, #0f2419);
+    radial-gradient(ellipse at 30% 40%, color-mix(in srgb, var(--banner-bg, var(--dorado)) 55%, transparent), transparent 55%),
+    linear-gradient(135deg, var(--banner-bg, var(--dorado)), var(--banner-bg-medio, var(--selva)) 60%, color-mix(in srgb, var(--banner-bg-medio, var(--selva)) 70%, #000));
 }
 .dis-atelier .brand-hero-overlay {
   position: relative;
@@ -120,9 +134,9 @@
   padding: 40px var(--margin-m) 44px;
   background: linear-gradient(
     to top,
-    rgba(250, 249, 246, 0.96) 8%,
-    rgba(250, 249, 246, 0.55) 42%,
-    rgba(250, 249, 246, 0) 100%
+    var(--banner-overlay-fill, rgba(250, 249, 246, 0.96)) 8%,
+    var(--banner-overlay-soft, rgba(250, 249, 246, 0.55)) 42%,
+    transparent 100%
   );
 }
 .dis-atelier .brand-hero-copy { max-width: 34rem; }
@@ -132,13 +146,14 @@
   line-height: 1.12;
   letter-spacing: -0.02em;
   font-weight: 400;
-  color: var(--selva);
+  color: var(--banner-fg, var(--selva));
 }
 .dis-atelier .brand-hero-sub {
   margin: 0 0 22px;
   font-size: 1.05rem;
   line-height: 1.55;
-  color: var(--texto-suave);
+  color: var(--banner-fg, var(--texto-suave));
+  opacity: 0.88;
   max-width: 38ch;
 }
 .dis-atelier .brand-hero-ctas {
@@ -152,6 +167,10 @@
   border-radius: 999px;
   font-weight: 600;
   letter-spacing: 0.04em;
+}
+.dis-atelier .brand-hero-ctas .btn-selva {
+  background: var(--banner-cta-bg, var(--selva));
+  color: var(--banner-cta-fg, #fff);
 }
 .dis-atelier .brand-hero-ghost {
   background: transparent;
@@ -167,9 +186,9 @@
     padding: 64px var(--margin-d);
     background: linear-gradient(
       to right,
-      rgba(250, 249, 246, 0.94) 26%,
-      rgba(250, 249, 246, 0.35) 55%,
-      rgba(250, 249, 246, 0) 78%
+      var(--banner-overlay-fill, rgba(250, 249, 246, 0.94)) 26%,
+      var(--banner-overlay-soft, rgba(250, 249, 246, 0.35)) 55%,
+      transparent 78%
     );
   }
 }
@@ -230,7 +249,7 @@
   background: #fff;
   font-weight: 600;
 }
-.dis-atelier .chip.on { background: var(--selva); color: #fff; border-color: var(--selva); }
+.dis-atelier .chip.on { background: var(--selva); color: var(--on-primario, #fff); border-color: var(--selva); }
 .dis-atelier .search,
 .dis-atelier .search-toggle,
 .dis-atelier .sortsel {

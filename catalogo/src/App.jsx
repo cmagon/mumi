@@ -2,16 +2,17 @@ import { useEffect, useState } from 'react'
 import { Routes, Route, Link, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { Leaf, Truck, ShieldCheck, MessageCircle, ShoppingCart, ArrowLeft, Plus, Minus, Trash2, Instagram, Facebook, Youtube, Twitter, Music2, Heart, Send, X, Menu } from 'lucide-react'
 import { useStore } from './store'
-import { Home, Producto, Nosotros, Contacto, Favoritos, Mayorista, Pagina, Galeria } from './pages'
-import { fCOP, iconoDe, confirmarPedidoWA, suscribir, abrirWA, FAVORITOS, cargarGoogleFonts, getCliente, setCliente, mensajeSolicitudMayorista, textoEnvio } from './utils'
+import { Home, Producto, Nosotros, Contacto, Favoritos, Mayorista, Pagina, Galeria, NoEncontrado } from './pages'
+import { fCOP, iconoDe, confirmarPedidoWA, suscribir, abrirWA, FAVORITOS, cargarGoogleFonts, getCliente, setCliente, mensajeSolicitudMayorista, textoEnvio, setFavicon } from './utils'
 import { ModalNombre } from './ui'
 import DOMPurify from 'dompurify'
 import FrutoIcon from './FrutoIcon'
-import Logo from './Logo'
 import BenefitIcon from './BenefitIcon'
 import PagoIcon from './PagoIcon'
 
 // ---- Utilidades de color para derivar la paleta de la plantilla ----
+const CREMA = '#F5F0E8'
+const TINTA = '#1a1a1a'
 function hexToRgb(h) {
   let s = (h || '').replace('#', '')
   if (s.length === 3) s = s.split('').map(x => x + x).join('')
@@ -26,31 +27,159 @@ function mezcla(hex, t) {
   const target = t >= 0 ? 255 : 0, k = Math.abs(t)
   return toHex({ r: c.r + (target - c.r) * k, g: c.g + (target - c.g) * k, b: c.b + (target - c.b) * k })
 }
-// Texto legible (claro/oscuro) según luminancia del fondo
-function textoLegible(hex) {
-  const c = hexToRgb(hex); if (!c) return '#ffffff'
-  const lum = (0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b) / 255
-  return lum > 0.6 ? '#1a1a1a' : '#F5F0E8'
+// Luminancia relativa WCAG
+function relLum(hex) {
+  const c = hexToRgb(hex); if (!c) return 0
+  const f = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4) }
+  return 0.2126 * f(c.r) + 0.7152 * f(c.g) + 0.0722 * f(c.b)
+}
+function contraste(a, b) {
+  const L1 = relLum(a), L2 = relLum(b)
+  const hi = Math.max(L1, L2), lo = Math.min(L1, L2)
+  return (hi + 0.05) / (lo + 0.05)
+}
+// Elige tinta clara u oscura según mejor contraste WCAG contra el fondo
+function textoSobre(fondo, claro = CREMA, oscuro = TINTA) {
+  if (!fondo) return claro
+  return contraste(claro, fondo) >= contraste(oscuro, fondo) ? claro : oscuro
+}
+// Ajusta un color hasta contraste mínimo WCAG contra un fondo (AA texto = 4.5)
+function asegurarContraste(color, fondo, min = 4.5) {
+  let c = color || '#C8A94A'
+  const bg = fondo || CREMA
+  const aclarar = relLum(bg) < 0.55
+  for (let i = 0; i < 24 && contraste(c, bg) < min; i++) c = mezcla(c, aclarar ? 0.14 : -0.14)
+  // Si aún no llega (colores muy saturados), fuerza tinta/crema
+  if (contraste(c, bg) < min) c = aclarar ? CREMA : TINTA
+  return c
+}
+/** Tinta de marca para temas claros: el oro/menta crudo casi nunca pasa AA → se oscurece con fuerza. */
+function tintaMarcaClara(acento, ...fondos) {
+  let ink = acento || '#3d4a54'
+  // Primero empuja luminancia baja (oro #b8923f → marrón oscuro legible)
+  for (let i = 0; i < 8 && relLum(ink) > 0.18; i++) ink = mezcla(ink, -0.18)
+  for (const bg of fondos) {
+    if (bg) ink = asegurarContraste(ink, bg, 5.5)
+  }
+  // Preferir contraste alto: si sigue flojo vs el fondo principal, mezcla con negro
+  const bg0 = fondos.find(Boolean) || '#ffffff'
+  if (contraste(ink, bg0) < 7) ink = asegurarContraste(mezcla(ink, -0.35), bg0, 7)
+  return ink
+}
+function colorConAlpha(hex, a) {
+  const c = hexToRgb(hex)
+  if (!c) return hex
+  return `rgba(${c.r},${c.g},${c.b},${a})`
 }
 
-// Genera las variables CSS de la paleta + fuentes a partir de la config de la plantilla
+/**
+ * Sistema de color (UX): 2 marcas + 1 fondo opcional.
+ * Roles: primario (header) · acento (fills/banners) · fondo (página)
+ * En temas claros el acento dorado NO se usa como texto: se deriva una tinta oscura.
+ */
 function paletaVars(cfg) {
   const v = {}
-  const prim = cfg.color_primario, sec = cfg.color_secundario
-  if (prim) {
+  const prim = cfg.color_primario || '#1a3a2a'
+  const sec = cfg.color_secundario || '#C8A94A'
+  const fondoCfg = (cfg.color_fondo || '').trim()
+  const primClaro = relLum(prim) > 0.72
+
+  // Superficie de página: fondo configurado, o primario si es claro, o crema Mumi
+  let surface = fondoCfg || (primClaro ? prim : CREMA)
+  if (relLum(surface) < 0.82) surface = mezcla(surface, 0.55)
+  const surfaceMuted = mezcla(surface, -0.08)
+  const inkBody = asegurarContraste(TINTA, surface, 7)
+  const inkSoft = asegurarContraste('#3d3d32', surface, 4.5)
+
+  v['--crema'] = surface
+  v['--crema-oscuro'] = surfaceMuted
+  v['--texto'] = inkBody
+  v['--texto-suave'] = inkSoft
+
+  if (primClaro) {
+    const barra = mezcla(prim, -0.04)
+    const ink = tintaMarcaClara(sec, '#ffffff', prim, surface, barra)
+    const onInk = textoSobre(ink)
+    v['--header-bg'] = prim
+    v['--barra-bg'] = barra
+    v['--selva'] = ink
+    // Hover más oscuro (nunca aclarar: rompería texto claro sobre botón)
+    v['--selva-medio'] = mezcla(ink, -0.12)
+    v['--on-primario'] = onInk
+    v['--header-fg'] = ink
+    // Subtítulo sólido AA (sin opacity: el oro con alpha falla siempre)
+    v['--header-fg-soft'] = asegurarContraste(mezcla(ink, 0.22), prim, 4.5)
+    v['--barra-fg'] = asegurarContraste(ink, barra, 4.5)
+    v['--nav-opacity'] = '1'
+    v['--hdr-shadow'] = '0 1px 0 rgba(0,0,0,0.08), 0 4px 16px rgba(0,0,0,0.05)'
+  } else {
+    const medio = mezcla(prim, 0.16)
+    const onPrim = textoSobre(prim)
+    v['--header-bg'] = prim
+    v['--barra-bg'] = medio
     v['--selva'] = prim
-    v['--selva-medio'] = mezcla(prim, 0.16)     // socio de degradado (mismo tono, más claro) → sin verde forzado
-    // Texto del header con contraste fuerte contra la plantilla (nombre y slogan)
-    v['--header-fg'] = textoLegible(prim)
-    v['--header-fg-soft'] = textoLegible(prim) === '#1a1a1a' ? 'rgba(26,26,26,0.72)' : 'rgba(245,240,232,0.82)'
-    // Texto de la barra de beneficios (fondo = --selva-medio)
-    v['--barra-fg'] = textoLegible(mezcla(prim, 0.16))
+    v['--selva-medio'] = medio
+    v['--on-primario'] = onPrim
+    v['--header-fg'] = onPrim
+    v['--header-fg-soft'] = onPrim === TINTA ? 'rgba(26,26,26,0.72)' : 'rgba(245,240,232,0.82)'
+    v['--barra-fg'] = textoSobre(medio)
+    v['--nav-opacity'] = '0.85'
+    v['--hdr-shadow'] = '0 2px 14px rgba(0,0,0,0.18)'
   }
-  if (sec) {
-    v['--dorado'] = sec
-    v['--lima'] = mezcla(sec, 0.12)              // el acento vivo deriva del color de la plantilla
-  }
-  // Fuentes (Google Fonts). Si no se configuran, se usan las de la app por defecto.
+
+  // Acento: fills brillantes; textos usan variantes ya contrastadas
+  const marca = v['--selva']
+  const headerBg = v['--header-bg']
+  const barraBg = v['--barra-bg']
+  // Peor caso del gradiente mayo-invita (acento aclarado)
+  const acentoClaro = mezcla(sec, 0.35)
+  const onAcento = contraste(TINTA, sec) >= contraste(CREMA, sec) ? TINTA : CREMA
+  const onAcentoSafe = contraste(onAcento, acentoClaro) >= 4.5
+    ? onAcento
+    : textoSobre(acentoClaro)
+  const bannerMedio = relLum(sec) > 0.55 ? mezcla(sec, -0.28) : mezcla(sec, 0.14)
+  // Lima solo para fills (ribbons); textos de categoría usan --dorado-texto
+  const limaFill = mezcla(sec, 0.08)
+
+  v['--dorado'] = sec
+  v['--lima'] = limaFill
+  v['--on-acento'] = onAcentoSafe
+  v['--on-lima'] = textoSobre(limaFill)
+  v['--dorado-texto'] = primClaro
+    ? marca // en temas claros, el “texto acento” ES la tinta de marca (legible)
+    : asegurarContraste(sec, surface, 4.5)
+  v['--dorado-sobre-oscuro'] = asegurarContraste(sec, marca, 4.5)
+  v['--acento-en-header'] = primClaro
+    ? marca
+    : asegurarContraste(sec, headerBg, 4.5)
+  v['--acento-en-barra'] = asegurarContraste(sec, barraBg, 4.5)
+  v['--banner-bg'] = sec
+  v['--banner-bg-medio'] = bannerMedio
+  v['--banner-fg'] = onAcentoSafe
+
+  // Overrides opcionales por sección (Personalizar → aviso / barra / footer)
+  if (cfg.aviso_color_bg) v['--aviso-bg'] = cfg.aviso_color_bg
+  if (cfg.aviso_color_texto) v['--aviso-fg'] = cfg.aviso_color_texto
+  else if (cfg.aviso_color_bg) v['--aviso-fg'] = textoSobre(cfg.aviso_color_bg)
+  if (cfg.barra_color_bg) v['--barra-custom-bg'] = cfg.barra_color_bg
+  if (cfg.barra_color_texto) v['--barra-custom-fg'] = cfg.barra_color_texto
+  else if (cfg.barra_color_bg) v['--barra-custom-fg'] = textoSobre(cfg.barra_color_bg)
+  if (cfg.footer_color_bg) v['--footer-bg'] = cfg.footer_color_bg
+  if (cfg.footer_color_texto) v['--footer-fg'] = cfg.footer_color_texto
+  else if (cfg.footer_color_bg) v['--footer-fg'] = textoSobre(cfg.footer_color_bg)
+
+  // Barra zona mayorista (invitación + banner activo)
+  if (cfg.mayo_invita_color_bg) v['--mayo-invita-bg'] = cfg.mayo_invita_color_bg
+  if (cfg.mayo_invita_color_texto) v['--mayo-invita-fg'] = cfg.mayo_invita_color_texto
+  else if (cfg.mayo_invita_color_bg) v['--mayo-invita-fg'] = textoSobre(cfg.mayo_invita_color_bg)
+  if (cfg.mayo_invita_color_btn) v['--mayo-invita-btn-bg'] = cfg.mayo_invita_color_btn
+  if (cfg.mayo_invita_color_btn_texto) v['--mayo-invita-btn-fg'] = cfg.mayo_invita_color_btn_texto
+  else if (cfg.mayo_invita_color_btn) v['--mayo-invita-btn-fg'] = textoSobre(cfg.mayo_invita_color_btn)
+  if (cfg.mayo_banner_color_bg) v['--mayo-banner-bg'] = cfg.mayo_banner_color_bg
+  if (cfg.mayo_banner_color_texto) v['--mayo-banner-fg'] = cfg.mayo_banner_color_texto
+  else if (cfg.mayo_banner_color_bg) v['--mayo-banner-fg'] = textoSobre(cfg.mayo_banner_color_bg)
+  if (cfg.mayo_banner_color_acento) v['--mayo-banner-acento'] = cfg.mayo_banner_color_acento
+
   if (cfg.fuente_titulos) v['--fuente-titulos'] = `'${cfg.fuente_titulos}'`
   if (cfg.fuente_subtitulos) v['--fuente-subtitulos'] = `'${cfg.fuente_subtitulos}'`
   if (cfg.fuente_texto) v['--fuente-texto'] = `'${cfg.fuente_texto}'`
@@ -118,13 +247,16 @@ export default function App() {
   const fichaAtelier = esAtelier && /^\/producto\//.test(loc.pathname)
   useBodyLock(menu)
   useEffect(() => { cargarGoogleFonts([cfg.fuente_titulos, cfg.fuente_subtitulos, cfg.fuente_texto]) }, [cfg.fuente_titulos, cfg.fuente_subtitulos, cfg.fuente_texto])
+  useEffect(() => { setFavicon(cfg.favicon_url) }, [cfg.favicon_url])
 
   // Modo mantenimiento: el catálogo se oculta y se muestra un aviso
+  const vistaProductos = (cfg.productos_vista || 'scroll') === 'grid' ? 'grid' : 'scroll'
+
   if (cfg.mantenimiento_activo) {
     return (
-      <div className={`wrap dis-${cfg.diseno || 'selva'}`} style={estilo}>
+      <div className={`wrap dis-${cfg.diseno || 'selva'}`} style={estilo} data-productos-vista={vistaProductos}>
         <div className="mantenimiento">
-          {cfg.logo_url ? <img src={cfg.logo_url} alt="" style={{ width: 84, height: 84, borderRadius: 16, objectFit: 'cover' }} /> : <Logo size={72} style={{ color: 'var(--dorado)' }} />}
+          {cfg.logo_url ? <img src={cfg.logo_url} alt="" style={{ width: 84, height: 84, borderRadius: 16, objectFit: 'contain' }} /> : null}
           <h1 className="serif" style={{ fontSize: '1.7rem', color: 'var(--selva)', marginTop: 12 }}>{marca}</h1>
           <p style={{ color: 'var(--texto-suave)', marginTop: 8, maxWidth: '38ch' }}>
             {cfg.mantenimiento_mensaje || 'Estamos haciendo mejoras en la tienda. Volvemos muy pronto 🌿'}
@@ -136,7 +268,7 @@ export default function App() {
   }
 
   return (
-    <div className={`wrap dis-${cfg.diseno || 'selva'}${fichaAtelier ? ' wrap-ficha-atelier' : ''}`} style={estilo}>
+    <div className={`wrap dis-${cfg.diseno || 'selva'}${fichaAtelier ? ' wrap-ficha-atelier' : ''}`} style={estilo} data-productos-vista={vistaProductos}>
       <ScrollToTop />
       {!fichaAtelier && <AvisoSuperior cfg={cfg} />}
       {/* Header clásico — en ficha Atelier se oculta (Stitch trae su propio chrome) */}
@@ -146,7 +278,7 @@ export default function App() {
             <Link to="/tienda" className="hdr-link">
               {cfg.logo_url
                 ? <img className="hdr-logo hdr-logo-img" src={cfg.logo_url} alt={marca || 'Logo'} />
-                : <Logo className="hdr-logo" style={{ color: 'var(--dorado)' }} />}
+                : null}
               <div className="hdr-textos" style={{ minWidth: 0 }}>{marca && <div className="hdr-title serif">{marca}</div>}{slogan && <div className="hdr-sub">{slogan}</div>}</div>
             </Link>
             <nav className="hdr-nav">
@@ -224,7 +356,7 @@ export default function App() {
         <Route path="/p/:slug" element={<Pagina />} />
         <Route path="/galeria" element={<Galeria />} />
         <Route path="/galeria/:albumId" element={<Galeria />} />
-        <Route path="*" element={<Home />} />
+        <Route path="*" element={<NoEncontrado />} />
       </Routes>
 
       <Footer cfg={cfg} onSolicitar={() => setPedirNombre(true)} onTerminos={() => setVerTerminos(true)} />
@@ -254,11 +386,12 @@ function InvitacionMayorista({ cfg, onSolicitar }) {
   const [oculto, setOculto] = useState(() => { try { return sessionStorage.getItem('mumi_mayo_hide') === '1' } catch { return false } })
   if (oculto) return null
   const cerrar = () => { setOculto(true); try { sessionStorage.setItem('mumi_mayo_hide', '1') } catch { /* noop */ } }
+  const tam = ['sm', 'md', 'lg'].includes(cfg.mayo_invita_tamano) ? cfg.mayo_invita_tamano : 'md'
   return (
-    <div className="mayo-invita">
+    <div className={`mayo-invita mayo-${tam}`}>
       <span className="mayo-invita-txt">{cfg.mayorista_mensaje || '¿Eres mayorista? Accede a precios especiales por volumen.'}</span>
-      <button className="mayo-invita-btn" onClick={onSolicitar}><MessageCircle size={14} /> Quiero ser mayorista</button>
-      <button className="mayo-invita-x" onClick={cerrar} aria-label="Cerrar"><X size={16} /></button>
+      <button type="button" className="mayo-invita-btn" onClick={onSolicitar}><MessageCircle size={14} /> Quiero ser mayorista</button>
+      <button type="button" className="mayo-invita-x" onClick={cerrar} aria-label="Cerrar"><X size={16} /></button>
     </div>
   )
 }
