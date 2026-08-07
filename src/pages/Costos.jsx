@@ -3494,6 +3494,7 @@ export default function Costos({ vista = 'productos' }) {
                 const codigo = opCodigo(c.ordenId)
                 const f = c.ficha || {}
                 const o = c.ordenU || {}
+                const fichaTotalU = Number(f.total || c.costoFicha || fichaCosto) || 0
                 const filas = [
                   { key: 'mp', label: 'Materias primas', ficha: f.mp, orden: o.mp, hint: 'Si sube: ingredientes de más o precios PEPS distintos' },
                   { key: 'emp', label: 'Empaque', ficha: f.emp, orden: o.emp, hint: 'Tarifa de ficha × unidades obtenidas' },
@@ -3504,15 +3505,27 @@ export default function Costos({ vista = 'productos' }) {
                   { key: 'destajo', label: 'Destajo (extra orden)', ficha: 0, orden: o.destajo, hint: 'Solo aparece en la orden' },
                   { key: 'tiempo', label: 'Costos por hora/día', ficha: f.tiempo, orden: o.tiempo, hint: 'Ficha: cantidad sugerida × tarifa; orden: cantidad real diligenciada' },
                 ].filter(row => (Number(row.ficha) || 0) > 0 || (Number(row.orden) || 0) > 0 || ['mp', 'mo'].includes(row.key))
+                // % = cuánto mueve este concepto el costo/u respecto al TOTAL de la ficha
+                // (antes era % sobre la misma línea → MO $50→$500 salía +900% y se veía “raro”).
                 const fmtDiff = (fichaV, ordenV) => {
-                  const d = (Number(ordenV) || 0) - (Number(fichaV) || 0)
-                  const pct = (Number(fichaV) || 0) > 0 ? (d / Number(fichaV)) * 100 : ((Number(ordenV) || 0) > 0 ? 100 : 0)
-                  return { d, pct }
+                  const fv = Number(fichaV) || 0
+                  const ov = Number(ordenV) || 0
+                  const d = ov - fv
+                  const pct = fichaTotalU > 0 ? (d / fichaTotalU) * 100 : (ov > 0 ? 100 : 0)
+                  return { d, pct, fv, ov }
+                }
+                const fmtPct = (pct, { nuevo = false } = {}) => {
+                  if (nuevo) return 'nuevo'
+                  if (!Number.isFinite(pct) || Math.abs(pct) < 0.05) return '—'
+                  const sign = pct >= 0 ? '+' : ''
+                  if (Math.abs(pct) >= 999) return `${sign}>999%`
+                  return `${sign}${pct.toFixed(1)}%`
                 }
                 const plan = Number(c.cantidadPlan) || 0
                 const obtuvo = Number(c.cantidad) || 0
                 const diffUnd = obtuvo - plan
                 const pctUnd = plan > 0 ? (diffUnd / plan) * 100 : null
+                const desvTotal = Number.isFinite(c.desviacion) ? c.desviacion : 0
                 return (
                   <div key={c.ordenId} className={`detalle-costo-orden ${resalta ? 'foco' : ''} ${alarma ? 'alarma' : ''}`}>
                     <div className="detalle-costo-orden-head">
@@ -3521,9 +3534,10 @@ export default function Costos({ vista = 'productos' }) {
                         <small> · {c.fecha ? fFecha(String(c.fecha).slice(0, 10)) : 'sin fecha'}</small>
                       </div>
                       <div style={{ textAlign:'right' }}>
-                        <div style={{ fontWeight:700, color: alarma ? (c.desviacion > 0 ? 'var(--rojo)' : 'var(--tierra)') : 'var(--selva)' }}>{fCOP(c.costo)}/u</div>
-                        <small style={{ color: c.desviacion > 10 ? 'var(--rojo)' : c.desviacion < -10 ? 'var(--tierra)' : 'var(--texto-suave)' }}>
-                          {c.desviacion >= 0 ? '+' : ''}{c.desviacion.toFixed(1)}% vs ficha ({fCOP(c.costoFicha || fichaCosto)}/u)
+                        <div style={{ fontWeight:700, color: alarma ? (desvTotal > 0 ? 'var(--rojo)' : 'var(--tierra)') : 'var(--selva)' }}>{fCOP(c.costo)}/u</div>
+                        <small style={{ color: desvTotal > 10 ? 'var(--rojo)' : desvTotal < -10 ? 'var(--tierra)' : 'var(--texto-suave)' }}>
+                          {!Number.isFinite(desvTotal) ? '—'
+                            : `${desvTotal >= 0 ? '+' : ''}${desvTotal.toFixed(1)}%`} vs ficha ({fCOP(c.costoFicha || fichaCosto)}/u)
                         </small>
                       </div>
                     </div>
@@ -3553,7 +3567,7 @@ export default function Costos({ vista = 'productos' }) {
                                 : 'var(--selva)',
                         }}>
                           {plan <= 0 ? '—' : `${diffUnd > 0 ? '+' : ''}${fNum(diffUnd)} und`}
-                          {pctUnd != null ? ` (${pctUnd >= 0 ? '+' : ''}${pctUnd.toFixed(1)}%)` : ''}
+                          {pctUnd != null ? ` (${fmtPct(pctUnd)})` : ''}
                         </div>
                         <small style={{ color:'var(--texto-suave)' }}>
                           {plan <= 0 ? 'Sin plan en la orden'
@@ -3571,13 +3585,14 @@ export default function Costos({ vista = 'productos' }) {
                             <th className="td-number">Ficha /u</th>
                             <th className="td-number">{codigo} /u</th>
                             <th className="td-number">Diferencia</th>
-                            <th className="td-number">%</th>
+                            <th className="td-number" title="Cuánto aporta este concepto a la variación del costo total de la ficha. La suma de las filas ≈ % del total.">% Δ total</th>
                           </tr>
                         </thead>
                         <tbody>
                           {filas.map(row => {
-                            const { d, pct } = fmtDiff(row.ficha, row.orden)
-                            const marca = Math.abs(pct) > 10 || (Math.abs(d) > 0 && !(Number(row.ficha) > 0) && (Number(row.orden) > 0))
+                            const { d, pct, fv, ov } = fmtDiff(row.ficha, row.orden)
+                            const esNuevo = !(fv > 0) && ov > 0
+                            const marca = Math.abs(pct) > 10 || esNuevo
                             return (
                               <tr key={row.key} className={marca ? 'fila-variacion' : undefined} title={row.hint || ''}>
                                 <td>
@@ -3586,35 +3601,38 @@ export default function Costos({ vista = 'productos' }) {
                                     <small style={{ display:'block', color:'var(--texto-suave)' }}>{row.hint}</small>
                                   )}
                                 </td>
-                                <td className="td-number">{(Number(row.ficha) || 0) > 0 || row.key === 'mp' || row.key === 'emp' || row.key === 'mo' ? fCOP(row.ficha || 0) : '—'}</td>
-                                <td className="td-number">{fCOP(row.orden || 0)}</td>
+                                <td className="td-number">{fv > 0 || row.key === 'mp' || row.key === 'emp' || row.key === 'mo' ? fCOP(fv) : '—'}</td>
+                                <td className="td-number">{fCOP(ov)}</td>
                                 <td className="td-number" style={{ color: d > 0.5 ? 'var(--rojo)' : d < -0.5 ? 'var(--tierra)' : undefined }}>
-                                  {d === 0 ? '—' : `${d > 0 ? '+' : ''}${fCOP(d)}`}
+                                  {Math.abs(d) < 0.5 ? '—' : `${d > 0 ? '+' : ''}${fCOP(d)}`}
                                 </td>
                                 <td className="td-number" style={{ color: pct > 10 ? 'var(--rojo)' : pct < -10 ? 'var(--tierra)' : 'var(--texto-suave)' }}>
-                                  {!(Number(row.ficha) > 0) && (Number(row.orden) || 0) > 0 ? 'nuevo' : (Math.abs(pct) < 0.05 ? '—' : `${pct >= 0 ? '+' : ''}${pct.toFixed(1)}%`)}
+                                  {fmtPct(pct, { nuevo: esNuevo })}
                                 </td>
                               </tr>
                             )
                           })}
                           {(() => {
-                            const { d, pct } = fmtDiff(f.total || c.costoFicha || fichaCosto, o.total || c.costo)
+                            const { d, pct } = fmtDiff(fichaTotalU, o.total || c.costo)
                             return (
                               <tr className="fila-total-comparativa">
                                 <td>= Costo de producción /u</td>
-                                <td className="td-number">{fCOP(f.total || c.costoFicha || fichaCosto)}</td>
+                                <td className="td-number">{fCOP(fichaTotalU)}</td>
                                 <td className="td-number">{fCOP(o.total || c.costo)}</td>
                                 <td className="td-number" style={{ color: d > 0 ? 'var(--rojo)' : d < 0 ? 'var(--tierra)' : undefined }}>
-                                  {d === 0 ? '—' : `${d > 0 ? '+' : ''}${fCOP(d)}`}
+                                  {Math.abs(d) < 0.5 ? '—' : `${d > 0 ? '+' : ''}${fCOP(d)}`}
                                 </td>
                                 <td className="td-number" style={{ fontWeight:700, color: pct > 10 ? 'var(--rojo)' : pct < -10 ? 'var(--tierra)' : 'var(--selva)' }}>
-                                  {pct >= 0 ? '+' : ''}{pct.toFixed(1)}%
+                                  {fmtPct(pct)}
                                 </td>
                               </tr>
                             )
                           })()}
                         </tbody>
                       </table>
+                      <small style={{ display:'block', marginTop:4, color:'var(--texto-suave)', fontSize:'0.72rem' }}>
+                        “% Δ total” = (diferencia del concepto) ÷ (costo ficha/u). Así las filas suman ≈ la variación del encabezado.
+                      </small>
                     </div>
                     <small style={{ display:'block', marginTop:6, color:'var(--texto-suave)', fontSize:'0.75rem' }}>
                       Totales de la orden: MP {fCOP(c.mpTotal)} · Empaque {fCOP(c.empTotal || 0)} · MO/CIF {fCOP(c.moTotal || 0)}
