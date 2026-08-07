@@ -164,6 +164,7 @@ export default function Costos({ vista = 'productos' }) {
   const [detalleCosto, setDetalleCosto] = useState(null) // { producto, items: [...], foco?: ordenId }
   const cerrarDetalleCostoRaw = useCallback(() => setDetalleCosto(null), [])
   const closeDetalleCosto = useHistoryLayer(!!detalleCosto, cerrarDetalleCostoRaw, 'detalle-costo')
+  const [modalEquipos, setModalEquipos] = useState(false)
   // ---- Queries ----
   // Dueña de la clave ['raw_materials']: tabla completa ordenada por nombre. Las pantallas
   // que solo necesitan unas columnas usan sub-claves (['raw_materials','receta'], etc.).
@@ -409,10 +410,18 @@ export default function Costos({ vista = 'productos' }) {
     qc.invalidateQueries({ queryKey: ['product_types'] }); toast('Tipo eliminado')
   }
   const limpiarEquipoForm = () => setEquipoForm({ id:null, nombre:'', descripcion:'', valor_adquisicion:'', valor_residual:'', vida_util_anos:5, allocation_mode:'general', rate_basis:'hora', capacidad_mes:176, grupo:'cif', categorias:[] })
-  const editarEquipo = (e) => setEquipoForm({
-    ...e,
-    categorias: equipoLinks.filter(l => String(l.equipment_id) === String(e.id)).map(l => l.categoria),
-  })
+  const cerrarModalEquiposRaw = useCallback(() => {
+    setModalEquipos(false)
+    setEquipoForm({ id:null, nombre:'', descripcion:'', valor_adquisicion:'', valor_residual:'', vida_util_anos:5, allocation_mode:'general', rate_basis:'hora', capacidad_mes:176, grupo:'cif', categorias:[] })
+  }, [])
+  const closeModalEquipos = useHistoryLayer(!!modalEquipos, cerrarModalEquiposRaw, 'equipos-depreciacion')
+  const editarEquipo = (e) => {
+    setEquipoForm({
+      ...e,
+      categorias: equipoLinks.filter(l => String(l.equipment_id) === String(e.id)).map(l => l.categoria),
+    })
+    setModalEquipos(true)
+  }
   const guardarEquipo = async () => {
     if (!equipoForm.nombre.trim()) { toast('Escribe el nombre del equipo', 'warning'); return }
     const payload = {
@@ -535,9 +544,15 @@ export default function Costos({ vista = 'productos' }) {
   // Se declara antes de los cálculos que lo usan (punto de equilibrio y precio sugerido).
   const gastosFijosOper = gastosOp.administracion.total + gastosOp.ventas.total + gastosOp.financiero.total
 
-  // Punto de equilibrio multiproducto (CF / MCPT × participación) sobre el portafolio activo
+  // Solo fichas realmente vendibles: no entran MP ni subproductos internos (uso en planta).
+  const esProductoVendible = (p) => {
+    const t = String(p?.tipo || '').toLowerCase()
+    return t !== 'mp' && t !== 'subproducto'
+  }
+
+  // Punto de equilibrio multiproducto (CF / MCPT × participación) sobre el portafolio vendible activo
   const peqMultiproducto = useMemo(() => {
-    const items = productosActivos.map(p => ({
+    const items = productosActivos.filter(esProductoVendible).map(p => ({
       nombre: p.nombre, precio_mayor: parseFloat(p.precio_mayor) || 0,
       // Margen de contribución = precio − costo VARIABLE (MP + empaque). Usar el costo total
       // (que ya incluye los fijos repartidos) descontaría los costos fijos dos veces y
@@ -2404,7 +2419,7 @@ export default function Costos({ vista = 'productos' }) {
                 <small style={{ color:'var(--texto-suave)', display:'block', marginBottom:8 }}>Costos extra exclusivos de esta ficha. Suman al <strong>costo final por unidad</strong> según su base.</small>
                 <div className="alert alert-warning" style={{ fontSize:'0.8rem' }}>
                   ⚠ <strong>Úsalo solo para valores exclusivos de este producto.</strong> La depreciación y asignación de máquinas
-                  se configura centralmente en <strong>Costos y Gastos → Depreciación y uso de equipos</strong>, para evitar contarla dos veces.
+                  se configura centralmente en <strong>Costos y Gastos → Agregar depreciación</strong>, para evitar contarla dos veces.
                 </div>
                 {adicionales.map((a, i) => {
                   const updA = (campos) => setAdicionales(arr => arr.map((x,idx) => idx===i ? { ...x, ...campos } : x))
@@ -3075,65 +3090,6 @@ export default function Costos({ vista = 'productos' }) {
             <button className={`tab-btn ${costosSubtab === 'analisis' ? 'active' : ''}`} onClick={() => setCostosSubtab('analisis')}>Análisis</button>
           </div>
 
-          {costosSubtab === 'costos' && <div className="card">
-            <div className="card-title"><Ico as={Wrench} size={15} />Depreciación y uso de equipos</div>
-            <div className="alert alert-info" style={{ fontSize:'0.8rem' }}>
-              La depreciación se calcula por línea recta: <strong>(valor − residual) ÷ vida útil ÷ 12</strong>.
-              El método general entra al CIF mensual; por categoría se asigna según las horas o días del proceso de cada ficha.
-            </div>
-            <div className="form-grid-4" style={{ alignItems:'end' }}>
-              <div className="form-group"><label className="form-label">Equipo *</label><input className="form-control" value={equipoForm.nombre} onChange={e => setEquipoForm(f => ({ ...f, nombre:e.target.value }))} placeholder="Horno deshidratador" /></div>
-              <div className="form-group"><label className="form-label">Valor de adquisición</label><MoneyInput value={equipoForm.valor_adquisicion} onChange={v => setEquipoForm(f => ({ ...f, valor_adquisicion:v }))} /></div>
-              <div className="form-group"><label className="form-label">Valor residual</label><MoneyInput value={equipoForm.valor_residual} onChange={v => setEquipoForm(f => ({ ...f, valor_residual:v }))} /></div>
-              <div className="form-group"><label className="form-label">Vida útil (años)</label><input type="number" min="0.1" step="0.1" className="form-control" value={equipoForm.vida_util_anos} onChange={e => setEquipoForm(f => ({ ...f, vida_util_anos:e.target.value }))} /></div>
-              <div className="form-group"><label className="form-label">Asignación</label><Select className="form-control" value={equipoForm.allocation_mode} onChange={e => setEquipoForm(f => ({ ...f, allocation_mode:e.target.value }))}><option value="general">General (CIF mensual)</option><option value="categoria">Por categoría y uso</option></Select></div>
-              <div className="form-group">
-                <label className="form-label">Grupo contable</label>
-                <Select className="form-control" value={['cif','administracion','ventas'].includes(equipoForm.grupo) ? equipoForm.grupo : 'cif'} onChange={e => setEquipoForm(f => ({ ...f, grupo:e.target.value }))}>
-                  {GRUPOS_EQUIPO.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
-                </Select>
-                <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem', display:'block', marginTop:4 }}>
-                  Según el <strong>uso</strong> del equipo: planta → <strong>CIF</strong> (entra al costo del producto si es asignación general);
-                  oficina → <strong>Administración</strong>; entregas/comercial → <strong>Ventas</strong>.
-                  Si compraste a crédito, aquí solo va la depreciación del activo; los intereses del crédito son gasto financiero (en Gastos), no depreciación.
-                </small>
-              </div>
-              {equipoForm.allocation_mode === 'categoria' && <>
-                <div className="form-group"><label className="form-label">Base de uso</label><Select className="form-control" value={equipoForm.rate_basis} onChange={e => setEquipoForm(f => ({ ...f, rate_basis:e.target.value }))}><option value="hora">Hora</option><option value="dia">Día</option></Select></div>
-                <div className="form-group"><label className="form-label">Capacidad mensual ({equipoForm.rate_basis === 'dia' ? 'días' : 'horas'})</label><input type="number" min="0.1" step="any" className="form-control" value={equipoForm.capacidad_mes} onChange={e => setEquipoForm(f => ({ ...f, capacidad_mes:e.target.value }))} /></div>
-              </>}
-            </div>
-            {equipoForm.allocation_mode === 'categoria' && (
-              <div className="form-group">
-                <label className="form-label">Categorías a las que aplica</label>
-                <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
-                  {[...new Set([...tiposProducto.map(t => t.nombre), 'subproducto', 'mp', 'otro'])].map(cat => (
-                    <label key={cat} className="check-row" style={{ padding:'5px 8px' }}><input type="checkbox" checked={equipoForm.categorias.includes(cat)} onChange={e => setEquipoForm(f => ({ ...f, categorias:e.target.checked ? [...f.categorias, cat] : f.categorias.filter(x => x !== cat) }))} /><span>{cat}</span></label>
-                  ))}
-                </div>
-              </div>
-            )}
-            <div style={{ display:'flex', gap:8, alignItems:'center', margin:'8px 0 14px' }}>
-              <button type="button" className="btn btn-primary" onClick={guardarEquipo}>{equipoForm.id ? 'Guardar cambios' : 'Agregar equipo'}</button>
-              {equipoForm.id && <button type="button" className="btn btn-secondary" onClick={limpiarEquipoForm}>Cancelar edición</button>}
-              <span style={{ marginLeft:'auto', color:'var(--texto-suave)', fontSize:'0.78rem' }}>
-                Depreciación mensual: <strong>{fCOP(getDepreciacionMensualEquipo(equipoForm))}</strong>
-                {equipoForm.allocation_mode === 'categoria' ? ` · ${fCOP(getCostoTasaEquipo(equipoForm))}/${equipoForm.rate_basis}` : ''}
-              </span>
-            </div>
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Equipo</th><th>Método</th><th>Categorías</th><th>Depreciación/mes</th><th>Tasa</th><th></th></tr></thead>
-                <tbody>
-                  {equipos.length === 0 ? <tr><td colSpan={6} className="empty-table">Sin equipos configurados.</td></tr> : equipos.map(e => {
-                    const cats = equipoLinks.filter(l => String(l.equipment_id) === String(e.id)).map(l => l.categoria)
-                    return <tr key={e.id}><td><strong>{e.nombre}</strong></td><td>{e.allocation_mode === 'general' ? 'General' : 'Por categoría'}</td><td>{cats.join(', ') || '—'}</td><td className="td-number">{fCOP(getDepreciacionMensualEquipo(e))}</td><td className="td-number">{e.allocation_mode === 'categoria' ? `${fCOP(getCostoTasaEquipo(e))}/${e.rate_basis}` : '—'}</td><td><div className="table-actions"><button className="btn btn-xs btn-secondary" onClick={() => editarEquipo(e)}><Pencil size={12} aria-hidden="true" /></button><button className="btn btn-xs btn-danger" onClick={() => eliminarEquipo(e)}><Trash2 size={12} aria-hidden="true" /></button></div></td></tr>
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>}
-
           {CAJAS.filter(caja => costosSubtab === 'costos' ? caja.g === 'cif' : costosSubtab === 'gastos' ? caja.g !== 'cif' : false).map(caja => {
             const items = cifItems.filter(c => (c.grupo || 'cif') === caja.g)
             return (
@@ -3143,7 +3099,15 @@ export default function Costos({ vista = 'productos' }) {
                   {caja.afecta
                     ? <span className="badge badge-verde" style={{ marginLeft:8, fontSize:'0.66rem' }}>afecta el costo del producto</span>
                     : <span className="badge badge-gris" style={{ marginLeft:8, fontSize:'0.66rem' }}>no afecta el costo del producto</span>}
-                  <button className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={() => addCIF(caja.g)}>+ Agregar ítem</button>
+                  <div style={{ marginLeft:'auto', display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
+                    {caja.g === 'cif' && (
+                      <button type="button" className="btn btn-sm btn-secondary" onClick={() => setModalEquipos(true)} title={depreciacionGeneral > 0 ? `Depreciación general al CIF: ${fCOP(depreciacionGeneral)}/mes` : undefined}>
+                        <Ico as={Wrench} size={13} />Agregar depreciación
+                        {equipos.length > 0 && <span className="badge badge-gris" style={{ marginLeft:4 }}>{equipos.length}</span>}
+                      </button>
+                    )}
+                    <button type="button" className="btn btn-sm btn-secondary" onClick={() => addCIF(caja.g)}>+ Agregar ítem</button>
+                  </div>
                 </div>
                 <div style={{ fontSize:'0.8rem', color:'var(--texto-suave)', marginBottom:8 }}>{caja.desc}</div>
                 <div className="table-wrap">
@@ -3352,14 +3316,17 @@ export default function Costos({ vista = 'productos' }) {
                       <div style={{ marginTop:14 }}>
                         <strong style={{ color:'var(--selva)', fontSize:'0.88rem' }}>Cuánto debes vender de cada producto</strong>
                         <div className="alert alert-info" style={{ fontSize:'0.8rem', margin:'6px 0 8px' }}>
-                          ℹ El mínimo de cada producto se reparte según su <strong>participación en ventas</strong> del portafolio
-                          (unidades × precio mayor). Es el punto en que no ganas ni pierdes: por encima de esa cifra, cada unidad deja utilidad.
+                          ℹ Solo productos <strong>vendibles</strong> (no incluye materias primas ni subproductos internos).
+                          El mínimo se reparte según su <strong>participación en ventas</strong> (unidades × precio mayor).
+                          Es el punto en que no ganas ni pierdes: por encima de esa cifra, cada unidad deja utilidad.
                         </div>
                         <div className="table-wrap">
                           <table>
                             <thead><tr><th>Producto</th><th className="td-number">Produces/mes</th><th className="td-number">% ventas</th><th className="td-number">Margen/u</th><th className="td-number">Mínimo a vender</th><th className="td-number">Holgura</th></tr></thead>
                             <tbody>
-                              {peqMultiproducto.map((i, idx) => {
+                              {peqMultiproducto.length === 0
+                                ? <tr><td colSpan={6} className="empty-table">No hay fichas vendibles activas para calcular el mínimo de venta.</td></tr>
+                                : peqMultiproducto.map((i, idx) => {
                                 const holgura = i.q - i.pe
                                 const ok = holgura >= 0
                                 return (
@@ -3465,6 +3432,84 @@ export default function Costos({ vista = 'productos' }) {
                       </td>
                     </tr>
                   ))}
+            </tbody>
+          </table>
+        </div>
+      </Modal>
+
+      <Modal
+        open={modalEquipos}
+        onClose={closeModalEquipos}
+        title="Depreciación y uso de equipos"
+        size="modal-xl"
+        footer={<button className="btn btn-secondary" onClick={closeModalEquipos}>Cerrar</button>}
+      >
+        <div className="alert alert-info" style={{ fontSize:'0.8rem' }}>
+          La depreciación se calcula por línea recta: <strong>(valor − residual) ÷ vida útil ÷ 12</strong>.
+          El método general entra al CIF mensual; por categoría se asigna según las horas o días del proceso de cada ficha.
+        </div>
+        <div className="form-grid-4" style={{ alignItems:'end' }}>
+          <div className="form-group"><label className="form-label">Equipo *</label><input className="form-control" value={equipoForm.nombre} onChange={e => setEquipoForm(f => ({ ...f, nombre:e.target.value }))} placeholder="Horno deshidratador" /></div>
+          <div className="form-group"><label className="form-label">Valor de adquisición</label><MoneyInput value={equipoForm.valor_adquisicion} onChange={v => setEquipoForm(f => ({ ...f, valor_adquisicion:v }))} /></div>
+          <div className="form-group"><label className="form-label">Valor residual</label><MoneyInput value={equipoForm.valor_residual} onChange={v => setEquipoForm(f => ({ ...f, valor_residual:v }))} /></div>
+          <div className="form-group"><label className="form-label">Vida útil (años)</label><input type="number" min="0.1" step="0.1" className="form-control" value={equipoForm.vida_util_anos} onChange={e => setEquipoForm(f => ({ ...f, vida_util_anos:e.target.value }))} /></div>
+          <div className="form-group"><label className="form-label">Asignación</label><Select className="form-control" value={equipoForm.allocation_mode} onChange={e => setEquipoForm(f => ({ ...f, allocation_mode:e.target.value }))}><option value="general">General (CIF mensual)</option><option value="categoria">Por categoría y uso</option></Select></div>
+          <div className="form-group">
+            <label className="form-label">Grupo contable</label>
+            <Select className="form-control" value={['cif','administracion','ventas'].includes(equipoForm.grupo) ? equipoForm.grupo : 'cif'} onChange={e => setEquipoForm(f => ({ ...f, grupo:e.target.value }))}>
+              {GRUPOS_EQUIPO.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
+            </Select>
+            <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem', display:'block', marginTop:4 }}>
+              Según el <strong>uso</strong> del equipo: planta → <strong>CIF</strong> (entra al costo del producto si es asignación general);
+              oficina → <strong>Administración</strong>; entregas/comercial → <strong>Ventas</strong>.
+              Si compraste a crédito, aquí solo va la depreciación del activo; los intereses del crédito son gasto financiero (en Gastos), no depreciación.
+            </small>
+          </div>
+          {equipoForm.allocation_mode === 'categoria' && <>
+            <div className="form-group"><label className="form-label">Base de uso</label><Select className="form-control" value={equipoForm.rate_basis} onChange={e => setEquipoForm(f => ({ ...f, rate_basis:e.target.value }))}><option value="hora">Hora</option><option value="dia">Día</option></Select></div>
+            <div className="form-group"><label className="form-label">Capacidad mensual ({equipoForm.rate_basis === 'dia' ? 'días' : 'horas'})</label><input type="number" min="0.1" step="any" className="form-control" value={equipoForm.capacidad_mes} onChange={e => setEquipoForm(f => ({ ...f, capacidad_mes:e.target.value }))} /></div>
+          </>}
+        </div>
+        {equipoForm.allocation_mode === 'categoria' && (
+          <div className="form-group">
+            <label className="form-label">Categorías a las que aplica</label>
+            <div style={{ display:'flex', flexWrap:'wrap', gap:8 }}>
+              {[...new Set([...tiposProducto.map(t => t.nombre), 'subproducto', 'mp', 'otro'])].map(cat => (
+                <label key={cat} className="check-row" style={{ padding:'5px 8px' }}><input type="checkbox" checked={equipoForm.categorias.includes(cat)} onChange={e => setEquipoForm(f => ({ ...f, categorias:e.target.checked ? [...f.categorias, cat] : f.categorias.filter(x => x !== cat) }))} /><span>{cat}</span></label>
+              ))}
+            </div>
+          </div>
+        )}
+        <div style={{ display:'flex', gap:8, alignItems:'center', margin:'8px 0 14px', flexWrap:'wrap' }}>
+          <button type="button" className="btn btn-primary" onClick={guardarEquipo}>{equipoForm.id ? 'Guardar cambios' : 'Agregar equipo'}</button>
+          {equipoForm.id && <button type="button" className="btn btn-secondary" onClick={limpiarEquipoForm}>Cancelar edición</button>}
+          <span style={{ marginLeft:'auto', color:'var(--texto-suave)', fontSize:'0.78rem' }}>
+            Depreciación mensual: <strong>{fCOP(getDepreciacionMensualEquipo(equipoForm))}</strong>
+            {equipoForm.allocation_mode === 'categoria' ? ` · ${fCOP(getCostoTasaEquipo(equipoForm))}/${equipoForm.rate_basis}` : ''}
+          </span>
+        </div>
+        <div className="table-wrap">
+          <table>
+            <thead><tr><th>Equipo</th><th>Método</th><th>Categorías</th><th>Depreciación/mes</th><th>Tasa</th><th></th></tr></thead>
+            <tbody>
+              {equipos.length === 0 ? <tr><td colSpan={6} className="empty-table">Sin equipos configurados.</td></tr> : equipos.map(e => {
+                const cats = equipoLinks.filter(l => String(l.equipment_id) === String(e.id)).map(l => l.categoria)
+                return (
+                  <tr key={e.id}>
+                    <td><strong>{e.nombre}</strong></td>
+                    <td>{e.allocation_mode === 'general' ? 'General' : 'Por categoría'}</td>
+                    <td>{cats.join(', ') || '—'}</td>
+                    <td className="td-number">{fCOP(getDepreciacionMensualEquipo(e))}</td>
+                    <td className="td-number">{e.allocation_mode === 'categoria' ? `${fCOP(getCostoTasaEquipo(e))}/${e.rate_basis}` : '—'}</td>
+                    <td>
+                      <div className="table-actions">
+                        <button type="button" className="btn btn-xs btn-secondary" onClick={() => editarEquipo(e)}><Pencil size={12} aria-hidden="true" /></button>
+                        <button type="button" className="btn btn-xs btn-danger" onClick={() => eliminarEquipo(e)}><Trash2 size={12} aria-hidden="true" /></button>
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         </div>
