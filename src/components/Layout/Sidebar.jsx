@@ -3,7 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Calculator, Package, Tags, ClipboardList, Factory, Users, Handshake,
   Camera, FolderOpen, NotebookText, AlertTriangle, GraduationCap,
-  Clock, Recycle, ChevronDown, Store,
+  Clock, Recycle, ChevronDown, Store, Truck,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { puedeVer, RUTA_MODULO } from '../../lib/permisos'
@@ -22,7 +22,8 @@ const NAV_ITEMS = [
   { to: '/produccion', icon: Factory, label: 'Registro de Producción' },
   { to: '/porempacar', icon: Recycle, label: 'Productos por Empacar' },
   { section: 'Utilidades' },
-  { to: '/utilidades', icon: Tags, label: 'Recetas rápidas' },
+  { to: '/utilidades', icon: Tags, label: 'Recetas rápidas', end: true },
+  { to: '/utilidades/envios', icon: Truck, label: 'Costos de envío' },
   { section: 'Personal' },
   { to: '/nomina',     icon: Users, label: 'Asistencia & Nómina' },
   { section: 'Comercial' },
@@ -57,7 +58,11 @@ export default function Sidebar({ open, onClose, puedeFichar, onRegistrarAsisten
     <NavLink
       key={item.to}
       to={item.to}
-      className={({ isActive }) => `nav-item${isActive || (item.to !== '/' && location.pathname.startsWith(item.to + '/')) ? ' active' : ''}`}
+      end={!!item.end}
+      className={({ isActive }) => {
+        const nested = !item.end && item.to !== '/' && location.pathname.startsWith(item.to + '/')
+        return `nav-item${isActive || nested ? ' active' : ''}`
+      }}
       onClick={onClose}
     >
       <span className="nav-icon"><item.icon size={18} aria-hidden="true" /></span>

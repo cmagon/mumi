@@ -2,11 +2,12 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { NavLink, Navigate, useNavigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
+import { pathImgProducto, conAltProducto } from '../lib/imgNombre'
 import { useToast } from '../hooks/useToast'
 import { useAuth } from '../context/AuthContext'
 import { puedeVerSeccion } from '../lib/permisos'
 import { fNum } from '../lib/businessLogic'
-import { Store, Eye, EyeOff, Star, Save, Settings, BarChart3, ExternalLink, Pencil, X, Plus, Upload, Trash2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Palette, Image as ImageIcon, Layout, Users, RefreshCw, Monitor, Tablet, Smartphone } from 'lucide-react'
+import { Store, Eye, EyeOff, Star, Save, Settings, BarChart3, ExternalLink, Pencil, X, Plus, Upload, Trash2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Palette, Image as ImageIcon, Layout, Users, RefreshCw, Monitor, Tablet, Smartphone, Mail } from 'lucide-react'
 import { Truck, ShieldCheck, MessageCircle, Package, CreditCard, Heart, Clock, Gift, Award, Sprout, BadgeCheck, Sparkles, MapPin, Phone, Percent, ThumbsUp, Recycle, HandCoins, Leaf } from 'lucide-react'
 import { Banknote, Wallet, QrCode, Landmark, Coins, Receipt, PiggyBank, BadgeDollarSign, Megaphone } from 'lucide-react'
 
@@ -31,6 +32,7 @@ import { getConfig } from '../lib/appConfig'
 import Select from '../components/ui/Select'
 import { useUnsavedGuard, snapConfig } from '../hooks/useUnsavedGuard'
 import { useConfirm } from '../context/ConfirmContext'
+import { TabClientes, TabMetricasCrm } from './catalogoCrm'
 
 // Fuentes de Google disponibles para el catálogo (títulos, subtítulos, párrafos)
 const FUENTES = [
@@ -44,15 +46,109 @@ const IMG_PROD_WEB = { key: 'web', w: 1200, h: 1200 }
 const IMG_PROD_MOBILE = { key: 'mobile', w: 780, h: 780 }
 const normalizeImgAdmin = (x) => {
   if (!x) return null
-  if (typeof x === 'string') return { url: x, url_mobile: x }
+  if (typeof x === 'string') return { url: x, url_mobile: x, alt: '' }
   const url = x.url || ''
   if (!url) return null
-  return { url, url_mobile: x.url_mobile || url }
+  return { url, url_mobile: x.url_mobile || url, alt: (x.alt || '').trim() }
 }
 const thumbUrl = (x) => normalizeImgAdmin(x)?.url_mobile || normalizeImgAdmin(x)?.url || ''
 
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 const fCOP = (n) => '$' + Math.round(Number(n) || 0).toLocaleString('es-CO')
+
+/** Solo dígitos → evita Number("30.000")===30 y cruces raros de montos. */
+const montoCOP = (v) => {
+  if (v == null || v === '') return 0
+  if (typeof v === 'number') return Number.isFinite(v) ? Math.max(0, Math.round(v)) : 0
+  const digits = String(v).replace(/[^\d]/g, '')
+  if (!digits) return 0
+  const n = parseInt(digits, 10)
+  return Number.isFinite(n) ? n : 0
+}
+
+function previewBarraProgreso(meta, total, labels) {
+  const m = montoCOP(meta)
+  if (!(m > 0)) return null
+  const t = montoCOP(total)
+  const falta = Math.max(0, m - t)
+  const ok = falta <= 0
+  return { meta: m, total: t, falta, pct: Math.min(100, Math.round((t / m) * 100)), ok, label: ok ? labels.ok : labels.falta(fCOP(falta)) }
+}
+
+function previewBarraPedido(cfg, total = 0, mayorista = false) {
+  if (!cfg?.envio_umbral_activo) return null
+  const meta = mayorista ? cfg.mayorista_pedido_minimo : cfg.pedido_minimo
+  const mayo = mayorista ? ' mayorista' : ''
+  return previewBarraProgreso(meta, total, {
+    falta: (f) => `Te faltan ${f} para el pedido mínimo sugerido${mayo}`,
+    ok: `¡Llegaste al pedido mínimo sugerido${mayo}!`,
+  })
+}
+
+function previewBarraGratis(cfg, total = 0, mayorista = false) {
+  if (!cfg?.envio_gratis_barra_activo) return null
+  const meta = mayorista ? cfg.envio_gratis_mayorista : cfg.envio_gratis_desde
+  return previewBarraProgreso(meta, total, {
+    falta: (f) => `Te faltan ${f} para envío gratis nacional`,
+    ok: '¡Envío gratis nacional en tu pedido!',
+  })
+}
+
+function PrevBarraMini({ estado, titulo, tono, formula }) {
+  if (!estado) return null
+  return (
+    <div style={{
+      background: tono === 'gratis' ? 'color-mix(in srgb, var(--dorado) 12%, #fff)' : 'color-mix(in srgb, var(--selva) 8%, #fff)',
+      border: `1px solid ${tono === 'gratis' ? 'color-mix(in srgb, var(--dorado) 35%, transparent)' : 'color-mix(in srgb, var(--selva) 18%, transparent)'}`,
+      borderRadius: 12, padding: '10px 12px', marginBottom: 8,
+    }}>
+      <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--texto-suave)', marginBottom: 4, textTransform: 'uppercase', letterSpacing: '0.04em' }}>{titulo}</div>
+      <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--selva)', marginBottom: 4 }}>{estado.label}</div>
+      {formula && <div style={{ fontSize: '0.68rem', color: 'var(--texto-suave)', marginBottom: 6, fontFamily: 'ui-monospace, monospace' }}>{formula}</div>}
+      <div style={{ height: 6, borderRadius: 999, background: 'color-mix(in srgb, var(--selva) 14%, #fff)', overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${estado.pct}%`, borderRadius: 999, background: estado.ok ? 'var(--selva)' : 'var(--dorado)', transition: 'width .2s ease' }} />
+      </div>
+    </div>
+  )
+}
+
+/** Maqueta: las barras solo aparecen dentro del carrito. */
+function PrevUbicacionBarras({ barras }) {
+  const hay = barras.filter(Boolean)
+  if (!hay.length) return null
+  const Mini = ({ estado, tono }) => !estado ? null : (
+    <div style={{
+      background: tono === 'gratis' ? 'rgba(200,169,74,0.2)' : 'rgba(26,58,42,0.08)',
+      borderRadius: 8, padding: '6px 8px', marginBottom: 4, border: '1px solid rgba(0,0,0,0.06)',
+    }}>
+      <div style={{ fontSize: '0.62rem', fontWeight: 700, color: 'var(--selva)', lineHeight: 1.25 }}>{estado.label}</div>
+      <div style={{ height: 4, borderRadius: 99, background: 'rgba(0,0,0,0.08)', marginTop: 4, overflow: 'hidden' }}>
+        <div style={{ height: '100%', width: `${estado.pct}%`, background: estado.ok ? 'var(--selva)' : 'var(--dorado)' }} />
+      </div>
+    </div>
+  )
+  return (
+    <div style={{ marginTop: 12, display: 'grid', gap: 10 }}>
+      <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--selva)' }}>Dónde las ve el cliente</div>
+      <div style={{ border: '1px dashed var(--crema-oscuro)', borderRadius: 12, padding: 10, background: '#fff' }}>
+        <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--texto-suave)', marginBottom: 6 }}>Solo dentro de «Tu pedido»</div>
+        <div style={{ fontSize: '0.65rem', color: 'var(--texto-suave)', marginBottom: 8 }}>
+          Debajo del total, antes de WhatsApp. Debajo hay «Seguir comprando» para cerrar y seguir viendo productos. La barra flotante «Ver pedido» ya no muestra umbrales.
+        </div>
+        <div style={{ background: 'var(--crema, #F5F0E8)', borderRadius: 10, padding: 10 }}>
+          <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--selva)', marginBottom: 8 }}>Tu pedido</div>
+          <div style={{ height: 28, borderRadius: 6, background: 'rgba(0,0,0,0.04)', marginBottom: 6 }} />
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: '0.78rem', color: 'var(--selva)', marginBottom: 8 }}>
+            <span>Total</span><span>{fCOP(hay[0]?.estado?.total || 0)}</span>
+          </div>
+          {hay.map((b, i) => <Mini key={i} estado={b.estado} tono={b.tono} />)}
+          <div style={{ marginTop: 8, background: '#25D366', color: '#fff', borderRadius: 10, padding: '8px 10px', textAlign: 'center', fontSize: '0.72rem', fontWeight: 700 }}>Confirmar por WhatsApp</div>
+          <div style={{ marginTop: 6, border: '1px solid var(--crema-oscuro)', borderRadius: 10, padding: '7px 10px', textAlign: 'center', fontSize: '0.7rem', fontWeight: 600, color: 'var(--selva)' }}>Seguir comprando</div>
+        </div>
+      </div>
+    </div>
+  )
+}
 
 const capital = (s) => s ? s.charAt(0).toUpperCase() + s.slice(1) : '—'
 const imgsDe = (p) => {
@@ -75,7 +171,7 @@ const detectarFrutos = (nombre, frutosCat) => {
 }
 const labelFrutoCat = (id, frutosCat) => (frutosCat || []).find(f => f.id === id)?.nombre || id
 
-const CATALOGO_TABS = ['productos', 'personalizar', 'config', 'mensajes', 'metricas']
+const CATALOGO_TABS = ['productos', 'personalizar', 'config', 'correos', 'clientes', 'mensajes', 'metricas']
 
 export default function Catalogo() {
   const toast = useToast()
@@ -93,9 +189,12 @@ export default function Catalogo() {
     personalizar: puedeConfig,
     config: puedeConfig,
     mensajes: puedeConfig,
+    correos: puedeMetricas || puedeConfig,
+    clientes: puedeMetricas || puedeConfig, // alias → redirige a correos
     metricas: puedeMetricas,
   }
-  const tab = CATALOGO_TABS.includes(tabParam) && okTab[tabParam] ? tabParam : null
+  const tabRaw = CATALOGO_TABS.includes(tabParam) && okTab[tabParam] ? tabParam : null
+  const tab = tabRaw === 'clientes' ? 'correos' : tabRaw
 
   const [dirtyMap, setDirtyMap] = useState({})
   const reportDirty = useCallback((key, v) => {
@@ -110,8 +209,9 @@ export default function Catalogo() {
   })
 
   useEffect(() => {
-    if (!tab) navigate(`/catalogo/${tabInicialCat}`, { replace: true })
-  }, [tab, tabInicialCat, navigate])
+    if (tabParam === 'clientes') navigate('/catalogo/correos', { replace: true })
+    else if (!tab) navigate(`/catalogo/${tabInicialCat}`, { replace: true })
+  }, [tab, tabParam, tabInicialCat, navigate])
 
   const { data: cfgUrl } = useQuery({
     queryKey: ['catalogo_url'],
@@ -140,15 +240,17 @@ export default function Catalogo() {
         {puedeProductos && <NavLink to="/catalogo/productos" className={tabCls} end><Ico as={Store} size={14} />Productos</NavLink>}
         {puedeConfig && <NavLink to="/catalogo/personalizar" className={tabCls} end><Ico as={Palette} size={14} />Personalizar</NavLink>}
         {puedeConfig && <NavLink to="/catalogo/config" className={tabCls} end><Ico as={Settings} size={14} />Configuración</NavLink>}
-        {puedeConfig && <NavLink to="/catalogo/mensajes" className={tabCls} end>✉️ Mensajes</NavLink>}
+        {(puedeMetricas || puedeConfig) && <NavLink to="/catalogo/correos" className={tabCls} end><Ico as={Mail} size={14} />Correos</NavLink>}
+        {puedeConfig && <NavLink to="/catalogo/mensajes" className={tabCls} end title="Formularios del catálogo (página Contacto)">✉️ Mensajes</NavLink>}
         {puedeMetricas && <NavLink to="/catalogo/metricas" className={tabCls} end><Ico as={BarChart3} size={14} />Métricas</NavLink>}
       </div>
 
       {tab === 'productos' && puedeProductos && <TabProductos toast={toast} qc={qc} onDirtyChange={v => reportDirty('productos', v)} />}
       {tab === 'personalizar' && puedeConfig && <TabPersonalizar toast={toast} qc={qc} cfgUrl={cfgUrl} onDirtyChange={v => reportDirty('personalizar', v)} />}
       {tab === 'config' && puedeConfig && <TabConfig toast={toast} onDirtyChange={v => reportDirty('config', v)} />}
+      {tab === 'correos' && (puedeMetricas || puedeConfig) && <TabClientes />}
       {tab === 'mensajes' && puedeConfig && <TabMensajes />}
-      {tab === 'metricas' && puedeMetricas && <TabMetricas />}
+      {tab === 'metricas' && puedeMetricas && <TabMetricasCrm />}
     </div>
   )
 }
@@ -168,9 +270,15 @@ function TabProductos({ toast, qc, onDirtyChange }) {
   const { data: productos = [], isLoading } = useQuery({
     queryKey: ['catalogo_admin_productos'],
     queryFn: async () => {
-      const { data } = await supabase.from('finished_products')
-        .select('id, nombre, product_id, precio_detal, precio_mayor, imagen_url, imagenes, descripcion, catalogo_descripcion, categoria_alegra_nombre, catalogo_visible, catalogo_frutos, catalogo_beneficios, catalogo_destacado, catalogo_novedad, catalogo_precio_oferta, catalogo_seo_titulo, catalogo_seo_desc, catalogo_contenido, catalogo_origen, stock, activo')
+      // Packs (grupo/label/orden) solo existen tras migration_v154; si faltan, reintentamos sin ellas
+      const colsBase = 'id, nombre, product_id, precio_detal, precio_mayor, imagen_url, imagenes, descripcion, catalogo_descripcion, categoria_alegra_nombre, catalogo_visible, catalogo_frutos, catalogo_beneficios, catalogo_destacado, catalogo_novedad, catalogo_precio_oferta, catalogo_seo_titulo, catalogo_seo_desc, catalogo_contenido, catalogo_origen, stock, activo'
+      let { data, error } = await supabase.from('finished_products')
+        .select(`${colsBase}, catalogo_grupo, catalogo_pack_label, catalogo_pack_orden`)
         .order('nombre')
+      if (error) {
+        ({ data, error } = await supabase.from('finished_products').select(colsBase).order('nombre'))
+        if (error) throw error
+      }
       const prods = (data || []).filter(p => p.activo !== false)
       // Categoría = la de Alegra; si no, el tipo de la ficha (products_costing)
       const ids = [...new Set(prods.map(p => p.product_id).filter(Boolean))]
@@ -217,7 +325,7 @@ function TabProductos({ toast, qc, onDirtyChange }) {
                   </td>
                   <td>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                      {imgsDe(p)[0] ? <img src={thumbUrl(imgsDe(p)[0])} alt="" style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover' }} /> : <span style={{ fontSize: '1.3rem' }}>🌿</span>}
+                      {imgsDe(p)[0] ? <img src={thumbUrl(imgsDe(p)[0])} alt={p.nombre || ''} style={{ width: 36, height: 36, borderRadius: 8, objectFit: 'cover' }} /> : <span style={{ fontSize: '1.3rem' }}>🌿</span>}
                       <strong>{p.nombre}</strong>
                     </div>
                   </td>
@@ -241,7 +349,7 @@ function TabProductos({ toast, qc, onDirtyChange }) {
 }
 
 // ---- Productos y combos adicionales (no vienen de Productos Terminados) ----
-const EXTRA_VACIO = (tipo) => ({ id: 'x' + Date.now() + Math.random().toString(36).slice(2, 5), tipo, nombre: '', categoria: '', descripcion: '', imagenes: [], precio_detal: '', precio_oferta: '', precio_mayor: '', stock: '', componentes: [], destacado: false, novedad: false, visible: true })
+const EXTRA_VACIO = (tipo) => ({ id: 'x' + Date.now() + Math.random().toString(36).slice(2, 5), tipo, nombre: '', categoria: '', descripcion: '', imagenes: [], precio_detal: '', precio_oferta: '', precio_mayor: '', stock: '', componentes: [], destacado: false, novedad: false, visible: true, grupo: '', pack_label: '', pack_orden: 0 })
 function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
   const [items, setItems] = useState(null)
   const [cats, setCats] = useState([])            // categorías creadas por el usuario
@@ -272,13 +380,15 @@ function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
   const subir = async (i, files) => {
     setSubiendo(true)
     try {
+      const nombre = (items[i]?.nombre || '').trim() || 'producto'
       const nuevos = []
       for (const f of files) {
-        const path = `catalogo/extra_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.jpg`
+        const ext = (f.name?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
+        const path = pathImgProducto(nombre, { carpeta: 'productos', ext })
         const { error } = await supabase.storage.from('product-images').upload(path, f, { upsert: true, contentType: f.type || 'image/jpeg' })
         if (error) throw error
         const { data } = supabase.storage.from('product-images').getPublicUrl(path)
-        nuevos.push(data.publicUrl)
+        nuevos.push({ url: data.publicUrl, url_mobile: data.publicUrl, alt: nombre })
       }
       upd(i, 'imagenes', [...(items[i].imagenes || []), ...nuevos])
     } catch (e) { toast('No se pudieron subir: ' + e.message, 'error') } finally { setSubiendo(false) }
@@ -290,6 +400,7 @@ function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
       const limpio = (items || []).filter(x => x.nombre?.trim()).map(x => ({
         ...x, precio_detal: Number(x.precio_detal) || 0, precio_oferta: Number(x.precio_oferta) || null,
         precio_mayor: Number(x.precio_mayor) || 0, stock: Number(x.stock) || 0,
+        imagenes: conAltProducto(x.imagenes, x.nombre),
       }))
       const { error } = await supabase.from('config_catalogo').upsert({ id: 1, productos_extra: limpio, categorias_extra: cats, updated_at: new Date().toISOString() }, { onConflict: 'id' })
       if (error) throw error
@@ -346,6 +457,13 @@ function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
                 ? <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Stock</label><input type="number" className="form-control" value={x.stock} onChange={e => upd(i, 'stock', e.target.value)} /></div>
                 : <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Stock</label><input className="form-control" value="Automático (según componentes)" disabled /></div>}
             </div>
+            {x.tipo === 'producto' && (
+              <div className="form-grid-2" style={{ marginBottom: 6 }}>
+                <div className="form-group" style={{ marginBottom: 0 }}><label className="form-label">Grupo pack</label><input className="form-control" value={x.grupo || ''} onChange={e => upd(i, 'grupo', e.target.value)} placeholder="ej. galletas-asai" /></div>
+                <div className="form-group" style={{ marginBottom: 0 }}><label className="form-label">Etiqueta chip</label><input className="form-control" value={x.pack_label || ''} onChange={e => upd(i, 'pack_label', e.target.value)} placeholder="x6 · x12" /></div>
+                <div className="form-group" style={{ marginBottom: 0, maxWidth: 120 }}><label className="form-label">Orden</label><input type="number" className="form-control" value={x.pack_orden ?? 0} onChange={e => upd(i, 'pack_orden', parseInt(e.target.value, 10) || 0)} /></div>
+              </div>
+            )}
             {x.tipo === 'combo' && (
               <div style={{ marginBottom: 8 }}>
                 <label className="form-label">Componentes (de productos existentes)</label>
@@ -367,9 +485,9 @@ function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
             <div>
               <label className="btn btn-xs btn-secondary" style={{ cursor: 'pointer' }}><Upload size={12} /> {subiendo ? 'Subiendo…' : 'Subir imágenes'}<input type="file" accept="image/*" multiple hidden onChange={e => { const fs = [...(e.target.files || [])]; if (fs.length) subir(i, fs); e.target.value = '' }} /></label>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
-                {(x.imagenes || []).map((url, k) => (
+                {(x.imagenes || []).map((im, k) => (
                   <div key={k} style={{ position: 'relative', width: 62, height: 62 }}>
-                    <img src={url} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} />
+                    <img src={typeof im === 'string' ? im : (im?.url || '')} alt={x.nombre || ''} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8 }} />
                     <button onClick={() => upd(i, 'imagenes', x.imagenes.filter((_, z) => z !== k))} style={{ position: 'absolute', top: 2, right: 2, background: 'rgba(0,0,0,0.6)', color: '#fff', border: 'none', borderRadius: 6, cursor: 'pointer', padding: '2px 4px' }}><X size={11} /></button>
                   </div>
                 ))}
@@ -436,6 +554,9 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
   const [seoDesc, setSeoDesc] = useState(producto.catalogo_seo_desc || '')
   const [contenido, setContenido] = useState(producto.catalogo_contenido || '')
   const [origen, setOrigen] = useState(producto.catalogo_origen || '')
+  const [grupo, setGrupo] = useState(producto.catalogo_grupo || '')
+  const [packLabel, setPackLabel] = useState(producto.catalogo_pack_label || '')
+  const [packOrden, setPackOrden] = useState(producto.catalogo_pack_orden ?? 0)
   const [imgs, setImgs] = useState(imgsDe(producto))
   const [subiendo, setSubiendo] = useState(false)
   const [cropFile, setCropFile] = useState(null)   // archivo pendiente de recortar
@@ -444,7 +565,7 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
   const [saving, setSaving] = useState(false)
   const confirmar = useConfirm()
   const formSnap = () => snapConfig({
-    frutos, beneficios, destacado, novedad, descripcion, precioOferta, seoTitulo, seoDesc, contenido, origen, imgs,
+    frutos, beneficios, destacado, novedad, descripcion, precioOferta, seoTitulo, seoDesc, contenido, origen, grupo, packLabel, packOrden, imgs,
   })
   const savedEditor = useRef(null)
   useEffect(() => { savedEditor.current = formSnap() }, [producto.id]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -466,20 +587,20 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
   const addBene = () => { const v = beneInput.trim(); if (v && !beneficios.includes(v)) setBeneficios(b => [...b, v]); setBeneInput('') }
   const quitarBene = (b) => setBeneficios(bs => bs.filter(x => x !== b))
 
-  // Sube versión web (1200) + móvil (780) del mismo recorte
+  // Sube versión web (1200) + móvil (780); el archivo lleva el nombre del producto (SEO)
   const subirBlobPar = async (blobs) => {
     setSubiendo(true)
     try {
-      const stamp = `${producto.id}_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+      const nombre = (producto.nombre || '').trim() || 'producto'
       const subirUno = async (blob, suf) => {
-        const path = `catalogo/${stamp}_${suf}.jpg`
+        const path = pathImgProducto(nombre, { carpeta: 'productos', sufijo: suf })
         const { error } = await supabase.storage.from('product-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
         if (error) throw error
         return supabase.storage.from('product-images').getPublicUrl(path).data.publicUrl
       }
       const url = await subirUno(blobs.web || blobs.main, 'web')
       const url_mobile = blobs.mobile ? await subirUno(blobs.mobile, 'mob') : url
-      setImgs(a => [...a, { url, url_mobile }])
+      setImgs(a => [...a, { url, url_mobile, alt: nombre }])
     } catch (e) { toast('No se pudo subir la imagen: ' + e.message, 'error') } finally { setSubiendo(false) }
   }
   const quitarImg = (i) => setImgs(a => a.filter((_, k) => k !== i))
@@ -487,15 +608,27 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
   const guardar = async () => {
     setSaving(true)
     try {
-      const imagenes = imgs.map(normalizeImgAdmin).filter(Boolean)
+      const imagenes = conAltProducto(imgs.map(normalizeImgAdmin).filter(Boolean), producto.nombre)
       const imagen_url = imagenes[0]?.url || null
-      const { error } = await supabase.from('finished_products').update({
+      const baseUpd = {
         catalogo_frutos: frutos, catalogo_beneficios: beneficios, catalogo_destacado: destacado, catalogo_novedad: novedad,
         catalogo_descripcion: descripcion || null, catalogo_precio_oferta: (precioOferta === '' || Number(precioOferta) <= 0) ? null : Number(precioOferta),
         catalogo_seo_titulo: seoTitulo.trim() || null, catalogo_seo_desc: seoDesc.trim() || null,
         catalogo_contenido: contenido.trim() || null, catalogo_origen: origen.trim() || null,
         imagen_url, imagenes,
-      }).eq('id', producto.id)
+      }
+      const packUpd = {
+        catalogo_grupo: grupo.trim() || null,
+        catalogo_pack_label: packLabel.trim() || null,
+        catalogo_pack_orden: Number(packOrden) || 0,
+      }
+      let packSinMigracion = false
+      let { error } = await supabase.from('finished_products').update({ ...baseUpd, ...packUpd }).eq('id', producto.id)
+      // Sin v154 las columnas de packs no existen: guardar el resto igual
+      if (error && /catalogo_grupo|catalogo_pack/i.test(error.message || '')) {
+        ({ error } = await supabase.from('finished_products').update(baseUpd).eq('id', producto.id))
+        packSinMigracion = !!(grupo.trim() || packLabel.trim())
+      }
       if (error) throw error
       if (producto.product_id) {
         try { await supabase.from('products_costing').update({ imagen_url, imagenes }).eq('id', producto.product_id) } catch { /* opcional */ }
@@ -503,7 +636,10 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
       qc.invalidateQueries({ queryKey: ['catalogo_admin_productos'] })
       savedEditor.current = formSnap()
       onDirtyChange?.(false)
-      toast('Producto actualizado ✓'); onClose()
+      toast(packSinMigracion
+        ? 'Guardado sin packs: aplica migration_v154 en Supabase'
+        : 'Producto actualizado ✓')
+      onClose()
     } catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
   }
 
@@ -564,6 +700,33 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
         <div className="form-group"><label className="form-label">Origen</label><input className="form-control" value={origen} onChange={e => setOrigen(e.target.value)} placeholder="Guaviare, Colombia" /></div>
       </div>
 
+      {/* Packs / presentaciones en tarjeta */}
+      <div className="card-title" style={{ fontSize: '0.95rem' }}>🎁 Packs / presentaciones en la tarjeta</div>
+      <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', margin: '0 0 8px' }}>
+        Productos con el <strong>mismo grupo</strong> se muestran como chips (ej. x6 · x12) en <strong>una sola tarjeta</strong>. Cada presentación sigue siendo un producto con su precio y stock.
+      </p>
+      <div className="form-grid-2">
+        <div className="form-group">
+          <label className="form-label">Grupo (clave compartida)</label>
+          <input className="form-control" value={grupo} onChange={e => setGrupo(e.target.value)} placeholder="ej. infusion-cocona" />
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.7rem' }}>Copia la misma clave en las otras presentaciones. Vacío = sin packs.</small>
+        </div>
+        <div className="form-group">
+          <label className="form-label">Etiqueta del chip</label>
+          <input className="form-control" value={packLabel} onChange={e => setPackLabel(e.target.value)} placeholder="x6 · x12 · 75 g · Caja" />
+        </div>
+        <div className="form-group" style={{ maxWidth: 160 }}>
+          <label className="form-label">Orden del chip</label>
+          <input type="number" className="form-control" value={packOrden} onChange={e => setPackOrden(parseInt(e.target.value, 10) || 0)} />
+        </div>
+      </div>
+      {grupo.trim() && (
+        <div style={{ marginBottom: 12, padding: '8px 10px', background: 'var(--crema)', borderRadius: 8, fontSize: '0.78rem' }}>
+          Vista chip: <span className="badge badge-verde" style={{ marginLeft: 6 }}>{packLabel.trim() || contenido.trim() || '…'}</span>
+          <span style={{ color: 'var(--texto-suave)', marginLeft: 8 }}>grupo «{grupo.trim()}»</span>
+        </div>
+      )}
+
       {/* Imágenes web + móvil */}
       <div className="card-title" style={{ fontSize: '0.95rem' }}>🖼️ Imágenes <span style={{ fontWeight: 400, fontSize: '0.78rem', color: 'var(--texto-suave)' }}>(web 1200×1200 + móvil 780×780)</span></div>
       <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
@@ -571,7 +734,7 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
           const n = normalizeImgAdmin(im)
           return (
             <div key={n.url + i} style={{ position: 'relative', width: 84, height: 84 }}>
-              <img src={thumbUrl(n)} alt="" style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8, border: i === 0 ? '2px solid var(--selva)' : '1px solid var(--crema-oscuro)' }} />
+              <img src={thumbUrl(n)} alt={producto.nombre || ''} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8, border: i === 0 ? '2px solid var(--selva)' : '1px solid var(--crema-oscuro)' }} />
               {i === 0 && <span style={{ position: 'absolute', top: -8, left: -6, fontSize: '0.6rem', background: 'var(--selva)', color: '#fff', padding: '1px 5px', borderRadius: 6 }}>Principal</span>}
               {n.url_mobile && n.url_mobile !== n.url && <span style={{ position: 'absolute', bottom: 22, left: 2, fontSize: '0.55rem', background: 'rgba(0,0,0,0.55)', color: '#fff', padding: '0 4px', borderRadius: 4 }}>web+mób</span>}
               <button type="button" className="btn btn-xs btn-danger" style={{ position: 'absolute', top: -8, right: -8, padding: 3 }} onClick={() => quitarImg(i)}><X size={12} /></button>
@@ -873,9 +1036,10 @@ function ChipEditor({ label, chips = [], input, setInput, onAdd, onDel, placehol
 
 // ---- Campo de plantilla de WhatsApp con fichas insertables ----
 const TOKENS_WA = [
-  { t: 'saludo', d: 'Saludo' }, { t: 'cliente', d: 'Nombre del cliente' }, { t: 'pedido', d: 'Detalle del pedido' },
-  { t: 'total', d: 'Total' }, { t: 'envio', d: 'Envío' }, { t: 'nota', d: 'Nota del cliente' },
-  { t: 'cierre', d: 'Frase de cierre' }, { t: 'tienda', d: 'Nombre de la tienda' },
+  { t: 'saludo', d: 'Saludo' }, { t: 'cliente', d: 'Nombre del cliente' },
+  { t: 'pedido', d: 'Detalle del pedido' },
+  { t: 'codigo', d: 'Nº de pedido (Pedido #…)' }, { t: 'total', d: 'Total' }, { t: 'envio', d: 'Envío' },
+  { t: 'nota', d: 'Nota del cliente' }, { t: 'cierre', d: 'Frase de cierre' }, { t: 'tienda', d: 'Nombre de la tienda' },
 ]
 function CampoPlantillaWA({ label, ayuda, value, onChange, tokens = TOKENS_WA, placeholder, rows = 5 }) {
   const ref = useRef(null)
@@ -1063,6 +1227,8 @@ function TabConfig({ toast, onDirtyChange }) {
   const [saving, setSaving] = useState(false)
   const [sec, setSec] = useState('general')     // sección abierta del acordeón
   const [waSel, setWaSel] = useState('stock')   // mensaje que se previsualiza
+  const [umbralPrevMayo, setUmbralPrevMayo] = useState(false) // vista previa: detal vs mayorista
+  const [umbralPrevTotal, setUmbralPrevTotal] = useState(null) // total simulado (null = auto ~40%)
   const [cropOg, setCropOg] = useState(null)
   const [subiendoOg, setSubiendoOg] = useState(false)
   const [savedSnap, setSavedSnap] = useState(null)
@@ -1123,7 +1289,6 @@ function TabConfig({ toast, onDirtyChange }) {
             <div className="form-group"><label className="form-label">WhatsApp (con indicativo)</label><input className="form-control" value={cfg.whatsapp || ''} onChange={e => set('whatsapp', e.target.value)} placeholder="+573157702180" /></div>
             <div className="form-group"><label className="form-label">País <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(para el copyright)</small></label><input className="form-control" value={cfg.pais || ''} onChange={e => set('pais', e.target.value)} placeholder="Colombia" /></div>
           </div>
-          <div className="form-group" style={{ maxWidth: 240 }}><label className="form-label">Pedido mínimo al detal (COP)</label><MoneyInput value={cfg.pedido_minimo ?? 0} onChange={v => set('pedido_minimo', v || 0)} /></div>
         </PzSec>
 
         <PzSec abierto={sec} setAbierto={setSec} id="envio" titulo={<>🚚 Envío</>}>
@@ -1132,6 +1297,64 @@ function TabConfig({ toast, onDirtyChange }) {
             <div className="form-group"><label className="form-label">Mensaje de envío (opcional)</label><input className="form-control" value={cfg.envio_mensaje || ''} onChange={e => set('envio_mensaje', e.target.value)} placeholder="Envío a todo el país en 2–4 días" /></div>
           </div>
           <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Si dejas ambos vacíos, el envío <strong>no se muestra</strong> en ningún lado. Se muestra en el <strong>carrito</strong>, pero <strong>no se envía por WhatsApp</strong> salvo que insertes la ficha <strong>{'{envio}'}</strong> en una plantilla.</small>
+
+          {/* —— 1) Pedido mínimo sugerido (barra propia) —— */}
+          <div style={{ marginTop: 14, borderTop: '1px solid var(--crema-oscuro)', paddingTop: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
+              <div style={{ flex: '1 1 200px' }}>
+                <div style={{ fontWeight: 700, fontSize: '0.86rem' }}>1) Pedido mínimo sugerido</div>
+                <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 2 }}>
+                  Sugerencia de monto de pedido. <strong>No bloquea</strong> WhatsApp. Tiene su propia barra.
+                </small>
+              </div>
+              <button type="button" role="switch" aria-checked={!!cfg.envio_umbral_activo}
+                onClick={() => set('envio_umbral_activo', !cfg.envio_umbral_activo)}
+                className={`btn btn-sm ${cfg.envio_umbral_activo ? 'btn-success' : 'btn-secondary'}`}
+                style={{ minWidth: 110, fontWeight: 700 }}>
+                {cfg.envio_umbral_activo ? 'Barra on' : 'Barra off'}
+              </button>
+            </div>
+            <div className="form-grid-2">
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Detal (COP)</label>
+                <MoneyInput value={cfg.pedido_minimo ?? 0} onChange={v => set('pedido_minimo', v || 0)} />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Mayorista (COP)</label>
+                <MoneyInput value={cfg.mayorista_pedido_minimo ?? 0} onChange={v => set('mayorista_pedido_minimo', v || 0)} />
+              </div>
+            </div>
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.7rem', display: 'block', marginTop: 6 }}>0 = sin sugerencia en ese canal</small>
+          </div>
+
+          {/* —— 2) Envío gratis (barra propia) —— */}
+          <div style={{ marginTop: 14, borderTop: '1px solid var(--crema-oscuro)', paddingTop: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', marginBottom: 10 }}>
+              <div style={{ flex: '1 1 200px' }}>
+                <div style={{ fontWeight: 700, fontSize: '0.86rem' }}>2) Envío gratis nacional</div>
+                <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 2 }}>
+                  Monto <strong>absoluto</strong> del pedido a partir del cual el envío es gratis (ej. $200.000). <strong>No se suma</strong> al pedido mínimo: cada barra calcula sola: meta − total del carrito.
+                </small>
+              </div>
+              <button type="button" role="switch" aria-checked={!!cfg.envio_gratis_barra_activo}
+                onClick={() => set('envio_gratis_barra_activo', !cfg.envio_gratis_barra_activo)}
+                className={`btn btn-sm ${cfg.envio_gratis_barra_activo ? 'btn-success' : 'btn-secondary'}`}
+                style={{ minWidth: 110, fontWeight: 700 }}>
+                {cfg.envio_gratis_barra_activo ? 'Barra on' : 'Barra off'}
+              </button>
+            </div>
+            <div className="form-grid-2">
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Pedido total desde — detal (COP)</label>
+                <MoneyInput value={cfg.envio_gratis_desde ?? 0} onChange={v => set('envio_gratis_desde', v || 0)} />
+              </div>
+              <div className="form-group" style={{ marginBottom: 0 }}>
+                <label className="form-label">Pedido total desde — mayorista (COP)</label>
+                <MoneyInput value={cfg.envio_gratis_mayorista ?? 0} onChange={v => set('envio_gratis_mayorista', v || 0)} />
+              </div>
+            </div>
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.7rem', display: 'block', marginTop: 6 }}>Ej.: $200.000 = envío gratis si el carrito llega a ese total. 0 = sin barra. No sumar el pedido mínimo encima.</small>
+          </div>
         </PzSec>
 
         <PzSec abierto={sec} setAbierto={setSec} id="pagos" titulo={<>💳 Métodos de pago</>}>
@@ -1251,8 +1474,8 @@ function TabConfig({ toast, onDirtyChange }) {
           </p>
           <div onFocus={() => setWaSel('stock')}>
             <CampoPlantillaWA label="1) Pedido al detal (con stock)" value={cfg.wa_texto_stock} onChange={v => set('wa_texto_stock', v)}
-              placeholder={'{saludo}\nSoy *{cliente}*\n\n🛒 *MI PEDIDO*\n\n{pedido}\n━━━━━━━━━━━━━━\n💰 *Total: {total}*\n\n{nota}\n\n{cierre}'}
-              ayuda="Por defecto: saludo → Soy [cliente] → pedido → total → cierre." />
+              placeholder={'{saludo}\nSoy *{cliente}*\n\n🛒 *MI PEDIDO*\n🔖 *{codigo}*\n\n{pedido}\n━━━━━━━━━━━━━━\n💰 *Total: {total}*\n\n{nota}\n\n{cierre}'}
+              ayuda="El Nº de pedido ({codigo}) siempre se incluye. El teléfono del cliente no va en WhatsApp (solo se guarda en Correos)." />
           </div>
           <div onFocus={() => setWaSel('sinstock')}>
             <CampoPlantillaWA label="2) Consulta de disponibilidad (agotado)" value={cfg.wa_texto_sin_stock} onChange={v => set('wa_texto_sin_stock', v)}
@@ -1262,8 +1485,8 @@ function TabConfig({ toast, onDirtyChange }) {
           </div>
           <div onFocus={() => setWaSel('mayorista')}>
             <CampoPlantillaWA label="3) Pedido mayorista" value={cfg.wa_texto_mayorista} onChange={v => set('wa_texto_mayorista', v)}
-              placeholder={'{saludo}\nSoy *{cliente}*, mayorista, y quiero hacer este pedido:\n\n{pedido}\n━━━━━━━━━━━━━━\n💰 *Total: {total}*\n\n{cierre}'}
-              ayuda="Se usa cuando el cliente pide desde la zona mayorista." />
+              placeholder={'{saludo}\nSoy *{cliente}*, mayorista, y quiero hacer este pedido:\n\n🔖 *{codigo}*\n\n{pedido}\n━━━━━━━━━━━━━━\n💰 *Total: {total}*\n\n{cierre}'}
+              ayuda="Se usa cuando el cliente pide desde la zona mayorista. Incluye {codigo}." />
           </div>
           <div onFocus={() => setWaSel('solicitud')}>
             <CampoPlantillaWA label="4) Solicitud para ser mayorista" value={cfg.mayorista_wa_texto} onChange={v => set('mayorista_wa_texto', v)}
@@ -1278,10 +1501,13 @@ function TabConfig({ toast, onDirtyChange }) {
             <input type="checkbox" checked={cfg.mayorista_activo !== false} onChange={e => set('mayorista_activo', e.target.checked)} /> Mostrar invitación a mayoristas
           </label>
           <div className="form-group"><label className="form-label">Mensaje de la barra de invitación</label><input className="form-control" value={cfg.mayorista_mensaje || ''} onChange={e => set('mayorista_mensaje', e.target.value)} placeholder="¿Eres mayorista? Accede a precios especiales por volumen." /></div>
-          <div className="form-grid-2">
-            <div className="form-group"><label className="form-label">Clave de acceso <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(vacío = sin clave)</small></label><input className="form-control" value={cfg.mayorista_clave || ''} onChange={e => set('mayorista_clave', e.target.value)} placeholder="Ej: Mum1Mayor2026" /></div>
-            <div className="form-group"><label className="form-label">Pedido mínimo mayorista (COP)</label><MoneyInput value={cfg.mayorista_pedido_minimo ?? 0} onChange={v => set('mayorista_pedido_minimo', v || 0)} /></div>
+          <div className="form-group" style={{ maxWidth: 320 }}>
+            <label className="form-label">Clave de acceso <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(vacío = sin clave)</small></label>
+            <input className="form-control" value={cfg.mayorista_clave || ''} onChange={e => set('mayorista_clave', e.target.value)} placeholder="Ej: Mum1Mayor2026" />
           </div>
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', margin: '4px 0 10px' }}>
+            Pedido mínimo sugerido y envío gratis (mayorista) se configuran por separado en <strong>Envío</strong>.
+          </small>
 
           <div style={{ marginTop: 14, borderTop: '1px solid var(--crema-oscuro)', paddingTop: 12 }}>
             <div style={{ fontWeight: 700, fontSize: '0.82rem', marginBottom: 8 }}>Diseño de la barra de invitación</div>
@@ -1293,7 +1519,7 @@ function TabConfig({ toast, onDirtyChange }) {
             </div>
             <div className="form-group" style={{ marginBottom: 10 }}>
               <label className="form-label">Tamaño del texto</label>
-              <select className="form-control" value={cfg.mayo_invita_tamano || 'md'} onChange={e => set('mayo_invita_tamano', e.target.value)}>
+              <select className="form-control" value={cfg.mayo_invita_tamano || 'sm'} onChange={e => set('mayo_invita_tamano', e.target.value)}>
                 <option value="sm">Pequeño</option>
                 <option value="md">Mediano</option>
                 <option value="lg">Grande</option>
@@ -1433,13 +1659,66 @@ function TabConfig({ toast, onDirtyChange }) {
             ? <div style={{ aspectRatio: '16/9', borderRadius: 10, overflow: 'hidden' }}><iframe src={cfg.contacto_mapa} title="Mapa" style={{ width: '100%', height: '100%', border: 0 }} /></div>
             : <p className="empty-table">Sin mapa configurado.</p>)}
 
+          {sec === 'envio' && (() => {
+            const pedidoOn = !!cfg.envio_umbral_activo
+            const gratisOn = !!cfg.envio_gratis_barra_activo
+            if (!pedidoOn && !gratisOn) {
+              return <p className="empty-table">Enciende la barra de <strong>pedido mínimo</strong> y/o la de <strong>envío gratis</strong> para previsualizarlas (son independientes).</p>
+            }
+            const pedidoMin = montoCOP(umbralPrevMayo ? cfg.mayorista_pedido_minimo : cfg.pedido_minimo)
+            const envioGratis = montoCOP(umbralPrevMayo ? cfg.envio_gratis_mayorista : cfg.envio_gratis_desde)
+            // Escala del slider = la meta MÁS ALTA (no la suma). Cada barra usa su propia meta.
+            const metaMax = Math.max(pedidoOn ? pedidoMin : 0, gratisOn ? envioGratis : 0, 1)
+            const totalSim = umbralPrevTotal != null ? montoCOP(umbralPrevTotal) : Math.round(metaMax * 0.4)
+            const barPedido = previewBarraPedido(cfg, totalSim, umbralPrevMayo)
+            const barGratis = previewBarraGratis(cfg, totalSim, umbralPrevMayo)
+            const barrasUbi = [
+              barPedido && { estado: barPedido, tono: 'pedido' },
+              barGratis && { estado: barGratis, tono: 'gratis' },
+            ].filter(Boolean)
+            return (
+              <div>
+                <div className="cfg-tabs" style={{ marginBottom: 10 }}>
+                  <button type="button" className={!umbralPrevMayo ? 'on' : ''} onClick={() => { setUmbralPrevMayo(false); setUmbralPrevTotal(null) }}>Detal</button>
+                  <button type="button" className={umbralPrevMayo ? 'on' : ''} onClick={() => { setUmbralPrevMayo(true); setUmbralPrevTotal(null) }}>Mayorista</button>
+                </div>
+                <div style={{ marginBottom: 10 }}>
+                  <label className="form-label">Total del carrito (simulado): {fCOP(totalSim)}</label>
+                  <input
+                    type="range" min={0} max={Math.max(metaMax, 1000)} step={1000}
+                    value={Math.min(totalSim, Math.max(metaMax, 1000))}
+                    onChange={e => setUmbralPrevTotal(Number(e.target.value))}
+                    style={{ width: '100%' }}
+                  />
+                  <small style={{ color: 'var(--texto-suave)', fontSize: '0.7rem', display: 'block', marginTop: 4 }}>
+                    Cada barra resta por su cuenta: <em>su meta − este total</em>. No se suman las metas entre sí.
+                  </small>
+                </div>
+                {pedidoOn && !barPedido && <p className="empty-table" style={{ marginBottom: 8 }}>Pedido mínimo: define un monto &gt; 0 para {umbralPrevMayo ? 'mayorista' : 'detal'}.</p>}
+                {gratisOn && !barGratis && <p className="empty-table" style={{ marginBottom: 8 }}>Envío gratis: define un monto &gt; 0 para {umbralPrevMayo ? 'mayorista' : 'detal'}.</p>}
+                <PrevBarraMini
+                  estado={barPedido}
+                  titulo="Cálculo · Pedido mínimo"
+                  tono="pedido"
+                  formula={barPedido ? `${fCOP(barPedido.meta)} − ${fCOP(barPedido.total)} = faltan ${fCOP(barPedido.falta)}` : null}
+                />
+                <PrevBarraMini
+                  estado={barGratis}
+                  titulo="Cálculo · Envío gratis"
+                  tono="gratis"
+                  formula={barGratis ? `${fCOP(barGratis.meta)} − ${fCOP(barGratis.total)} = faltan ${fCOP(barGratis.falta)}` : null}
+                />
+                <PrevUbicacionBarras barras={barrasUbi} />
+              </div>
+            )
+          })()}
+
           {(sec === 'general' || !sec) && (
             <div style={{ fontSize: '0.85rem', color: 'var(--texto-suave)', lineHeight: 1.7 }}>
               <div><strong>Catálogo:</strong> {base || '— sin URL —'}</div>
               <div><strong>WhatsApp:</strong> {cfg.whatsapp || '—'}</div>
-              <div><strong>Pedido mínimo:</strong> {fCOP(cfg.pedido_minimo || 0)}</div>
               <div><strong>País:</strong> {cfg.pais || '—'}</div>
-              <p style={{ marginTop: 10 }}>Abre una sección para ver su vista previa.</p>
+              <p style={{ marginTop: 10 }}>Abre una sección para ver su vista previa. Pedido mínimo y envío gratis se configuran en <strong>Envío</strong> (por separado).</p>
             </div>
           )}
         </div>
@@ -2306,7 +2585,8 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
     const on = lienzo === target ? null : target
     setLienzo(on)
     if (iframeEl) {
-      const base = ((cfg?.url_publica || cfgUrl || '') + '').replace(/\/+$/, '')
+      const publicada = ((cfg?.url_publica || cfgUrl || '') + '').trim().replace(/\/+$/, '')
+      const base = (import.meta.env.DEV ? 'http://localhost:5174' : publicada) || publicada
       if (!base) return
       iframeEl.src = on === 'nosotros' ? `${base}/nosotros` : (on && on.startsWith('pagina:')) ? `${base}/p/${on.slice(7)}` : base
     }
@@ -2442,8 +2722,10 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
 
   if (!cfg) return <div className="card"><p className="empty-table">Cargando…</p></div>
   const secciones = cfg.secciones || SECCIONES_DEFAULT
-  // URL del iframe: cfg local o la query del padre (evita preview vacía si una falla)
-  const previewUrl = ((cfg.url_publica || cfgUrl || '') + '').trim().replace(/\/+$/, '')
+  // En desarrollo local: preview del Vite del catálogo (npm run dev:catalogo → :5174).
+  // En producción: URL pública desplegada. Sin esto el iframe sigue mostrando el Worker viejo.
+  const previewUrlPublica = ((cfg.url_publica || cfgUrl || '') + '').trim().replace(/\/+$/, '')
+  const previewUrl = (import.meta.env.DEV ? 'http://localhost:5174' : previewUrlPublica) || previewUrlPublica
 
   return (
     <div className="pz-layout">
@@ -2832,7 +3114,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
       {/* Vista previa en vivo */}
       <div className="pz-preview">
         <div className="pz-preview-bar">
-          <span><Eye size={14} style={{ verticalAlign: '-2px' }} /> Vista previa{packPendiente && selPack ? ` · ${selPack.nombre}` : familiaActiva === 'atelier' ? ' · Atelier' : ' · Clásico'}</span>
+          <span><Eye size={14} style={{ verticalAlign: '-2px' }} /> Vista previa{import.meta.env.DEV ? ' · local' : ''}{packPendiente && selPack ? ` · ${selPack.nombre}` : familiaActiva === 'atelier' ? ' · Atelier' : ' · Clásico'}</span>
           <div className="pz-devices">
             <button type="button" className={dispositivo === 'desktop' ? 'on' : ''} onClick={() => setDispositivo('desktop')} title="PC"><Monitor size={15} /></button>
             <button type="button" className={dispositivo === 'tablet' ? 'on' : ''} onClick={() => setDispositivo('tablet')} title="Tablet"><Tablet size={15} /></button>
@@ -3327,7 +3609,7 @@ function EditorBanner({ banner, toast, qc, onClose, modoAtelier = false }) {
   )
 }
 
-// ==================== MENSAJES ====================
+// ==================== CONTACTO (formulario del catálogo) ====================
 function TabMensajes() {
   const { data: msgs = [], isLoading } = useQuery({
     queryKey: ['mensajes_catalogo'],
@@ -3336,7 +3618,11 @@ function TabMensajes() {
   if (isLoading) return <div className="card"><p className="empty-table">Cargando…</p></div>
   return (
     <div className="card">
-      <div className="card-title">✉️ Mensajes de contacto ({msgs.length})</div>
+      <div className="card-title">✉️ Mensajes ({msgs.length})</div>
+      <p style={{ fontSize: '0.84rem', color: 'var(--texto-suave)', marginTop: 0 }}>
+        Aquí llegan los mensajes del formulario de la página <strong>Contacto</strong> del catálogo público.
+        No son plantillas de WhatsApp (esas están en Configuración) ni la lista de correos (esa está en <strong>Correos</strong>).
+      </p>
       {msgs.length === 0 ? <p className="empty-table">Aún no hay mensajes.</p>
         : <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {msgs.map(m => (
@@ -3352,118 +3638,5 @@ function TabMensajes() {
             ))}
           </div>}
     </div>
-  )
-}
-
-// ==================== MÉTRICAS ====================
-function TabMetricas() {
-  const qVis = useQuery({
-    queryKey: ['catalogo_visitas'],
-    queryFn: async () => { const { data, error } = await supabase.from('visitas_catalogo').select('producto, dispositivo, fecha').order('id', { ascending: false }).limit(2000); if (error) throw error; return data || [] },
-  })
-  const qPed = useQuery({
-    queryKey: ['catalogo_pedidos'],
-    queryFn: async () => { const { data, error } = await supabase.from('pedidos_catalogo').select('total, estado, created_at').order('id', { ascending: false }).limit(1000); if (error) throw error; return data || [] },
-  })
-  const qSub = useQuery({
-    queryKey: ['catalogo_subs'],
-    queryFn: async () => { const { data, error } = await supabase.from('suscriptores_catalogo').select('email, nombre, created_at').order('id', { ascending: false }).limit(1000); if (error) throw error; return data || [] },
-  })
-  const visitas = qVis.data || [], pedidos = qPed.data || [], subs = qSub.data || []
-
-  // ---- Estados: cargando / error / vacío ----
-  if (qVis.isLoading || qPed.isLoading || qSub.isLoading) return <div className="card"><p className="empty-table">Cargando métricas…</p></div>
-  const err = qVis.error || qPed.error || qSub.error
-  if (err) return <div className="card"><p className="empty-table" style={{ color: 'var(--rojo)' }}>No se pudieron cargar las métricas: {err.message}</p></div>
-
-  const hoy = new Date(); const hace7 = new Date(hoy.getTime() - 7 * 864e5).toISOString().slice(0, 10)
-  const visitas7 = visitas.filter(v => (v.fecha || '') >= hace7).length
-  const topProd = Object.entries(visitas.filter(v => v.producto).reduce((m, v) => { m[v.producto] = (m[v.producto] || 0) + 1; return m }, {})).sort((a, b) => b[1] - a[1]).slice(0, 5)
-  const porDisp = visitas.reduce((m, v) => { const d = v.dispositivo || 'desconocido'; m[d] = (m[d] || 0) + 1; return m }, {})
-  const totalPedidos = pedidos.length
-  const montoPedidos = pedidos.reduce((s, p) => s + (p.total || 0), 0)
-  const ticket = totalPedidos ? montoPedidos / totalPedidos : 0
-  const conversion = visitas.length ? (totalPedidos / visitas.length) * 100 : 0
-
-  // Tendencia de visitas por día (últimos 7 días)
-  const dias = Array.from({ length: 7 }, (_, i) => new Date(hoy.getTime() - (6 - i) * 864e5).toISOString().slice(0, 10))
-  const porDia = dias.map(d => ({ d, n: visitas.filter(v => (v.fecha || '').slice(0, 10) === d).length }))
-  const maxDia = Math.max(1, ...porDia.map(x => x.n))
-  const DISP = [['mobile', '📱 Móvil'], ['tablet', '📲 Tablet'], ['desktop', '💻 Escritorio'], ['desconocido', '❔ Otro']]
-
-  const sinDatos = visitas.length === 0 && pedidos.length === 0 && subs.length === 0
-  if (sinDatos) return (
-    <div className="card" style={{ textAlign: 'center', padding: '40px 20px' }}>
-      <div style={{ fontSize: '2.4rem' }}>📊</div>
-      <div className="card-title" style={{ justifyContent: 'center' }}>Aún no hay datos</div>
-      <p style={{ color: 'var(--texto-suave)', fontSize: '0.88rem' }}>Cuando los clientes visiten el catálogo, inicien pedidos o se suscriban, verás aquí las métricas.</p>
-    </div>
-  )
-
-  return (
-    <>
-      <div className="kpi-grid">
-        <div className="kpi-card verde"><div className="kpi-label">Visitas totales</div><div className="kpi-value">{fNum(visitas.length)}</div><div className="kpi-sub">{visitas7} en 7 días</div></div>
-        <div className="kpi-card dorado"><div className="kpi-label">Pedidos iniciados</div><div className="kpi-value">{fNum(totalPedidos)}</div><div className="kpi-sub">{fCOP(montoPedidos)} en total</div></div>
-        <div className="kpi-card tierra"><div className="kpi-label">Ticket promedio</div><div className="kpi-value" style={{ fontSize: '1.4rem' }}>{fCOP(ticket)}</div><div className="kpi-sub">conversión {conversion.toFixed(1)}%</div></div>
-        <div className="kpi-card lima"><div className="kpi-label">Suscriptores</div><div className="kpi-value">{fNum(subs.length)}</div><div className="kpi-sub">correos capturados</div></div>
-      </div>
-
-      <div className="card">
-        <div className="card-title"><Ico as={BarChart3} size={15} />Visitas · últimos 7 días</div>
-        <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 120, padding: '8px 0' }}>
-          {porDia.map(({ d, n }) => (
-            <div key={d} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, height: '100%', justifyContent: 'flex-end' }}>
-              <span style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--texto-suave)' }}>{n}</span>
-              <div title={`${n} visitas`} style={{ width: '70%', minHeight: 3, height: `${(n / maxDia) * 100}%`, background: 'linear-gradient(var(--selva), var(--lima))', borderRadius: '5px 5px 0 0' }} />
-              <span style={{ fontSize: '0.64rem', color: 'var(--texto-suave)' }}>{new Date(d + 'T00:00').toLocaleDateString('es-CO', { weekday: 'short' })}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className="card">
-        <div className="card-title">📟 Visitas por dispositivo</div>
-        {visitas.length === 0 ? <p className="empty-table">Sin visitas todavía.</p>
-          : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {DISP.filter(([k]) => porDisp[k]).map(([k, label]) => {
-                const pct = Math.round((porDisp[k] / visitas.length) * 100)
-                return (
-                  <div key={k}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', marginBottom: 3 }}><span>{label}</span><span style={{ color: 'var(--texto-suave)' }}>{fNum(porDisp[k])} · {pct}%</span></div>
-                    <div style={{ height: 8, background: 'var(--crema)', borderRadius: 999, overflow: 'hidden' }}><div style={{ width: `${pct}%`, height: '100%', background: 'var(--selva)' }} /></div>
-                  </div>
-                )
-              })}
-            </div>}
-      </div>
-
-      <div className="card">
-        <div className="card-title"><Ico as={Star} size={15} />Productos más vistos</div>
-        {topProd.length === 0 ? <p className="empty-table">Aún no hay visitas a productos.</p>
-          : <div className="table-wrap"><table>
-              <thead><tr><th>Producto</th><th className="td-number">Visitas</th></tr></thead>
-              <tbody>{topProd.map(([n, c]) => <tr key={n}><td>{n}</td><td className="td-number">{c}</td></tr>)}</tbody>
-            </table></div>}
-      </div>
-
-      <div className="card">
-        <div className="card-title">📧 Suscriptores ({fNum(subs.length)})</div>
-        {subs.length === 0 ? <p className="empty-table">Aún no hay suscriptores.</p>
-          : <div className="table-wrap"><table>
-              <thead><tr><th>Correo</th><th>Nombre</th><th>Fecha</th></tr></thead>
-              <tbody>{subs.slice(0, 20).map((s, i) => <tr key={i}><td>{s.email}</td><td>{s.nombre || '—'}</td><td>{s.created_at ? new Date(s.created_at).toLocaleDateString('es-CO') : '—'}</td></tr>)}</tbody>
-            </table></div>}
-      </div>
-
-      <div className="card">
-        <div className="card-title">🧾 Últimos pedidos iniciados</div>
-        {pedidos.length === 0 ? <p className="empty-table">Aún no hay pedidos.</p>
-          : <div className="table-wrap"><table>
-              <thead><tr><th>Fecha</th><th className="td-number">Total</th><th>Estado</th></tr></thead>
-              <tbody>{pedidos.slice(0, 15).map((p, i) => <tr key={i}><td>{p.created_at ? new Date(p.created_at).toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' }) : '—'}</td><td className="td-number">{fCOP(p.total)}</td><td><span className="badge badge-dorado">{p.estado || 'iniciado'}</span></td></tr>)}</tbody>
-            </table></div>}
-      </div>
-    </>
   )
 }

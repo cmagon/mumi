@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useSwipeable } from 'react-swipeable'
 import { Plus, ChevronLeft, ChevronRight, Send, Heart, X, MessageCircle } from 'lucide-react'
-import { fCOP, labelCategoria, iconoDe, stockLabel, suscribir, FAVORITOS, imgsDe, imgSrc } from './utils'
+import { fCOP, labelCategoria, iconoDe, stockLabel, suscribir, FAVORITOS, imgsDe, imgSrc, altImg, emailValido, telefonoValido, getEmail, getCliente, getTelefono, buscarClientePorEmail, setCliente, setEmail, setTelefono } from './utils'
 import FrutoIcon from './FrutoIcon'
 import { useStore } from './store'
 
@@ -89,57 +89,91 @@ export function bannerConTexto(b) {
   return !!(b?.titulo?.trim() || b?.subtitulo?.trim() || b?.boton_texto?.trim())
 }
 
+/** Chips de pack/presentación (x6, x12…) — no abren la ficha. */
+function PackChips({ packs, selId, onSelect }) {
+  if (!packs || packs.length < 2) return null
+  return (
+    <div className="card-packs" role="group" aria-label="Presentaciones" onClick={(e) => e.stopPropagation()}>
+      {packs.map(pr => (
+        <button
+          key={pr.id}
+          type="button"
+          className={`card-pack${String(selId) === String(pr.id) ? ' on' : ''}${(pr.stock ?? 0) <= 0 ? ' off' : ''}`}
+          onClick={() => onSelect(pr.id)}
+          title={pr.nombre || pr.label}
+        >
+          {pr.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 // ---- Tarjeta de producto ----
-export function Card({ p, cfg, n = 0, onOpen, onAdd }) {
-  const { esFav, toggleFav, precio, mayorista, enOferta, descuentoPct } = useStore()
-  const agotado = (p.stock ?? 0) <= 0
-  const st = stockLabel(p.stock, cfg)
-  const fav = esFav(p.id)
-  const oferta = enOferta(p)
+export function Card({ p, cfg, n: nProp = 0, onOpen, onAdd }) {
+  const { esFav, toggleFav, precio, mayorista, enOferta, descuentoPct, productoPorId, agregar, enCarrito } = useStore()
+  const packs = Array.isArray(p.presentaciones) && p.presentaciones.length > 1 ? p.presentaciones : null
+  const [selId, setSelId] = useState(p.id)
+  useEffect(() => { setSelId(p.id) }, [p.id])
+  const activo = (packs && productoPorId(selId)) || p
+  const n = packs ? enCarrito(activo.id) : nProp
+  const agotado = (activo.stock ?? 0) <= 0
+  const st = stockLabel(activo.stock, cfg)
+  const fav = esFav(activo.id)
+  const oferta = enOferta(activo)
   const atelier = (cfg?.diseno || 'selva') === 'atelier'
-  const portada = imgsDe(p)[0]
-  const srcWeb = imgSrc(portada || p.imagen_url, false)
-  const srcMob = imgSrc(portada || p.imagen_url, true)
-  const meta = [p.contenido, p.origen].filter(Boolean).join(' · ')
+  const portada = imgsDe(activo)[0]
+  const srcWeb = imgSrc(portada || activo.imagen_url, false)
+  const srcMob = imgSrc(portada || activo.imagen_url, true)
+  const meta = [activo.contenido, activo.origen].filter(Boolean).join(' · ')
+  const abrir = () => (onOpen ? onOpen(activo) : null)
+  const add = () => {
+    if (agotado) return
+    if (packs) agregar(activo, 1)
+    else if (onAdd) onAdd()
+    else agregar(activo, 1)
+  }
   const addBtn = agotado
     ? <button type="button" className="card-add card-add-off" disabled aria-label="Agotado">{atelier ? <Plus size={18} /> : 'Agotado'}</button>
-    : <button type="button" className="card-add" onClick={(e) => { e.stopPropagation(); onAdd() }} aria-label="Agregar">
+    : <button type="button" className="card-add" onClick={(e) => { e.stopPropagation(); add() }} aria-label="Agregar">
         <Plus size={atelier ? 18 : 15} /> {atelier ? (n > 0 ? `${n}` : '') : (n > 0 ? `Agregar (${n})` : 'Agregar')}
       </button>
   return (
     <div className={`card ${atelier ? 'card-atelier' : ''}`}>
-      <div className="card-media" onClick={onOpen}>
+      <div className="card-media" onClick={abrir}>
         {srcWeb
           ? <picture>
               {srcMob && srcMob !== srcWeb ? <source media="(max-width: 700px)" srcSet={srcMob} /> : null}
-              <img src={srcWeb} alt={p.nombre} />
+              <img src={srcWeb} alt={altImg(activo, portada)} />
             </picture>
-          : <span className="ph-fruto"><FrutoIcon name={iconoDe(p.frutos)} size={44} /></span>}
-        {oferta && <span className="ribbon ribbon-oferta">{atelier ? 'Oferta' : `-${descuentoPct(p)}%`}</span>}
-        {p.novedad && !oferta && <span className="ribbon ribbon-nuevo">Nuevo</span>}
+          : <span className="ph-fruto"><FrutoIcon name={iconoDe(activo.frutos)} size={44} /></span>}
+        {oferta && <span className="ribbon ribbon-oferta">{atelier ? 'Oferta' : `-${descuentoPct(activo)}%`}</span>}
+        {activo.novedad && !oferta && <span className="ribbon ribbon-nuevo">Nuevo</span>}
         {agotado && <span className="ribbon ribbon-agotado">Agotado</span>}
-        {FAVORITOS && <button type="button" className={`fav-btn ${fav ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); toggleFav(p.id) }} aria-label="Favorito"><Heart size={17} fill={fav ? 'currentColor' : 'none'} /></button>}
+        {FAVORITOS && <button type="button" className={`fav-btn ${fav ? 'on' : ''}`} onClick={(e) => { e.stopPropagation(); toggleFav(activo.id) }} aria-label="Favorito"><Heart size={17} fill={fav ? 'currentColor' : 'none'} /></button>}
         {atelier && addBtn}
       </div>
       <div className="card-body">
         {atelier ? (
           <>
             <div className="card-row">
-              <button type="button" className="card-name" onClick={onOpen}>{p.nombre}</button>
-              <div className="card-price">{fCOP(precio(p))}{oferta && <span className="precio-antes">{fCOP(p.precio_detal)}</span>}</div>
+              <button type="button" className="card-name" onClick={abrir}>{activo.nombre}</button>
+              <div className="card-price">{fCOP(precio(activo))}{oferta && <span className="precio-antes">{fCOP(activo.precio_detal)}</span>}</div>
             </div>
+            <PackChips packs={packs} selId={selId} onSelect={setSelId} />
             {meta ? <div className="card-meta">{meta}</div> : null}
             {st && (st.tono === 'urgente' || st.tono === 'pocas') && <div className={`stock-tag stock-${st.tono}`}>🔥 {st.texto}</div>}
             <button type="button" className={`card-add card-add-desk ${agotado ? 'card-add-off' : ''}`} disabled={agotado}
-              onClick={(e) => { e.stopPropagation(); if (!agotado) onAdd() }}>
+              onClick={(e) => { e.stopPropagation(); add() }}>
               <Plus size={14} /> {agotado ? 'Agotado' : (n > 0 ? `Añadir (${n})` : 'Añadir')}
             </button>
           </>
         ) : (
           <>
-            <div className="card-name" onClick={onOpen}>{p.nombre}</div>
+            <div className="card-name" onClick={abrir}>{activo.nombre}</div>
+            <PackChips packs={packs} selId={selId} onSelect={setSelId} />
             {st && (st.tono === 'urgente' || st.tono === 'pocas') && <div className={`stock-tag stock-${st.tono}`}>🔥 {st.texto}</div>}
-            <div className="card-price">{fCOP(precio(p))}{oferta && <span className="precio-antes">{fCOP(p.precio_detal)}</span>}{mayorista && p.precio_mayor > 0 && <span className="precio-tag">mayor</span>}</div>
+            <div className="card-price">{fCOP(precio(activo))}{oferta && <span className="precio-antes">{fCOP(activo.precio_detal)}</span>}{mayorista && activo.precio_mayor > 0 && <span className="precio-tag">mayor</span>}</div>
             {addBtn}
           </>
         )}
@@ -374,15 +408,98 @@ export function ModalNombre({ titulo = '¿Cuál es tu nombre?', texto, inicial =
   )
 }
 
+/** Correo (sesión) + nombre + teléfono. Precarga si el correo ya está registrado. */
+export function ModalSesionCliente({
+  titulo = 'Identifícate para continuar',
+  texto = 'Usamos tu correo para guardar favoritos y agilizar tu pedido.',
+  emailInicial = '',
+  nombreInicial = '',
+  telefonoInicial = '',
+  pedirTelefono = true,
+  cta = 'Continuar',
+  onConfirmar,
+  onClose,
+}) {
+  const [email, setE] = useState(emailInicial || getEmail() || '')
+  const [nombre, setN] = useState(nombreInicial || getCliente() || '')
+  const [telefono, setT] = useState(telefonoInicial || getTelefono() || '')
+  const [buscando, setBuscando] = useState(false)
+  const emailOk = emailValido(email)
+  const nombreOk = nombre.trim().length >= 2
+  const telOk = !pedirTelefono || telefonoValido(telefono)
+  const formOk = emailOk && nombreOk && telOk
+
+  useEffect(() => {
+    if (!emailOk) return
+    let cancel = false
+    const t = setTimeout(async () => {
+      setBuscando(true)
+      try {
+        const row = await buscarClientePorEmail(email)
+        if (cancel || !row) return
+        if (row.nombre && !nombre.trim()) setN(row.nombre)
+        if (row.telefono && !telefono.trim()) setT(row.telefono)
+      } finally { if (!cancel) setBuscando(false) }
+    }, 400)
+    return () => { cancel = true; clearTimeout(t) }
+  }, [email, emailOk]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  return (
+    <div className="overlay" style={{ alignItems: 'center' }} onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="popup" style={{ textAlign: 'left' }}>
+        <button className="popup-x" onClick={onClose} aria-label="Cerrar"><X size={20} /></button>
+        <h2 className="serif" style={{ color: 'var(--selva)', fontSize: '1.3rem' }}>{titulo}</h2>
+        {texto && <p style={{ color: 'var(--texto-suave)', margin: '6px 0 12px', fontSize: '0.9rem' }}>{texto}</p>}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault()
+            if (!formOk) return
+            const em = email.trim().toLowerCase()
+            const nom = nombre.trim()
+            const tel = telefono.trim()
+            setEmail(em)
+            setCliente(nom)
+            if (tel) setTelefono(tel)
+            onConfirmar({ email: em, nombre: nom, telefono: tel })
+          }}
+          style={{ display: 'flex', flexDirection: 'column', gap: 10 }}
+        >
+          <label style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--selva)' }}>Correo *</label>
+          <input className="cf" type="email" autoFocus value={email} onChange={e => setE(e.target.value)} placeholder="tu@correo.com" required />
+          <label style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--selva)' }}>Nombre *{buscando ? ' · buscando…' : ''}</label>
+          <input className="cf" value={nombre} onChange={e => setN(e.target.value)} placeholder="¿Cómo te llamas?" />
+          {pedirTelefono && (
+            <>
+              <label style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--selva)' }}>Teléfono / WhatsApp *</label>
+              <input className="cf" type="tel" inputMode="tel" value={telefono} onChange={e => setT(e.target.value)} placeholder="Ej: 300 123 4567" />
+            </>
+          )}
+          <button className="btn btn-selva" type="submit" disabled={!formOk} style={!formOk ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}>
+            {cta}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
+
 // ---- Newsletter ----
 export function Newsletter() {
-  const { cfg } = useStore()
+  const { cfg, establecerEmail } = useStore()
   const atelier = (cfg?.diseno || 'selva') === 'atelier'
-  const [email, setEmail] = useState('')
+  const [email, setEmailForm] = useState('')
   const [nombre, setNombre] = useState('')
   const [ok, setOk] = useState(false)
   const [err, setErr] = useState('')
-  const enviar = async (e) => { e.preventDefault(); setErr(''); try { await suscribir(email, nombre); setOk(true) } catch (ex) { setErr(ex.message) } }
+  const enviar = async (e) => {
+    e.preventDefault()
+    setErr('')
+    try {
+      await suscribir(email, nombre, 'newsletter')
+      establecerEmail?.(email, nombre)
+      setOk(true)
+    } catch (ex) { setErr(ex.message) }
+  }
   return (
     <section className={`news ${atelier ? 'news-atelier' : ''}`}>
       <h2 className="serif news-title">{atelier ? 'Únete a nuestra comunidad' : 'Recibe nuestras ofertas 🌿'}</h2>
@@ -393,7 +510,7 @@ export function Newsletter() {
         ? <div className="news-ok">¡Gracias por suscribirte! 💚</div>
         : <form className="news-form" onSubmit={enviar}>
             {!atelier && <input type="text" placeholder="Tu nombre (opcional)" value={nombre} onChange={e => setNombre(e.target.value)} />}
-            <input type="email" placeholder={atelier ? 'Tu correo electrónico' : 'Tu correo'} value={email} onChange={e => setEmail(e.target.value)} required />
+            <input type="email" placeholder={atelier ? 'Tu correo electrónico' : 'Tu correo'} value={email} onChange={e => setEmailForm(e.target.value)} required />
             <button type="submit"><Send size={16} /> Suscribirme</button>
           </form>}
       {err && <div className="news-err">{err}</div>}

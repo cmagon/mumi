@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useLocation, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
+import { pathImgProducto, conAltProducto, urlDeImg } from '../lib/imgNombre'
 import {
   fCOP, fNum, fFecha, getCIFTotalMensual, getCIFMensual, getCostoMinuto,
   calcularCostosProducto, calcularReceta, getPEqMultiproducto,
@@ -31,12 +32,14 @@ import { getConfig } from '../lib/appConfig'
 import Select from '../components/ui/Select'
 import {
   FICHAS_LOTEO,
+  ATAJOS_LOTEO,
   normalizarMetodoLoteo,
   configDesdePartes,
   agregarParte,
   quitarParte,
   actualizarParte,
   etiquetaParte,
+  describirPlantilla,
   ejemploLote,
   sugerirSiguienteLote,
 } from '../lib/loteoProducto'
@@ -929,7 +932,9 @@ export default function Costos({ vista = 'productos' }) {
       const mpsCambiadas = new Set((actualizarMP ? cambiosMP : []).map(c => String(c.mpId)))
 
       // Imágenes: ya se subieron al elegirlas; la PRIMERA de la galería es la principal.
-      const imagenUrl = imagenes[0] || ''
+      // alt + nombre de archivo = nombre del producto (SEO)
+      const imagenesSeo = conAltProducto(imagenes, formProd.nombre)
+      const imagenUrl = imagenesSeo[0]?.url || ''
 
       // Subir ficha técnica
       let fichaPathFinal = fichaPath
@@ -1001,6 +1006,9 @@ export default function Costos({ vista = 'productos' }) {
       delete datos.imp_saludable_pct
       delete datos.ibua_valor
       delete datos.empaca_surtido
+      // metodo_loteo (v150/v155): NUNCA en el update principal — si la columna no existe
+      // tumba todo el guardado. Se escribe aparte y se verifica con lectura.
+      delete datos.metodo_loteo
 
       if (editingId) {
         // Detectar cambios en cantidades/costos de ingredientes para guardar histórico
@@ -1046,19 +1054,44 @@ export default function Costos({ vista = 'productos' }) {
           equipo_unit: r.equipoUnit || 0,
         }).eq('id', idFicha)
       } catch { /* columnas opcionales: no bloquea el guardado */ }
-      // Método de loteo (v150) — escritura aparte y tolerante.
+      // Método de loteo (v150/v155) — escritura aparte + verificación de lectura.
       try {
         const idFicha = editingId || datos._newId
+        const payloadLoteo = normalizarMetodoLoteo(formProd.metodo_loteo)
         if (idFicha) {
           const { error: eLoteo } = await supabase.from('products_costing')
-            .update({ metodo_loteo: normalizarMetodoLoteo(formProd.metodo_loteo) })
+            .update({ metodo_loteo: payloadLoteo })
             .eq('id', idFicha)
-          if (eLoteo && /metodo_loteo/i.test(eLoteo.message || '')) {
-            datos._avisoLoteo = 'No se guardó el método de loteo: aplica la migración v150 en Supabase.'
-          } else if (eLoteo) throw eLoteo
+          if (eLoteo) {
+            datos._avisoLoteo = /metodo_loteo|column/i.test(eLoteo.message || '')
+              ? 'No se guardó el método de loteo: falta la columna en SQL. Ejecuta en Supabase el archivo supabase/migration_v155_metodo_loteo.sql'
+              : `No se guardó el método de loteo: ${eLoteo.message}`
+          } else {
+            // Confirmar que quedó en SQL (evita “lo veo en pantalla pero no en DB”)
+            const { data: check, error: eCheck } = await supabase
+              .from('products_costing')
+              .select('metodo_loteo')
+              .eq('id', idFicha)
+              .maybeSingle()
+            if (eCheck && /metodo_loteo|column/i.test(eCheck.message || '')) {
+              datos._avisoLoteo = 'La columna metodo_loteo no existe en Supabase. Ejecuta migration_v155_metodo_loteo.sql y vuelve a guardar la ficha.'
+            } else {
+              const leido = normalizarMetodoLoteo(check?.metodo_loteo)
+              const ok = payloadLoteo
+                ? !!(leido && JSON.stringify(leido.partes) === JSON.stringify(payloadLoteo.partes))
+                : !leido
+              if (!ok) {
+                datos._avisoLoteo = 'El método de loteo no quedó persistido en SQL (revisa permisos RLS o aplica migration_v155_metodo_loteo.sql).'
+              } else {
+                datos._loteoOk = leido ? describirPlantilla(leido) : null
+              }
+            }
+          }
         }
       } catch (e) {
-        if (/metodo_loteo/i.test(e?.message || '')) datos._avisoLoteo = 'No se guardó el método de loteo: aplica la migración v150 en Supabase.'
+        datos._avisoLoteo = /metodo_loteo|column/i.test(e?.message || '')
+          ? 'No se guardó el método de loteo: aplica migration_v155_metodo_loteo.sql en Supabase.'
+          : (e?.message || 'Error al guardar método de loteo')
       }
       // Precio por ficha (utilidad objetivo propia, IVA, impuesto saludable) e imprimibles —
       // escritura aparte y tolerante (columnas v130 opcionales).
@@ -1083,7 +1116,7 @@ export default function Costos({ vista = 'productos' }) {
       // Galería de imágenes — escritura aparte y tolerante (columna v92 opcional).
       try {
         const idFicha = editingId || datos._newId
-        if (idFicha) await supabase.from('products_costing').update({ imagenes }).eq('id', idFicha)
+        if (idFicha) await supabase.from('products_costing').update({ imagenes: imagenesSeo }).eq('id', idFicha)
       } catch { /* columna opcional: no bloquea el guardado */ }
 
       // Actualiza el costo/precio/nombre en el catálogo de PRODUCTO TERMINADO SOLO SI ya fue
@@ -1105,7 +1138,7 @@ export default function Costos({ vista = 'productos' }) {
               activo: formProd.activo !== false,
             }).eq('id', ya.id)
             // Galería de imágenes (columna v92) — aparte y tolerante para no bloquear la sincronización
-            try { await supabase.from('finished_products').update({ imagenes }).eq('id', ya.id) } catch { /* opcional */ }
+            try { await supabase.from('finished_products').update({ imagenes: imagenesSeo }).eq('id', ya.id) } catch { /* opcional */ }
             // Si ese terminado está enlazado a Alegra, empuja costo/precio/nombre automáticamente
             if (ya.alegra_item_id) { try { await supabase.functions.invoke('alegra-push-stock', { body: { finished_id: ya.id } }) } catch (e) { console.warn('No se pudo sincronizar con Alegra:', e) } }
           }
@@ -1156,17 +1189,19 @@ export default function Costos({ vista = 'productos' }) {
         }
       }
       const mpSelf = (cambiosMP || []).find(c => c.esSelf)
-      return { recetasAfectadas, mpSelf, avisoV130: datos._avisoV130, avisoLoteo: datos._avisoLoteo }
+      return { recetasAfectadas, mpSelf, avisoV130: datos._avisoV130, avisoLoteo: datos._avisoLoteo, loteoOk: datos._loteoOk }
     },
     onSuccess: (res) => {
       qc.invalidateQueries({ queryKey: ['products_costing'] })
       qc.invalidateQueries({ queryKey: ['product_cost_history'] })
       qc.invalidateQueries({ queryKey: ['raw_materials'] })
       qc.invalidateQueries({ queryKey: ['finished_products'] })
+      qc.invalidateQueries({ queryKey: ['lotes_para_sugerencia'] })
       const n = res?.recetasAfectadas?.length || 0
       toast(editingId ? 'Producto actualizado ✓' : 'Producto guardado ✓')
       if (res?.avisoV130) toast('La ficha se guardó, pero el IVA / utilidad objetivo / imprimibles NO: falta correr la migración v130. (' + res.avisoV130 + ')', 'warning')
-      if (res?.avisoLoteo) toast(res.avisoLoteo, 'warning')
+      if (res?.avisoLoteo) toast(res.avisoLoteo, 'error')
+      else if (res?.loteoOk) toast(`Método de loteo guardado en SQL: ${res.loteoOk}`, 'success')
       if (res?.mpSelf) toast(`Costo de "${res.mpSelf.nombre}" guardado en Inventario MP: $${fNum(res.mpSelf.nuevo)}/${res.mpSelf.unidad || 'u'}`, 'success')
       if (n > 0) toast(`Precio replicado a ${n} receta(s): ${res.recetasAfectadas.join(', ')}`, 'success')
       closeFicha()
@@ -1434,11 +1469,12 @@ export default function Costos({ vista = 'productos' }) {
   const subirImgBlob = async (blob) => {
     setSubiendoImg(true)
     try {
-      const path = `productos/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.jpg`
+      const nombre = (formProd.nombre || '').trim() || 'producto'
+      const path = pathImgProducto(nombre, { carpeta: 'productos' })
       const { error } = await supabase.storage.from('product-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
       if (error) throw error
       const { data } = supabase.storage.from('product-images').getPublicUrl(path)
-      setImagenes(prev => [...prev, data.publicUrl])
+      setImagenes(prev => [...prev, { url: data.publicUrl, url_mobile: data.publicUrl, alt: nombre }])
       toast('Imagen cargada ✓ — recuerda guardar la ficha')
     } catch (err) { toast('No se pudo subir la imagen: ' + err.message, 'error') }
     finally { setSubiendoImg(false) }
@@ -1774,9 +1810,9 @@ export default function Costos({ vista = 'productos' }) {
             <div className="form-group">
               <label className="form-label">Imágenes <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(la primera es la principal — clic en ★ para cambiarla)</small></label>
               <div style={{ display:'flex', gap:8, flexWrap:'wrap', alignItems:'flex-start' }}>
-                {imagenes.map((url, i) => (
-                  <div key={url + i} style={{ position:'relative', width:72, height:72, borderRadius:'var(--radio)', overflow:'hidden', border: i === 0 ? '2px solid var(--dorado)' : '1px solid var(--crema-oscuro)' }}>
-                    <img src={url} alt={`imagen ${i + 1}`} style={{ width:'100%', height:'100%', objectFit:'cover' }} />
+                {imagenes.map((im, i) => (
+                  <div key={urlDeImg(im) + i} style={{ position:'relative', width:72, height:72, borderRadius:'var(--radio)', overflow:'hidden', border: i === 0 ? '2px solid var(--dorado)' : '1px solid var(--crema-oscuro)' }}>
+                    <img src={urlDeImg(im)} alt={formProd.nombre || `imagen ${i + 1}`} style={{ width:'100%', height:'100%', objectFit:'cover' }} />
                     <div style={{ position:'absolute', top:2, right:2, display:'flex', gap:2 }}>
                       {i > 0 && <button type="button" title="Hacer principal" onClick={() => hacerPrincipal(i)} style={{ background:'rgba(0,0,0,0.55)', color:'#ffd54f', border:'none', borderRadius:4, cursor:'pointer', fontSize:'0.7rem', padding:'1px 4px' }}>★</button>}
                       <button type="button" title="Quitar imagen" onClick={() => quitarImagen(i)} style={{ background:'rgba(0,0,0,0.55)', color:'#fff', border:'none', borderRadius:4, cursor:'pointer', fontSize:'0.7rem', padding:'1px 4px' }}>✕</button>
@@ -2085,8 +2121,8 @@ export default function Costos({ vista = 'productos' }) {
                 <Ico as={Tag} size={14} />Método de loteo
               </div>
               <p style={{ fontSize:'0.78rem', color:'var(--texto-suave)', margin:'0 0 10px' }}>
-                Arma el lote con las fichas de abajo. Si dejas el campo vacío, en las órdenes <strong>no se autosugiere</strong> lote.
-                Con numeración, el consecutivo sube solo (ej. 0126 → 10026 → 10126).
+                Para la serie tipo <strong>10026 → 10426</strong> usa el atajo <strong>Serie nAA</strong> (Numeración + Año aa).
+                Si armas Día + Mes + Año <em>sin</em> Numeración, en órdenes sugerirá la fecha del día (<strong>260826</strong>), no el consecutivo.
               </p>
 
               {(() => {
@@ -2107,9 +2143,23 @@ export default function Costos({ vista = 'productos' }) {
                 }
                 const ej = cfg ? ejemploLote(cfg) : '—'
                 const sig = cfg && ej !== '—' ? (sugerirSiguienteLote(cfg, [ej]) || '—') : '—'
+                const tieneSeq = partes.some(p => p.tipo === 'seq')
 
                 return (
                   <>
+                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
+                      {ATAJOS_LOTEO.map(a => (
+                        <button
+                          key={a.id}
+                          type="button"
+                          className="btn btn-sm btn-secondary"
+                          onClick={() => setFormProd(f => ({ ...f, metodo_loteo: normalizarMetodoLoteo(a.config) }))}
+                          title={a.desc}
+                        >
+                          {a.label}
+                        </button>
+                      ))}
+                    </div>
                     <label className="form-label">Plantilla del lote</label>
                     <div
                       style={{
@@ -2249,12 +2299,18 @@ export default function Costos({ vista = 'productos' }) {
 
                     {cfg ? (
                       <div style={{ marginTop: 10, padding: '8px 12px', background: 'rgba(124,179,66,0.08)', borderRadius: 'var(--radio)', fontSize: '0.82rem' }}>
-                        Vista previa: <strong style={{ color: 'var(--selva)', letterSpacing: 0.5 }}>{ej}</strong>
+                        Plantilla: <strong>{describirPlantilla(cfg)}</strong>
+                        {' · '}Vista previa: <strong style={{ color: 'var(--selva)', letterSpacing: 0.5 }}>{ej}</strong>
                         {' · '}Siguiente: <strong>{sig}</strong>
+                        {!tieneSeq && (
+                          <div style={{ marginTop: 6, color: 'var(--rojo)', fontSize: '0.78rem' }}>
+                            Sin Numeración: en órdenes sugerirá la fecha del día (ddmmaa), no 10426. Usa el atajo «Serie nAA».
+                          </div>
+                        )}
                       </div>
                     ) : (
                       <small style={{ display: 'block', marginTop: 8, color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
-                        Tip: Numeración + Año aa → lotes tipo 0126, 10026, 10126…
+                        Tip: atajo «Serie nAA» → lotes tipo 0126, 10026, 10426…
                       </small>
                     )}
                   </>

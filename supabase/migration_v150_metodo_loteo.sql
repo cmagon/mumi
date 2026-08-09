@@ -1,6 +1,6 @@
 -- v150 — Método de loteo por producto (ficha).
--- JSONB con preset/config: { metodo, prefijo, ancho_seq, formato_anio, reinicio, separador }.
--- null / vacío / metodo "ninguno" = no autosugerir lote al diligenciar órdenes.
+-- NOTA: hay otro archivo también llamado v150 (mayo_barra_colores). Si dudaste cuál corriste,
+-- ejecuta también: migration_v155_metodo_loteo.sql (idempotente, misma columna).
 alter table products_costing
   add column if not exists metodo_loteo jsonb;
 

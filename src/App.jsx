@@ -22,6 +22,7 @@ const Compartido = lazy(() => import('./pages/Compartido'))
 const Dashboard = lazy(() => import('./pages/Dashboard'))
 const Costos = lazy(() => import('./pages/Costos'))
 const Receta = lazy(() => import('./pages/Receta'))
+const CalculadoraEnvios = lazy(() => import('./pages/CalculadoraEnvios'))
 const Inventario = lazy(() => import('./pages/Inventario'))
 const ProductosTerminados = lazy(() => import('./pages/ProductosTerminados'))
 const ProductosPorEmpacar = lazy(() => import('./pages/ProductosPorEmpacar'))
@@ -183,6 +184,7 @@ export default function App() {
         <Route path="/productos"   element={<ModRoute modulo="productos"><Costos vista="productos" /></ModRoute>} />
         <Route path="/costos-gastos" element={<ModRoute modulo="costos_gastos"><Costos vista="costos" /></ModRoute>} />
         <Route path="/utilidades"  element={<ModRoute modulo="utilidades"><Receta /></ModRoute>} />
+        <Route path="/utilidades/envios" element={<ModRoute modulo="utilidades"><CalculadoraEnvios /></ModRoute>} />
         <Route path="/receta"      element={<Navigate to="/utilidades" replace />} />
         <Route path="/inventario"  element={<ModRoute modulo="inventario"><Inventario /></ModRoute>} />
         <Route path="/terminados"  element={<ModRoute modulo="productos"><ProductosTerminados /></ModRoute>} />

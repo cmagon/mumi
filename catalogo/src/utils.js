@@ -15,10 +15,37 @@ export function cargarGoogleFonts(familias) {
 // Envía un mensaje al panel de administración (cuando el catálogo corre dentro del iframe del editor)
 export const postCanvas = (msg) => { try { if (window.parent && window.parent !== window) window.parent.postMessage(msg, '*') } catch { /* noop */ } }
 
-// Favoritos: desactivado por ahora (se reactiva cuando haya cuentas de usuario)
-export const FAVORITOS = false
+// Favoritos activos: el correo actúa como sesión del cliente
+export const FAVORITOS = true
 // Buscador del catálogo
 export const BUSCADOR = true
+
+export const emailValido = (e) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test((e || '').trim())
+
+// ---- Sesión soft por correo (localStorage) ----
+export const getEmail = () => { try { return localStorage.getItem('mumi_email') || '' } catch { return '' } }
+export const setEmail = (v) => { try { const e = (v || '').trim().toLowerCase(); e ? localStorage.setItem('mumi_email', e) : localStorage.removeItem('mumi_email') } catch { /* noop */ } }
+export const getCliente = () => { try { return localStorage.getItem('mumi_cliente') || '' } catch { return '' } }
+export const setCliente = (v) => { try { v ? localStorage.setItem('mumi_cliente', v) : localStorage.removeItem('mumi_cliente') } catch { /* noop */ } }
+export const getTelefono = () => { try { return localStorage.getItem('mumi_telefono') || '' } catch { return '' } }
+export const setTelefono = (v) => { try { const t = (v || '').trim(); t ? localStorage.setItem('mumi_telefono', t) : localStorage.removeItem('mumi_telefono') } catch { /* noop */ } }
+/** Celular: al menos 7 dígitos (permite +57, espacios, guiones). */
+export const telefonoValido = (t) => ((t || '').replace(/\D/g, '').length >= 7)
+
+export async function buscarClientePorEmail(email) {
+  const e = (email || '').trim().toLowerCase()
+  if (!emailValido(e)) return null
+  const { data, error } = await supabase.rpc('catalogo_cliente_por_email', { p_email: e })
+  if (error) {
+    // Fallback sin RPC: lectura directa (puede fallar por RLS)
+    try {
+      const { data: row } = await supabase.from('suscriptores_catalogo').select('nombre, activo, telefono').ilike('email', e).maybeSingle()
+      return row || null
+    } catch { return null }
+  }
+  const row = Array.isArray(data) ? data[0] : data
+  return row || null
+}
 
 // ---- Formato moneda COP ----
 export const fCOP = (n) => '$' + Math.round(Number(n) || 0).toLocaleString('es-CO')
@@ -27,11 +54,13 @@ export const fCOP = (n) => '$' + Math.round(Number(n) || 0).toLocaleString('es-C
 // Formato nuevo: { url, url_mobile }. Formato legado: string URL.
 export const normalizeImg = (x) => {
   if (!x) return null
-  if (typeof x === 'string') return { url: x, url_mobile: x }
+  if (typeof x === 'string') return { url: x, url_mobile: x, alt: '' }
   const url = x.url || x.src || ''
   if (!url) return null
-  return { url, url_mobile: x.url_mobile || url }
+  return { url, url_mobile: x.url_mobile || url, alt: (x.alt || '').trim() }
 }
+/** Alt SEO: nombre del producto (prioridad) o el alt guardado en la imagen */
+export const altImg = (p, img) => (p?.nombre || '').trim() || (normalizeImg(img)?.alt || '') || ''
 export const imgSrc = (x, mobile = false) => {
   const n = normalizeImg(x)
   if (!n) return ''
@@ -258,7 +287,10 @@ export function jsonLdProducto(cfg, p) {
     '@type': 'Product',
     name: p.seo_titulo || p.nombre,
     description: sinHtml(p.seo_desc || p.descripcion).slice(0, 500) || undefined,
-    image: p.imagen_url ? [p.imagen_url] : undefined,
+    image: (() => {
+      const urls = imgsUrls(p)
+      return urls.length ? urls : (p.imagen_url ? [p.imagen_url] : undefined)
+    })(),
     url,
     brand: { '@type': 'Brand', name: cfg?.nombre_tienda || 'Mumi Amazonia' },
     category: p.categoria || undefined,
@@ -351,17 +383,15 @@ const precioItem = (i, mayorista) => {
 
 // ---- Mensaje de WhatsApp + registro del pedido ----
 // `intro` = encabezado configurable (según haya stock o no); el detalle se arma solo.
-// Nombre del cliente guardado en el navegador (se pide una vez en el carrito)
-export const getCliente = () => { try { return localStorage.getItem('mumi_cliente') || '' } catch { return '' } }
-export const setCliente = (v) => { try { v ? localStorage.setItem('mumi_cliente', v) : localStorage.removeItem('mumi_cliente') } catch { /* noop */ } }
 
 // ---- Plantillas de WhatsApp: fichas insertables por el administrador ----
 export const TOKENS_WA = [
-  { t: 'saludo', d: 'Saludo' }, { t: 'cliente', d: 'Nombre del cliente' }, { t: 'pedido', d: 'Detalle del pedido' },
-  { t: 'total', d: 'Total' }, { t: 'envio', d: 'Envío' }, { t: 'nota', d: 'Nota del cliente' },
-  { t: 'cierre', d: 'Frase de cierre' }, { t: 'tienda', d: 'Nombre de la tienda' },
+  { t: 'saludo', d: 'Saludo' }, { t: 'cliente', d: 'Nombre del cliente' },
+  { t: 'pedido', d: 'Detalle del pedido' },
+  { t: 'codigo', d: 'Nº de pedido (Pedido #…)' }, { t: 'total', d: 'Total' }, { t: 'envio', d: 'Envío' },
+  { t: 'nota', d: 'Nota del cliente' }, { t: 'cierre', d: 'Frase de cierre' }, { t: 'tienda', d: 'Nombre de la tienda' },
 ]
-export const tienePlantilla = (s) => /\{\s*(saludo|cliente|pedido|total|envio|nota|cierre|tienda)\s*\}/i.test(s || '')
+export const tienePlantilla = (s) => /\{\s*(saludo|cliente|telefono|pedido|codigo|total|envio|nota|cierre|tienda)\s*\}/i.test(s || '')
 // Texto de envío: solo si el administrador lo configuró
 export function textoEnvio(cfg) {
   const msg = (cfg?.envio_mensaje || '').trim()
@@ -370,6 +400,54 @@ export function textoEnvio(cfg) {
   if (msg && tarifa) return `🚚 ${msg} (${fCOP(tarifa)})`
   return msg ? `🚚 ${msg}` : `🚚 Envío: ${fCOP(tarifa)}`
 }
+
+/** Monto COP seguro (evita "30.000" → 30 y mezcla de strings). Solo dígitos. */
+export function montoCOP(v) {
+  if (v == null || v === '') return 0
+  if (typeof v === 'number') return Number.isFinite(v) ? Math.max(0, Math.round(v)) : 0
+  const digits = String(v).replace(/[^\d]/g, '')
+  if (!digits) return 0
+  const n = parseInt(digits, 10)
+  return Number.isFinite(n) ? n : 0
+}
+
+/**
+ * Progreso hacia UN monto meta. No combina metas entre barras.
+ * falta = meta − totalCarrito (nunca metaA + metaB).
+ */
+function barraProgreso(meta, total, labels) {
+  const m = montoCOP(meta)
+  if (!(m > 0)) return null
+  const t = montoCOP(total)
+  const falta = Math.max(0, m - t)
+  const ok = falta <= 0
+  return {
+    meta: m, total: t, falta, pct: Math.min(100, Math.round((t / m) * 100)), ok,
+    label: ok ? labels.ok : labels.falta(fCOP(falta)),
+  }
+}
+
+/** Barra 1: pedido mínimo sugerido. Usa solo pedido_minimo / mayorista_pedido_minimo. */
+export function barraPedidoMinimoEstado(cfg, total = 0, mayorista = false) {
+  if (!cfg?.envio_umbral_activo) return null
+  const meta = mayorista ? cfg.mayorista_pedido_minimo : cfg.pedido_minimo
+  const mayo = mayorista ? ' mayorista' : ''
+  return barraProgreso(meta, total, {
+    falta: (f) => `Te faltan ${f} para el pedido mínimo sugerido${mayo}`,
+    ok: `¡Llegaste al pedido mínimo sugerido${mayo}!`,
+  })
+}
+
+/** Barra 2: envío gratis. Usa solo envio_gratis_desde / envio_gratis_mayorista (monto absoluto del pedido, no se suma al mínimo). */
+export function barraEnvioGratisEstado(cfg, total = 0, mayorista = false) {
+  if (!cfg?.envio_gratis_barra_activo) return null
+  const meta = mayorista ? cfg.envio_gratis_mayorista : cfg.envio_gratis_desde
+  return barraProgreso(meta, total, {
+    falta: (f) => `Te faltan ${f} para envío gratis nacional`,
+    ok: '¡Envío gratis nacional en tu pedido!',
+  })
+}
+
 // Reemplaza las fichas y limpia líneas que quedaron vacías
 export function aplicarPlantilla(tpl, vars) {
   let s = String(tpl || '')
@@ -388,27 +466,29 @@ export function mensajeSolicitudMayorista(cfg, nombre = null) {
   return `${vars.saludo}\n${soy}estoy interesado(a) en ser mayorista. ¿Me comparten los precios al por mayor?${tpl ? `\n\n${tpl}` : ''}`
 }
 
-export function construirMensajeWA(items, nota, cfg, mayorista = false, intro = '', nombre = null) {
+export function construirMensajeWA(items, nota, cfg, mayorista = false, intro = '', nombre = null, codigo = '', telefono = null) {
   const agotadoDe = (i) => (Number(i.stock) || 0) <= 0
   const total = items.reduce((s, i) => s + (agotadoDe(i) ? 0 : precioItem(i, mayorista) * i.cantidad), 0)
   const todosAgotados = items.length > 0 && items.every(agotadoDe)
   const cliente = (nombre == null ? getCliente() : nombre).trim()
+  // El teléfono se guarda en CRM; nunca se incluye en el mensaje de WhatsApp
+  const codigoTxt = (codigo || '').trim()
+  const codigoLinea = codigoTxt ? `Pedido #${codigoTxt}` : ''
   const lineas = items.map(i => {
     const em = emojiCategoria(i.categoria)
     const pu = precioItem(i, mayorista)
     const ago = agotadoDe(i)
-    // Si está agotado no se indica cantidad (se consulta disponibilidad, no se pide una cantidad).
-    // No se incluye el enlace del producto: el mensaje queda más limpio y directo.
     return ago
       ? `${em} *${i.nombre}*\n   ${fCOP(pu)} c/u  (agotado — sobre pedido)`
       : `${em} *${i.cantidad}x ${i.nombre}*\n   ${fCOP(pu)} c/u → ${fCOP(pu * i.cantidad)}${notaStock(i, cfg)}`
   }).join('\n\n')
-  // En consultas de disponibilidad no se incluye el nombre del cliente
   const clienteVar = todosAgotados ? '' : cliente
   const vars = {
     saludo: '¡Hola! 🌿',
     cliente: clienteVar,
+    telefono: '',
     pedido: lineas,
+    codigo: codigoLinea,
     total: fCOP(total),
     envio: todosAgotados ? '' : textoEnvio(cfg),
     nota: nota?.trim() ? `📝 *Nota:* ${nota.trim()}` : '',
@@ -416,19 +496,25 @@ export function construirMensajeWA(items, nota, cfg, mayorista = false, intro = 
     tienda: cfg?.nombre_tienda || 'Mumi Amazonia',
   }
   const tpl = (intro || '').trim()
-  // Si el administrador escribió una plantilla con fichas, manda ella
-  if (tienePlantilla(tpl)) return aplicarPlantilla(tpl, vars)
+  if (tienePlantilla(tpl)) {
+    let msg = aplicarPlantilla(tpl, vars)
+    // Si la plantilla no trae el Nº, lo añadimos igual (siempre visible)
+    if (codigoTxt && !msg.includes(codigoTxt)) {
+      msg = `${msg}\n\n🔖 *Pedido #${codigoTxt}*`
+    }
+    return msg
+  }
 
-  // Orden por defecto (si hay texto sin fichas, se usa como saludo/encabezado)
   const saludo = tpl || (todosAgotados
     ? '¡Hola! 🌿 Quisiera consultar la disponibilidad de:'
     : mayorista ? '¡Hola! 🌿 Soy mayorista y quiero hacer este pedido:' : '¡Hola! 🌿 Me gustaría hacer este pedido:')
-  const titulo = todosAgotados ? '📋 *CONSULTA DE DISPONIBILIDAD*' : `🛒 *MI PEDIDO${mayorista ? ' (MAYORISTA)' : ''}*`
+  const titulo = todosAgotados
+    ? '📋 *CONSULTA DE DISPONIBILIDAD*'
+    : `🛒 *MI PEDIDO${mayorista ? ' (MAYORISTA)' : ''}*${codigoTxt ? `\n🔖 *Pedido #${codigoTxt}*` : ''}`
   let msg = saludo
   if (clienteVar) msg += `\nSoy *${clienteVar}*`
   msg += `\n\n${titulo}\n\n${lineas}\n\n━━━━━━━━━━━━━━\n`
   msg += todosAgotados ? '💬 *¿Cuándo estará disponible?*' : `💰 *Total: ${vars.total}*`
-  // El envío NO se incluye por defecto: solo aparece si el administrador pone la ficha {envio}
   if (vars.nota) msg += `\n\n${vars.nota}`
   msg += `\n\n${vars.cierre}`
   return msg
@@ -440,26 +526,179 @@ export function abrirWA(cfg, texto) {
   window.open(`https://wa.me/${numero}?text=${encodeURIComponent(texto || '')}`, '_blank')
 }
 
-// ---- Suscripción al newsletter ----
-export async function suscribir(email, nombre) {
+// ---- Suscripción / CRM ----
+/** Registra correo solo si es nuevo. Si ya existe, completa nombre/teléfono vacíos sin duplicar. */
+export async function suscribir(email, nombre, origen = 'newsletter', telefono = null) {
   const e = (email || '').trim().toLowerCase()
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e)) throw new Error('Escribe un correo válido')
-  const { error } = await supabase.from('suscriptores_catalogo').insert({ email: e, nombre: (nombre || '').trim() || null })
-  if (error && !/duplicate|unique/i.test(error.message)) throw error
-  return true
+  if (!emailValido(e)) throw new Error('Escribe un correo válido')
+  const nom = (nombre || '').trim() || null
+  const tel = (telefono || '').trim() || null
+
+  const existente = await buscarClientePorEmail(e)
+  if (existente) {
+    setEmail(e)
+    if (nom) setCliente(nom)
+    else if (existente.nombre) setCliente(existente.nombre)
+    if (tel) setTelefono(tel)
+    else if (existente.telefono) setTelefono(existente.telefono)
+    const faltaNombre = nom && !existente.nombre
+    const faltaTel = tel && !existente.telefono
+    const actualizarTel = tel && existente.telefono && tel !== existente.telefono
+    if (faltaNombre || faltaTel || actualizarTel) {
+      try {
+        await supabase.rpc('catalogo_upsert_suscriptor', {
+          p_email: e, p_nombre: nom, p_origen: origen || 'newsletter', p_telefono: tel,
+        })
+      } catch {
+        try {
+          await supabase.rpc('catalogo_upsert_suscriptor', { p_email: e, p_nombre: nom, p_origen: origen || 'newsletter' })
+        } catch { /* noop */ }
+      }
+    }
+    return { ya_existia: true }
+  }
+
+  const { data, error } = await supabase.rpc('catalogo_upsert_suscriptor', {
+    p_email: e, p_nombre: nom, p_origen: origen || 'newsletter', p_telefono: tel,
+  })
+  if (error) {
+    // Intento firma antigua (3 args) o insert directo
+    const retry = await supabase.rpc('catalogo_upsert_suscriptor', {
+      p_email: e, p_nombre: nom, p_origen: origen || 'newsletter',
+    })
+    if (retry.error) {
+      const { data: prev } = await supabase.from('suscriptores_catalogo').select('email').ilike('email', e).maybeSingle()
+      if (prev) {
+        setEmail(e)
+        if (nom) setCliente(nom)
+        if (tel) setTelefono(tel)
+        return { ya_existia: true }
+      }
+      const { error: e2 } = await supabase.from('suscriptores_catalogo').insert({ email: e, nombre: nom, telefono: tel })
+      if (e2 && !/duplicate|unique/i.test(e2.message)) throw e2
+    }
+  }
+  setEmail(e)
+  if (nom) setCliente(nom)
+  if (tel) setTelefono(tel)
+  return { ya_existia: false, token: data }
 }
 
-export async function confirmarPedidoWA(items, nota, cfg, mayorista = false, intro = '', nombre = null) {
+export async function desuscribirPorToken(token) {
+  const { data, error } = await supabase.rpc('catalogo_desuscribir', { p_token: token })
+  if (error) throw error
+  return !!data
+}
+
+export async function listarFavoritosRemotos(email) {
+  const e = (email || getEmail() || '').trim().toLowerCase()
+  if (!emailValido(e)) return []
+  const { data, error } = await supabase.rpc('catalogo_listar_favoritos', { p_email: e })
+  if (error) return []
+  return (data || []).map(r => String(r.product_id ?? r))
+}
+
+export async function toggleFavoritoRemoto(email, productId, nombre) {
+  const e = (email || '').trim().toLowerCase()
+  if (!emailValido(e)) throw new Error('Correo requerido')
+  // Asegura suscriptor sin duplicar
+  try { await suscribir(e, nombre, 'favorito') } catch { /* noop */ }
+  const { data, error } = await supabase.rpc('catalogo_toggle_favorito', {
+    p_email: e,
+    p_product_id: String(productId),
+    p_nombre: (nombre || '').trim() || null,
+  })
+  if (error) throw error
+  setEmail(e)
+  return !!data
+}
+
+/**
+ * Registra pedido, abre WA con Pedido #. Sin preguntar si envió el mensaje.
+ */
+export async function confirmarPedidoWA(items, nota, cfg, mayorista = false, intro = '', nombre = null, email = null, telefono = null) {
   const total = items.reduce((s, i) => s + precioItem(i, mayorista) * i.cantidad, 0)
   const cliente = (nombre == null ? getCliente() : nombre).trim()
-  // Registra el pedido iniciado (best-effort); el cliente va en la nota para no depender de columnas nuevas
+  const correo = (email == null ? getEmail() : email).trim().toLowerCase()
+  const tel = (telefono == null ? getTelefono() : telefono).trim()
+  let codigo = ''
+  let pedidoId = null
+  const productos = items.map(i => ({
+    id: i.id, nombre: i.nombre, cantidad: i.cantidad, precio: precioItem(i, mayorista), mayorista,
+  }))
   try {
-    await supabase.from('pedidos_catalogo').insert({
-      productos: items.map(i => ({ nombre: i.nombre, cantidad: i.cantidad, precio: precioItem(i, mayorista), mayorista })),
-      total, nota: [cliente && `Cliente: ${cliente}`, nota?.trim()].filter(Boolean).join(' — ') || null,
+    const { data, error } = await supabase.rpc('catalogo_iniciar_pedido', {
+      p_productos: productos,
+      p_total: total,
+      p_nota: nota?.trim() || null,
+      p_email: correo || null,
+      p_nombre: cliente || null,
+      p_mayorista: !!mayorista,
+      p_telefono: tel || null,
     })
+    if (!error && data) {
+      const row = Array.isArray(data) ? data[0] : data
+      codigo = row?.codigo || ''
+      pedidoId = row?.id ?? null
+    } else {
+      // Fallback: firma sin p_telefono o insert directo
+      const retry = await supabase.rpc('catalogo_iniciar_pedido', {
+        p_productos: productos, p_total: total, p_nota: nota?.trim() || null,
+        p_email: correo || null, p_nombre: cliente || null, p_mayorista: !!mayorista,
+      })
+      if (!retry.error && retry.data) {
+        const row = Array.isArray(retry.data) ? retry.data[0] : retry.data
+        codigo = row?.codigo || ''
+        pedidoId = row?.id ?? null
+      } else {
+        const { data: ins } = await supabase.from('pedidos_catalogo').insert({
+          productos, total,
+          nota: [cliente && `Cliente: ${cliente}`, correo && `Email: ${correo}`, tel && `Tel: ${tel}`, nota?.trim()].filter(Boolean).join(' — ') || null,
+          estado: 'enviado', email: correo || null, nombre: cliente || null, telefono: tel || null,
+        }).select('id').maybeSingle()
+        pedidoId = ins?.id ?? null
+        codigo = pedidoId ? `TMP-${pedidoId}` : ''
+      }
+      if (correo) try { await suscribir(correo, cliente, 'pedido', tel) } catch { /* noop */ }
+    }
   } catch { /* noop */ }
+
+  if (correo) {
+    setEmail(correo)
+    try { await suscribir(correo, cliente, 'pedido', tel) } catch { /* noop */ }
+  }
+  if (cliente) setCliente(cliente)
+  if (tel) setTelefono(tel)
+
   const numero = (cfg?.whatsapp || '+573157702180').replace(/[^0-9]/g, '')
-  const texto = encodeURIComponent(construirMensajeWA(items, nota, cfg, mayorista, intro, cliente))
+  const texto = encodeURIComponent(construirMensajeWA(items, nota, cfg, mayorista, intro, cliente, codigo, tel))
   window.open(`https://wa.me/${numero}?text=${texto}`, '_blank')
+
+  if (codigo) {
+    try { await marcarPedidoEstado(codigo, 'enviado') } catch { /* noop */ }
+  }
+  return { codigo, id: pedidoId }
+}
+
+export async function sincronizarFavoritosLocales(email, ids, nombre) {
+  const e = (email || '').trim().toLowerCase()
+  if (!emailValido(e) || !Array.isArray(ids) || !ids.length) return
+  const remotos = new Set(await listarFavoritosRemotos(e))
+  for (const id of ids) {
+    const sid = String(id)
+    if (remotos.has(sid)) continue
+    try { await toggleFavoritoRemoto(e, sid, nombre) } catch { /* noop */ }
+  }
+}
+
+export async function marcarPedidoEstado(codigo, estado) {
+  if (!codigo) return false
+  const { data, error } = await supabase.rpc('catalogo_marcar_pedido', { p_codigo: codigo, p_estado: estado })
+  if (error) {
+    try {
+      await supabase.from('pedidos_catalogo').update({ estado }).eq('codigo', codigo)
+      return true
+    } catch { return false }
+  }
+  return !!data
 }

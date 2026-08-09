@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, uploadFile, beginSilentWrites, endSilentWrites } from '../lib/supabase'
 import { startDownload, updateDownload, endDownload, isDownloadCanceled } from '../lib/downloadProgress'
 import { reservarPEPS, liberarReservaLotes, consumirReservaLotes, consumirPEPS, reponerPEPS, estadoLote, crearLoteEntrada, costoPEPS, revertirLotesDeOrden } from '../lib/lotes'
-import { sugerirSiguienteLote, normalizarMetodoLoteo } from '../lib/loteoProducto'
+import { analizarSugerenciaLote, normalizarMetodoLoteo, expandirLotes } from '../lib/loteoProducto'
 import { writeOrQueue } from '../lib/offlineQueue'
 import { encolarEfectos, aplicarEfectos, contarEfectos, onEfectosChange, ordenesConEfectosPendientes } from '../lib/efectosPendientes'
 import { puedeVerSeccion, puedeSeccionExplicita } from '../lib/permisos'
@@ -15,7 +15,8 @@ import BuscadorSelect from '../components/ui/BuscadorSelect'
 import { fFecha, fNum, fCOP, componerSurtido, minutosProcesoOrden, calcularCostoProduccionOrden } from '../lib/businessLogic'
 import { useNavTrail } from '../hooks/useNavTrail'
 import { useHistoryLayer } from '../hooks/useHistoryLayer'
-import { setBusy } from '../lib/busy'
+import { setBusy, resetBusy } from '../lib/busy'
+import { forceUnlockBodyScroll } from '../lib/bodyScrollLock'
 import Cargando from '../components/ui/Cargando'
 import PaginacionTabla from '../components/ui/PaginacionTabla'
 import { usePaginacion } from '../hooks/usePaginacion'
@@ -300,7 +301,14 @@ export default function OrdenesProduccion() {
   // Modales = subpáginas del historial: Atrás del navegador cierra o vuelve al módulo anterior
   const cerrarNuevaRaw = useCallback(() => { setModalNueva(false); setEditOrdenId(null) }, [])
   const closeNueva = useHistoryLayer(modalNueva, cerrarNuevaRaw, 'orden-nueva')
-  const cerrarProcesoRaw = useCallback(() => setModalProceso(false), [])
+  const cerrarProcesoRaw = useCallback(() => {
+    setModalConfirmEnvio(false)
+    setModalProceso(false)
+    // Defensa táctil: si un modal anidado dejó el body bloqueado o el overlay “Guardando…”, liberar.
+    resetBusy()
+    // unlock en el siguiente frame (después del cleanup del Modal)
+    requestAnimationFrame(() => forceUnlockBodyScroll())
+  }, [])
   const closeProceso = useHistoryLayer(modalProceso, cerrarProcesoRaw, 'orden-proceso')
   const cerrarDetalleRaw = useCallback(() => setOrdenDetalle(null), [])
   const closeDetalle = useHistoryLayer(!!ordenDetalle, cerrarDetalleRaw, 'orden-detalle')
@@ -571,6 +579,26 @@ export default function OrdenesProduccion() {
   })
   const recordsDeOrden = (id) => prodRecords.filter(r => r.orden_id === id)
 
+  // Lotes históricos para sugerir el siguiente consecutivo (nAA: 10026 → 10426).
+  // Se carga al abrir proceso aunque la ficha no traiga método (fallback nAA por lotes existentes).
+  const { data: lotesHistSugerencia = [], isFetched: lotesHistListo } = useQuery({
+    queryKey: ['lotes_para_sugerencia'],
+    enabled: !!ordenPrep,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const [o, r, s] = await Promise.all([
+        supabase.from('production_orders').select('lote').not('lote', 'is', null).neq('lote', '').range(0, 9999),
+        supabase.from('production_records').select('lote').not('lote', 'is', null).neq('lote', '').range(0, 9999),
+        supabase.from('mezcla_saldos').select('lote').not('lote', 'is', null).neq('lote', '').range(0, 4999),
+      ])
+      return expandirLotes([
+        ...(o.data || []).map(x => x.lote),
+        ...(r.data || []).map(x => x.lote),
+        ...(s.data || []).map(x => x.lote),
+      ])
+    },
+  })
+
   // Producto de un lote (para autocompletar el nombre del surtido según el lote combinado)
   const productoDeLote = (lote) => {
     const k = String(lote || '').trim().split(/[,;]/)[0].trim()
@@ -581,29 +609,21 @@ export default function OrdenesProduccion() {
     return o?.producto || ''
   }
 
-  // Autosugerencia de lote según metodo_loteo de la ficha (solo si está configurado).
-  // Consecutivo por PRODUCTO (órdenes + registros), excluyendo la orden en curso.
-  const siguienteLoteSugerido = useMemo(() => {
-    const cfg = normalizarMetodoLoteo(prepMetodoLoteo)
-    if (!cfg || !ordenPrep) return null
-    const mismoProducto = (o) => {
-      if (ordenPrep.origen_id && o.origen_id != null) return String(o.origen_id) === String(ordenPrep.origen_id)
-      return (o.producto || '') === (ordenPrep.producto || '')
-    }
-    const lotesOrdenes = ordenes
-      .filter(o => o.id !== ordenPrep.id && mismoProducto(o))
-      .map(o => (o.lote || '').trim())
-      .filter(Boolean)
-    const lotesRecs = prodRecords
-      .filter(r => {
-        if (r.orden_id === ordenPrep.id) return false
-        if (ordenPrep.producto) return (r.producto || '') === ordenPrep.producto
-        return false
-      })
-      .map(r => (r.lote || '').trim())
-      .filter(Boolean)
-    return sugerirSiguienteLote(cfg, [...lotesOrdenes, ...lotesRecs])
-  }, [prepMetodoLoteo, ordenPrep, ordenes, prodRecords])
+  // Solo SUGIERE (placeholder + botón). Nunca rellena el campo solo.
+  // 1) Si la ficha tiene Numeración → esa plantilla.
+  // 2) Si la ficha viene vacía / solo-fecha pero ya hay lotes 10026… → fuerza serie nAA (10426).
+  //    (Evita el bug de sugerir 260826 cuando SQL no trae la config nAA.)
+  const analisisLote = useMemo(() => {
+    if (!ordenPrep) return null
+    const lotesMemoria = expandirLotes([
+      ...ordenes.filter(o => o.id !== ordenPrep.id).map(o => o.lote),
+      ...prodRecords.filter(r => r.orden_id !== ordenPrep.id).map(r => r.lote),
+      ...saldosMezcla.map(s => s.lote),
+    ])
+    const lotes = [...new Set([...lotesHistSugerencia, ...lotesMemoria])]
+    return analizarSugerenciaLote(prepMetodoLoteo, lotes, { listo: lotesHistListo })
+  }, [prepMetodoLoteo, ordenPrep, ordenes, prodRecords, saldosMezcla, lotesHistSugerencia, lotesHistListo])
+  const siguienteLoteSugerido = analisisLote?.sugerido || null
 
   // ===== RECONCILIACIÓN DE CIERRES OFFLINE =====
   // Una orden cerrada sin conexión guarda sus movimientos de inventario como pendientes. Aquí se
@@ -746,14 +766,37 @@ export default function OrdenesProduccion() {
       let prod = null
       {
         const sel = 'bache, peso_unidad, rendimiento, desperdicio, ingredientes, procesos, porciona, peso_subporcion, ficha_url, ficha_nombre, tipo, vida_util_valor, vida_util_unidad'
-        const r1 = await supabase.from('products_costing').select(sel + ', imprimibles, costos_hora, empaca_surtido, metodo_loteo').eq('id', o.origen_id).single()
-        if (r1.error && /imprimibles|costos_hora|empaca_surtido|metodo_loteo/i.test(r1.error.message || '')) {
-          const r2 = await supabase.from('products_costing').select(sel + ', imprimibles, costos_hora, empaca_surtido').eq('id', o.origen_id).single()
-          if (r2.error && /imprimibles|costos_hora|empaca_surtido/i.test(r2.error.message || '')) {
+        const r1 = await supabase.from('products_costing').select(sel + ', imprimibles, costos_hora, empaca_surtido').eq('id', o.origen_id).single()
+        if (r1.error && /imprimibles|costos_hora|empaca_surtido/i.test(r1.error.message || '')) {
+          const r2 = await supabase.from('products_costing').select(sel + ', imprimibles, costos_hora').eq('id', o.origen_id).single()
+          if (r2.error && /imprimibles|costos_hora/i.test(r2.error.message || '')) {
             const r3 = await supabase.from('products_costing').select(sel).eq('id', o.origen_id).single()
             prod = r3.data
           } else prod = r2.data
         } else prod = r1.data
+      }
+      // metodo_loteo en query SEPARADA (por id y, si viene vacío, por nombre del producto).
+      {
+        let rawLoteo = null
+        const { data: loteoRow, error: eLoteo } = await supabase
+          .from('products_costing')
+          .select('id, nombre, metodo_loteo')
+          .eq('id', o.origen_id)
+          .maybeSingle()
+        if (eLoteo && /metodo_loteo|column/i.test(eLoteo.message || '')) {
+          toast('No se puede leer método de loteo: falta la columna en SQL. Ejecuta migration_v155_metodo_loteo.sql', 'warning')
+        } else {
+          rawLoteo = loteoRow?.metodo_loteo
+        }
+        if (!rawLoteo && o.producto) {
+          const { data: byName } = await supabase
+            .from('products_costing')
+            .select('metodo_loteo')
+            .eq('nombre', o.producto)
+            .maybeSingle()
+          if (byName?.metodo_loteo) rawLoteo = byName.metodo_loteo
+        }
+        setPrepMetodoLoteo(normalizarMetodoLoteo(rawLoteo))
       }
       setPrepImprimibles(parse(prod?.imprimibles))
       if (prod) {
@@ -764,7 +807,6 @@ export default function OrdenesProduccion() {
           ? o.costos_adicionales_hora
           : parse(prod.costos_hora).map(c => ({ ...c, cantidad: c.cantidad_default || '' })))
         if (prod.vida_util_valor) setPrepVidaUtil({ valor: parseFloat(prod.vida_util_valor), unidad: prod.vida_util_unidad || 'meses' })
-        setPrepMetodoLoteo(normalizarMetodoLoteo(prod.metodo_loteo))
         setPrepPorciona(!!prod.porciona)
         setPrepPesoSubp(o.peso_subporcion || prod.peso_subporcion || '')
         // Subprocesos = ÚNICAMENTE los de la mano de obra de la ficha; se conservan las horas ya guardadas (por nombre)
@@ -807,7 +849,18 @@ export default function OrdenesProduccion() {
         setPrepDatos(calcDatosPrevistos(ings, rend, desp, pu))
         setPrepFicha(prod.ficha_url ? { url: prod.ficha_url, nombre: prod.ficha_nombre } : null)
       }
-    } else if (o.origen === 'receta' && o.origen_id) {
+    } else if (o.producto) {
+      // Sin origen producto: igual intenta método de loteo por nombre (serie nAA de la ficha homónima)
+      const { data: byName, error: eName } = await supabase
+        .from('products_costing')
+        .select('metodo_loteo')
+        .eq('nombre', o.producto)
+        .maybeSingle()
+      if (!(eName && /metodo_loteo|column/i.test(eName.message || ''))) {
+        setPrepMetodoLoteo(normalizarMetodoLoteo(byName?.metodo_loteo))
+      }
+    }
+    if (o.origen === 'receta' && o.origen_id) {
       const { data: rec } = await supabase.from('recipes').select('ingredientes, rendimiento, desperdicio, peso_unidad, porciona, peso_subporcion, ficha_url, ficha_nombre').eq('id', o.origen_id).single()
       if (rec) {
         setPrepPorciona(!!rec.porciona)
@@ -1995,9 +2048,24 @@ export default function OrdenesProduccion() {
         else await notificar({ destinatario: 'admin', tipo: 'orden_enviada', mensaje: `Orden #${opNum(o.id)} (${o.producto}) enviada para aprobación por ${profile?.nombre || 'operario'}.${avisoAjustes}`, link: '/ordenes', ref_id: o.id })
       }
       qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['production_records'] }); qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] }); qc.invalidateQueries({ queryKey: ['inventory_movements'] }); qc.invalidateQueries({ queryKey: ['mezcla_saldos'] }); qc.invalidateQueries({ queryKey: ['products_costing'] }); qc.invalidateQueries({ queryKey: ['finished_movements'] })
-      setModalConfirmEnvio(false); closeProceso()
+      // Cerrar en dos pasos: si se desmontan confirm+proceso a la vez, en tablets el
+      // overflow:hidden del body / overlay puede quedar pegado y “congelar” la UI.
+      setModalConfirmEnvio(false)
       toast(r.queued ? 'Orden guardada sin conexión — se enviará al sincronizar 📴' : (autoAprob ? 'Producción registrada, cerrada y aprobada ✓' : 'Producción registrada y orden enviada a aprobación ✓'))
-    } catch (e) { toast(e.message, 'error') } finally { setSavingEvid(false); setBusy(false) }
+      requestAnimationFrame(() => {
+        closeProceso()
+        // Liberación defensiva por si algún setBusy de writes anidados quedó desbalanceado
+        resetBusy()
+        forceUnlockBodyScroll()
+      })
+    } catch (e) {
+      toast(e.message, 'error')
+      resetBusy()
+      forceUnlockBodyScroll()
+    } finally {
+      setSavingEvid(false)
+      setBusy(false)
+    }
   }
 
   // Enviar y cerrar: requiere lotes completados; toma la cantidad de los registros vinculados
@@ -3641,8 +3709,23 @@ export default function OrdenesProduccion() {
                   {prepLote.trim() !== ''
                     ? <span style={{ color: 'var(--selva)' }}>✓ Lote: {prepLote.trim()}</span>
                     : siguienteLoteSugerido
-                      ? <button type="button" className="btn btn-xs btn-secondary" onClick={() => setPrepLote(siguienteLoteSugerido)}>Usar sugerido: {siguienteLoteSugerido}</button>
-                      : <span>Sin método de loteo en la ficha — escribe el lote manualmente (Fichas → Parámetros de producción).</span>}
+                      ? <>
+                          <button type="button" className="btn btn-xs btn-secondary" onClick={() => setPrepLote(siguienteLoteSugerido)}>Usar sugerido: {siguienteLoteSugerido}</button>
+                          {analisisLote && (
+                            <span style={{ display: 'block', marginTop: 4, lineHeight: 1.35 }}>
+                              Plantilla: <strong>{analisisLote.plantilla}</strong>
+                              {analisisLote.modo === 'seq' && analisisLote.ultimoLote
+                                ? <> · Último: <strong>{analisisLote.ultimoLote}</strong> → <strong>{analisisLote.sugerido}</strong></>
+                                : null}
+                              {analisisLote.aviso
+                                ? <span style={{ display: 'block', color: 'var(--naranja, #c47800)', marginTop: 3 }}>{analisisLote.aviso}</span>
+                                : null}
+                            </span>
+                          )}
+                        </>
+                      : !lotesHistListo
+                        ? <span>Buscando lotes existentes para sugerir el siguiente…</span>
+                        : <span>No hay lotes previos ni método en ficha — escribe el lote a mano o configura <strong>Serie nAA</strong> en la ficha.</span>}
                 </small>
               </div>
               <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de vencimiento *</label><input type="date" className="form-control" value={prepVence} onChange={e => setPrepVence(e.target.value)} disabled={!prepFechaInicio} />
@@ -4042,10 +4125,10 @@ export default function OrdenesProduccion() {
       </Modal>
 
       {/* Modal Confirmar envío (resumen + confirmar/editar) */}
-      <Modal open={modalConfirmEnvio} onClose={() => setModalConfirmEnvio(false)} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><CheckCircle2 size={18} aria-hidden="true" /> Confirmar y enviar producción</span>}
+      <Modal open={modalConfirmEnvio} onClose={() => setModalConfirmEnvio(false)} guard={false} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><CheckCircle2 size={18} aria-hidden="true" /> Confirmar y enviar producción</span>}
         footer={<>
-          <button className="btn btn-secondary" onClick={() => setModalConfirmEnvio(false)}>✏ Editar</button>
-          <button className="btn btn-success" onClick={confirmarEnviar} disabled={savingEvid}>{savingEvid ? 'Enviando...' : 'Confirmar y enviar'}</button>
+          <button type="button" className="btn btn-secondary" onClick={() => setModalConfirmEnvio(false)} disabled={savingEvid}>✏ Editar</button>
+          <button type="button" className="btn btn-success" onClick={confirmarEnviar} disabled={savingEvid}>{savingEvid ? 'Enviando...' : 'Confirmar y enviar'}</button>
         </>}>
         {ordenPrep && (
           <div style={{ fontSize: '0.9rem' }}>

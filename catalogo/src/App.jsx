@@ -2,9 +2,9 @@ import { useEffect, useState } from 'react'
 import { Routes, Route, Link, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { Leaf, Truck, ShieldCheck, MessageCircle, ShoppingCart, ArrowLeft, Plus, Minus, Trash2, Instagram, Facebook, Youtube, Twitter, Music2, Heart, Send, X, Menu } from 'lucide-react'
 import { useStore } from './store'
-import { Home, Producto, Nosotros, Contacto, Favoritos, Mayorista, Pagina, Galeria, NoEncontrado } from './pages'
-import { fCOP, iconoDe, confirmarPedidoWA, suscribir, abrirWA, FAVORITOS, cargarGoogleFonts, getCliente, setCliente, mensajeSolicitudMayorista, textoEnvio, setFavicon } from './utils'
-import { ModalNombre } from './ui'
+import { Home, Producto, Nosotros, Contacto, Favoritos, Mayorista, Pagina, Galeria, NoEncontrado, Desuscribir } from './pages'
+import { fCOP, iconoDe, confirmarPedidoWA, suscribir, abrirWA, FAVORITOS, cargarGoogleFonts, getCliente, setCliente, getEmail, setEmail, getTelefono, setTelefono, emailValido, telefonoValido, buscarClientePorEmail, mensajeSolicitudMayorista, textoEnvio, barraPedidoMinimoEstado, barraEnvioGratisEstado, setFavicon } from './utils'
+import { ModalNombre, ModalSesionCliente } from './ui'
 import DOMPurify from 'dompurify'
 import FrutoIcon from './FrutoIcon'
 import BenefitIcon from './BenefitIcon'
@@ -186,20 +186,30 @@ function paletaVars(cfg) {
   return v
 }
 
-// Al navegar entre páginas, vuelve arriba (salvo cuando solo cambian los filtros en la query).
+// Al navegar entre páginas, vuelve arriba del scroll de la app (no del navegador).
 function ScrollToTop() {
   const { pathname } = useLocation()
-  useEffect(() => { window.scrollTo({ top: 0, behavior: 'auto' }) }, [pathname])
+  useEffect(() => {
+    const wrap = document.querySelector('.wrap')
+    if (wrap) wrap.scrollTo({ top: 0, behavior: 'auto' })
+    else window.scrollTo({ top: 0, behavior: 'auto' })
+  }, [pathname])
   return null
 }
 
-// Bloquea el scroll del fondo mientras hay un overlay abierto
+// Bloquea el scroll de la app mientras hay un overlay abierto
 function useBodyLock(active) {
   useEffect(() => {
     if (!active) return
-    const prev = document.body.style.overflow
+    const wrap = document.querySelector('.wrap')
+    const prevBody = document.body.style.overflow
+    const prevWrap = wrap ? wrap.style.overflow : ''
     document.body.style.overflow = 'hidden'
-    return () => { document.body.style.overflow = prev }
+    if (wrap) wrap.style.overflow = 'hidden'
+    return () => {
+      document.body.style.overflow = prevBody
+      if (wrap) wrap.style.overflow = prevWrap
+    }
   }, [active])
 }
 
@@ -231,7 +241,7 @@ function ModalTerminos({ cfg, onClose }) {
 }
 
 export default function App() {
-  const { cfg, nItems, total, favs, mayorista, setMayorista } = useStore()
+  const { cfg, nItems, total, favs, mayorista, setMayorista, pendienteFav, cancelarPendienteFav, confirmarEmailFav, establecerEmail } = useStore()
   const loc = useLocation()
   const [verCarrito, setVerCarrito] = useState(false)
   const [menu, setMenu] = useState(false)
@@ -353,6 +363,7 @@ export default function App() {
         <Route path="/contacto" element={<Contacto />} />
         <Route path="/favoritos" element={<Favoritos />} />
         <Route path="/mayorista" element={<Mayorista />} />
+        <Route path="/desuscribir" element={<Desuscribir />} />
         <Route path="/p/:slug" element={<Pagina />} />
         <Route path="/galeria" element={<Galeria />} />
         <Route path="/galeria/:albumId" element={<Galeria />} />
@@ -367,9 +378,22 @@ export default function App() {
           onClose={() => setPedirNombre(false)}
           onConfirmar={(n) => { setCliente(n); setPedirNombre(false); abrirWA(cfg, mensajeSolicitudMayorista(cfg, n)) }} />
       )}
+      {pendienteFav != null && (
+        <ModalSesionCliente
+          titulo="Guarda tus favoritos"
+          texto="Indica tu correo para guardar este producto y ver tus favoritos cuando vuelvas."
+          cta="Guardar favorito"
+          onClose={cancelarPendienteFav}
+          onConfirmar={async ({ email, nombre, telefono }) => {
+            establecerEmail(email, nombre, telefono)
+            try { await suscribir(email, nombre, 'favorito', telefono) } catch { /* noop */ }
+            await confirmarEmailFav(email, nombre)
+          }}
+        />
+      )}
       <WelcomePopup cfg={cfg} />
 
-      {/* Barra carrito flotante — en ficha Atelier móvil el CTA sticky la sustituye */}
+      {/* Barra carrito flotante — umbral solo dentro del drawer */}
       {nItems > 0 && !verCarrito && !fichaAtelier && (
         <button className="cartbar" onClick={() => setVerCarrito(true)}>
           <span className="cartbar-count">{nItems}</span><ShoppingCart size={20} /> Ver pedido
@@ -381,28 +405,94 @@ export default function App() {
   )
 }
 
+function UmbralBar({ estado, compact, tipo }) {
+  if (!estado) return null
+  return (
+    <div className={`umbral-bar umbral-${tipo}${compact ? ' umbral-bar-compact' : ''}${estado.ok ? ' umbral-bar-ok' : ''}`} role="status">
+      <div className="umbral-bar-txt">{estado.label}</div>
+      <div className="umbral-bar-track" aria-hidden="true"><div className="umbral-bar-fill" style={{ width: `${estado.pct}%` }} /></div>
+    </div>
+  )
+}
+
+/** Dos barras independientes: pedido mínimo sugerido ≠ envío gratis. */
+function BarrasUmbralEnvio({ compact = false }) {
+  const { cfg, total, mayorista } = useStore()
+  const pedido = barraPedidoMinimoEstado(cfg, total, mayorista)
+  const gratis = barraEnvioGratisEstado(cfg, total, mayorista)
+  if (!pedido && !gratis) return null
+  return (
+    <div className={`umbral-stack${compact ? ' umbral-stack-compact' : ''}`}>
+      <UmbralBar estado={pedido} compact={compact} tipo="pedido" />
+      <UmbralBar estado={gratis} compact={compact} tipo="gratis" />
+    </div>
+  )
+}
+
 // ---- Invitación a ser mayorista (barra fija descartable bajo el nav) ----
 function InvitacionMayorista({ cfg, onSolicitar }) {
   const [oculto, setOculto] = useState(() => { try { return sessionStorage.getItem('mumi_mayo_hide') === '1' } catch { return false } })
   if (oculto) return null
   const cerrar = () => { setOculto(true); try { sessionStorage.setItem('mumi_mayo_hide', '1') } catch { /* noop */ } }
-  const tam = ['sm', 'md', 'lg'].includes(cfg.mayo_invita_tamano) ? cfg.mayo_invita_tamano : 'md'
+  const tam = ['sm', 'md', 'lg'].includes(cfg.mayo_invita_tamano) ? cfg.mayo_invita_tamano : 'sm'
   return (
     <div className={`mayo-invita mayo-${tam}`}>
-      <span className="mayo-invita-txt">{cfg.mayorista_mensaje || '¿Eres mayorista? Accede a precios especiales por volumen.'}</span>
-      <button type="button" className="mayo-invita-btn" onClick={onSolicitar}><MessageCircle size={14} /> Quiero ser mayorista</button>
-      <button type="button" className="mayo-invita-x" onClick={cerrar} aria-label="Cerrar"><X size={16} /></button>
+      <span className="mayo-invita-txt">{cfg.mayorista_mensaje || '¿Eres mayorista? Precios por volumen.'}</span>
+      <button type="button" className="mayo-invita-btn" onClick={onSolicitar}><MessageCircle size={13} /> Ser mayorista</button>
+      <button type="button" className="mayo-invita-x" onClick={cerrar} aria-label="Cerrar"><X size={14} /></button>
     </div>
   )
 }
 
 // ---- Carrito (drawer) ----
 function CartDrawer({ onClose }) {
-  const { cfg, carrito, agregar, quitar, total, precio, mayorista, pedidoMinimo } = useStore()
+  const { cfg, carrito, agregar, quitar, vaciar, total, precio, mayorista, pedidoMinimo, establecerEmail } = useStore()
   const [nota, setNota] = useState('')
+  const [email, setEmailForm] = useState(() => getEmail())
   const [nombre, setNombre] = useState(() => getCliente())
+  const [telefono, setTelefonoForm] = useState(() => getTelefono())
+  const [enviando, setEnviando] = useState(false)
+  const emailOk = emailValido(email)
   const nombreOk = nombre.trim().length >= 2
+  const telOk = telefonoValido(telefono)
+  const puedePedir = emailOk && nombreOk && telOk && !enviando
   useBodyLock(true)
+
+  useEffect(() => {
+    if (!emailOk) return
+    let cancel = false
+    const t = setTimeout(async () => {
+      const row = await buscarClientePorEmail(email)
+      if (cancel || !row) return
+      if (row.nombre && !nombre.trim()) {
+        setNombre(row.nombre)
+        setCliente(row.nombre)
+      }
+      if (row.telefono && !telefono.trim()) {
+        setTelefonoForm(row.telefono)
+        setTelefono(row.telefono)
+      }
+    }, 350)
+    return () => { cancel = true; clearTimeout(t) }
+  }, [email, emailOk]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const confirmar = async () => {
+    if (!puedePedir) return
+    setEnviando(true)
+    try {
+      establecerEmail?.(email, nombre, telefono)
+      await confirmarPedidoWA(
+        carrito, nota, cfg, mayorista,
+        mayorista ? (cfg.wa_texto_mayorista || cfg.wa_texto_stock) : cfg.wa_texto_stock,
+        nombre.trim(), email.trim().toLowerCase(), telefono.trim(),
+      )
+      vaciar()
+      onClose()
+    } finally {
+      setEnviando(false)
+    }
+  }
+
   return (
     <div className="overlay" onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="sheet">
@@ -419,21 +509,38 @@ function CartDrawer({ onClose }) {
               </div>
             ))}
             <div style={{ padding: '14px 16px' }}>
-              <label style={{ fontSize: '0.82rem', color: 'var(--selva)', fontWeight: 700 }}>Tu nombre *</label>
+              <label style={{ fontSize: '0.82rem', color: 'var(--selva)', fontWeight: 700 }}>Correo *</label>
+              <input type="email" value={email} onChange={e => { setEmailForm(e.target.value); setEmail(e.target.value.trim().toLowerCase()) }} placeholder="tu@correo.com"
+                style={{ width: '100%', marginTop: 6, padding: 11, borderRadius: 10, border: `1.5px solid ${emailOk ? 'var(--crema-oscuro)' : 'var(--dorado)'}`, font: 'inherit' }} />
+              {!emailOk && <div style={{ fontSize: '0.76rem', color: 'var(--tierra)', marginTop: 4 }}>Necesitamos tu correo para el pedido y novedades.</div>}
+              <label style={{ fontSize: '0.82rem', color: 'var(--selva)', fontWeight: 700, display: 'block', marginTop: 12 }}>Tu nombre *</label>
               <input value={nombre} onChange={e => { setNombre(e.target.value); setCliente(e.target.value.trim()) }} placeholder="¿Con quién tenemos el gusto?"
                 style={{ width: '100%', marginTop: 6, padding: 11, borderRadius: 10, border: `1.5px solid ${nombreOk ? 'var(--crema-oscuro)' : 'var(--dorado)'}`, font: 'inherit' }} />
               {!nombreOk && <div style={{ fontSize: '0.76rem', color: 'var(--tierra)', marginTop: 4 }}>Escribe tu nombre para que sepamos quién hace el pedido.</div>}
+              <label style={{ fontSize: '0.82rem', color: 'var(--selva)', fontWeight: 700, display: 'block', marginTop: 12 }}>Teléfono / WhatsApp *</label>
+              <input type="tel" inputMode="tel" value={telefono} onChange={e => { setTelefonoForm(e.target.value); setTelefono(e.target.value.trim()) }} placeholder="Ej: 300 123 4567"
+                style={{ width: '100%', marginTop: 6, padding: 11, borderRadius: 10, border: `1.5px solid ${telOk ? 'var(--crema-oscuro)' : 'var(--dorado)'}`, font: 'inherit' }} />
+              {!telOk && <div style={{ fontSize: '0.76rem', color: 'var(--tierra)', marginTop: 4 }}>Indica un celular válido para contactarte.</div>}
               <label style={{ fontSize: '0.82rem', color: 'var(--texto-suave)', fontWeight: 600, display: 'block', marginTop: 12 }}>Nota (opcional)</label>
               <textarea rows={2} value={nota} onChange={e => setNota(e.target.value)} placeholder="Indicaciones adicionales para tu pedido" style={{ width: '100%', marginTop: 6, padding: 10, borderRadius: 10, border: '1.5px solid var(--crema-oscuro)', font: 'inherit', resize: 'vertical' }} />
             </div>
             {mayorista && <div style={{ padding: '0 16px', color: 'var(--selva)', fontSize: '0.8rem', fontWeight: 700 }}>Precios de mayorista aplicados 🏷️</div>}
             <div style={{ padding: '4px 16px 8px', display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: '1.1rem', color: 'var(--selva)' }}><span>Total</span><span>{fCOP(total)}</span></div>
             {textoEnvio(cfg) && <p style={{ padding: '0 16px 6px', color: 'var(--texto-suave)', fontSize: '0.82rem' }}>{textoEnvio(cfg)}</p>}
-            {pedidoMinimo > 0 && total < pedidoMinimo && <p style={{ padding: '0 16px 8px', color: 'var(--tierra)', fontSize: '0.82rem' }}>Pedido mínimo{mayorista ? ' mayorista' : ''} sugerido: {fCOP(pedidoMinimo)}</p>}
-            <div style={{ padding: '4px 16px 16px' }}>
-              <button className="btn btn-wa" disabled={!nombreOk} style={!nombreOk ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}
-                onClick={() => nombreOk && confirmarPedidoWA(carrito, nota, cfg, mayorista, mayorista ? (cfg.wa_texto_mayorista || cfg.wa_texto_stock) : cfg.wa_texto_stock, nombre.trim())}>
-                <MessageCircle size={18} /> Confirmar por WhatsApp
+            {(cfg.envio_umbral_activo || cfg.envio_gratis_barra_activo)
+              ? <div style={{ padding: '0 16px 10px' }}><BarrasUmbralEnvio /></div>
+              : (pedidoMinimo > 0 && total < pedidoMinimo && (
+                <p style={{ padding: '0 16px 8px', color: 'var(--tierra)', fontSize: '0.82rem' }}>
+                  Pedido mínimo{mayorista ? ' mayorista' : ''} sugerido: {fCOP(pedidoMinimo)}. Puedes confirmar igual.
+                </p>
+              ))}
+            <div className="cart-acciones">
+              <button type="button" className="btn btn-ghost btn-seguir-compra" onClick={onClose}>
+                Seguir comprando
+              </button>
+              <button className="btn btn-wa" disabled={!puedePedir} style={!puedePedir ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}
+                onClick={confirmar}>
+                <MessageCircle size={18} /> {enviando ? 'Abriendo WhatsApp…' : 'Confirmar pedido'}
               </button>
             </div>
             {Array.isArray(cfg.pagos) && cfg.pagos.filter(p => p?.nombre).length > 0 && (
@@ -456,7 +563,7 @@ function CartDrawer({ onClose }) {
 // ---- Popup de bienvenida (descuento por suscribirse) ----
 function WelcomePopup({ cfg }) {
   const [visible, setVisible] = useState(false)
-  const [email, setEmail] = useState('')
+  const [correo, setCorreo] = useState('')
   const [ok, setOk] = useState(false)
   useEffect(() => {
     if (!cfg?.popup_activo) return
@@ -465,7 +572,15 @@ function WelcomePopup({ cfg }) {
     return () => clearTimeout(t)
   }, [cfg?.popup_activo])
   const cerrar = () => { localStorage.setItem('mumi_welcome', '1'); setVisible(false) }
-  const enviar = async (e) => { e.preventDefault(); try { await suscribir(email); setOk(true); localStorage.setItem('mumi_welcome', '1') } catch { /* muestra igual */ setOk(true) } }
+  const enviar = async (e) => {
+    e.preventDefault()
+    try {
+      await suscribir(correo, '', 'popup')
+      setEmail(correo.trim().toLowerCase())
+      setOk(true)
+      localStorage.setItem('mumi_welcome', '1')
+    } catch { setOk(true) }
+  }
   useBodyLock(visible)
   if (!visible) return null
   return (
@@ -478,7 +593,7 @@ function WelcomePopup({ cfg }) {
         {ok
           ? <div className="news-ok" style={{ background: 'rgba(124,179,66,0.15)', color: 'var(--selva)' }}>¡Listo! Revisa tu correo 💚</div>
           : <form onSubmit={enviar} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              <input className="cf" type="email" placeholder="Tu correo" value={email} onChange={e => setEmail(e.target.value)} required />
+              <input className="cf" type="email" placeholder="Tu correo" value={correo} onChange={e => setCorreo(e.target.value)} required />
               <button className="btn btn-selva" type="submit"><Send size={16} /> Quiero mi descuento</button>
             </form>}
         <button className="popup-skip" onClick={cerrar}>No, gracias</button>
@@ -515,9 +630,8 @@ function BarraBeneficios({ cfg }) {
   )
 }
 
-// ---- Footer ----
+// ---- Footer (WhatsApp no va aquí: el pedido ya sale por WA desde el carrito / Contacto) ----
 function Footer({ cfg, onSolicitar, onTerminos }) {
-  const wa = (cfg?.whatsapp || '+573157702180').replace(/[^0-9]/g, '')
   const nombre = (cfg?.nombre_tienda || '').trim()
   const marcaFooter = nombre || 'Mumi Amazonia'
   const pais = (cfg?.pais || '').trim()
@@ -558,7 +672,6 @@ function Footer({ cfg, onSolicitar, onTerminos }) {
             <h4 className="ftr-col-title">Ayuda</h4>
             <div className="ftr-links ftr-links-col">
               <Link to="/contacto">Contacto</Link>
-              <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer">WhatsApp</a>
               {cfg?.terminos_texto?.trim() && <button type="button" onClick={onTerminos}>Términos</button>}
               {cfg?.mayorista_activo !== false && <button type="button" onClick={onSolicitar}>Mayorista</button>}
             </div>
@@ -577,7 +690,6 @@ function Footer({ cfg, onSolicitar, onTerminos }) {
         <Link to="/tienda">Tienda</Link>
         {tieneNosotros(cfg) && <Link to="/nosotros">Nosotros</Link>}
         <Link to="/contacto">Contacto</Link>
-        <a href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer">WhatsApp</a>
         {cfg?.terminos_texto?.trim() && <button onClick={onTerminos}>Términos y datos</button>}
       </div>
       {redes.length > 0 && (

@@ -25,6 +25,7 @@ export const CATALOGO_MODULOS = [
   ] },
   { modulo: 'utilidades', label: 'Utilidades',               secciones: [
       { id: 'recetas', label: 'Recetas rápidas / prueba' },
+      { id: 'envios',  label: 'Calculadora de costos de envío' },
   ] },
   { modulo: 'inventario', label: 'Inventario MP',           secciones: [
       { id: 'stock',      label: 'Ver stock / listado' },
@@ -75,7 +76,7 @@ export const MODULOS_POR_ROL = {
 // aunque la UI histórica se los ocultaba. Los defaults replican ese comportamiento previo.
 export const SECCIONES_POR_ROL = {
   operario: {
-    utilidades: ['recetas'],
+    utilidades: ['recetas', 'envios'],
     inventario: ['stock', 'movimientos'],
     ordenes:    ['crear', 'resultados'],
     produccion: ['registrar', 'analisis'],
@@ -83,7 +84,7 @@ export const SECCIONES_POR_ROL = {
     catalogo:   ['productos'],
   },
   auxiliar: {
-    utilidades: ['recetas'],
+    utilidades: ['recetas', 'envios'],
     inventario: ['stock'],
     ordenes:    ['resultados'],
     produccion: ['registrar'],
@@ -99,6 +100,7 @@ export const RUTA_MODULO = {
   '/productos':  'productos',
   '/costos-gastos': 'costos_gastos',
   '/utilidades': 'utilidades',
+  '/utilidades/envios': 'utilidades',
   '/inventario': 'inventario',
   '/terminados': 'productos',
   '/porempacar': 'porempacar',

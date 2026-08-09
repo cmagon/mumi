@@ -20,6 +20,32 @@ export const FICHAS_LOTEO = [
   { id: 'sep', tipo: 'sep', label: 'Separador', hint: '-', pideValor: true, defaultValor: '-' },
 ]
 
+/** Config canónica de la serie nAA (10026 → 10426). */
+export const CONFIG_LOTEO_NAA = {
+  metodo: 'patron',
+  partes: [{ tipo: 'seq', ancho: 2 }, { tipo: 'aa' }],
+  reinicio: 'anual',
+}
+
+/**
+ * Atajos de un clic (evita armar mal Día+Mes+Año cuando se quería nAA).
+ * nAA = Numeración + Año aa → 0126, 10026, 10426…
+ */
+export const ATAJOS_LOTEO = [
+  {
+    id: 'naa',
+    label: 'Serie nAA (recomendada)',
+    desc: '10426, 10526…',
+    config: CONFIG_LOTEO_NAA,
+  },
+  {
+    id: 'fecha',
+    label: 'Fecha del día',
+    desc: 'ddmmaa → 260826',
+    config: { metodo: 'patron', partes: [{ tipo: 'dd' }, { tipo: 'mm' }, { tipo: 'aa' }], reinicio: 'nunca' },
+  },
+]
+
 const p2 = (n) => String(n).padStart(2, '0')
 
 function padSeq(n, ancho) {
@@ -91,12 +117,25 @@ function normalizarParte(p) {
  * Normaliza cualquier forma de config a { metodo:'patron', partes, reinicio } o null.
  */
 export function normalizarMetodoLoteo(raw) {
-  if (!raw || typeof raw !== 'object') return null
-  if (String(raw.metodo || '') === METODO_NINGUNO) return null
-  const partes = configAPartes(raw)
+  let src = raw
+  // jsonb a veces llega como string (doble encode / export)
+  if (typeof src === 'string') {
+    try { src = JSON.parse(src) } catch { return null }
+  }
+  if (!src || typeof src !== 'object') return null
+  if (String(src.metodo || '') === METODO_NINGUNO) return null
+  let partes = configAPartes(src)
   if (!partes.length) return null
+  // Canon nAA: si quedó Año + Numeración, invertir → Numeración + Año (10026, no 26100)
+  if (
+    partes.length === 2
+    && (partes[0].tipo === 'aa' || partes[0].tipo === 'aaaa')
+    && partes[1].tipo === 'seq'
+  ) {
+    partes = [partes[1], partes[0]]
+  }
   const tieneAnio = partes.some(p => p.tipo === 'aa' || p.tipo === 'aaaa')
-  const reinicio = raw.reinicio === 'nunca' ? 'nunca' : (tieneAnio ? 'anual' : 'nunca')
+  const reinicio = src.reinicio === 'nunca' ? 'nunca' : (tieneAnio ? 'anual' : 'nunca')
   return { metodo: 'patron', partes, reinicio }
 }
 
@@ -146,6 +185,13 @@ export function construirLote(partes, seqNum, fecha = new Date()) {
   return out
 }
 
+/** Patrón clásico nAA / nAAAA: solo numeración + año (ej. 10026, 1012026). */
+function esPatronSeqAnio(partes) {
+  if (!partes || partes.length !== 2) return false
+  const [a, b] = partes
+  return a?.tipo === 'seq' && (b?.tipo === 'aa' || b?.tipo === 'aaaa')
+}
+
 /**
  * Extrae el número de secuencia de un lote según el patrón.
  * Devuelve null si no encaja.
@@ -158,6 +204,26 @@ export function parseSeqDeLote(lote, config, fechaRef = new Date()) {
   const partes = c.partes
   const idxSeq = partes.findIndex(p => p.tipo === 'seq')
   if (idxSeq < 0) return null
+
+  // Camino rápido y estricto para nAA: todo dígitos, año al final (evita falsos positivos raros).
+  if (esPatronSeqAnio(partes)) {
+    if (!/^\d+$/.test(L)) return null
+    const yLen = partes[1].tipo === 'aaaa' ? 4 : 2
+    if (L.length <= yLen) return null
+    // Excluir ddmmaa (6 dígitos tipo 260826): no son serie nAA aunque terminen en el año.
+    if (yLen === 2 && L.length === 6) {
+      const dd = parseInt(L.slice(0, 2), 10)
+      const mm = parseInt(L.slice(2, 4), 10)
+      if (dd >= 1 && dd <= 31 && mm >= 1 && mm <= 12) return null
+    }
+    const yExpected = anioStr(fechaRef, partes[1].tipo === 'aaaa' ? 'aaaa' : 'aa')
+    const yPart = L.slice(-yLen)
+    const seqPart = L.slice(0, -yLen)
+    if (!/^\d+$/.test(seqPart) || !seqPart.length) return null
+    if (c.reinicio === 'anual' && yPart !== yExpected) return null
+    if (c.reinicio !== 'anual' && !/^\d+$/.test(yPart)) return null
+    return parseInt(seqPart, 10)
+  }
 
   // Consumir prefijo fijo (izquierda)
   let i = 0
@@ -175,9 +241,6 @@ export function parseSeqDeLote(lote, config, fechaRef = new Date()) {
     const slice = L.slice(i, i + len)
     if (!/^\d+$/.test(slice) || slice.length !== len) return null
     if ((p.tipo === 'aa' || p.tipo === 'aaaa') && c.reinicio === 'anual' && slice !== v) return null
-    if ((p.tipo === 'mm' || p.tipo === 'dd') && c.reinicio === 'anual') {
-      // mes/día no filtran el año; solo validamos dígitos
-    }
     i += len
   }
 
@@ -205,19 +268,36 @@ export function parseSeqDeLote(lote, config, fechaRef = new Date()) {
   return parseInt(seqPart, 10)
 }
 
+/** Normaliza una lista cruda de lotes (puede venir con varios en un string: "10026, 10126"). */
+export function expandirLotes(lotesPrevios = []) {
+  const out = []
+  for (const raw of lotesPrevios || []) {
+    String(raw || '').split(/[,;|/]+/).forEach(p => {
+      const t = p.trim()
+      if (t) out.push(t)
+    })
+  }
+  return out
+}
+
 /**
- * Sugiere el siguiente lote. `lotesPrevios`: strings de lotes del mismo producto.
+ * Sugiere el siguiente lote según lotes ya existentes que encajen en el patrón.
+ * Con numeración: toma el máximo consecutivo parseable (p. ej. 10026 → 10126).
  * Devuelve null si no hay método configurado.
+ *
+ * @param {{ fecha?: Date, listo?: boolean }} opts
+ *   listo=false → aún cargando historial; no inventa el primer lote (0126) para no engañar.
  */
-export function sugerirSiguienteLote(config, lotesPrevios = [], { fecha = new Date() } = {}) {
+export function sugerirSiguienteLote(config, lotesPrevios = [], { fecha = new Date(), listo = true } = {}) {
   const c = normalizarMetodoLoteo(config)
   if (!c) return null
 
-  const previos = (lotesPrevios || []).map(l => String(l || '').trim()).filter(Boolean)
+  const previos = expandirLotes(lotesPrevios)
   const tieneSeq = c.partes.some(p => p.tipo === 'seq')
 
   // Solo fecha/texto: lote del día; si ya existe → base-2, base-3…
   if (!tieneSeq) {
+    if (!listo && !previos.length) return null
     const base = construirLote(c.partes, 1, fecha)
     if (!base) return null
     if (!previos.includes(base)) return base
@@ -227,16 +307,123 @@ export function sugerirSiguienteLote(config, lotesPrevios = [], { fecha = new Da
   }
 
   let max = 0
+  let hayMatch = false
   for (const l of previos) {
     const seq = parseSeqDeLote(l, c, fecha)
-    if (seq != null && Number.isFinite(seq)) max = Math.max(max, seq)
+    if (seq != null && Number.isFinite(seq)) {
+      hayMatch = true
+      max = Math.max(max, seq)
+    }
   }
-  return construirLote(c.partes, max + 1, fecha)
+  // Sin historial cargado y sin matches en memoria → no sugerir aún el "01"+año
+  if (!hayMatch && !listo) return null
+
+  const seqParte = c.partes.find(p => p.tipo === 'seq')
+  const anchoBase = seqParte?.ancho || 2
+  // Conserva el ancho real de la serie (100… → 3 dígitos) aunque la ficha diga 2
+  const anchoEfectivo = Math.max(anchoBase, String(max + 1).length, max > 0 ? String(max).length : 0)
+  const partesBuild = c.partes.map(p => (
+    p.tipo === 'seq' ? { ...p, ancho: anchoEfectivo } : p
+  ))
+  return construirLote(partesBuild, max + 1, fecha)
 }
 
 /** Ejemplo del primer lote con la config actual. */
 export function ejemploLote(config, fecha = new Date()) {
   return sugerirSiguienteLote(config, [], { fecha }) || '—'
+}
+
+/** Etiqueta legible de la plantilla (para UI / auditoría). */
+export function describirPlantilla(config) {
+  const c = normalizarMetodoLoteo(config)
+  if (!c) return 'Sin método'
+  return c.partes.map(etiquetaParte).join(' + ')
+}
+
+/** ¿Hay lotes tipo nAA del año actual? (ej. 10026, 10326). */
+export function hayLotesSerieNaa(lotesPrevios = [], fecha = new Date()) {
+  const cfg = normalizarMetodoLoteo(CONFIG_LOTEO_NAA)
+  for (const l of expandirLotes(lotesPrevios)) {
+    if (parseSeqDeLote(l, cfg, fecha) != null) return true
+  }
+  return false
+}
+
+/**
+ * Elige la config efectiva para sugerir:
+ * - Si la ficha trae Numeración → se respeta.
+ * - Si la ficha está vacía, es solo-fecha, o no se pudo leer SQL, pero ya existen lotes nAA
+ *   (10026…), se usa serie nAA. Así no se sugiere 260826 por una ficha mal armada.
+ */
+export function resolverConfigSugerenciaLote(configFicha, lotesPrevios = [], { fecha = new Date() } = {}) {
+  const ficha = normalizarMetodoLoteo(configFicha)
+  const tieneSeq = !!(ficha && ficha.partes.some(p => p.tipo === 'seq'))
+  if (tieneSeq) {
+    return { config: ficha, origen: 'ficha', aviso: null }
+  }
+  if (hayLotesSerieNaa(lotesPrevios, fecha)) {
+    const leido = ficha ? describirPlantilla(ficha) : 'vacío / no leído de SQL'
+    return {
+      config: normalizarMetodoLoteo(CONFIG_LOTEO_NAA),
+      origen: 'naa_fallback',
+      aviso: `La ficha en SQL no trae Numeración (leído: ${leido}). Sugiriendo serie nAA según lotes existentes (ej. 10326 → 10426). Corrige la ficha con el atajo «Serie nAA» y vuelve a guardar.`,
+    }
+  }
+  if (ficha) {
+    return {
+      config: ficha,
+      origen: 'ficha_fecha',
+      aviso: 'La ficha no tiene Numeración: se usará la fecha del día. Para 10426 usa el atajo «Serie nAA».',
+    }
+  }
+  return { config: null, origen: 'ninguno', aviso: null }
+}
+
+/**
+ * Diagnóstico de la sugerencia: plantilla efectiva, último lote de la serie, aviso.
+ */
+export function analizarSugerenciaLote(config, lotesPrevios = [], { fecha = new Date(), listo = true } = {}) {
+  const resolved = resolverConfigSugerenciaLote(config, lotesPrevios, { fecha })
+  const c = resolved.config
+  if (!c) return null
+
+  const plantilla = describirPlantilla(c)
+  const tieneSeq = c.partes.some(p => p.tipo === 'seq')
+  const sugerido = sugerirSiguienteLote(c, lotesPrevios, { fecha, listo })
+
+  if (!tieneSeq) {
+    return {
+      plantilla,
+      modo: 'fecha',
+      sugerido,
+      maxSeq: null,
+      ultimoLote: null,
+      origen: resolved.origen,
+      aviso: resolved.aviso,
+      sqlRaw: config ?? null,
+    }
+  }
+
+  let maxSeq = 0
+  let ultimoLote = null
+  for (const l of expandirLotes(lotesPrevios)) {
+    const seq = parseSeqDeLote(l, c, fecha)
+    if (seq != null && Number.isFinite(seq) && seq >= maxSeq) {
+      maxSeq = seq
+      ultimoLote = l
+    }
+  }
+
+  return {
+    plantilla,
+    modo: 'seq',
+    sugerido,
+    maxSeq: maxSeq > 0 ? maxSeq : null,
+    ultimoLote,
+    origen: resolved.origen,
+    aviso: resolved.aviso,
+    sqlRaw: config ?? null,
+  }
 }
 
 /** Agrega una ficha al patrón (respeta unicidad aa/aaaa, seq, mm, dd). */
@@ -251,6 +438,13 @@ export function agregarParte(partes, ficha, valorExtra = '') {
   if (tipo === 'seq') {
     if (list.some(p => p.tipo === 'seq')) {
       return list.map(p => (p.tipo === 'seq' ? { tipo: 'seq', ancho: p.ancho || 2 } : p))
+    }
+    // Si ya hay año, la numeración va ANTES (nAA → 10026, no 26100)
+    const anioIdx = list.findIndex(p => p.tipo === 'aa' || p.tipo === 'aaaa')
+    if (anioIdx >= 0) {
+      const next = [...list]
+      next.splice(anioIdx, 0, { tipo: 'seq', ancho: 2 })
+      return next
     }
     return [...list, { tipo: 'seq', ancho: 2 }]
   }

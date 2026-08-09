@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
+import { pathImgProducto, conAltProducto, urlDeImg } from '../lib/imgNombre'
 import { fNum, fFecha, componerSurtido } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
@@ -70,16 +71,18 @@ export default function ProductosTerminados() {
   const [subiendoEdImg, setSubiendoEdImg] = useState(false)
   const [cropEd, setCropEd] = useState(null)      // archivo pendiente de recortar (ficha)
   const [cropGal, setCropGal] = useState(null)    // archivo pendiente de recortar (galería)
-  // Sube un blob JPEG ya recortado (1:1) y devuelve la URL pública
-  const subirImgProd = async (blob) => {
-    const path = `terminados/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.jpg`
+  // Sube un blob JPEG ya recortado (1:1); el archivo lleva el nombre del producto (SEO)
+  const subirImgProd = async (blob, nombre) => {
+    const path = pathImgProducto(nombre || 'producto', { carpeta: 'productos' })
     const { error } = await supabase.storage.from('product-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
     if (error) throw error
-    return supabase.storage.from('product-images').getPublicUrl(path).data.publicUrl
+    const url = supabase.storage.from('product-images').getPublicUrl(path).data.publicUrl
+    const alt = (nombre || '').trim() || 'producto'
+    return { url, url_mobile: url, alt }
   }
   const subirEdBlob = async (blob) => {
     setSubiendoEdImg(true)
-    try { const url = await subirImgProd(blob); setEdImgs(prev => [...prev, url]) }
+    try { const img = await subirImgProd(blob, pForm.nombre); setEdImgs(prev => [...prev, img]) }
     catch (e) { toast('No se pudo subir: ' + e.message, 'error') } finally { setSubiendoEdImg(false) }
   }
   // Auditoría (admin): historial global de ajustes/movimientos de producto terminado
@@ -93,7 +96,7 @@ export default function ProductosTerminados() {
   const abrirGaleria = (p) => { setGaleriaDe(p); setGaleriaImgs(imgsDe(p)) }
   const subirGalBlob = async (blob) => {
     setSubiendoGal(true)
-    try { const url = await subirImgProd(blob); setGaleriaImgs(prev => [...prev, url]) }
+    try { const img = await subirImgProd(blob, galeriaDe?.nombre); setGaleriaImgs(prev => [...prev, img]) }
     catch (e) { toast('No se pudo subir: ' + e.message, 'error') } finally { setSubiendoGal(false) }
   }
   // Experimental: intenta enviar la imagen principal al ítem de Alegra (3 métodos; su API
@@ -115,10 +118,11 @@ export default function ProductosTerminados() {
   })
   const guardarGaleria = useMutation({
     mutationFn: async () => {
-      const { error } = await supabase.from('finished_products').update({ imagen_url: galeriaImgs[0] || null }).eq('id', galeriaDe.id)
+      const imgs = conAltProducto(galeriaImgs, galeriaDe?.nombre)
+      const { error } = await supabase.from('finished_products').update({ imagen_url: imgs[0]?.url || null }).eq('id', galeriaDe.id)
       if (error) throw error
       // Columna v92 — tolerante si la migración aún no se corre
-      try { await supabase.from('finished_products').update({ imagenes: galeriaImgs }).eq('id', galeriaDe.id) } catch { /* opcional */ }
+      try { await supabase.from('finished_products').update({ imagenes: imgs }).eq('id', galeriaDe.id) } catch { /* opcional */ }
     },
     meta: { label: 'Guardando imágenes…' },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['finished_products'] }); setGaleriaDe(null); toast('Imágenes guardadas ✓') },
@@ -318,7 +322,8 @@ export default function ProductosTerminados() {
       if (!pForm.nombre.trim()) throw new Error('Indica el nombre comercial del producto')
       if (pForm.stock_min === '' || pForm.stock_min == null) throw new Error('Define el stock mínimo (usa 0 si no quieres alerta de stock bajo)')
       if (alegraCategorias.length > 0 && !pForm.categoria_alegra_id) throw new Error('Elige una categoría de Alegra')
-      const payload = { nombre: pForm.nombre.trim(), descripcion: (pForm.descripcion || '').trim() || null, sku: pForm.sku || null, alegra_item_id: pForm.alegra_item_id || null, tipo: pForm.tipo, stock_min: parseFloat(pForm.stock_min) || 0, costo_unitario: parseFloat(pForm.costo_unitario) || 0, precio_mayor: parseFloat(pForm.precio_mayor) || 0, precio_detal: parseFloat(pForm.precio_detal) || 0, imagen_url: edImgs[0] || null, activo: pForm.activo, unidad_medida: pForm.unidad_medida || 'unit', codigo_unspsc: pForm.codigo_unspsc || null, categoria_alegra_id: pForm.categoria_alegra_id || null, categoria_alegra_nombre: pForm.categoria_alegra_nombre || null, surtido_a: pForm.surtido_a ? Number(pForm.surtido_a) : null, surtido_b: pForm.surtido_b ? Number(pForm.surtido_b) : null }
+      const imgs = conAltProducto(edImgs, pForm.nombre)
+      const payload = { nombre: pForm.nombre.trim(), descripcion: (pForm.descripcion || '').trim() || null, sku: pForm.sku || null, alegra_item_id: pForm.alegra_item_id || null, tipo: pForm.tipo, stock_min: parseFloat(pForm.stock_min) || 0, costo_unitario: parseFloat(pForm.costo_unitario) || 0, precio_mayor: parseFloat(pForm.precio_mayor) || 0, precio_detal: parseFloat(pForm.precio_detal) || 0, imagen_url: imgs[0]?.url || null, activo: pForm.activo, unidad_medida: pForm.unidad_medida || 'unit', codigo_unspsc: pForm.codigo_unspsc || null, categoria_alegra_id: pForm.categoria_alegra_id || null, categoria_alegra_nombre: pForm.categoria_alegra_nombre || null, surtido_a: pForm.surtido_a ? Number(pForm.surtido_a) : null, surtido_b: pForm.surtido_b ? Number(pForm.surtido_b) : null }
       let out
       if (pEditId) {
         const { error } = await supabase.from('finished_products').update(payload).eq('id', pEditId); if (error) throw error
@@ -330,7 +335,7 @@ export default function ProductosTerminados() {
         out = { id: data.id, esNuevo: true }
       }
       // Galería de imágenes (columna v92) — aparte y tolerante
-      try { await supabase.from('finished_products').update({ imagenes: edImgs }).eq('id', out.id) } catch { /* opcional */ }
+      try { await supabase.from('finished_products').update({ imagenes: imgs }).eq('id', out.id) } catch { /* opcional */ }
       // Propaga los cambios a la FICHA DE PRODUCTO enlazada (nombre, descripción e imágenes),
       // para que ambas queden consistentes. El usuario ya confirmó antes de guardar.
       const pid = pEditId ? (productos.find(x => x.id === pEditId)?.product_id || null) : (pForm.product_id || null)
@@ -338,9 +343,9 @@ export default function ProductosTerminados() {
         await supabase.from('products_costing').update({
           nombre: pForm.nombre.trim(),
           descripcion: (pForm.descripcion || '').trim() || null,
-          imagen_url: edImgs[0] || '',
+          imagen_url: imgs[0]?.url || '',
         }).eq('id', pid)
-        try { await supabase.from('products_costing').update({ imagenes: edImgs }).eq('id', pid) } catch { /* columna v92 opcional */ }
+        try { await supabase.from('products_costing').update({ imagenes: imgs }).eq('id', pid) } catch { /* columna v92 opcional */ }
       }
       return out
     },
@@ -804,7 +809,7 @@ export default function ProductosTerminados() {
                         <td>
                           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                             {(() => { const im = imgsDe(p); return im.length
-                              ? <img src={im[0]} alt="" title={`${im.length} imagen(es) — clic en 📷 para gestionar`} style={{ width: 30, height: 30, borderRadius: 4, objectFit: 'cover', flexShrink: 0, cursor: 'pointer' }} onClick={() => abrirGaleria(p)} />
+                              ? <img src={urlDeImg(im[0])} alt={p.nombre || ''} title={`${im.length} imagen(es) — clic en 📷 para gestionar`} style={{ width: 30, height: 30, borderRadius: 4, objectFit: 'cover', flexShrink: 0, cursor: 'pointer' }} onClick={() => abrirGaleria(p)} />
                               : <div onClick={() => abrirGaleria(p)} title="Sin imágenes — clic para agregar" style={{ width: 30, height: 30, borderRadius: 4, background: 'var(--crema)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '0.75rem', color: 'var(--texto-suave)', flexShrink: 0, cursor: 'pointer' }}>📷</div> })()}
                             <strong>{p.nombre}</strong>
                           </div>
@@ -1057,9 +1062,9 @@ export default function ProductosTerminados() {
           <div className="form-group" style={{ gridColumn: '1 / -1' }}>
             <label className="form-label">Imágenes <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(la primera es la principal — ★ para cambiarla)</small></label>
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'flex-start' }}>
-              {edImgs.map((url, i) => (
-                <div key={url + i} style={{ position: 'relative', width: 64, height: 64, borderRadius: 6, overflow: 'hidden', border: i === 0 ? '2px solid var(--dorado)' : '1px solid var(--crema-oscuro)' }}>
-                  <img src={url} alt={`imagen ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+              {edImgs.map((im, i) => (
+                <div key={urlDeImg(im) + i} style={{ position: 'relative', width: 64, height: 64, borderRadius: 6, overflow: 'hidden', border: i === 0 ? '2px solid var(--dorado)' : '1px solid var(--crema-oscuro)' }}>
+                  <img src={urlDeImg(im)} alt={pForm.nombre || `imagen ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
                   <div style={{ position: 'absolute', top: 2, right: 2, display: 'flex', gap: 2 }}>
                     {i > 0 && <button type="button" title="Hacer principal" onClick={() => setEdImgs(prev => [prev[i], ...prev.filter((_, idx) => idx !== i)])} style={{ background: 'rgba(0,0,0,0.55)', color: '#ffd54f', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.68rem', padding: '1px 4px' }}>★</button>}
                     <button type="button" title="Quitar" onClick={() => setEdImgs(prev => prev.filter((_, idx) => idx !== i))} style={{ background: 'rgba(0,0,0,0.55)', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.68rem', padding: '1px 4px' }}>✕</button>
@@ -1460,9 +1465,9 @@ export default function ProductosTerminados() {
           La <strong>primera</strong> imagen es la principal. Estas imágenes quedan guardadas con el producto para catálogos y futuras integraciones con otros servicios.
         </div>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-          {galeriaImgs.map((url, i) => (
-            <div key={url + i} style={{ position: 'relative', width: 96, height: 96, borderRadius: 8, overflow: 'hidden', border: i === 0 ? '2px solid var(--dorado)' : '1px solid var(--crema-oscuro)' }}>
-              <img src={url} alt={`imagen ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+          {galeriaImgs.map((im, i) => (
+            <div key={urlDeImg(im) + i} style={{ position: 'relative', width: 96, height: 96, borderRadius: 8, overflow: 'hidden', border: i === 0 ? '2px solid var(--dorado)' : '1px solid var(--crema-oscuro)' }}>
+              <img src={urlDeImg(im)} alt={galeriaDe?.nombre || `imagen ${i + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
               <div style={{ position: 'absolute', top: 3, right: 3, display: 'flex', gap: 3 }}>
                 {i > 0 && <button type="button" title="Hacer principal" onClick={() => setGaleriaImgs(prev => [prev[i], ...prev.filter((_, idx) => idx !== i)])} style={{ background: 'rgba(0,0,0,0.55)', color: '#ffd54f', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.78rem', padding: '1px 5px' }}>★</button>}
                 <button type="button" title="Quitar" onClick={() => setGaleriaImgs(prev => prev.filter((_, idx) => idx !== i))} style={{ background: 'rgba(0,0,0,0.55)', color: '#fff', border: 'none', borderRadius: 4, cursor: 'pointer', fontSize: '0.78rem', padding: '1px 5px' }}>✕</button>

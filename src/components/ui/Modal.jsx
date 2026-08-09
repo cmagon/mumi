@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { GripVertical } from 'lucide-react'
+import { lockBodyScroll, unlockBodyScroll } from '../../lib/bodyScrollLock'
 
 // Modal con guardia anti-cierre accidental.
 // `movable`: panel flotante sin overlay a pantalla completa (no tapa la vista previa).
@@ -10,7 +11,6 @@ export default function Modal({ open, onClose, title, children, footer, size = '
   const dirtyRef = useRef(false)
   const dialogRef = useRef(null)
   const prevFocusRef = useRef(null)
-  const dragRef = useRef(null)
   const titleId = useId()
 
   useEffect(() => {
@@ -47,22 +47,30 @@ export default function Modal({ open, onClose, title, children, footer, size = '
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, guard])
 
-  // Solo los modales normales bloquean el scroll; los arrastrables dejan ver la preview
+  // Contador global: varios modales (proceso + confirmar envío) no pueden dejarse
+  // overflow:hidden al cerrarse juntos — en tablets eso congela toda la UI.
   useEffect(() => {
     if (!open) return
     prevFocusRef.current = document.activeElement
-    const prevOverflow = document.body.style.overflow
-    if (!movable) document.body.style.overflow = 'hidden'
+    if (!movable) lockBodyScroll()
     const t = setTimeout(() => {
-      const el = dialogRef.current?.querySelector(
-        'input:not([type="hidden"]), textarea, select, button, [tabindex]:not([tabindex="-1"])'
-      )
-      ;(el || dialogRef.current)?.focus()
+      // En táctil no forzar foco a inputs: el teclado virtual tapa botones y deja
+      // sensación de pantalla bloqueada. Solo enfocamos el diálogo.
+      try {
+        const coarse = typeof window !== 'undefined' && window.matchMedia?.('(pointer: coarse)').matches
+        if (coarse) dialogRef.current?.focus?.({ preventScroll: true })
+        else {
+          const el = dialogRef.current?.querySelector(
+            'input:not([type="hidden"]), textarea, select, button, [tabindex]:not([tabindex="-1"])'
+          )
+          ;(el || dialogRef.current)?.focus?.({ preventScroll: true })
+        }
+      } catch { /* noop */ }
     }, 0)
     return () => {
       clearTimeout(t)
-      document.body.style.overflow = prevOverflow || ''
-      try { prevFocusRef.current?.focus?.() } catch { /* noop */ }
+      if (!movable) unlockBodyScroll()
+      try { prevFocusRef.current?.focus?.({ preventScroll: true }) } catch { /* noop */ }
     }
   }, [open, movable])
 
