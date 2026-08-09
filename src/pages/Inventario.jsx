@@ -1,5 +1,5 @@
-import { useState, useEffect } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useState, useEffect, useMemo } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { fFecha, fNum, getEstadoStock } from '../lib/businessLogic'
@@ -8,12 +8,26 @@ import { useAuth } from '../context/AuthContext'
 import { puedeVerSeccion } from '../lib/permisos'
 import Modal from '../components/ui/Modal'
 import MoneyInput from '../components/ui/MoneyInput'
+import { useNavTrail } from '../hooks/useNavTrail'
 import { useConfirm, usePrompt } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import {
   crearLoteEntrada, consumirPEPS, consumirLote, bajarLote, estadoLote, costoPEPS,
   reponerCantidadesLotes, reducirLote, stockDesdeLotes, sincronizarPEPSAlStock, LOTE_SIN_CODIGO,
+  corregirCantidadLote,
 } from '../lib/lotes'
+
+/** Fecha + hora local (para ingresos PEPS / auditoría). Acepta date o timestamptz. */
+const fFechaHora = (s) => {
+  if (!s) return '—'
+  try {
+    const d = String(s).includes('T') || String(s).includes(' ')
+      ? new Date(s)
+      : new Date(s + 'T12:00:00')
+    if (Number.isNaN(d.getTime())) return String(s)
+    return d.toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
+  } catch { return String(s) }
+}
 import * as XLSX from 'xlsx'
 import { Download, Tags, Tag, Plus, Pencil, X, Package, ClipboardList, FileText, AlertTriangle, Trash2, Undo2 } from 'lucide-react'
 import Select from '../components/ui/Select'
@@ -24,15 +38,15 @@ const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline',
 
 const EMPTY_MP = { nombre: '', categoria: '', tipo: 'comprado', unidad: 'Kg', precio: '', stock_min: 0, stock: 0, lote: '', vencimiento: '', obs: '', extra: {}, vendible: false, precio_venta: '' }
 const EMPTY_MOV = { mp_id: '', tipo: 'entrada', cantidad: '', responsable: '', obs: '', lote: '', vencimiento: '', extra: {}, costo: '', motivo: 'consumo', lote_id: '', proveedor: '' }
-// Motivos de salida/ajuste manual de inventario
+// Motivos solo de salida (el "ajuste de conteo" es un tipo aparte: corrige cantidad absoluta de un PEPS)
 const MOTIVOS_SALIDA = [
   { value: 'consumo', label: 'Consumo / uso' },
   { value: 'perdida', label: 'Pérdida / daño' },
   { value: 'vencimiento', label: 'Vencimiento' },
   { value: 'no_contabilizada', label: 'Salida no contabilizada' },
-  { value: 'ajuste', label: 'Ajuste de conteo' },
 ]
 const motivoLabel = (m) => (MOTIVOS_SALIDA.find(x => x.value === m)?.label || m)
+const tituloTipoMov = (t) => (t === 'entrada' ? 'Compra / recepción' : t === 'salida' ? 'Salida' : t === 'ajuste' ? 'Ajuste de conteo' : 'Movimiento')
 const UNIDADES = ['Kg','Gramo','Litro','Mililitro','Unidad']
 // Sufijo corto para mostrar el precio según la unidad
 const sufijoUnidad = (u) => u === 'Kg' ? '/Kg' : u === 'Gramo' ? '/g' : u === 'Litro' ? '/L' : u === 'Mililitro' ? '/ml' : u === 'Unidad' ? '/u' : `/${u || 'u'}`
@@ -100,6 +114,7 @@ export default function Inventario() {
   const [modalMP, setModalMP] = useState(false)
   const [modalMov, setModalMov] = useState(false)
   const [modalCats, setModalCats] = useState(false)
+  const [modalUltMovs, setModalUltMovs] = useState(false)
   const [modalHist, setModalHist] = useState(false)
   const [histMP, setHistMP] = useState(null)
   const [formMP, setFormMP] = useState(EMPTY_MP)
@@ -110,17 +125,19 @@ export default function Inventario() {
   // Si se llega desde "Convertir receta a producto" con ingredientes por registrar,
   // abre el modal de Nueva MP precargando el primero.
   const location = useLocation()
-  const navigate = useNavigate()
+  const { consumeArrival } = useNavTrail()
   useEffect(() => {
-    const nuevas = location.state?.nuevasMP
+    const st = location.state
+    if (!st?.nuevasMP) return
+    const nuevas = st.nuevasMP
     if (nuevas && nuevas.length && puedeEditarInv) {
       setFormMP({ ...EMPTY_MP, nombre: nuevas[0] })
       setEditMPId(null); setModalMP(true)
       if (nuevas.length > 1) toast(`Por registrar: ${nuevas.join(', ')}`, 'info')
-      navigate(location.pathname, { replace: true, state: {} })   // limpia el state
     }
+    consumeArrival()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [location.state])
   const [nuevaCat, setNuevaCat] = useState('')
 
   const { data: mps = [] } = useQuery({
@@ -143,8 +160,23 @@ export default function Inventario() {
   const [bajaLote, setBajaLote] = useState(null)   // lote a dar de baja: { lote, mp }
   const [bajaForm, setBajaForm] = useState({ cantidad: '', motivo: 'vencido', obs: '' })
   const [lotesMP, setLotesMP] = useState(null)
+  // Orden PEPS de consumo: próximo a vencer / más antiguo primero (no cambiar: lo usan salidas y descuadre).
   const lotesDe = (mpId) => lotesDB.filter(l => l.mp_id === mpId).sort((a, b) => (a.vencimiento || '9999') < (b.vencimiento || '9999') ? -1 : (a.fecha_entrada < b.fecha_entrada ? -1 : 1))
   const stockLotes = (mpId) => stockDesdeLotes(lotesDe(mpId))
+  // Listado del modal PEPS: más reciente → más antiguo (solo presentación).
+  const tsIngresoLote = (l) => {
+    const s = l?.created_at || l?.fecha_entrada
+    if (!s) return 0
+    const t = new Date(String(s).includes('T') || String(s).includes(' ') ? s : `${s}T12:00:00`).getTime()
+    return Number.isFinite(t) ? t : 0
+  }
+  const lotesModalOrdenados = useMemo(() => {
+    if (!lotesMP) return []
+    return lotesDe(lotesMP.id).slice().sort((a, b) => tsIngresoLote(b) - tsIngresoLote(a))
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lotesMP?.id, lotesDB])
+  const pagLotes = usePaginacion(lotesModalOrdenados, { defaultSize: 10, resetDeps: [lotesMP?.id] })
+  const pagUltMovs = usePaginacion(movimientos, { defaultSize: 10, resetDeps: [modalUltMovs] })
   // Descuadre PEPS: stock general vs suma de lotes (incluye empaque / MP sin trazabilidad).
   // Si hay stock y cero lotes, también cuenta: se puede crear el respaldo "sin lote".
   const descuadrePEPS = (m) => {
@@ -169,11 +201,16 @@ export default function Inventario() {
       // El usuario ingresa stock/stock_min en unidad BASE (g/ml/u); se guarda internamente en la
       // unidad de precio (Kg/Litro) dividiendo por el factor (1000 para Kg/Litro).
       const fac = factorU(datos.unidad)
+      const mpVieja = editMPId ? mps.find(m => m.id === editMPId) : null
       const payload = {
         ...datos,
         precio: parseFloat(datos.precio) || 0,
         stock_min: (parseFloat(datos.stock_min) || 0) / fac,
-        stock: (parseFloat(datos.stock) || 0) / fac,
+        // En edición el stock NO se cambia desde la ficha (solo +/− Mov.: compra, salida, ajuste PEPS).
+        // Así no se descuadran los lotes al editar nombre, precio, etc.
+        stock: editMPId
+          ? (Number(mpVieja?.stock) || 0)
+          : ((parseFloat(datos.stock) || 0) / fac),
         vencimiento: datos.vencimiento || null,
         extra: datos.extra || {},
         vendible: !!datos.vendible,
@@ -184,12 +221,11 @@ export default function Inventario() {
       if (editMPId) {
         const { error } = await supabase.from('raw_materials').update(payload).eq('id', editMPId); if (error) throw error
         // Auditoría: registra QUÉ campos cambiaron, quién y cuándo (tabla v94, tolerante)
-        const mpAnt = mps.find(m => m.id === editMPId)
-        if (mpAnt) {
-          const CAMPOS = { nombre: 'Nombre', categoria: 'Categoría', tipo: 'Tipo', unidad: 'Unidad', precio: 'Precio', stock: 'Stock', stock_min: 'Stock mínimo', lote: 'Lote', vencimiento: 'Vencimiento', obs: 'Observación', vendible: 'Vendible', precio_venta: 'Precio de venta' }
+        if (mpVieja) {
+          const CAMPOS = { nombre: 'Nombre', categoria: 'Categoría', tipo: 'Tipo', unidad: 'Unidad', precio: 'Precio', stock_min: 'Stock mínimo', lote: 'Lote', vencimiento: 'Vencimiento', obs: 'Observación', vendible: 'Vendible', precio_venta: 'Precio de venta' }
           const cambios = []
           for (const [k, label] of Object.entries(CAMPOS)) {
-            const antes = mpAnt[k], despues = payload[k]
+            const antes = mpVieja[k], despues = payload[k]
             const na = antes == null || antes === '' ? '' : String(antes)
             const nd = despues == null || despues === '' ? '' : String(despues)
             if (na !== nd) cambios.push({ campo: label, antes: na || '—', despues: nd || '—' })
@@ -201,7 +237,6 @@ export default function Inventario() {
         // Si cambió la unidad de medida, los lotes PEPS ya guardados quedan expresados en el factor
         // VIEJO (p.ej. Gramo→Kg cambia el factor de 1 a 1000) — hay que reescalarlos, si no la
         // trazabilidad de lotes queda hasta 1000x errónea frente al nuevo stock.
-        const mpVieja = mps.find(m => m.id === editMPId)
         if (mpVieja && mpVieja.unidad !== datos.unidad) {
           const facVieja = factorU(mpVieja.unidad)
           const ratio = facVieja / fac
@@ -213,16 +248,6 @@ export default function Inventario() {
               cantidad_reservada: (l.cantidad_reservada || 0) * ratio,
             }).eq('id', l.id)
           }
-        }
-        // Si se editó el stock a mano (sin movimiento), alinea PEPS: crea/ajusta lote "sin lote"
-        // o consume exceso — el stock de la ficha manda.
-        if (mpVieja && Math.abs((Number(mpVieja.stock) || 0) - (Number(payload.stock) || 0)) > 0.001) {
-          await sincronizarPEPSAlStock({
-            mp_id: editMPId,
-            stock: payload.stock,
-            costo_unitario: payload.precio || 0,
-            creado_por: profile?.nombre || '',
-          })
         }
       }
       else {
@@ -257,16 +282,15 @@ export default function Inventario() {
     onError: (e) => toast(e.message, 'error'),
   })
 
-  // Verifica ANTES de guardar si una salida/ajuste negativo va a exceder lo disponible en lotes
-  // PEPS (sin bloquear, solo para avisar — el stock general sigue siendo la fuente de verdad).
+  // Verifica ANTES de guardar si una salida va a exceder lo disponible en lotes PEPS
+  // (sin bloquear, solo para avisar — el stock general sigue siendo la fuente de verdad).
   // Devuelve el faltante en unidad BASE, o 0 si alcanza.
   const chequearFaltanteLotes = async () => {
     const mpId = parseInt(formMov.mp_id)
     const mp = mps.find(m => m.id === mpId)
-    if (!mp || esEmpaque(mp.categoria)) return 0
+    if (!mp || esEmpaque(mp.categoria) || formMov.tipo !== 'salida') return 0
     const cantidad = (parseFloat(formMov.cantidad) || 0) / factorU(mp.unidad)
-    if (!(formMov.tipo === 'salida' || (formMov.tipo === 'ajuste' && cantidad < 0))) return 0
-    const aDescontar = formMov.tipo === 'salida' ? cantidad : Math.abs(cantidad)
+    if (!(cantidad > 0)) return 0
     let disponible = 0
     if (formMov.lote_id) {
       const { data } = await supabase.from('raw_material_lots').select('cantidad_actual').eq('id', formMov.lote_id).single()
@@ -275,7 +299,7 @@ export default function Inventario() {
       const { data } = await supabase.from('raw_material_lots').select('cantidad_actual').eq('mp_id', mpId).gt('cantidad_actual', 0)
       disponible = (data || []).reduce((s, l) => s + (l.cantidad_actual || 0), 0)
     }
-    const faltante = aDescontar - disponible
+    const faltante = cantidad - disponible
     return faltante > 0 ? faltante * factorU(mp.unidad) : 0   // a unidad BASE para mostrar al usuario
   }
   const guardarMovimiento = async () => {
@@ -294,21 +318,43 @@ export default function Inventario() {
       if (!formMov.mp_id) throw new Error('Selecciona la materia prima')
       const mpId = parseInt(formMov.mp_id)
       const mp = mps.find(m => m.id === mpId)
-      // El usuario ingresa la cantidad en unidad BASE (g/ml/u); se guarda en la unidad de precio.
-      const cantidad = (parseFloat(formMov.cantidad) || 0) / factorU(mp?.unidad)
-      if (!cantidad) throw new Error('Ingresa una cantidad')
-      // La fecha del movimiento SIEMPRE es el día en que se registra (fecha LOCAL, no editable):
-      // el usuario no puede antedatar ni posfechar movimientos de inventario.
+      const fac = factorU(mp?.unidad)
+      // Cantidad en unidad BASE en el form → unidad de precio para guardar.
+      const cantBaseRaw = parseFloat(formMov.cantidad)
+      // La fecha del movimiento SIEMPRE es el día en que se registra (fecha LOCAL, no editable).
       const d = new Date()
       const fechaHoy = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
       const extra = { ...(formMov.extra || {}) }
-      // Costo unitario del movimiento: en entradas el de compra/fabricación; en salidas el
-      // costo PEPS real de los lotes consumidos (se calcula más abajo).
       let costoMovimiento = formMov.costo !== '' && formMov.costo != null ? (parseFloat(formMov.costo) || 0) : (mp?.precio || 0)
-      // Si la salida ya bajó stock dentro de la RPC PEPS (v138), no se vuelve a ajustar.
+      // Si PEPS / corrección ya ajustó stock, no se vuelve a tocar.
       let stockYaAjustado = false
-      // PEPS para TODA MP (también empaque): sin código de lote → "sin lote".
-      if (formMov.tipo === 'entrada' || (formMov.tipo === 'ajuste' && cantidad > 0)) {
+      let cantidad = Number.isFinite(cantBaseRaw) ? cantBaseRaw / fac : NaN
+      let obsFinal = formMov.obs
+      let loteNombre = formMov.lote || ''
+      let vencMov = formMov.vencimiento || null
+
+      if (formMov.tipo === 'ajuste') {
+        // Ajuste de conteo = corregir cantidad ABSOLUTA de un lote PEPS (incluye dejar en 0).
+        if (!formMov.lote_id) throw new Error('Selecciona el lote PEPS a corregir')
+        if (!Number.isFinite(cantBaseRaw) || cantBaseRaw < 0) throw new Error('Ingresa la cantidad correcta del lote (puede ser 0)')
+        const loteId = parseInt(formMov.lote_id)
+        const loteSel = lotesDB.find(l => l.id === loteId)
+        const cantidadNueva = cantBaseRaw / fac
+        const r = await corregirCantidadLote({ lote_id: loteId, cantidad_nueva: cantidadNueva })
+        stockYaAjustado = true
+        if (Math.abs(r.delta) <= 0.0001) throw new Error('La cantidad es igual a la actual — no hay nada que corregir')
+        cantidad = r.delta
+        extra.correccion_lote = true
+        extra.lote_id = loteId
+        extra.cantidad_antes = Number(loteSel?.cantidad_actual) || 0
+        extra.cantidad_despues = cantidadNueva
+        extra.motivo = 'ajuste'
+        loteNombre = loteSel?.lote || ''
+        vencMov = loteSel?.vencimiento || null
+        obsFinal = `[Ajuste de conteo · lote ${loteNombre || 's/n'}] ${formMov.obs || ''}`.trim()
+        costoMovimiento = r.costo_unitario || mp?.precio || 0
+      } else if (formMov.tipo === 'entrada') {
+        if (!(cantidad > 0)) throw new Error('Ingresa una cantidad')
         const creado = await crearLoteEntrada({
           mp_id: mpId,
           lote: formMov.lote || (esEmpaque(mp?.categoria) ? LOTE_SIN_CODIGO : ''),
@@ -317,61 +363,51 @@ export default function Inventario() {
           creado_por: profile?.nombre || '', proveedor: formMov.proveedor || '',
         })
         if (creado?.id) extra.lote_id = creado.id
-        if (formMov.proveedor) extra.proveedor = formMov.proveedor
-      } else if (formMov.tipo === 'salida' || (formMov.tipo === 'ajuste' && cantidad < 0)) {
+        const prov = String(formMov.proveedor || '').trim()
+        if (prov) extra.proveedor = prov
+      } else if (formMov.tipo === 'salida') {
+        if (!(cantidad > 0)) throw new Error('Ingresa una cantidad')
         if (!formMov.motivo) throw new Error('Indica el motivo de la salida')
-        const aDescontar = formMov.tipo === 'salida' ? cantidad : Math.abs(cantidad)
         let consumidos = [], faltante = 0
         if (formMov.lote_id) {
-          const r = await consumirLote({ lote_id: parseInt(formMov.lote_id), cantidad: aDescontar, ajustarStock: true })
+          const r = await consumirLote({ lote_id: parseInt(formMov.lote_id), cantidad, ajustarStock: true })
           consumidos = r.consumidos; faltante = r.faltante; stockYaAjustado = !!r.stockAjustado
         } else {
-          const r = await consumirPEPS({ mp_id: mpId, cantidad: aDescontar, ajustarStock: true })
+          const r = await consumirPEPS({ mp_id: mpId, cantidad, ajustarStock: true })
           consumidos = r.consumidos; faltante = r.faltante; stockYaAjustado = !!r.stockAjustado
         }
-        // Si faltó lote, el stock ya bajó: el descuadre se corrige creando deuda visual;
-        // al reconciliar se puede ajustar. Dejamos constancia del faltante.
         if (consumidos.length) extra.lotes_consumidos = consumidos
         if (faltante > 0) extra.faltante_sin_lote = faltante
         extra.motivo = formMov.motivo
         const cp = costoPEPS(consumidos, faltante, mp?.precio || 0)
         costoMovimiento = cp.costoUnitario
         extra.costo_peps_total = Math.round(cp.costoTotal)
+        obsFinal = `[${motivoLabel(formMov.motivo)}] ${formMov.obs || ''}`.trim()
+      } else {
+        throw new Error('Tipo de movimiento no válido')
       }
-      const obsFinal = (formMov.tipo === 'salida' || (formMov.tipo === 'ajuste' && cantidad < 0))
-        ? `[${motivoLabel(formMov.motivo)}] ${formMov.obs || ''}`.trim()
-        : formMov.obs
+
       const movBase = {
         mp_id: mpId, tipo: formMov.tipo, cantidad, fecha: fechaHoy,
         responsable: formMov.responsable, obs: obsFinal,
-        lote: formMov.lote || '', vencimiento: formMov.vencimiento || null, extra,
+        lote: loteNombre, vencimiento: vencMov, extra,
       }
       let { error: movErr } = await supabase.from('inventory_movements').insert({ ...movBase, costo_unitario: costoMovimiento })
-      // La columna costo_unitario es de la migración v126; si no está, se guarda sin ella
-      // (el costo queda igualmente dentro de `extra`) para no bloquear el movimiento.
       if (movErr && /costo_unitario/i.test(movErr.message || '')) {
         ;({ error: movErr } = await supabase.from('inventory_movements').insert(movBase))
       }
       if (movErr) throw movErr
       if (mp) {
-        // Entradas / empaque / fallbacks: ajustan stock aquí. Salidas PEPS v138 ya lo hicieron.
         if (!stockYaAjustado) {
           const delta = formMov.tipo === 'salida' ? -cantidad : cantidad
           await supabase.rpc('ajustar_stock_mp', { p_mp_id: mpId, p_delta: delta })
         }
-        // Si es entrada, también actualiza lote/venc y el COSTO del MP como PROMEDIO PONDERADO
-        // (no se reemplaza por el costo del último ingreso; se pondera con el stock que ya había,
-        // así la valorización no se distorsiona si el nuevo lote entra a un costo distinto).
         const upd = {}
         if (formMov.tipo === 'entrada') {
           if (formMov.lote) upd.lote = formMov.lote
           if (formMov.vencimiento) upd.vencimiento = formMov.vencimiento
           if (formMov.costo !== '' && formMov.costo != null) {
             const costoNuevo = parseFloat(formMov.costo) || 0
-            // El stock/precio se releen de la BASE, no de la caché del navegador: si otra
-            // persona movió esta MP mientras el formulario estaba abierto, ponderar contra un
-            // stock viejo distorsionaría el precio. `ajustar_stock_mp` ya sumó esta entrada,
-            // así que se descuenta para obtener el stock anterior real.
             const { data: fresco } = await supabase.from('raw_materials').select('stock, precio').eq('id', mpId).single()
             const stockPrevio = Math.max(0, (Number(fresco?.stock) || 0) - cantidad)
             const precioPrevio = Number(fresco?.precio) || 0
@@ -406,40 +442,43 @@ export default function Inventario() {
       const mp = mps.find(m => m.id === mv.mp_id)
       if (!mp) throw new Error('Materia prima no encontrada')
       const cant = Number(mv.cantidad) || 0
-      // El reverso del efecto que tuvo en el stock: entrada sumó → resta; salida restó → suma.
-      const signoOriginal = mv.tipo === 'salida' ? -1 : 1   // ajuste guarda con signo en cantidad
-      const delta = mv.tipo === 'ajuste' ? -cant : -(signoOriginal * cant)
-      await supabase.rpc('ajustar_stock_mp', { p_mp_id: mv.mp_id, p_delta: delta })
-      // Reversa de lotes por ID (v138). Fallback por nombre de lote solo si el movimiento es viejo.
       const ex = mv.extra || {}
-      try {
-        if (Array.isArray(ex.lotes_consumidos) && ex.lotes_consumidos.length) {
-          // Salida / ajuste negativo: devolver a los mismos lotes (por id)
-          const porId = ex.lotes_consumidos.filter(lc => lc.id && (Number(lc.cantidad) || 0) > 0)
-          if (porId.length) {
-            await reponerCantidadesLotes(porId)
-          } else {
-            for (const lc of ex.lotes_consumidos) {
-              if (!lc.lote) continue
-              const { data: ls } = await supabase.from('raw_material_lots').select('*')
-                .eq('mp_id', mv.mp_id).eq('lote', lc.lote).limit(1)
-              const l = ls?.[0]
-              if (l) await supabase.from('raw_material_lots').update({
-                cantidad_actual: (Number(l.cantidad_actual) || 0) + (Number(lc.cantidad) || 0),
-              }).eq('id', l.id)
+      // Ajuste de conteo (corrección PEPS): restaurar cantidad_antes; corregirCantidadLote ya mueve el stock.
+      if (ex.correccion_lote && ex.lote_id != null && ex.cantidad_antes != null) {
+        await corregirCantidadLote({ lote_id: ex.lote_id, cantidad_nueva: Number(ex.cantidad_antes) })
+      } else {
+        // El reverso del efecto en stock: entrada sumó → resta; salida restó → suma.
+        // Ajuste legacy (sin correccion_lote) guarda el delta con signo en cantidad.
+        const signoOriginal = mv.tipo === 'salida' ? -1 : 1
+        const delta = mv.tipo === 'ajuste' ? -cant : -(signoOriginal * cant)
+        await supabase.rpc('ajustar_stock_mp', { p_mp_id: mv.mp_id, p_delta: delta })
+        try {
+          if (Array.isArray(ex.lotes_consumidos) && ex.lotes_consumidos.length) {
+            const porId = ex.lotes_consumidos.filter(lc => lc.id && (Number(lc.cantidad) || 0) > 0)
+            if (porId.length) {
+              await reponerCantidadesLotes(porId)
+            } else {
+              for (const lc of ex.lotes_consumidos) {
+                if (!lc.lote) continue
+                const { data: ls } = await supabase.from('raw_material_lots').select('*')
+                  .eq('mp_id', mv.mp_id).eq('lote', lc.lote).limit(1)
+                const l = ls?.[0]
+                if (l) await supabase.from('raw_material_lots').update({
+                  cantidad_actual: (Number(l.cantidad_actual) || 0) + (Number(lc.cantidad) || 0),
+                }).eq('id', l.id)
+              }
             }
+          } else if (mv.tipo === 'entrada') {
+            let loteId = ex.lote_id
+            if (!loteId && mv.lote) {
+              const { data: ls } = await supabase.from('raw_material_lots').select('id')
+                .eq('mp_id', mv.mp_id).eq('lote', mv.lote).order('fecha_entrada', { ascending: false }).limit(1)
+              loteId = ls?.[0]?.id
+            }
+            if (loteId) await reducirLote({ lote_id: loteId, cantidad: Math.abs(cant) })
           }
-        } else if (mv.tipo === 'entrada' || (mv.tipo === 'ajuste' && cant > 0)) {
-          // Entrada: reducir el lote creado (preferir id guardado en extra)
-          let loteId = ex.lote_id
-          if (!loteId && mv.lote) {
-            const { data: ls } = await supabase.from('raw_material_lots').select('id')
-              .eq('mp_id', mv.mp_id).eq('lote', mv.lote).order('fecha_entrada', { ascending: false }).limit(1)
-            loteId = ls?.[0]?.id
-          }
-          if (loteId) await reducirLote({ lote_id: loteId, cantidad: Math.abs(cant) })
-        }
-      } catch (e) { console.warn('No se pudo revertir el lote del movimiento:', e) }
+        } catch (e) { console.warn('No se pudo revertir el lote del movimiento:', e) }
+      }
       // Marca el original como anulado y crea un contra-asiento visible en el historial
       await supabase.from('inventory_movements').update({ extra: { ...ex, anulado: true, anulado_por: profile?.nombre || '', anulado_el: new Date().toISOString() } }).eq('id', mv.id)
       const contra = {
@@ -630,6 +669,11 @@ export default function Inventario() {
         <h1 className="page-title">Inventario MP</h1>
         <div className="page-actions">
           <button className="btn btn-secondary btn-sm" onClick={exportarExcel}><Ico as={Download} size={14} />Excel</button>
+          {(puedeVerStock || puedeEditarInv) && (
+            <button className="btn btn-secondary btn-sm" onClick={() => setModalUltMovs(true)}>
+              <Ico as={ClipboardList} size={14} />Últimos movimientos
+            </button>
+          )}
           {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalCats(true)}><Ico as={Tag} size={14} />Categorías</button>}
           {puedeEditarInv && <button className="btn btn-secondary btn-sm" onClick={() => { setFormMP(EMPTY_MP); setEditMPId(null); setModalMP(true) }}><Ico as={Plus} size={14} />Nueva MP</button>}
           {puedeEditarInv && <button className="btn btn-primary btn-sm" onClick={() => openMovimiento()}><Ico as={Plus} size={14} />Movimiento</button>}
@@ -696,8 +740,7 @@ export default function Inventario() {
                   <Fila et="Lote">{lv.lote || '—'}</Fila>
                   <Fila et="Vence">{lv.vence ? fFecha(lv.vence) : '—'}</Fila>
                   <div className="acordeon-acciones">
-                    {puedeEditarInv && <button className="btn btn-xs btn-primary" onClick={() => openMovimiento(m.id, 'entrada')}>+ Entrada</button>}
-                    {puedeEditarInv && <button className="btn btn-xs btn-secondary" onClick={() => openMovimiento(m.id, 'salida')}>- Salida</button>}
+                    {puedeEditarInv && <button className="btn btn-xs btn-primary" onClick={() => openMovimiento(m.id)}>+/− Mov.</button>}
                     <button className="btn btn-xs btn-secondary" onClick={() => openHistorial(m)}>🕑 Historial</button>
                     {esAdmin && desq && (
                       <button className="btn btn-xs btn-dorado" disabled={reconciliarPEPS.isPending}
@@ -746,8 +789,7 @@ export default function Inventario() {
                       <td className="col-opcional"><span className={`badge ${badge}`}>{label}</span></td>
                       <td onClick={e => e.stopPropagation()}>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          {puedeEditarInv && <button className="btn btn-xs btn-primary" onClick={() => openMovimiento(m.id, 'entrada')}>+ Ent.</button>}
-                          {puedeEditarInv && <button className="btn btn-xs btn-secondary" onClick={() => openMovimiento(m.id, 'salida')}>- Sal.</button>}
+                          {puedeEditarInv && <button className="btn btn-xs btn-primary" onClick={() => openMovimiento(m.id)} title="Compra, salida o ajuste de conteo">+/− Mov.</button>}
                           <button className="btn btn-xs btn-secondary" onClick={() => openHistorial(m)}>🕑</button>
                           <button className="btn btn-xs btn-secondary" title="Lotes (PEPS)" onClick={() => { setLotesMP(m); setModalLotes(true) }}>🧊</button>
                           {esAdmin && desq && (
@@ -777,19 +819,23 @@ export default function Inventario() {
         <PaginacionTabla {...pagMP} />
       </div>
 
-      {(puedeVerStock || puedeEditarInv) && <div className="card">
-        <div className="card-title"><Ico as={ClipboardList} size={16} />Últimos Movimientos</div>
+      {/* Modal Últimos movimientos (global) */}
+      <Modal open={modalUltMovs} onClose={() => setModalUltMovs(false)}
+        title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><ClipboardList size={18} aria-hidden="true" /> Últimos movimientos</span>}
+        size="modal-lg"
+        footer={<button className="btn btn-secondary" onClick={() => setModalUltMovs(false)}>Cerrar</button>}
+      >
         <div className="table-wrap">
           <table>
             <thead><tr><th>Fecha</th><th>MP</th><th>Tipo</th><th>Cantidad</th><th>Lote</th><th>Responsable</th><th>Observación</th></tr></thead>
             <tbody>
               {movimientos.length === 0
                 ? <tr><td colSpan={7} className="empty-table">Sin movimientos</td></tr>
-                : movimientos.slice(0, 30).map(mv => {
+                : pagUltMovs.slice.map(mv => {
                     const mp = mps.find(m => m.id === mv.mp_id)
                     return (
                       <tr key={mv.id}>
-                        <td>{fFecha(mv.fecha)}</td>
+                        <td style={{ whiteSpace: 'nowrap' }}>{fFechaHora(mv.created_at || mv.fecha)}</td>
                         <td>{mp?.nombre || `MP #${mv.mp_id}`}</td>
                         <td><span className={`badge ${mv.tipo === 'entrada' ? 'badge-verde' : mv.tipo === 'salida' ? 'badge-rojo' : 'badge-gris'}`}>{mv.tipo}</span></td>
                         <td className="td-number">{fCantMov(mv.cantidad, mp?.unidad)}</td>
@@ -798,12 +844,12 @@ export default function Inventario() {
                         <td>{mv.obs || '—'}</td>
                       </tr>
                     )
-                  })
-              }
+                  })}
             </tbody>
           </table>
         </div>
-      </div>}
+        <PaginacionTabla {...pagUltMovs} />
+      </Modal>
 
       {/* Modal MP */}
       <Modal open={modalMP} onClose={() => { setModalMP(false); setFormMP(EMPTY_MP); setEditMPId(null) }}
@@ -844,7 +890,15 @@ export default function Inventario() {
         </div>
         <div className="form-grid-2">
           <div className="form-group"><label className="form-label">Stock mínimo <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(en {baseLbl(formMP.unidad)})</small></label><input type="number" className="form-control" value={formMP.stock_min} onChange={e => setFormMP(f => ({ ...f, stock_min: e.target.value }))} /></div>
-          <div className="form-group"><label className="form-label">Stock actual <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(en {baseLbl(formMP.unidad)}{factorU(formMP.unidad) > 1 ? ` · 1 ${formMP.unidad}=${factorU(formMP.unidad)}${baseLbl(formMP.unidad)}` : ''})</small></label><input type="number" className="form-control" value={formMP.stock} onChange={e => setFormMP(f => ({ ...f, stock: e.target.value }))} /></div>
+          <div className="form-group">
+            <label className="form-label">Stock actual <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(en {baseLbl(formMP.unidad)}{factorU(formMP.unidad) > 1 ? ` · 1 ${formMP.unidad}=${factorU(formMP.unidad)}${baseLbl(formMP.unidad)}` : ''})</small></label>
+            <input type="number" className="form-control" value={formMP.stock} disabled={!!editMPId}
+              onChange={e => setFormMP(f => ({ ...f, stock: e.target.value }))}
+              title={editMPId ? 'El stock solo cambia con +/− Mov. (compra, salida o ajuste de conteo PEPS)' : undefined} />
+            {editMPId
+              ? <small style={{ color: 'var(--texto-suave)' }}>Solo lectura. Usa <strong>+/− Mov.</strong> → Compra, Salida o <strong>Ajuste de conteo</strong> (corrige un lote PEPS).</small>
+              : <small style={{ color: 'var(--texto-suave)' }}>Opcional al crear. Si lo dejas en 0, luego registra una <strong>Compra</strong> (con lote y proveedor).</small>}
+          </div>
         </div>
         <div className="form-group" style={{ background: 'rgba(124,179,66,0.07)', borderRadius: 'var(--radio)', padding: 10 }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600 }}>
@@ -864,8 +918,8 @@ export default function Inventario() {
         {!esEmpaque(formMP.categoria) && <CamposExtra value={formMP.extra} onChange={extra => setFormMP(f => ({ ...f, extra }))} />}
       </Modal>
 
-      {/* Modal Movimiento */}
-      <Modal open={modalMov} onClose={() => setModalMov(false)} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Package size={18} aria-hidden="true" /> {formMov.tipo === 'entrada' ? 'Entrada' : formMov.tipo === 'salida' ? 'Salida' : 'Movimiento'} de Inventario</span>}
+      {/* Modal Movimiento unificado: Compra / Salida / Ajuste de conteo (PEPS) */}
+      <Modal open={modalMov} onClose={() => setModalMov(false)} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Package size={18} aria-hidden="true" /> {tituloTipoMov(formMov.tipo)}</span>}
         footer={
           <>
             <button className="btn btn-secondary" onClick={() => setModalMov(false)}>Cancelar</button>
@@ -873,79 +927,132 @@ export default function Inventario() {
           </>
         }
       >
-        <div className="form-grid-2">
-          <div className="form-group">
-            <label className="form-label">Materia Prima</label>
-            <Select className="form-control" value={formMov.mp_id} onChange={e => setFormMov(f => ({ ...f, mp_id: e.target.value }))}>
-              <option value="">Seleccionar...</option>
-              {mps.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
-            </Select>
-          </div>
-          <div className="form-group">
-            <label className="form-label">Tipo</label>
-            <Select className="form-control" value={formMov.tipo} onChange={e => setFormMov(f => ({ ...f, tipo: e.target.value }))}>
-              <option value="entrada">Entrada (Compra/Recepción)</option>
-              <option value="salida">Salida (Uso en producción)</option>
-              <option value="ajuste">Ajuste de inventario</option>
-            </Select>
-          </div>
-        </div>
-        <div className="form-grid-2">
-          <div className="form-group">
-            <label className="form-label">Cantidad {formMov.mp_id && <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(en {baseLbl(mps.find(m => String(m.id) === String(formMov.mp_id))?.unidad)})</small>} {formMov.tipo === 'ajuste' && <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(+ suma / − resta)</small>}</label>
-            <input type="number" className="form-control" value={formMov.cantidad} onChange={e => setFormMov(f => ({ ...f, cantidad: e.target.value }))} min={formMov.tipo === 'ajuste' ? undefined : 0} />
-          </div>
-        </div>
-        {/* Costo en entradas — actualiza el precio de la MP (y recalcula las fichas) */}
-        {formMov.tipo === 'entrada' && (() => {
+        {(() => {
           const mpSel = mps.find(m => String(m.id) === String(formMov.mp_id))
-          const u = mpSel?.unidad || 'Kg'
+          const uBase = baseLbl(mpSel?.unidad)
+          // En +/− Mov. no listar lotes agotados (0): no aportan a salida ni a ajuste útil.
+          const lotesMp = lotesDe(parseInt(formMov.mp_id) || 0).filter(l => (l.cantidad_actual || 0) > 0)
+          const loteSel = lotesMp.find(l => String(l.id) === String(formMov.lote_id))
           return (
-            <div className="form-group">
-              <label className="form-label">Costo {porUnidad(u)} <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>— opcional, actualiza el precio de la MP</small></label>
-              <MoneyInput value={formMov.costo} onChange={v => setFormMov(f => ({ ...f, costo: v }))} placeholder={mpSel ? `Actual: $ ${fNum(mpSel.precio)}` : '$ 0'} />
-            </div>
+            <>
+              <div className="form-grid-2">
+                <div className="form-group">
+                  <label className="form-label">Materia Prima</label>
+                  <Select className="form-control" value={formMov.mp_id} onChange={e => setFormMov(f => ({ ...f, mp_id: e.target.value, lote_id: '', cantidad: '' }))}>
+                    <option value="">Seleccionar...</option>
+                    {mps.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+                  </Select>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Motivo / tipo</label>
+                  <Select className="form-control" value={formMov.tipo} onChange={e => setFormMov(f => ({ ...f, tipo: e.target.value, lote_id: '', cantidad: '' }))}>
+                    <option value="entrada">Compra / recepción</option>
+                    <option value="salida">Salida</option>
+                    <option value="ajuste">Ajuste de conteo (PEPS)</option>
+                  </Select>
+                </div>
+              </div>
+
+              {/* Ajuste: primero el lote PEPS, luego la cantidad absoluta */}
+              {formMov.tipo === 'ajuste' && (
+                <div style={{ background: 'rgba(124,179,66,0.07)', border: '1px solid rgba(124,179,66,0.25)', borderRadius: 'var(--radio)', padding: 10, marginBottom: 8 }}>
+                  <div className="form-group">
+                    <label className="form-label">Lote PEPS a corregir <small style={{ color: 'var(--rojo)' }}>*</small></label>
+                    <Select className="form-control" value={formMov.lote_id} onChange={e => {
+                      const id = e.target.value
+                      const l = lotesMp.find(x => String(x.id) === String(id))
+                      setFormMov(f => ({
+                        ...f,
+                        lote_id: id,
+                        cantidad: l ? String((Number(l.cantidad_actual) || 0) * factorU(mpSel?.unidad)) : '',
+                      }))
+                    }}>
+                      <option value="">Seleccionar lote…</option>
+                      {lotesMp.map(l => (
+                        <option key={l.id} value={l.id}>
+                          Ingreso {fFechaHora(l.created_at || l.fecha_entrada)} · Lote {l.lote || '(s/n)'} · {fBase(l.cantidad_actual, mpSel?.unidad)} disp.
+                          {l.vencimiento ? ` · vence ${l.vencimiento}` : ''}
+                        </option>
+                      ))}
+                    </Select>
+                    <small style={{ color: 'var(--texto-suave)' }}>
+                      Escribe lo que <strong>queda realmente</strong> en ese lote (no suma ni resta). Puedes dejarlo en <strong>0</strong>.
+                    </small>
+                  </div>
+                  {loteSel && (
+                    <p style={{ fontSize: '0.82rem', margin: '0 0 8px' }}>
+                      Disponible hoy: <strong>{fBase(loteSel.cantidad_actual, mpSel?.unidad)}</strong>
+                      {(loteSel.cantidad_reservada || 0) > 0 && <> · Reservado: <strong>{fBase(loteSel.cantidad_reservada, mpSel?.unidad)}</strong></>}
+                    </p>
+                  )}
+                  <div className="form-group" style={{ marginBottom: 0 }}>
+                    <label className="form-label">Cantidad correcta {mpSel && <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(en {uBase})</small>}</label>
+                    <input type="number" className="form-control" value={formMov.cantidad} min={0} step="any"
+                      onChange={e => setFormMov(f => ({ ...f, cantidad: e.target.value }))} disabled={!formMov.lote_id} />
+                  </div>
+                </div>
+              )}
+
+              {/* Salida: motivo + lote (opcional), luego cantidad */}
+              {formMov.tipo === 'salida' && (
+                <div className="form-grid-2" style={{ background: 'rgba(192,57,43,0.05)', border: '1px solid rgba(192,57,43,0.18)', borderRadius: 'var(--radio)', padding: 10 }}>
+                  <div className="form-group">
+                    <label className="form-label">Motivo de salida <small style={{ color: 'var(--rojo)' }}>*</small></label>
+                    <Select className="form-control" value={formMov.motivo} onChange={e => setFormMov(f => ({ ...f, motivo: e.target.value }))}>
+                      {MOTIVOS_SALIDA.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
+                    </Select>
+                  </div>
+                  {!esEmpaque(mpSel?.categoria) && (
+                    <div className="form-group">
+                      <label className="form-label">Lote a descontar</label>
+                      <Select className="form-control" value={formMov.lote_id} onChange={e => setFormMov(f => ({ ...f, lote_id: e.target.value }))}>
+                        <option value="">Automático (PEPS)</option>
+                        {lotesMp.map(l => (
+                          <option key={l.id} value={l.id}>
+                            Ingreso {fFechaHora(l.created_at || l.fecha_entrada)} · Lote {l.lote || '(s/n)'} · {fBase(l.cantidad_actual, mpSel?.unidad)}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {(formMov.tipo === 'entrada' || formMov.tipo === 'salida') && (
+                <div className="form-group">
+                  <label className="form-label">Cantidad {mpSel && <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(en {uBase})</small>}</label>
+                  <input type="number" className="form-control" value={formMov.cantidad} min={0} step="any"
+                    onChange={e => setFormMov(f => ({ ...f, cantidad: e.target.value }))} />
+                </div>
+              )}
+
+              {formMov.tipo === 'entrada' && (
+                <div className="form-group">
+                  <label className="form-label">Costo {porUnidad(mpSel?.unidad || 'Kg')} <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>— opcional, actualiza el precio de la MP</small></label>
+                  <MoneyInput value={formMov.costo} onChange={v => setFormMov(f => ({ ...f, costo: v }))} placeholder={mpSel ? `Actual: $ ${fNum(mpSel.precio)}` : '$ 0'} />
+                </div>
+              )}
+
+              {formMov.tipo === 'entrada' && !esEmpaque(mpSel?.categoria) && (
+                <>
+                  <div className="form-grid-2">
+                    <div className="form-group"><label className="form-label">Lote</label><input className="form-control" value={formMov.lote} onChange={e => setFormMov(f => ({ ...f, lote: e.target.value }))} placeholder="N° de lote" /></div>
+                    <div className="form-group"><label className="form-label">Fecha de vencimiento</label><input type="date" className="form-control" value={formMov.vencimiento || ''} onChange={e => setFormMov(f => ({ ...f, vencimiento: e.target.value }))} /></div>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Proveedor <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(a quién se le compró este lote)</small></label>
+                    <input className="form-control" list="dl-proveedores-mp" value={formMov.proveedor || ''} onChange={e => setFormMov(f => ({ ...f, proveedor: e.target.value }))} />
+                    <datalist id="dl-proveedores-mp">{proveedoresConocidos.map(p => <option key={p} value={p} />)}</datalist>
+                  </div>
+                </>
+              )}
+
+              <div className="form-group"><label className="form-label">Responsable</label><input className="form-control" value={formMov.responsable} onChange={e => setFormMov(f => ({ ...f, responsable: e.target.value }))} placeholder="Nombre del responsable" /></div>
+              <div className="form-group"><label className="form-label">Observación</label><textarea className="form-control" rows={2} value={formMov.obs} onChange={e => setFormMov(f => ({ ...f, obs: e.target.value }))} /></div>
+              {formMov.tipo !== 'ajuste' && !esEmpaque(mpSel?.categoria) && <CamposExtra value={formMov.extra} onChange={extra => setFormMov(f => ({ ...f, extra }))} />}
+            </>
           )
         })()}
-        {/* Salida/ajuste: motivo + lote a descontar (pérdida, vencimiento, salida no contabilizada…) */}
-        {(formMov.tipo === 'salida' || formMov.tipo === 'ajuste') && !esEmpaque(mps.find(m => String(m.id) === String(formMov.mp_id))?.categoria) && (
-          <div className="form-grid-2" style={{ background: 'rgba(192,57,43,0.05)', border: '1px solid rgba(192,57,43,0.18)', borderRadius: 'var(--radio)', padding: 10 }}>
-            <div className="form-group">
-              <label className="form-label">Motivo {formMov.tipo === 'salida' && <small style={{ color: 'var(--rojo)' }}>*</small>}</label>
-              <Select className="form-control" value={formMov.motivo} onChange={e => setFormMov(f => ({ ...f, motivo: e.target.value }))}>
-                {MOTIVOS_SALIDA.map(m => <option key={m.value} value={m.value}>{m.label}</option>)}
-              </Select>
-            </div>
-            <div className="form-group">
-              <label className="form-label">¿De qué lote se descuenta? <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(solo aplica si el ajuste RESTA)</small></label>
-              {/* BUG corregido: aquí se usaba `mpSel`, que solo existe en el bloque de entradas —
-                  al elegir salida/ajuste con lotes cargados el modal se rompía (ReferenceError). */}
-              <Select className="form-control" value={formMov.lote_id} onChange={e => setFormMov(f => ({ ...f, lote_id: e.target.value }))}>
-                <option value="">Automático (PEPS: el más antiguo/próximo a vencer)</option>
-                {lotesDe(parseInt(formMov.mp_id)).map(l => (
-                  <option key={l.id} value={l.id}>Lote {l.lote || '(s/n)'} · {fBase(l.cantidad_actual, mps.find(m => String(m.id) === String(formMov.mp_id))?.unidad)} disp.{l.vencimiento ? ` · vence ${l.vencimiento}` : ''}</option>
-                ))}
-              </Select>
-            </div>
-          </div>
-        )}
-        {/* Lote y vencimiento — solo en entradas (crea el lote), no aplican a empaques */}
-        {formMov.tipo === 'entrada' && !esEmpaque(mps.find(m => String(m.id) === String(formMov.mp_id))?.categoria) && (
-          <>
-            <div className="form-grid-2">
-              <div className="form-group"><label className="form-label">Lote</label><input className="form-control" value={formMov.lote} onChange={e => setFormMov(f => ({ ...f, lote: e.target.value }))} placeholder="N° de lote" /></div>
-              <div className="form-group"><label className="form-label">Fecha de vencimiento</label><input type="date" className="form-control" value={formMov.vencimiento || ''} onChange={e => setFormMov(f => ({ ...f, vencimiento: e.target.value }))} /></div>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Proveedor <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(a quién se le compró este lote)</small></label>
-              <input className="form-control" list="dl-proveedores-mp" value={formMov.proveedor || ''} onChange={e => setFormMov(f => ({ ...f, proveedor: e.target.value }))} />
-              <datalist id="dl-proveedores-mp">{proveedoresConocidos.map(p => <option key={p} value={p} />)}</datalist>
-            </div>
-          </>
-        )}
-        <div className="form-group"><label className="form-label">Responsable</label><input className="form-control" value={formMov.responsable} onChange={e => setFormMov(f => ({ ...f, responsable: e.target.value }))} placeholder="Nombre del responsable" /></div>
-        <div className="form-group"><label className="form-label">Observación</label><textarea className="form-control" rows={2} value={formMov.obs} onChange={e => setFormMov(f => ({ ...f, obs: e.target.value }))} /></div>
-        {!esEmpaque(mps.find(m => String(m.id) === String(formMov.mp_id))?.categoria) && <CamposExtra value={formMov.extra} onChange={extra => setFormMov(f => ({ ...f, extra }))} />}
       </Modal>
 
       {/* Modal Categorías */}
@@ -988,34 +1095,39 @@ export default function Inventario() {
         <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', marginTop: 10 }}>Solo se pueden eliminar categorías que no tengan materias primas asignadas. Al renombrar, se actualiza en todas las MPs que la usaban.</p>
       </Modal>
 
-      {/* Modal Lotes PEPS por MP */}
+      {/* Modal Lotes PEPS por MP — listado reciente→antiguo, máx. 10 por página */}
       <Modal open={modalLotes} onClose={() => setModalLotes(false)} title={`🧊 Lotes (PEPS) — ${lotesMP?.nombre || ''}`} size="modal-lg">
         {lotesMP && (() => {
-          const lotes = lotesDe(lotesMP.id)
-          const activos = lotes.filter(l => (l.cantidad_actual || 0) > 0)
+          const activos = lotesDe(lotesMP.id).filter(l => (l.cantidad_actual || 0) > 0)
           const totalLotes = stockLotes(lotesMP.id)
           const desfase = Math.round((totalLotes - (lotesMP.stock || 0)) * 100) / 100
           return (
             <>
               <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>
                 Las salidas consumen primero el lote <strong>más próximo a vencer / más antiguo</strong> (PEPS).
+                Este listado se muestra del <strong>más reciente al más antiguo</strong>.
                 Saldo en lotes: <strong>{fBase(totalLotes, lotesMP.unidad)}</strong>.
-                {desfase !== 0 && <span style={{ color: 'var(--rojo)', display: 'inline-flex', alignItems: 'center', gap: 3 }}> <AlertTriangle size={12} aria-hidden="true" /> Difiere del stock general ({fNum(lotesMP.stock || 0)}) en {fNum(desfase)}. Ajusta con una entrada/salida.</span>}
+                {desfase !== 0 && <span style={{ color: 'var(--rojo)', display: 'inline-flex', alignItems: 'center', gap: 3 }}> <AlertTriangle size={12} aria-hidden="true" /> Difiere del stock general ({fNum(lotesMP.stock || 0)}) en {fNum(desfase)}.</span>}
+                <br />
+                <strong>¿Reconteo o ingreso mal digitado?</strong> Usa <em>+/− Mov.</em> → <strong>Ajuste de conteo</strong> y elige el lote (puedes dejarlo en 0).
+                <strong> ¿Venció o se dañó?</strong> Usa la papelera (dar de baja).
               </div>
               <div className="table-wrap">
                 <table>
                   <thead><tr><th>#PEPS</th><th>Lote</th><th>Ingreso</th><th>Proveedor</th><th>Vence</th><th className="td-number">Inicial</th><th className="td-number">Disponible</th><th className="td-number">Reservado</th><th className="td-number">Costo/u</th><th>Estado</th><th></th></tr></thead>
                   <tbody>
-                    {lotes.length === 0
+                    {lotesModalOrdenados.length === 0
                       ? <tr><td colSpan={11} className="empty-table">Sin lotes. Registra una entrada para crear el primero.</td></tr>
-                      : lotes.map((l, i) => {
+                      : pagLotes.slice.map((l) => {
                         const est = estadoLote(l.vencimiento)
                         const agotado = (l.cantidad_actual || 0) <= 0
                         return (
                           <tr key={l.id} style={{ opacity: agotado ? 0.5 : 1 }}>
                             <td>{agotado ? '—' : activos.indexOf(l) + 1}</td>
                             <td>{l.lote || '—'}</td>
-                            <td>{fFecha(l.fecha_entrada)}</td>
+                            <td style={{ whiteSpace: 'nowrap' }} title={l.created_at || l.fecha_entrada}>
+                              {fFechaHora(l.created_at || l.fecha_entrada)}
+                            </td>
                             <td>{l.proveedor || '—'}</td>
                             <td>{l.vencimiento ? fFecha(l.vencimiento) : '—'}</td>
                             <td className="td-number">{fBase(l.cantidad_inicial, lotesMP.unidad)}</td>
@@ -1037,6 +1149,7 @@ export default function Inventario() {
                   </tbody>
                 </table>
               </div>
+              <PaginacionTabla {...pagLotes} tamanos={[10]} />
             </>
           )
         })()}
@@ -1065,7 +1178,6 @@ export default function Inventario() {
         )}
       </Modal>
 
-      {/* Modal Dar de baja lote */}
       <Modal open={!!bajaLote} onClose={() => setBajaLote(null)} title={`🗑 Dar de baja lote — ${bajaLote?.mp?.nombre || ''}`}
         footer={<>
           <button className="btn btn-secondary" onClick={() => setBajaLote(null)}>Cancelar</button>
@@ -1127,18 +1239,19 @@ export default function Inventario() {
             <div className="card-title" style={{ fontSize: '0.95rem' }}><Ico as={ClipboardList} size={15} />Movimientos ({histMovs.length})</div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Fecha</th><th>Tipo</th><th>Cantidad</th><th>Lote</th><th>Vence</th><th>Responsable</th><th>Obs</th>{esAdmin && <th></th>}</tr></thead>
+                <thead><tr><th>Fecha</th><th>Tipo</th><th>Cantidad</th><th>Lote</th><th>Proveedor</th><th>Vence</th><th>Responsable</th><th>Obs</th>{esAdmin && <th></th>}</tr></thead>
                 <tbody>
                   {histMovs.length === 0
-                    ? <tr><td colSpan={esAdmin ? 8 : 7} className="empty-table">Sin movimientos registrados</td></tr>
+                    ? <tr><td colSpan={esAdmin ? 9 : 8} className="empty-table">Sin movimientos registrados</td></tr>
                     : histMovs.map(mv => {
                       const anulado = mv.extra?.anulado
                       return (
                       <tr key={mv.id} style={anulado ? { opacity: 0.5, textDecoration: 'line-through' } : undefined}>
-                        <td>{fFecha(mv.fecha)}</td>
+                        <td style={{ whiteSpace: 'nowrap' }}>{fFechaHora(mv.created_at || mv.fecha)}</td>
                         <td><span className={`badge ${mv.tipo === 'entrada' ? 'badge-verde' : mv.tipo === 'salida' ? 'badge-rojo' : 'badge-gris'}`}>{mv.tipo}</span></td>
                         <td className="td-number">{fCantMov(mv.cantidad, histMP?.unidad)}</td>
                         <td>{mv.lote || '—'}</td>
+                        <td>{mv.extra?.proveedor || '—'}</td>
                         <td>{mv.vencimiento ? fFecha(mv.vencimiento) : '—'}</td>
                         <td>{mv.responsable || '—'}</td>
                         <td>{mv.obs || '—'}{anulado && <span className="badge badge-gris" style={{ marginLeft: 4, fontSize: '0.62rem' }}>anulado</span>}</td>

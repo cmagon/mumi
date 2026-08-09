@@ -10,8 +10,8 @@ import 'yet-another-react-lightbox/styles.css'
 import 'yet-another-react-lightbox/plugins/thumbnails.css'
 import { supabase } from './supabase'
 import { useStore } from './store'
-import { Card, HeroSlider, BrandHero, Impacto, BannerGrupo, Newsletter, ModalNombre } from './ui'
-import { fCOP, labelCategoria, getFrutos, iconoDe, iconoFruto, labelFruto, stockLabel, imgsDe, imgSrc, textoEnvio, sinTildes, sinHtml, registrarVisita, confirmarPedidoWA, setSEO, compartir, rutaProducto, buscarPorSlug, abrirWA, mensajeSolicitudMayorista, getCliente, setCliente, FAVORITOS, BUSCADOR, videoEmbed, videoThumb, detectRed, formatoRed, paginaPorSlug, postCanvas } from './utils'
+import { Card, HeroSlider, BrandHero, Impacto, BannerGrupo, Newsletter, ModalNombre, ModalSesionCliente } from './ui'
+import { fCOP, labelCategoria, getFrutos, iconoDe, iconoFruto, labelFruto, stockLabel, imgsDe, imgSrc, altImg, textoEnvio, sinTildes, sinHtml, registrarVisita, confirmarPedidoWA, setSEO, compartir, rutaProducto, buscarPorSlug, abrirWA, mensajeSolicitudMayorista, getCliente, setCliente, getEmail, getTelefono, emailValido, telefonoValido, desuscribirPorToken, sincronizarFavoritosLocales, FAVORITOS, BUSCADOR, videoEmbed, videoThumb, detectRed, formatoRed, paginaPorSlug, postCanvas, baseUrl, jsonLdSitio, jsonLdProducto } from './utils'
 import FrutoIcon from './FrutoIcon'
 
 // ==================== MIGAS DE PAN ====================
@@ -86,12 +86,20 @@ export function Home() {
   useEffect(() => {
     registrarVisita(null)
     const marca = cfg.nombre_tienda || 'Mumi Amazonia'
+    const path = typeof window !== 'undefined' && window.location.pathname.startsWith('/tienda') ? '/tienda' : '/'
+    const sp = (cfg.seo_paginas || {}).tienda || {}
     setSEO({
-      title: cfg.seo_titulo || '',
-      desc: cfg.seo_descripcion || [marca, cfg.slogan || cfg.subtitulo].filter(Boolean).join(' — '),
+      title: sp.titulo || cfg.seo_titulo || '',
+      desc: sp.desc || cfg.seo_descripcion || [marca, cfg.slogan || cfg.subtitulo].filter(Boolean).join(' — '),
       image: cfg.seo_imagen || cfg.logo_url,
+      url: `${baseUrl(cfg)}${path}`,
+      siteName: marca,
+      keywords: cfg.seo_keywords || '',
+      verification: cfg.seo_verificacion || '',
+      noindex: cfg.seo_indexar === false || !!cfg.mantenimiento_activo,
+      jsonLd: jsonLdSitio(cfg),
     })
-  }, [cfg.seo_titulo, cfg.seo_descripcion, cfg.seo_imagen, cfg.nombre_tienda, cfg.slogan])
+  }, [cfg.seo_titulo, cfg.seo_descripcion, cfg.seo_imagen, cfg.seo_keywords, cfg.seo_verificacion, cfg.seo_indexar, cfg.seo_paginas, cfg.nombre_tienda, cfg.slogan, cfg.subtitulo, cfg.url_publica, cfg.mantenimiento_activo])
 
   const [buscando, setBuscando] = useState(!!q)
   const abrir = (p) => nav(rutaProducto(p))
@@ -124,11 +132,27 @@ export function Home() {
   if (productos === null) return <div className="spin" />
 
   const atelier = (cfg.diseno || 'selva') === 'atelier'
-  const cardProps = (p) => ({ p, cfg, n: enCarrito(p.id), onOpen: () => abrir(p), onAdd: () => agregar(p, 1) })
-  const listaCls = atelier ? 'grid' : 'row'
+  const cardProps = (p) => ({ p, cfg, n: enCarrito(p.id), onOpen: (prod) => abrir(prod || p), onAdd: () => agregar(p, 1) })
+  // Una tarjeta por grupo de presentaciones (packs); el resto se elige con chips
+  const sinDupPacks = (lista) => {
+    const seen = new Set()
+    return (lista || []).filter(p => {
+      const g = (p.grupo || '').trim()
+      if (!g || !p.presentaciones?.length) return true
+      if (seen.has(g)) return false
+      seen.add(g)
+      return true
+    })
+  }
+  // Clásico: scroll (fila) o cuadrícula; Atelier siempre grid
+  const vistaProductos = (cfg.productos_vista || 'scroll') === 'grid' ? 'grid' : 'row'
+  const listaCls = atelier ? 'grid' : vistaProductos
   const frutosLista = getFrutos()
-  const mostrarFrutos = atelier ? frutosLista.length > 0 : (cfg.mostrar_filtro_frutos && frutosLista.length > 0)
-  const cosecha = destacados.length ? destacados : (productos || []).slice(0, 6)
+  // Ambos diseños respetan el switch de Personalizar
+  const mostrarFiltroFrutos = !!cfg.mostrar_filtro_frutos && frutosLista.length > 0
+  const cosecha = sinDupPacks(destacados.length ? destacados : (productos || []).slice(0, 6))
+  const resultadosUnicos = sinDupPacks(resultados)
+  const novedadesUnicas = sinDupPacks(novedades)
 
   const secHead = (eyebrow, titulo, linkTo, linkTxt) => (
     <div className={`sec-head ${atelier ? 'sec-head-atelier' : ''}`}>
@@ -147,70 +171,72 @@ export function Home() {
         ? <BrandHero cfg={cfg} banner={bannersPrincipales[0] || null} />
         : (heroSlides.length > 0 && <HeroSlider slides={heroSlides} onOpen={abrir} />))}
 
-      {/* Filtro por frutos: círculos en Atelier, chips en Selva */}
-      {mostrarFrutos && (
-        atelier ? (
-          <section className="fruto-filter">
-            <div className="sec-head sec-head-center">
-              <h2 className="sec-title serif">Explora por ingrediente</h2>
-            </div>
-            <div className="frutos">
-              <button type="button" className={`fruto ${!fFruto ? 'on' : ''}`} onClick={() => setFFruto('')}>
-                <div className="fruto-emoji"><Search size={22} /></div>
-                <div className="fruto-name">Todos</div>
-              </button>
-              {frutosLista.map(f => (
-                <button type="button" key={f.id} className={`fruto ${fFruto === f.id ? 'on' : ''}`} onClick={() => setFFruto(fFruto === f.id ? '' : f.id)}>
-                  {f.foto_url
-                    ? <div className="fruto-foto"><img src={f.foto_url} alt="" /></div>
-                    : <div className="fruto-emoji"><FrutoIcon name={f.icono} size={28} /></div>}
-                  <div className="fruto-name">{f.nombre}</div>
+      {/* En móvil: toolbar (relevancia) arriba, frutos debajo — CSS order */}
+      <div className="home-filters">
+        {mostrarFiltroFrutos && (
+          atelier ? (
+            <section className="fruto-filter home-frutos">
+              <div className="sec-head sec-head-center">
+                <h2 className="sec-title serif">{cfg.frutos_filtro_titulo || 'Explora por ingrediente'}</h2>
+              </div>
+              <div className="frutos">
+                <button type="button" className={`fruto ${!fFruto ? 'on' : ''}`} onClick={() => setFFruto('')}>
+                  <div className="fruto-emoji"><Search size={22} /></div>
+                  <div className="fruto-name">Todos</div>
                 </button>
-              ))}
+                {frutosLista.map(f => (
+                  <button type="button" key={f.id} className={`fruto ${fFruto === f.id ? 'on' : ''}`} onClick={() => setFFruto(fFruto === f.id ? '' : f.id)}>
+                    {f.foto_url
+                      ? <div className="fruto-foto"><img src={f.foto_url} alt="" /></div>
+                      : <div className="fruto-emoji"><FrutoIcon name={f.icono} size={28} /></div>}
+                    <div className="fruto-name">{f.nombre}</div>
+                  </button>
+                ))}
+              </div>
+            </section>
+          ) : (
+            <div className="chips home-frutos" style={{ paddingTop: 0 }}>
+              <button className={`chip chip-sm ${!fFruto ? 'on' : ''}`} onClick={() => setFFruto('')}>Todos los frutos</button>
+              {frutosLista.map(f => <button key={f.id} className={`chip chip-sm ${fFruto === f.id ? 'on' : ''}`} onClick={() => setFFruto(fFruto === f.id ? '' : f.id)}><FrutoIcon name={f.icono} size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />{f.nombre}</button>)}
             </div>
-          </section>
-        ) : (
-          <div className="chips" style={{ paddingTop: 0 }}>
-            <button className={`chip chip-sm ${!fFruto ? 'on' : ''}`} onClick={() => setFFruto('')}>Todos los frutos</button>
-            {frutosLista.map(f => <button key={f.id} className={`chip chip-sm ${fFruto === f.id ? 'on' : ''}`} onClick={() => setFFruto(fFruto === f.id ? '' : f.id)}><FrutoIcon name={f.icono} size={14} style={{ verticalAlign: '-2px', marginRight: 4 }} />{f.nombre}</button>)}
-          </div>
-        )
-      )}
+          )
+        )}
 
-      {/* Toolbar: en Atelier solo búsqueda compacta (menos ruido tipo Munay) */}
-      <div className={`toolbar ${atelier ? 'toolbar-atelier' : ''}`}>
-        {BUSCADOR && (buscando
-          ? <div className="search"><Search size={17} /><input autoFocus placeholder="Buscar producto…" value={q} onChange={e => setQ(e.target.value)} /><button onClick={() => { setQ(''); setBuscando(false) }} aria-label="Cerrar"><X size={16} /></button></div>
-          : <button className="search-toggle" onClick={() => setBuscando(true)} aria-label="Buscar"><Search size={18} /> <span>Buscar</span></button>)}
-        {!atelier && (
-          <>
-            <select className="sortsel" value={cat} onChange={e => setCat(e.target.value)} aria-label="Categoría">
-              <option value="todos">Todas las categorías</option>
-              {cats.map(c => <option key={c} value={c}>{labelCategoria(c)}</option>)}
-            </select>
+        {/* Toolbar: en Atelier solo búsqueda compacta (menos ruido tipo Munay) */}
+        <div className={`toolbar home-toolbar ${atelier ? 'toolbar-atelier' : ''}`}>
+          {BUSCADOR && (buscando
+            ? <div className="search"><Search size={17} /><input autoFocus placeholder="Buscar producto…" value={q} onChange={e => setQ(e.target.value)} /><button onClick={() => { setQ(''); setBuscando(false) }} aria-label="Cerrar"><X size={16} /></button></div>
+            : <button className="search-toggle" onClick={() => setBuscando(true)} aria-label="Buscar"><Search size={18} /> <span>Buscar</span></button>)}
+          {!atelier && (
+            <>
+              <select className="sortsel" value={cat} onChange={e => setCat(e.target.value)} aria-label="Categoría">
+                <option value="todos">Todas las categorías</option>
+                {cats.map(c => <option key={c} value={c}>{labelCategoria(c)}</option>)}
+              </select>
+              <select className="sortsel" value={orden} onChange={e => setOrden(e.target.value)} aria-label="Ordenar">
+                <option value="rel">Relevancia</option><option value="precio_asc">Precio: menor a mayor</option>
+                <option value="precio_desc">Precio: mayor a menor</option><option value="nombre">Nombre (A-Z)</option>
+              </select>
+            </>
+          )}
+          {atelier && buscando && (
             <select className="sortsel" value={orden} onChange={e => setOrden(e.target.value)} aria-label="Ordenar">
-              <option value="rel">Relevancia</option><option value="precio_asc">Precio: menor a mayor</option>
-              <option value="precio_desc">Precio: mayor a menor</option><option value="nombre">Nombre (A-Z)</option>
+              <option value="rel">Relevancia</option><option value="precio_asc">Precio ↑</option>
+              <option value="precio_desc">Precio ↓</option><option value="nombre">A-Z</option>
             </select>
-          </>
-        )}
-        {atelier && buscando && (
-          <select className="sortsel" value={orden} onChange={e => setOrden(e.target.value)} aria-label="Ordenar">
-            <option value="rel">Relevancia</option><option value="precio_asc">Precio ↑</option>
-            <option value="precio_desc">Precio ↓</option><option value="nombre">A-Z</option>
-          </select>
-        )}
+          )}
+        </div>
       </div>
 
       {filtrando ? (
         <>
           <Migas items={[{ label: cat !== 'todos' ? labelCategoria(cat) : (q ? `Búsqueda: "${q}"` : (fFruto ? labelFruto(fFruto) : 'Resultados')) }]} />
           <div className="sec-head">
-            <h2 className="sec-title serif">{resultados.length} resultado{resultados.length === 1 ? '' : 's'}</h2>
+            <h2 className="sec-title serif">{resultadosUnicos.length} resultado{resultadosUnicos.length === 1 ? '' : 's'}</h2>
             <button className="sec-link" onClick={() => { limpiarFiltros(); setBuscando(false) }}>Limpiar filtros ✕</button>
           </div>
           <div className="grid">
-            {resultados.length ? resultados.map(p => <Card key={p.id} {...cardProps(p)} />)
+            {resultadosUnicos.length ? resultadosUnicos.map(p => <Card key={p.id} {...cardProps(p)} />)
               : <p className="empty" style={{ gridColumn: '1 / -1' }}>No encontramos productos. Prueba con otra búsqueda o filtro.</p>}
           </div>
         </>
@@ -219,7 +245,7 @@ export function Home() {
           {/* Atelier: cosecha destacada primero (como “Los más vendidos” en Munay) */}
           {atelier && cosecha.length > 0 && (
             <section className="sec-cosecha">
-              {secHead('Productos destacados', 'Nuestra cosecha', '/tienda?orden=rel', 'Ver todo')}
+              {secHead(cfg.cosecha_eyebrow || 'Productos destacados', cfg.cosecha_titulo || 'Nuestra cosecha', '/tienda?orden=rel', 'Ver todo')}
               <div className="grid">{cosecha.map(p => <Card key={p.id} {...cardProps(p)} />)}</div>
             </section>
           )}
@@ -227,12 +253,15 @@ export function Home() {
           {(cfg.secciones || []).filter(s => s.on !== false).map((s, idx) => {
             const key = s.key || s.id || idx
             const tipo = s.tipo || s.id
-            const filaCat = (c) => (porCategoria[c]?.length ? (
-              <section key={c}>
-                {secHead(null, labelCategoria(c), atelier ? `/tienda?cat=${encodeURIComponent(c)}` : null, 'Ver todo')}
-                <div className={listaCls}>{porCategoria[c].map(p => <Card key={p.id} {...cardProps(p)} />)}</div>
-              </section>
-            ) : null)
+            const filaCat = (c) => {
+              const lista = sinDupPacks(porCategoria[c] || [])
+              return lista.length ? (
+                <section key={c}>
+                  {secHead(null, labelCategoria(c), atelier ? `/tienda?cat=${encodeURIComponent(c)}` : null, 'Ver todo')}
+                  <div className={listaCls}>{lista.map(p => <Card key={p.id} {...cardProps(p)} />)}</div>
+                </section>
+              ) : null
+            }
             switch (tipo) {
               case 'hero': return null
               case 'banner': {
@@ -246,15 +275,15 @@ export function Home() {
                 return atelier ? <BannerGrupo key={key} banners={grupoBanners} /> : <HeroSlider key={key} slides={grupoBanners} onOpen={() => {}} />
               }
               case 'novedades':
-                if (!novedades.length || (atelier && cosecha.length)) return null // en atelier la cosecha ya cubre destacados/novedades arriba
+                if (!novedadesUnicas.length || (atelier && cosecha.length)) return null // en atelier la cosecha ya cubre destacados/novedades arriba
                 return (
                   <section key={key}>
                     {secHead(atelier ? 'Lo nuevo' : null, s.titulo || (atelier ? 'Novedades' : '✨ Novedades'), null)}
-                    <div className={listaCls}>{novedades.map(p => <Card key={p.id} {...cardProps(p)} />)}</div>
+                    <div className={listaCls}>{novedadesUnicas.map(p => <Card key={p.id} {...cardProps(p)} />)}</div>
                   </section>
                 )
               case 'combos': {
-                const combos = (productos || []).filter(p => p._tipo === 'combo')
+                const combos = sinDupPacks((productos || []).filter(p => p._tipo === 'combo'))
                 return combos.length > 0 ? (
                   <section key={key}>
                     {secHead(null, s.titulo || (atelier ? 'Kits y combos' : '🎁 Combos'), null)}
@@ -275,7 +304,7 @@ export function Home() {
                 // En atelier los círculos ya filtran arriba; el mosaico decorativo se omite para no duplicar
                 return atelier ? null : <Mosaico key={key} s={s} />
               case 'impacto':
-                return atelier ? <Impacto key={key} cfg={cfg} /> : null
+                return (atelier && cfg.impacto_activo !== false) ? <Impacto key={key} cfg={cfg} /> : null
               case 'newsletter':
                 return <Newsletter key={key} />
               default:
@@ -283,8 +312,9 @@ export function Home() {
             }
           })}
 
-          {/* Impacto al final si Atelier y no hay sección impacto en config */}
-          {atelier && !(cfg.secciones || []).some(s => (s.tipo || s.id) === 'impacto' && s.on !== false) && (
+          {/* Impacto al final si Atelier lo tiene activo y no hay sección impacto en el orden */}
+          {atelier && cfg.impacto_activo !== false
+            && !(cfg.secciones || []).some(s => (s.tipo || s.id) === 'impacto') && (
             <Impacto cfg={cfg} />
           )}
         </>
@@ -313,7 +343,7 @@ function CardRelAtelier({ p, onOpen, onAdd, precioFn }) {
   return (
     <article className="rel-mini">
       <button type="button" className="rel-mini-media" onClick={onOpen} aria-label={p.nombre}>
-        {src ? <img src={src} alt="" /> : <FrutoIcon name={iconoDe(p.frutos)} size={36} />}
+        {src ? <img src={src} alt={altImg(p, portada)} /> : <FrutoIcon name={iconoDe(p.frutos)} size={36} />}
         <span className="rel-mini-add" onClick={(e) => { e.stopPropagation(); onAdd() }} aria-hidden><Plus size={18} /></span>
       </button>
       <button type="button" className="rel-mini-name" onClick={onOpen}>{p.nombre}</button>
@@ -326,31 +356,50 @@ function CardRelAtelier({ p, onOpen, onAdd, precioFn }) {
 export function Producto() {
   const { id: param } = useParams()
   const nav = useNavigate()
-  const { cfg, productos, enCarrito, agregar, esFav, toggleFav, precio, mayorista, enOferta, descuentoPct } = useStore()
+  const { cfg, productos, enCarrito, agregar, esFav, toggleFav, precio, mayorista, enOferta, descuentoPct, establecerEmail } = useStore()
   const p = buscarPorSlug(productos, param)
   const [img, setImg] = useState(0)
   const [drag, setDrag] = useState(0)
   const [lightbox, setLightbox] = useState(false)
   const [cant, setCant] = useState(1)
   const [hdrScrolled, setHdrScrolled] = useState(false)
+  const [pedirDatos, setPedirDatos] = useState(false)
   const atelier = (cfg.diseno || 'selva') === 'atelier'
   const ctaFijo = atelier && cfg.ficha_cta_fijo !== false
 
   useEffect(() => {
     setImg(0)
     setCant(1)
-    if (p) {
-      registrarVisita(p.nombre)
-      setSEO({ title: p.seo_titulo || p.nombre, desc: p.seo_desc || sinHtml(p.descripcion).slice(0, 160), image: p.imagen_url })
+    if (!p) {
+      setSEO({ title: 'Producto no encontrado', noindex: true, jsonLd: null, siteName: cfg.nombre_tienda || 'Mumi Amazonia' })
+      return
     }
-  }, [param, p?.nombre])
+    registrarVisita(p.nombre)
+    const marca = cfg.nombre_tienda || 'Mumi Amazonia'
+    setSEO({
+      title: p.seo_titulo || p.nombre,
+      desc: p.seo_desc || sinHtml(p.descripcion).slice(0, 160),
+      image: p.imagen_url || cfg.seo_imagen || cfg.logo_url,
+      url: `${baseUrl(cfg)}${rutaProducto(p)}`,
+      type: 'product',
+      siteName: marca,
+      keywords: cfg.seo_keywords || '',
+      verification: cfg.seo_verificacion || '',
+      noindex: cfg.seo_indexar === false,
+      jsonLd: jsonLdProducto(cfg, p),
+    })
+  }, [param, p?.nombre, p?.id, cfg.nombre_tienda, cfg.url_publica, cfg.seo_imagen, cfg.logo_url, cfg.seo_keywords, cfg.seo_verificacion, cfg.seo_indexar])
 
   useEffect(() => {
     if (!atelier) return
-    const onScroll = () => setHdrScrolled(window.scrollY > 20)
+    const scroller = document.querySelector('.wrap') || window
+    const onScroll = () => {
+      const y = scroller === window ? window.scrollY : scroller.scrollTop
+      setHdrScrolled(y > 20)
+    }
     onScroll()
-    window.addEventListener('scroll', onScroll, { passive: true })
-    return () => window.removeEventListener('scroll', onScroll)
+    scroller.addEventListener('scroll', onScroll, { passive: true })
+    return () => scroller.removeEventListener('scroll', onScroll)
   }, [atelier])
 
   const galeria = p ? imgsDe(p) : []
@@ -379,14 +428,37 @@ export function Producto() {
   const st = stockLabel(p.stock, cfg)
   const relacionados = (productos || []).filter(x => x.id !== p.id && x.categoria === p.categoria).slice(0, 8)
   const maxCant = Math.max(1, Number(p.stock) || 1)
-  const pedir = () => confirmarPedidoWA([{ ...p, cantidad: n > 0 ? n : cant }], '', cfg, mayorista,
-    agotado ? cfg.wa_texto_sin_stock : (mayorista ? (cfg.wa_texto_mayorista || cfg.wa_texto_stock) : cfg.wa_texto_stock))
+  const introWA = agotado ? cfg.wa_texto_sin_stock : (mayorista ? (cfg.wa_texto_mayorista || cfg.wa_texto_stock) : cfg.wa_texto_stock)
+  const itemsPedido = () => [{ ...p, cantidad: n > 0 ? n : cant }]
+  const lanzarPedido = async (nombre, email, telefono) => {
+    await confirmarPedidoWA(itemsPedido(), '', cfg, mayorista, introWA, nombre, email, telefono)
+  }
+  const pedir = () => {
+    if (emailValido(getEmail()) && (getCliente() || '').trim().length >= 2 && telefonoValido(getTelefono())) {
+      void lanzarPedido(getCliente(), getEmail(), getTelefono())
+    } else {
+      setPedirDatos(true)
+    }
+  }
   const compartirProd = () => compartir({ title: p.nombre, text: `${p.nombre} — ${fCOP(precio(p))}`, url: window.location.href })
   const fav = esFav(p.id)
   const oferta = enOferta(p)
   const envioTxt = (cfg.ficha_mostrar_envio !== false) ? textoEnvio(cfg) : ''
   const titRel = (cfg.ficha_titulo_relacionados || '').trim() || (atelier ? 'Combina bien con' : 'También te puede gustar')
   const catLabel = labelCategoria(p.categoria)
+  const modalesPedido = pedirDatos ? (
+    <ModalSesionCliente
+      titulo="Datos para tu pedido"
+      texto="Correo primero: si ya nos escribiste, precargamos tu nombre y teléfono."
+      cta="Continuar a WhatsApp"
+      onClose={() => setPedirDatos(false)}
+      onConfirmar={async ({ email, nombre, telefono }) => {
+        establecerEmail?.(email, nombre, telefono)
+        setPedirDatos(false)
+        await lanzarPedido(nombre, email, telefono)
+      }}
+    />
+  ) : null
 
   // ——— Layout Stitch / Atelier (móvil + desktop) ———
   if (atelier) {
@@ -395,7 +467,7 @@ export function Producto() {
         {/* App bar móvil (Stitch) */}
         <header className={`ficha-top ${hdrScrolled ? 'ficha-top-solid' : ''}`}>
           <button type="button" className="icon-round" onClick={() => nav(-1)} aria-label="Volver"><ArrowLeft size={18} /></button>
-          <h1 className="serif ficha-top-title">Detalle</h1>
+          <div className="serif ficha-top-title">Detalle</div>
           <div className="ficha-top-actions">
             {FAVORITOS && <button type="button" className={`icon-round ${fav ? 'on' : ''}`} onClick={() => toggleFav(p.id)} aria-label="Favorito"><Heart size={18} fill={fav ? 'currentColor' : 'none'} /></button>}
             <button type="button" className="icon-round" onClick={compartirProd} aria-label="Compartir"><Share2 size={18} /></button>
@@ -423,7 +495,7 @@ export function Producto() {
                       <div className="det-slide" key={g.url}>
                         <picture>
                           {g.url_mobile && g.url_mobile !== g.url ? <source media="(max-width: 700px)" srcSet={g.url_mobile} /> : null}
-                          <img className="det-float" src={g.url} alt={k === img ? p.nombre : ''} draggable={false} loading={k === 0 ? 'eager' : 'lazy'} />
+                          <img className="det-float" src={g.url} alt={altImg(p, g)} draggable={false} loading={k === 0 ? 'eager' : 'lazy'} />
                         </picture>
                       </div>
                     ))}
@@ -441,7 +513,7 @@ export function Producto() {
               <div className="det-thumbs atelier-thumbs">
                 {galeria.map((g, k) => (
                   <button key={g.url} type="button" className={`det-thumb ${k === img ? 'on' : ''}`} onClick={() => setImg(k)}>
-                    <img src={imgSrc(g, true) || g.url} alt="" />
+                    <img src={imgSrc(g, true) || g.url} alt={altImg(p, g)} />
                   </button>
                 ))}
               </div>
@@ -559,6 +631,7 @@ export function Producto() {
           </footer>
         )}
         <div className={`footer-space ${ctaFijo ? 'footer-space-cta' : ''}`} />
+        {modalesPedido}
       </div>
     )
   }
@@ -574,7 +647,7 @@ export function Producto() {
                 <div className="det-slide" key={g.url}>
                   <picture>
                     {g.url_mobile && g.url_mobile !== g.url ? <source media="(max-width: 700px)" srcSet={g.url_mobile} /> : null}
-                    <img src={g.url} alt={k === img ? p.nombre : ''} draggable={false} loading={k === 0 ? 'eager' : 'lazy'} />
+                    <img src={g.url} alt={altImg(p, g)} draggable={false} loading={k === 0 ? 'eager' : 'lazy'} />
                   </picture>
                 </div>
               ))}
@@ -592,7 +665,7 @@ export function Producto() {
       {galeria.length > 1 && (
         <div className="det-thumbs">{galeria.map((g, k) => (
           <button key={g.url} type="button" className={`det-thumb ${k === img ? 'on' : ''}`} onClick={() => setImg(k)}>
-            <img src={imgSrc(g, true) || g.url} alt="" />
+            <img src={imgSrc(g, true) || g.url} alt={altImg(p, g)} />
           </button>
         ))}</div>
       )}
@@ -665,28 +738,98 @@ export function Producto() {
       {relacionados.length > 0 && (
         <section>
           <div className="sec-head"><h2 className="sec-title serif">{titRel}</h2></div>
-          <div className="row">{relacionados.map(r => <Card key={r.id} p={r} cfg={cfg} n={enCarrito(r.id)} onOpen={() => nav(rutaProducto(r))} onAdd={() => agregar(r, 1)} />)}</div>
+          <div className="row">{relacionados.map(r => <Card key={r.id} p={r} cfg={cfg} n={enCarrito(r.id)} onOpen={(prod) => nav(rutaProducto(prod || r))} onAdd={() => agregar(r, 1)} />)}</div>
         </section>
       )}
       <div className="footer-space" />
+      {modalesPedido}
     </div>
   )
 }
 
 // ==================== FAVORITOS ====================
 export function Favoritos() {
-  const { productos, favs, cfg, enCarrito, agregar } = useStore()
+  const { productos, favs, cfg, enCarrito, agregar, emailSesion, establecerEmail } = useStore()
   const nav = useNavigate()
-  useEffect(() => { setSEO({ title: 'Favoritos' }) }, [])
+  const [login, setLogin] = useState(false)
+  useEffect(() => {
+    setSEO({
+      title: 'Favoritos',
+      url: `${baseUrl(cfg)}/favoritos`,
+      siteName: cfg.nombre_tienda || 'Mumi Amazonia',
+      noindex: true,
+      jsonLd: null,
+    })
+  }, [cfg.nombre_tienda, cfg.url_publica])
   if (productos === null) return <div className="spin" />
-  const lista = (productos || []).filter(p => favs.includes(p.id))
+  const logueado = emailValido(emailSesion)
+  const lista = (productos || []).filter(p => favs.some(id => String(id) === String(p.id)))
   return (
     <div className="page">
       <Migas items={[{ label: 'Favoritos' }]} />
       <div className="sec-head"><h2 className="sec-title serif">❤️ Tus favoritos</h2></div>
-      {lista.length
-        ? <div className="grid">{lista.map(p => <Card key={p.id} p={p} cfg={cfg} n={enCarrito(p.id)} onOpen={() => nav(rutaProducto(p))} onAdd={() => agregar(p, 1)} />)}</div>
-        : <p className="empty">Aún no tienes favoritos. Toca el ❤ en un producto para guardarlo.</p>}
+      {!logueado ? (
+        <div style={{ padding: '8px 4px 24px', maxWidth: 420 }}>
+          <p className="empty" style={{ textAlign: 'left' }}>Ingresa tu correo para ver y sincronizar tus productos favoritos.</p>
+          <button type="button" className="btn btn-selva" onClick={() => setLogin(true)}>Ingresar con correo</button>
+        </div>
+      ) : (
+        <>
+          <p style={{ fontSize: '0.85rem', color: 'var(--texto-suave)', margin: '0 0 12px' }}>Sesión: {emailSesion}</p>
+          {lista.length
+            ? <div className="grid">{lista.map(p => <Card key={p.id} p={p} cfg={cfg} n={enCarrito(p.id)} onOpen={(prod) => nav(rutaProducto(prod || p))} onAdd={() => agregar(p, 1)} />)}</div>
+            : <p className="empty">Aún no tienes favoritos. Toca el ❤ en un producto para guardarlo.</p>}
+        </>
+      )}
+      {login && (
+        <ModalSesionCliente
+          titulo="Tu correo"
+          texto="Así guardamos tus favoritos y los reconocemos cuando vuelvas."
+          cta="Ver mis favoritos"
+          pedirTelefono={false}
+          onClose={() => setLogin(false)}
+          onConfirmar={async ({ email, nombre }) => {
+            establecerEmail(email, nombre)
+            await sincronizarFavoritosLocales(email, favs, nombre)
+            setLogin(false)
+          }}
+        />
+      )}
+      <div className="footer-space" />
+    </div>
+  )
+}
+
+// ==================== DESUSCRIBIR ====================
+export function Desuscribir() {
+  const { cfg } = useStore()
+  const [params] = useSearchParams()
+  const token = params.get('t') || params.get('token') || ''
+  const [estado, setEstado] = useState('idle') // idle | ok | err
+  const [msg, setMsg] = useState('')
+  useEffect(() => {
+    setSEO({ title: 'Cancelar suscripción', noindex: true, siteName: cfg.nombre_tienda || 'Mumi Amazonia', jsonLd: null })
+  }, [cfg.nombre_tienda])
+  useEffect(() => {
+    if (!token) { setEstado('err'); setMsg('Enlace incompleto. Usa el enlace de baja de un correo de Mumi.'); return }
+    let cancel = false
+    desuscribirPorToken(token).then((ok) => {
+      if (cancel) return
+      if (ok) { setEstado('ok'); setMsg('Listo. Ya no recibirás correos de Mumi Amazonia.') }
+      else { setEstado('ok'); setMsg('Tu correo ya estaba dado de baja, o el enlace no es válido.') }
+    }).catch((e) => {
+      if (cancel) return
+      setEstado('err')
+      setMsg(e.message || 'No pudimos procesar la baja. Intenta más tarde.')
+    })
+    return () => { cancel = true }
+  }, [token])
+  return (
+    <div className="page" style={{ maxWidth: 460, margin: '0 auto', padding: '32px 16px' }}>
+      <h1 className="serif" style={{ color: 'var(--selva)', fontSize: '1.5rem' }}>Correos de Mumi</h1>
+      {estado === 'idle' && <p style={{ color: 'var(--texto-suave)' }}>Procesando…</p>}
+      {estado !== 'idle' && <p style={{ marginTop: 12, color: estado === 'err' ? 'var(--tierra)' : 'var(--selva)' }}>{msg}</p>}
+      <Link to="/tienda" className="btn btn-selva" style={{ marginTop: 20, display: 'inline-flex' }}>Volver a la tienda</Link>
       <div className="footer-space" />
     </div>
   )
@@ -980,7 +1123,21 @@ function BloquesEditable({ bloques, onChange, nivel = 0, ruta = [], target }) {
 
 export function Nosotros() {
   const { cfg, edicion } = useStore()
-  useEffect(() => { setSEO({ title: 'Nosotros', desc: sinHtml(cfg.nosotros_texto).slice(0, 160) || 'Sabores artesanales de la selva.' }) }, [cfg.nosotros_texto])
+  useEffect(() => {
+    const marca = cfg.nombre_tienda || 'Mumi Amazonia'
+    const sp = (cfg.seo_paginas || {}).nosotros || {}
+    setSEO({
+      title: sp.titulo || 'Nosotros',
+      desc: sp.desc || sinHtml(cfg.nosotros_texto).slice(0, 160) || 'Productos con origen en la selva del Guaviare.',
+      image: cfg.seo_imagen || cfg.logo_url,
+      url: `${baseUrl(cfg)}/nosotros`,
+      siteName: marca,
+      keywords: cfg.seo_keywords || '',
+      verification: cfg.seo_verificacion || '',
+      noindex: cfg.seo_indexar === false,
+      jsonLd: null,
+    })
+  }, [cfg.nosotros_texto, cfg.nombre_tienda, cfg.url_publica, cfg.seo_imagen, cfg.logo_url, cfg.seo_keywords, cfg.seo_verificacion, cfg.seo_indexar, cfg.seo_paginas])
   const editando = edicion?.on && edicion.target === 'nosotros'
   const bloques = Array.isArray(cfg.nosotros_bloques) && cfg.nosotros_bloques.length
     ? cfg.nosotros_bloques
@@ -1000,7 +1157,21 @@ export function Pagina() {
   const { cfg, edicion } = useStore()
   const pag = paginaPorSlug(cfg.paginas, slug)
   const editando = edicion?.on && edicion.target === `pagina:${slug}`
-  useEffect(() => { if (pag) setSEO({ title: pag.titulo }) }, [pag?.titulo])
+  useEffect(() => {
+    if (!pag) return
+    const marca = cfg.nombre_tienda || 'Mumi Amazonia'
+    setSEO({
+      title: pag.seo_titulo || pag.titulo,
+      desc: sinHtml(pag.seo_desc || pag.subtitulo || '').slice(0, 160) || cfg.seo_descripcion || '',
+      image: pag.seo_imagen || cfg.seo_imagen || cfg.logo_url,
+      url: `${baseUrl(cfg)}/p/${encodeURIComponent(pag.slug)}`,
+      siteName: marca,
+      keywords: cfg.seo_keywords || '',
+      verification: cfg.seo_verificacion || '',
+      noindex: cfg.seo_indexar === false,
+      jsonLd: null,
+    })
+  }, [pag?.titulo, pag?.seo_titulo, pag?.slug, pag?.seo_desc, pag?.seo_imagen, pag?.subtitulo, cfg.nombre_tienda, cfg.url_publica, cfg.seo_imagen, cfg.logo_url, cfg.seo_descripcion, cfg.seo_keywords, cfg.seo_verificacion, cfg.seo_indexar])
   if (cfg.paginas == null) return <div className="spin" />
   if (!pag) return <div className="empty">Página no encontrada. <Link to="/tienda" className="sec-link">Volver a la tienda</Link></div>
   return (
@@ -1022,7 +1193,15 @@ export function Mayorista() {
   const [clave, setClave] = useState('')
   const [err, setErr] = useState('')
   const [pidiendo, setPidiendo] = useState(false)   // modal que pide el nombre
-  useEffect(() => { setSEO({ title: 'Acceso mayorista' }) }, [])
+  useEffect(() => {
+    setSEO({
+      title: 'Acceso mayorista',
+      url: `${baseUrl(cfg)}/mayorista`,
+      siteName: cfg.nombre_tienda || 'Mumi Amazonia',
+      noindex: true,
+      jsonLd: null,
+    })
+  }, [cfg.nombre_tienda, cfg.url_publica])
   const entrar = (e) => {
     e?.preventDefault()
     const req = (cfg.mayorista_clave || '').trim()
@@ -1118,7 +1297,21 @@ export function Galeria() {
   const { cfg } = useStore()
   const { albumId } = useParams()
   const nav = useNavigate()
-  useEffect(() => { setSEO({ title: cfg.galeria_titulo || 'Galería' }) }, [cfg.galeria_titulo])
+  useEffect(() => {
+    const marca = cfg.nombre_tienda || 'Mumi Amazonia'
+    const sp = (cfg.seo_paginas || {}).galeria || {}
+    setSEO({
+      title: sp.titulo || cfg.galeria_titulo || 'Galería',
+      desc: sp.desc || cfg.galeria_subtitulo || cfg.seo_descripcion || '',
+      image: cfg.seo_imagen || cfg.logo_url,
+      url: `${baseUrl(cfg)}${typeof window !== 'undefined' ? window.location.pathname : '/galeria'}`,
+      siteName: marca,
+      keywords: cfg.seo_keywords || '',
+      verification: cfg.seo_verificacion || '',
+      noindex: cfg.seo_indexar === false,
+      jsonLd: null,
+    })
+  }, [cfg.galeria_titulo, cfg.galeria_subtitulo, cfg.nombre_tienda, cfg.url_publica, cfg.seo_imagen, cfg.logo_url, cfg.seo_descripcion, cfg.seo_keywords, cfg.seo_verificacion, cfg.seo_indexar, cfg.seo_paginas])
   const albumes = Array.isArray(cfg.galeria_albumes) ? cfg.galeria_albumes.filter(a => (a.items || []).length || a.titulo) : []
   const abierto = albumId ? albumes.find(a => String(a.id) === String(albumId)) : null
   return (
@@ -1142,7 +1335,21 @@ export function Galeria() {
 // ==================== CONTACTO ====================
 export function Contacto() {
   const { cfg } = useStore()
-  useEffect(() => { setSEO({ title: 'Contacto' }) }, [])
+  useEffect(() => {
+    const marca = cfg.nombre_tienda || 'Mumi Amazonia'
+    const sp = (cfg.seo_paginas || {}).contacto || {}
+    setSEO({
+      title: sp.titulo || 'Contacto',
+      desc: sp.desc || `Contacta a ${marca}. Pedidos, mayoristas y alianzas por WhatsApp.`,
+      image: cfg.seo_imagen || cfg.logo_url,
+      url: `${baseUrl(cfg)}/contacto`,
+      siteName: marca,
+      keywords: cfg.seo_keywords || '',
+      verification: cfg.seo_verificacion || '',
+      noindex: cfg.seo_indexar === false,
+      jsonLd: null,
+    })
+  }, [cfg.nombre_tienda, cfg.url_publica, cfg.seo_imagen, cfg.logo_url, cfg.seo_keywords, cfg.seo_verificacion, cfg.seo_indexar, cfg.seo_paginas])
   const [f, setF] = useState({ nombre: '', email: '', telefono: '', mensaje: '' })
   const [ok, setOk] = useState(false)
   const [err, setErr] = useState('')
@@ -1173,6 +1380,32 @@ export function Contacto() {
           </form>}
       {cfg.contacto_mapa && <div className="nos-mapa" style={{ marginTop: 18 }}><iframe src={cfg.contacto_mapa} title="Ubicación" loading="lazy" allowFullScreen referrerPolicy="no-referrer-when-downgrade" /></div>}
       </div>
+      <div className="footer-space" />
+    </div>
+  )
+}
+
+/** 404 real (evita soft-404 indexable al redirigir todo a Home) */
+export function NoEncontrado() {
+  const { cfg } = useStore()
+  const nav = useNavigate()
+  useEffect(() => {
+    const marca = cfg.nombre_tienda || 'Mumi Amazonia'
+    setSEO({
+      title: 'Página no encontrada',
+      desc: 'La página que buscas no existe en el catálogo.',
+      url: typeof window !== 'undefined' ? window.location.href.split('?')[0] : '',
+      siteName: marca,
+      noindex: true,
+      jsonLd: null,
+    })
+  }, [cfg.nombre_tienda])
+  return (
+    <div className="page" style={{ textAlign: 'center', padding: '48px 20px' }}>
+      <div style={{ fontSize: '2.4rem', fontWeight: 800, color: 'var(--selva)', opacity: 0.35 }}>404</div>
+      <h1 className="serif" style={{ fontSize: '1.5rem', color: 'var(--selva)', marginTop: 8 }}>Página no encontrada</h1>
+      <p style={{ color: 'var(--texto-suave)', margin: '10px auto 18px', maxWidth: '36ch' }}>El enlace no existe o ya no está disponible.</p>
+      <button type="button" className="btn btn-selva" style={{ width: 'auto', margin: '0 auto' }} onClick={() => nav('/tienda')}>Ir a la tienda</button>
       <div className="footer-space" />
     </div>
   )

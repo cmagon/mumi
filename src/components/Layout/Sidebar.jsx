@@ -3,7 +3,7 @@ import { NavLink, useLocation } from 'react-router-dom'
 import {
   LayoutDashboard, Calculator, Package, Tags, ClipboardList, Factory, Users, Handshake,
   Camera, FolderOpen, NotebookText, AlertTriangle, GraduationCap,
-  Clock, Leaf, Recycle, ChevronDown, Store,
+  Clock, Recycle, ChevronDown, Store, Truck,
 } from 'lucide-react'
 import { useAuth } from '../../context/AuthContext'
 import { puedeVer, RUTA_MODULO } from '../../lib/permisos'
@@ -15,12 +15,15 @@ const NAV_ITEMS = [
   { section: 'Principal' },
   { to: '/dashboard',  icon: LayoutDashboard, label: 'Tablero Principal' },
   { section: 'Producción' },
-  { to: '/costos',     icon: Calculator, label: 'Calculadora de Costos' },
+  { to: '/productos',   icon: Package, label: 'Productos' },
+  { to: '/costos-gastos', icon: Calculator, label: 'Costos y Gastos' },
   { to: '/inventario', icon: Package, label: 'Inventario MP' },
-  { to: '/terminados', icon: Tags, label: 'Producto Terminado' },
   { to: '/ordenes',    icon: ClipboardList, label: 'Órdenes de Producción' },
   { to: '/produccion', icon: Factory, label: 'Registro de Producción' },
   { to: '/porempacar', icon: Recycle, label: 'Productos por Empacar' },
+  { section: 'Utilidades' },
+  { to: '/utilidades', icon: Tags, label: 'Recetas rápidas', end: true },
+  { to: '/utilidades/envios', icon: Truck, label: 'Costos de envío' },
   { section: 'Personal' },
   { to: '/nomina',     icon: Users, label: 'Asistencia & Nómina' },
   { section: 'Comercial' },
@@ -55,7 +58,11 @@ export default function Sidebar({ open, onClose, puedeFichar, onRegistrarAsisten
     <NavLink
       key={item.to}
       to={item.to}
-      className={({ isActive }) => `nav-item${isActive ? ' active' : ''}`}
+      end={!!item.end}
+      className={({ isActive }) => {
+        const nested = !item.end && item.to !== '/' && location.pathname.startsWith(item.to + '/')
+        return `nav-item${isActive || nested ? ' active' : ''}`
+      }}
       onClick={onClose}
     >
       <span className="nav-icon"><item.icon size={18} aria-hidden="true" /></span>
@@ -81,7 +88,7 @@ export default function Sidebar({ open, onClose, puedeFichar, onRegistrarAsisten
           >
             {cfg.logo_url
               ? <img src={cfg.logo_url} alt={`Logo de ${cfg.empresa || 'Mumi Amazonia'}`} style={{ maxWidth: 32, maxHeight: 32, objectFit: 'contain' }} />
-              : <Leaf size={22} aria-hidden="true" />}
+              : null}
             <span>{cfg.empresa || 'Mumi Amazonia'}</span>
           </NavLink>
         </div>

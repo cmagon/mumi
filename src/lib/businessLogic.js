@@ -13,6 +13,20 @@ export const fFecha = (s) => {
     return d.toLocaleDateString('es-CO', { day: '2-digit', month: 'short', year: 'numeric' })
   } catch { return s }
 }
+
+/**
+ * Número visible de una orden (OP-N): índice por id ascendente + número inicial configurable.
+ * `idsOrdenados` puede ser number[] o [{ id }].
+ */
+export const numeroOrdenVisible = (id, idsOrdenados = [], startNum = 1) => {
+  const nid = Number(id)
+  if (!Number.isFinite(nid)) return startNum || 1
+  const start = Math.max(1, parseInt(startNum, 10) || 1)
+  const idx = (idsOrdenados || []).findIndex((x) => Number(x?.id ?? x) === nid)
+  return (idx >= 0 ? idx : 0) + start
+}
+export const codigoOrdenVisible = (id, idsOrdenados = [], startNum = 1) =>
+  `OP-${numeroOrdenVisible(id, idsOrdenados, startNum)}`
 // Compone el nombre de un producto SURTIDO entre dos sabores tomando como base el prefijo común.
 // Ej: ("Bocadillo Mumi Seje", "Bocadillo Mumi Araza") -> "Bocadillo Mumi Surt. Seje - Araza"
 export const componerSurtido = (nombreA, nombreB) => {
@@ -50,6 +64,32 @@ export const getCIFMensual = (item) => {
 export const getCIFTotalMensual = (cifItems = []) =>
   cifItems.reduce((s, c) => s + getCIFMensual(c), 0)
 
+export const getDepreciacionMensualEquipo = (equipo = {}) => {
+  const valor = parseFloat(equipo.valor_adquisicion) || 0
+  const residual = parseFloat(equipo.valor_residual) || 0
+  const anos = parseFloat(equipo.vida_util_anos) || 0
+  return anos > 0 ? Math.max(0, valor - residual) / (anos * 12) : 0
+}
+
+export const getCostoTasaEquipo = (equipo = {}) => {
+  const capacidad = parseFloat(equipo.capacidad_mes) || 0
+  return capacidad > 0 ? getDepreciacionMensualEquipo(equipo) / capacidad : 0
+}
+
+export const getEquipoUnitProducto = ({ equipos = [], links = [], tipo = '', categorias = [], procesos = [], unidsBache = 0, jornadaHoras = 8 }) => {
+  if (!(unidsBache > 0)) return { total: 0, detalle: [] }
+  const categoriasProducto = new Set([tipo, ...(Array.isArray(categorias) ? categorias : [])].filter(Boolean))
+  const minutos = procesos.reduce((s, p) => s + (parseFloat(p.minutos) || 0), 0)
+  const detalle = equipos.filter(e => e.activo !== false && e.allocation_mode === 'categoria').flatMap(e => {
+    const aplica = links.some(l => String(l.equipment_id) === String(e.id) && categoriasProducto.has(l.categoria))
+    if (!aplica) return []
+    const uso = e.rate_basis === 'dia' ? minutos / ((parseFloat(jornadaHoras) || 8) * 60) : minutos / 60
+    const porBache = getCostoTasaEquipo(e) * uso
+    return [{ id: e.id, nombre: e.nombre, porBache, porUnidad: porBache / unidsBache }]
+  })
+  return { total: detalle.reduce((s, d) => s + d.porUnidad, 0), detalle }
+}
+
 // Clasificación contable de los ítems de CIF (ver AUDITORIA_COSTOS.md — Paso 3/4).
 // Solo el grupo 'cif' se reparte entre productos; los demás son gasto operacional/
 // financiero/impuesto o pasivo y no deben afectar el costo unitario.
@@ -62,6 +102,13 @@ export const GRUPOS_CIF = [
   { value: 'pasivo',         label: 'Pasivo (no es gasto)' },
 ]
 export const getGrupoCIFLabel = (g) => (GRUPOS_CIF.find(x => x.value === g)?.label || g)
+
+// Depreciación de equipos/maquinaria: solo grupos donde tiene sentido un activo físico.
+// Financiero = intereses/comisiones bancarias; impuesto = renta; pasivo = deuda (no gasto).
+// Esos tres se usan en ítems de Gastos, no en equipos.
+export const GRUPOS_EQUIPO = GRUPOS_CIF.filter(g =>
+  g.value === 'cif' || g.value === 'administracion' || g.value === 'ventas'
+)
 
 // Costo por minuto de mano de obra
 // Fórmula: CIF_total / (operarios × 22días × 8h × 60min × (1 - 15% improductividad))
@@ -120,6 +167,8 @@ export const calcularCostosProducto = ({
   jornadaHoras = 8,
   improductividad = 0.15,
   adicionales = [],   // costos extra personalizados: [{ descripcion, valor, base: 'unidad'|'bache'|'mes' }]
+  costosHora = [],    // costos por tiempo: [{ nombre, unidad:'hora'|'dia', tarifa, cantidad_default }]
+  equipoUnit = 0,
 }) => {
   const costoMin = getCostoMinuto(cifTotal, operariosActivos, diasHabiles, jornadaHoras, improductividad)
   const mermaFrac = merma / 100
@@ -173,11 +222,21 @@ export const calcularCostosProducto = ({
   const adicUnitFijo = porBase(['mes'])               // fijos prorrateados
   const adicUnit     = adicUnitVar + adicUnitFijo
 
+  // Costos por horas/días de la ficha: tarifa × cantidad sugerida del bache → / unidades del bache.
+  // En la orden real se diligencia la cantidad; aquí la sugerida estima el costo de producto.
+  const tiempoBache = (Array.isArray(costosHora) ? costosHora : []).reduce((s, c) => {
+    const tarifa = num(c?.tarifa)
+    const cant = num(c?.cantidad_default != null ? c.cantidad_default : c?.cantidad)
+    return s + tarifa * cant
+  }, 0)
+  const tiempoUnit = unidsBache > 0 ? tiempoBache / unidsBache : 0
+
   // Costo VARIABLE unitario: lo que realmente crece con cada unidad producida. Es la base del
   // margen de contribución y del punto de equilibrio, así que incluye los adicionales variables
-  // (ej. depreciación por horas de máquina) pero no el overhead ni los adicionales mensuales.
-  const cvu = mpUnit + empUnit + adicUnitVar
-  const costoTotalUnit = mpUnit + empUnit + moUnit + adicUnit  // costo unitario CON overhead por tiempo + adicionales
+  // (ej. depreciación por horas de máquina) y los costos por tiempo, pero no el overhead ni
+  // los adicionales mensuales.
+  const cvu = mpUnit + empUnit + adicUnitVar + tiempoUnit
+  const costoTotalUnit = mpUnit + empUnit + moUnit + adicUnit + tiempoUnit + (parseFloat(equipoUnit) || 0)
   const costoFinal = costoTotalUnit
   // Ganancia por unidad = Precio − Costo unitario (igual que la hoja 05 del Excel)
   const utilMayor  = precioMayor - costoTotalUnit
@@ -202,8 +261,9 @@ export const calcularCostosProducto = ({
     : (totalUnidsTodos > 0 ? (unidsMesTot / totalUnidsTodos * 100).toFixed(1) : '—')
 
   return {
-    totalMPBache, totalMOBache, totalEmpBache, totalMinutos,
+    totalMPBache, totalMOBache, totalEmpBache, totalMinutos, tiempoBache,
     mpUnit, moUnit, empUnit, cifUnit, adicUnit, adicUnitVar, adicUnitFijo,
+    tiempoUnit, equipoUnit: parseFloat(equipoUnit) || 0,
     cvu, costoTotalUnit, comUnit, costoFinal, utilMayorNeto,
     margenMayor, margenDetal, utilMayor, utilDetal, pe,
     unidsMesTot, pctCIF, costoMin,
@@ -267,7 +327,8 @@ export const getTasaGastosOper = (gastosOperMensuales = 0, costoProduccionMensua
   costoProduccionMensual > 0 ? gastosOperMensuales / costoProduccionMensual : 0
 
 // Precio de venta a partir del COSTO DE PRODUCCIÓN (NIC 2), no de un "costo pleno":
-//   Precio = Costo de producción ÷ (1 − %comisión − %ICA − %utilidad bruta)
+//   Precio = Costo de producción ÷ (1 − %comisión − %utilidad bruta)
+//   (icaPct es opcional/legado; en la ficha se pasa 0 — el ICA es del período)
 // El costo de producción es MP + MO + CIF. Los gastos operativos (admin/ventas/financieros) NO
 // entran al costo del producto: son gastos del período. El %utilidad de aquí es el MARGEN BRUTO
 // objetivo (antes de gastos), que debe ser suficiente para cubrir esos gastos y dejar utilidad neta.
@@ -479,6 +540,102 @@ export const calcHoras = (entrada, salida) => {
   // siguiente", no se puede tratar como negativo/0 — se asume que cruzó un solo día.
   if (mins < 0) mins += 24 * 60
   return Math.max(0, mins / 60)
+}
+
+/** Minutos de proceso de una orden (suma de subprocesos o span inicio→fin global). */
+export const minutosProcesoOrden = ({ inicio = '', fin = '', procesos_tiempos = [], modo_avanzado = false } = {}) => {
+  const procs = Array.isArray(procesos_tiempos) ? procesos_tiempos : []
+  if (modo_avanzado && procs.length > 0) {
+    const suma = procs.reduce((s, p) => s + calcHoras(p.inicio, p.fin) * 60, 0)
+    if (suma > 0) return suma
+  }
+  const global = calcHoras(inicio, fin) * 60
+  if (global > 0) return global
+  // Sin modo avanzado marcado pero con procesos guardados: intentar sumarlos igual.
+  return procs.reduce((s, p) => s + calcHoras(p.inicio, p.fin) * 60, 0)
+}
+
+/**
+ * Costo de producción REAL de una orden vs COSTO DE PRODUCCIÓN de la ficha
+ * (MP + empaque + MO + CIF, p. ej. costoTotalUnit).
+ *
+ * - MP: consumo PEPS real / unidades obtenidas → detecta ingredientes de más.
+ * - Empaque: tarifa de ficha × unidades (suele ir con la cantidad producida).
+ * - MO/CIF: minutos reales × costo/minuto; si no hay tiempos, usa la tarifa de ficha
+ *   (así producir más cantidad con tiempos/proporciones normales no dispara falsa alarma).
+ * - Destajo y costos por hora/día: extras reales que suman al costo de la orden.
+ */
+export const calcularCostoProduccionOrden = ({
+  cantidadObtenida = 0,
+  mpPepsTotal = 0,
+  destajoTotal = 0,
+  costosTiempoTotal = 0,
+  minutosReales = 0,
+  mpUnit = 0,
+  empUnit = 0,
+  moUnit = 0,
+  adicUnit = 0,
+  equipoUnit = 0,
+  costoTotalUnit = 0,
+  totalMinutos = 0,
+  costoMin = 0,
+  bache = 0,
+  merma = 0,
+} = {}) => {
+  const qty = Number(cantidadObtenida) || 0
+  const fichaUnit = Number(costoTotalUnit) || 0
+  if (!(qty > 0)) {
+    return {
+      costo_ficha_unit: fichaUnit,
+      costo_real_unit: 0,
+      desviacion_pct: 0,
+      mp_total: 0, emp_total: 0, mo_total: 0, adic_total: 0,
+      destajo_total: Number(destajoTotal) || 0,
+      costos_tiempo_total: Number(costosTiempoTotal) || 0,
+      minutos_reales: Number(minutosReales) || 0,
+      minutos_esperados: 0,
+      cantidad_obtenida: 0,
+      costo_real_total: 0,
+    }
+  }
+
+  const unidsBache = (Number(bache) || 0) * (1 - (Number(merma) || 0) / 100)
+  const bachesEquiv = unidsBache > 0 ? qty / unidsBache : 0
+  const minutosEsperados = (Number(totalMinutos) || 0) * bachesEquiv
+  const minsReal = Number(minutosReales) || 0
+
+  const mpTotal = (Number(mpPepsTotal) || 0) > 0 ? Number(mpPepsTotal) : (Number(mpUnit) || 0) * qty
+  const empTotal = (Number(empUnit) || 0) * qty
+  const adicTotal = ((Number(adicUnit) || 0) + (Number(equipoUnit) || 0)) * qty
+  // MO/CIF por tiempo real cuando hay registro; si no, tarifa de ficha por unidad producida.
+  const moTotal = (minsReal > 0 && (Number(costoMin) || 0) > 0)
+    ? minsReal * Number(costoMin)
+    : (Number(moUnit) || 0) * qty
+
+  const destajo = Number(destajoTotal) || 0
+  const tiempoExtra = Number(costosTiempoTotal) || 0
+  const costoRealTotal = mpTotal + empTotal + moTotal + adicTotal + destajo + tiempoExtra
+  const costoRealUnit = costoRealTotal / qty
+  const desviacion_pct = fichaUnit > 0 ? ((costoRealUnit - fichaUnit) / fichaUnit) * 100 : 0
+
+  return {
+    costo_ficha_unit: fichaUnit,
+    costo_real_unit: costoRealUnit,
+    desviacion_pct,
+    mp_total: mpTotal,
+    emp_total: empTotal,
+    mo_total: moTotal,
+    adic_total: adicTotal,
+    destajo_total: destajo,
+    costos_tiempo_total: tiempoExtra,
+    minutos_reales: minsReal,
+    minutos_esperados: minutosEsperados,
+    cantidad_obtenida: qty,
+    costo_real_total: costoRealTotal,
+    // Alias para snapshots previos
+    mp_peps_total: mpTotal,
+    conversion_total: empTotal + moTotal + adicTotal,
+  }
 }
 
 // Cuenta los días hábiles (laborales) entre dos fechas YYYY-MM-DD inclusive

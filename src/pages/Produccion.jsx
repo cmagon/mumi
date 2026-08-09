@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from 'react'
-import { useLocation, useNavigate } from 'react-router-dom'
+import { useState, useRef, useEffect, useCallback } from 'react'
+import { useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, uploadFile } from '../lib/supabase'
 import { writeOrQueue } from '../lib/offlineQueue'
@@ -14,6 +14,8 @@ import { descargarPlantillaProduccion, leerPlantillaProduccion, exportarRegistro
 import { startDownload, updateDownload, endDownload, isDownloadCanceled } from '../lib/downloadProgress'
 import Modal from '../components/ui/Modal'
 import TimeField from '../components/ui/TimeField'
+import { useNavTrail } from '../hooks/useNavTrail'
+import { useHistoryLayer } from '../hooks/useHistoryLayer'
 import { useReorder } from '../hooks/useReorder'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import { puedeVerSeccion } from '../lib/permisos'
@@ -74,7 +76,9 @@ export default function Produccion() {
   useEffect(() => { if (!puedeAnalisis && tab === 'analisis') setTab('lista') }, [puedeAnalisis, tab])
   const [filtroMes, setFiltroMes] = useState('')
   const [filtroAño, setFiltroAño] = useState(String(new Date().getFullYear()))
-  const [filtroProd, setFiltroProd] = useState('')
+  const [filtroCategoria, setFiltroCategoria] = useState('')
+  const [filtroLote, setFiltroLote] = useState('')
+  const [filtroProductoExacto, setFiltroProductoExacto] = useState('')
   const [anioAnalisis, setAnioAnalisis] = useState(String(new Date().getFullYear()))
   const [modal, setModal] = useState(false)
   const [form, setForm] = useState(EMPTY)
@@ -99,17 +103,27 @@ export default function Produccion() {
 
   // Precarga al llegar desde una orden de producción
   const location = useLocation()
-  const navigate = useNavigate()
+  const { pushTo, consumeArrival } = useNavTrail()
+  const cerrarModalProdRaw = useCallback(() => {
+    setModal(false); setForm(EMPTY); setEditId(null); setFotos([]); setDetalleRec(null); setOrdenLink(null); setSubprocs([])
+  }, [])
+  const closeModalProd = useHistoryLayer(modal, cerrarModalProdRaw, 'registro-prod')
   useEffect(() => {
-    const d = location.state?.desdeOrden
-    if (d) {
+    const st = location.state
+    if (!st || (!st.desdeOrden && !st.filtrarProducto)) return
+    if (st.desdeOrden) {
+      const d = st.desdeOrden
       setForm({ ...EMPTY, producto: d.producto || '', tipo_registro: d.tipo_registro || 'final', cantidad: d.cantidad || '', lote: d.lote || '', vence: d.vence || '', inicio: d.inicio || '', fin: d.fin || '', ...(d.fecha ? { fecha: d.fecha } : {}) })
       setEditId(null); setDetalleRec(null); setFotos([]); setOrdenLink(d.orden_id || null)
       setModal(true)
-      navigate(location.pathname, { replace: true, state: {} })
     }
+    if (st.filtrarProducto) {
+      setFiltroProductoExacto(st.filtrarProducto)
+      setTab('lista')
+    }
+    consumeArrival()
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [location.state])
 
   const { data: registros = [] } = useQuery({
     queryKey: ['production_records'],
@@ -201,7 +215,7 @@ export default function Produccion() {
     await supabase.from('production_orders').update({ estado: 'en_proceso' }).eq('id', r.orden_id)
     qc.invalidateQueries({ queryKey: ['production_orders'] })
     toast('Orden devuelta a proceso — corrige los datos desde Órdenes y vuelve a Enviar y cerrar')
-    navigate('/ordenes', { state: { verOrden: r.orden_id } })
+    pushTo('/ordenes', { verOrden: r.orden_id })
   }
 
   // Subproductos = materias primas fabricadas internamente (Inventario MP, tipo 'interno')
@@ -330,7 +344,7 @@ export default function Produccion() {
         }
       }
       qc.invalidateQueries({ queryKey: ['production_records'] })
-      setModal(false); setForm(EMPTY); setEditId(null); setFotos([]); setDetalleRec(null); setOrdenLink(null); setSubprocs([])
+      closeModalProd()
     } catch (err) {
       toast(err.message, 'error')
     } finally {
@@ -525,14 +539,24 @@ export default function Produccion() {
       const d = new Date(p.fecha)
       if (filtroMes && d.getMonth() + 1 !== parseInt(filtroMes)) return false
       if (filtroAño && d.getFullYear() !== parseInt(filtroAño)) return false
-      if (filtroProd && p.producto !== filtroProd) return false
+      if (filtroProductoExacto && p.producto !== filtroProductoExacto) return false
+      if (filtroLote) {
+        const q = filtroLote.trim().toLocaleLowerCase('es')
+        const lotes = `${p.lote || ''} ${p.lote_mezcla || ''} ${p.lotes_origen || ''}`.toLocaleLowerCase('es')
+        if (!lotes.includes(q)) return false
+      }
+      if (filtroCategoria) {
+        const ficha = productos.find(x => x.nombre === p.producto)
+        const terminado = terminados.find(x => x.nombre === (p.producto_surtido || p.producto))
+        if ((ficha?.tipo || terminado?.tipo || '') !== filtroCategoria) return false
+      }
       return true
     } catch { return false }
   })
-  const pagRegistros = usePaginacion(filtrados, { resetDeps: [filtroMes, filtroAño, filtroProd] })
+  const pagRegistros = usePaginacion(filtrados, { resetDeps: [filtroMes, filtroAño, filtroCategoria, filtroLote, filtroProductoExacto] })
 
   const aprobados = registros.filter(r => r.aprobado !== false)
-  const prodNames = [...new Set(registros.map(r => r.producto))].sort()
+  const categoriasFiltro = [...new Set([...productos.map(p => p.tipo), ...terminados.map(p => p.tipo)].filter(Boolean))].sort()
   // Nombre del PRODUCTO FINAL que va a stock de producto terminado (con presentación, p.ej. "Galleta de Arazá x40g").
   // Para surtido → el producto surtido resultante; si no, el del catálogo que corresponda al producto base.
   const normNom = (s) => String(s || '').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/\s+/g, ' ')
@@ -681,10 +705,24 @@ export default function Produccion() {
             <Select className="form-control" value={filtroAño} onChange={e => setFiltroAño(e.target.value)} style={{ width: 'auto' }}>
               {aniosRegistros.map(a => <option key={a} value={a}>{a}</option>)}
             </Select>
-            <Select className="form-control" value={filtroProd} onChange={e => setFiltroProd(e.target.value)} style={{ width: 'auto' }}>
-              <option value="">Todos los productos</option>
-              {prodNames.map(p => <option key={p} value={p}>{p}</option>)}
+            <Select className="form-control" value={filtroCategoria} onChange={e => setFiltroCategoria(e.target.value)} style={{ width: 'auto' }}>
+              <option value="">Todas las categorías</option>
+              {categoriasFiltro.map(c => <option key={c} value={c}>{c}</option>)}
             </Select>
+            <input
+              className="form-control"
+              type="search"
+              value={filtroLote}
+              onChange={e => setFiltroLote(e.target.value)}
+              placeholder="Buscar lote…"
+              aria-label="Buscar por lote"
+              style={{ width: 'min(100%, 220px)' }}
+            />
+            {filtroProductoExacto && (
+              <button type="button" className="btn btn-sm btn-secondary" onClick={() => setFiltroProductoExacto('')}>
+                Producto: {filtroProductoExacto} ×
+              </button>
+            )}
           </div>
           {/* ===== Versión móvil: acordeón ===== */}
           <div className="solo-movil">
@@ -823,12 +861,12 @@ export default function Produccion() {
       )}
 
       {/* Modal registro */}
-      <Modal open={modal} onClose={() => { setModal(false); setForm(EMPTY); setEditId(null); setFotos([]); setDetalleRec(null); setOrdenLink(null); setSubprocs([]) }}
+      <Modal open={modal} onClose={closeModalProd}
         title={`🏭 ${editId ? 'Editar' : 'Nuevo'} Registro de Producción`} size="modal-lg"
         footer={
           <>
             {editId && autoSavedAt && <span style={{ fontSize: '0.72rem', color: 'var(--selva)', marginRight: 'auto' }}>✓ autoguardado {autoSavedAt}</span>}
-            <button className="btn btn-secondary" onClick={() => setModal(false)}>Cancelar</button>
+            <button className="btn btn-secondary" onClick={closeModalProd}>Cancelar</button>
             <button className="btn btn-primary" onClick={handleSave} disabled={saving}>
               {saving ? 'Guardando...' : 'Guardar Registro'}
             </button>
@@ -1118,7 +1156,7 @@ export default function Produccion() {
               <div><strong>Vence:</strong> {detalleRec.vence ? fFecha(detalleRec.vence) : '—'}</div>
               <div><strong>Peso final / desperdicio:</strong> {fNum(detalleRec.peso_final || 0)} / {fNum(detalleRec.peso_desperdicio || 0)}</div>
               {detalleRec.cant_subporciones != null && <div><strong>Subporciones:</strong> {fNum(detalleRec.cant_subporciones || 0)} {detalleRec.peso_subporcion ? `(${fNum(detalleRec.peso_subporcion)} g c/u)` : ''}</div>}
-              {detalleRec.orden_id && <div><strong>Origen:</strong> <button type="button" className="btn-link-emp" onClick={() => navigate('/ordenes', { state: { verOrden: detalleRec.orden_id } })} title="Ver detalles de la orden">📋 Orden de producción OP-{opNum(detalleRec.orden_id)}</button></div>}
+              {detalleRec.orden_id && <div><strong>Origen:</strong> <button type="button" className="btn-link-emp" onClick={() => pushTo('/ordenes', { verOrden: detalleRec.orden_id })} title="Ver detalles de la orden">📋 Orden de producción OP-{opNum(detalleRec.orden_id)}</button></div>}
               {detalleRec.aprobado === false && <div><strong>Aprobación:</strong> <span className="badge badge-dorado">Pendiente</span></div>}
             </div>
             {/* Detalle del SURTIDO: lotes combinados y el producto FABRICADO de cada uno (no el nombre final) */}

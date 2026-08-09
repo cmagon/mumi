@@ -17,6 +17,12 @@ export function setBusy(on, label) {
   else { _labels.pop() }   // sin label explícito al apagar: retira la última empujada
   notify()
 }
+/** Fuerza el overlay a apagarse (cierre de orden / recuperación tras error en táctil). */
+export function resetBusy() {
+  _count = 0
+  _labels = []
+  notify()
+}
 export function getBusy() { return _count }
 export function getBusyLabel() { return _labels[_labels.length - 1] || null }
 export function subscribeBusy(fn) { _subs.add(fn); return () => _subs.delete(fn) }

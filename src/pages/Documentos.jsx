@@ -856,7 +856,8 @@ export default function Documentos() {
             <option value="/ordenes">Órdenes de Producción</option>
             <option value="/inventario">Inventario MP</option>
             <option value="/nomina">Asistencia & Nómina</option>
-            <option value="/costos">Calculadora de Costos / Fichas</option>
+            <option value="/productos">Productos / Fichas</option>
+            <option value="/costos-gastos">Costos y Gastos</option>
           </Select>
         </div>
         <div className="form-group">

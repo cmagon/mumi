@@ -5,7 +5,7 @@ import { fFecha, getRolLabel } from '../lib/businessLogic'
 import { useAuth } from '../context/AuthContext'
 import { useConfirm } from '../context/ConfirmContext'
 import { useToast } from '../hooks/useToast'
-import { CATALOGO_MODULOS, MODULOS_POR_ROL } from '../lib/permisos'
+import { CATALOGO_MODULOS, MODULOS_POR_ROL, esSeccionOptIn } from '../lib/permisos'
 import Modal from '../components/ui/Modal'
 import { Bell, Check, FolderOpen, Pencil, Save, Tag, Trash2, Undo2, Users, X } from 'lucide-react'
 import Select from '../components/ui/Select'
@@ -444,9 +444,13 @@ function PermisosTab({ onSaved }) {
   }, [rolSel, permisos])
 
   const tieneModulo = (m) => (config.modulos || []).includes(m)
+  // Secciones "normales": sin lista → todas ON si el módulo está. Opt-in (p. ej. diligenciar_todas): OFF hasta marcarlas.
   const tieneSeccion = (m, s) => {
     const sec = config.secciones?.[m]
-    if (!sec) return tieneModulo(m)   // sin restricción → todas visibles si ve el módulo
+    if (!Array.isArray(sec)) {
+      if (esSeccionOptIn(m, s)) return false
+      return tieneModulo(m)
+    }
     return sec.includes(s)
   }
 
@@ -460,7 +464,8 @@ function PermisosTab({ onSaved }) {
 
   const toggleSeccion = (m, s, todasSecciones) => {
     setConfig(c => {
-      const actual = c.secciones?.[m] || todasSecciones.map(x => x.id)  // por defecto: todas
+      // Base al primer toque: todas las no-opt-in (las opt-in solo si ya estaban marcadas).
+      const actual = c.secciones?.[m] || todasSecciones.map(x => x.id).filter(id => !esSeccionOptIn(m, id))
       const tiene = actual.includes(s)
       const nuevas = tiene ? actual.filter(x => x !== s) : [...actual, s]
       return { ...c, secciones: { ...(c.secciones || {}), [m]: nuevas } }
@@ -489,7 +494,8 @@ function PermisosTab({ onSaved }) {
         secciones se aplican de verdad en Costos, Inventario, Órdenes, Producción, Nómina, Producto
         Terminado y Catálogo. El rol <strong>Administrador</strong> siempre tiene acceso total y no
         es configurable. Sin override, cada rol conserva sus secciones por defecto (p. ej. operario
-        ve Recetas pero no CIF ni Liquidación).
+        ve Recetas pero no CIF ni Liquidación). Las opciones sensibles (asistencia de otros,
+        diligenciar cualquier orden) van <strong>apagadas</strong> hasta que las marques.
       </div>
 
       <div className="form-group" style={{ maxWidth: 320 }}>

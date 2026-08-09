@@ -4,11 +4,33 @@ import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { VitePWA } from 'vite-plugin-pwa'
 
+// Id de build: con cada deploy (commit SHA) el cliente detecta el cambio y purga caché.
+// Sin SHA (dev/local) queda fijo en 'dev' para no recargar en bucle al reiniciar Vite.
+// En Cloudflare Workers el SPA sirve index.html si falta un archivo: por eso build-id.txt
+// DEBE generarse en el build, y el id solo acepta caracteres seguros (ver purgarCache / index.html).
+const MUMI_BUILD =
+  process.env.VERCEL_GIT_COMMIT_SHA ||
+  process.env.CF_PAGES_COMMIT_SHA ||
+  process.env.WORKERS_CI_COMMIT_SHA ||
+  process.env.GITHUB_SHA ||
+  'dev'
+
 export default defineConfig({
+  define: {
+    __MUMI_BUILD__: JSON.stringify(MUMI_BUILD),
+  },
   resolve: {
     alias: { '@': fileURLToPath(new URL('./src', import.meta.url)) },
   },
   plugins: [
+    {
+      // Archivo plano que el index.html pide con cache:'no-store' para detectar deploy
+      // aunque el service worker aún sirva un shell viejo.
+      name: 'mumi-build-id',
+      generateBundle() {
+        this.emitFile({ type: 'asset', fileName: 'build-id.txt', source: `${MUMI_BUILD}\n` })
+      },
+    },
     react(),
     tailwindcss(),
     VitePWA({
@@ -31,6 +53,9 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Fuerza activación inmediata del SW nuevo en todas las pestañas abiertas.
+        skipWaiting: true,
+        clientsClaim: true,
         // Se precachea SOLO el shell: index.html, el bundle de arranque, su CSS,
         // fuentes e iconos. Las consultas a Supabase siguen yendo a la red.
         //

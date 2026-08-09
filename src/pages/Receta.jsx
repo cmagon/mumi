@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase, uploadFile } from '../lib/supabase'
 import { fCOP, fNum, fFecha, calcularReceta, presDeUnidad } from '../lib/businessLogic'
@@ -8,6 +7,7 @@ import { CATALOGO_PARAMS, PARAM_UNIDAD } from '../lib/calidad'
 import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
 import { useReorder } from '../hooks/useReorder'
+import { useNavTrail } from '../hooks/useNavTrail'
 import { useAuth } from '../context/AuthContext'
 import Modal from '../components/ui/Modal'
 import ImageCropper from '../components/ui/ImageCropper'
@@ -17,7 +17,7 @@ import Select from '../components/ui/Select'
 export default function Receta({ embedded = false, productos = [], onConvertir }) {
   const toast = useToast()
   const confirmar = useConfirm()
-  const navigate = useNavigate()
+  const { pushTo } = useNavTrail()
   const qc = useQueryClient()
   const imgInputRef  = useRef()
   const { profile } = useAuth()
@@ -190,13 +190,13 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
   // Enviar la receta a una nueva orden de producción (precarga producto/cantidad/origen)
   const enviarAOrden = () => {
     if (!nombre.trim()) { toast('Ponle nombre a la receta antes de enviarla a una orden', 'warning'); return }
-    navigate('/ordenes', { state: { nuevaOrden: {
+    pushTo('/ordenes', { nuevaOrden: {
       producto: nombre,
       origen: recetaSelId ? 'receta' : 'producto',
       origen_id: recetaSelId ? String(recetaSelId) : '',
       cantidad_plan: resultado?.unidades ? String(Math.round(resultado.unidades)) : '',
       ancla: ancla || '', cantidad_ancla: cantidadAncla || '',
-    } } })
+    } })
   }
 
   const addIngNormal   = () => setIngredientes(p => [...p, { ...EMPTY_ING_BASE, _id: Date.now() + Math.random(), nombre: '', tipo: 'normal',   base: 'total' }])
@@ -392,7 +392,7 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
         `Esta receta tiene ingredientes que no están en la lista de Materias Primas:\n${faltantes.map(i => '• ' + i.nombre).join('\n')}\n\n¿Deseas agregarlos a Materias Primas?`,
         { title: 'Ingredientes sin registrar', confirmText: 'Sí, agregar', cancelText: 'No, continuar' }
       )
-      if (ok) { navigate('/inventario', { state: { nuevasMP: faltantes.map(i => i.nombre) } }); return }
+      if (ok) { pushTo('/inventario', { nuevasMP: faltantes.map(i => i.nombre) }); return }
     }
     onConvertir?.(recetaSelId)
   }

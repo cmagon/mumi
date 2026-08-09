@@ -7,9 +7,17 @@ import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persi
 import { get, set, del } from 'idb-keyval'
 import { AuthProvider } from './context/AuthContext'
 import { ConfirmProvider } from './context/ConfirmContext'
+import { asegurarBuildActual } from './lib/purgarCache'
 import App from './App'
 // index.css carga Tailwind (sin preflight) + el CSS propio en la capa `app` (ver index.css)
 import './index.css'
+
+/* global __MUMI_BUILD__ — inyectado en vite.config.js en cada deploy */
+const MUMI_BUILD = typeof __MUMI_BUILD__ !== 'undefined' ? __MUMI_BUILD__ : 'dev'
+
+// Deploy nuevo → purga SW + caches + React Query y recarga.
+// No bloquea el montaje: si reload falla, la app no queda en blanco.
+asegurarBuildActual(MUMI_BUILD)
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -88,6 +96,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
         client={queryClient}
         persistOptions={{
           persister,
+          // Al cambiar el build, React Query descarta el IndexedDB persistido.
+          buster: MUMI_BUILD,
           maxAge: 1000 * 60 * 60 * 24 * 7,   // 7 días
           dehydrateOptions: {
             shouldDehydrateQuery: (q) =>

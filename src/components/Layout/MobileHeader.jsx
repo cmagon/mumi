@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { Leaf, Menu, Settings, User, ShieldCheck, LogOut, ChevronDown, Users, RefreshCw } from 'lucide-react'
-import { del } from 'idb-keyval'
+import { Menu, Settings, User, ShieldCheck, LogOut, ChevronDown, Users, RefreshCw } from 'lucide-react'
 import NotificationBell from '../NotificationBell'
 import DevUserSwitch from '../DevUserSwitch'
 import ProfileModal from '../ProfileModal'
@@ -9,30 +8,7 @@ import { useAuth } from '../../context/AuthContext'
 import { getRolLabel } from '../../lib/businessLogic'
 import { puedeVer } from '../../lib/permisos'
 import { getConfig, loadConfig } from '../../lib/appConfig'
-
-// Recarga "en frío": borra el caché de datos (react-query persistido), quita el service
-// worker y vuelve a cargar desde el servidor. Equivale a un Ctrl+Shift+R, útil en la app
-// instalada (PWA) donde no existe el botón de recargar del navegador.
-//
-// El ORDEN importa. Antes se borraban los cachés y solo se llamaba a r.update(), dejando
-// un service worker ACTIVO pero con el precaché vacío: a partir de ahí cada recarga
-// dependía de que la red contestara en ese mismo instante, y en la planta eso acababa en
-// la pantalla de "sitio no disponible" del navegador una y otra vez. Desregistrar primero
-// hace que la recarga sea una petición normal, sin nada en medio; registerSW.js vuelve a
-// instalar un service worker limpio en cuanto la página carga.
-async function recargarApp() {
-  try { await del('mumi-query-cache') } catch { /* noop */ }
-  try {
-    if ('serviceWorker' in navigator) {
-      const rs = await navigator.serviceWorker.getRegistrations()
-      await Promise.all(rs.map(r => r.unregister()))
-    }
-  } catch { /* noop */ }
-  try {
-    if ('caches' in window) { const ks = await caches.keys(); await Promise.all(ks.map(k => caches.delete(k))) }
-  } catch { /* noop */ }
-  window.location.reload()
-}
+import { purgarCacheYRecargar } from '../../lib/purgarCache'
 
 export default function MobileHeader({ onMenuClick, onLogout }) {
   const [cfg, setCfg] = useState(getConfig())
@@ -56,7 +32,7 @@ export default function MobileHeader({ onMenuClick, onLogout }) {
       <Link to="/dashboard" className="mobile-brand" title="Ir al Tablero Principal" aria-label="Ir al Tablero Principal" style={{ textDecoration: 'none' }}>
         {cfg.logo_url
           ? <img src={cfg.logo_url} alt="logo" style={{ maxWidth: 26, maxHeight: 26, objectFit: 'contain' }} />
-          : <Leaf size={20} aria-hidden="true" />}
+          : null}
         <span>{cfg.empresa || 'Mumi Amazonia'}</span>
       </Link>
 
@@ -107,7 +83,7 @@ export default function MobileHeader({ onMenuClick, onLogout }) {
                   </button>
                 )}
 
-                <button className="user-menu-item" role="menuitem" onClick={() => { cerrar(); recargarApp() }}>
+                <button className="user-menu-item" role="menuitem" onClick={() => { cerrar(); purgarCacheYRecargar() }}>
                   <RefreshCw size={15} aria-hidden="true" /> Recargar aplicación
                 </button>
                 <button className="user-menu-item user-menu-item-danger" role="menuitem" onClick={() => { cerrar(); onLogout?.() }}>

@@ -18,26 +18,91 @@ function codigoLoteEntrada(lote) {
 // `orden_id` (opcional) marca el lote que produjo una orden, para poder revertirlo si se devuelve.
 // Devuelve { id } del lote creado (o null si el insert no devolvió fila).
 export async function crearLoteEntrada({ mp_id, lote, vencimiento, fecha, cantidad, costo_unitario, creado_por, proveedor, orden_id }) {
+  const prov = String(proveedor || '').trim() || null
   const base = {
     mp_id, lote: codigoLoteEntrada(lote), vencimiento: vencimiento || null,
     fecha_entrada: fecha || new Date().toISOString().split('T')[0],
     cantidad_inicial: cantidad, cantidad_actual: cantidad,
     costo_unitario: costo_unitario || 0, creado_por: creado_por || '',
-    ...(proveedor ? { proveedor } : {}),
+    proveedor: prov,
   }
   const insertar = async (row) => {
-    const { data, error } = await supabase.from('raw_material_lots').insert(row).select('id').single()
+    const { data, error } = await supabase.from('raw_material_lots').insert(row).select('id, proveedor').single()
     if (error) throw error
-    return data?.id ?? null
+    return data
   }
-  if (!orden_id) return { id: await insertar(base) }
-  // La columna orden_id es de la migración v127; si no está, se inserta sin ella
-  try {
-    return { id: await insertar({ ...base, orden_id }) }
-  } catch (e) {
-    if (!/orden_id/i.test(e?.message || '')) throw e
-    return { id: await insertar(base) }
+  // orden_id (v127): si falta la columna, reintenta sin ella.
+  // proveedor (v89/v140): si el usuario escribió uno y la columna no existe, ERROR claro
+  // (antes se omitía en silencio y el lote quedaba sin proveedor).
+  const intentar = async (row) => {
+    try {
+      return await insertar(row)
+    } catch (e) {
+      const msg = e?.message || ''
+      if (/proveedor/i.test(msg) && 'proveedor' in row) {
+        if (row.proveedor) {
+          throw new Error('No se pudo guardar el proveedor: falta la columna en la base de datos (aplica la migración v89 o v140).')
+        }
+        const { proveedor: _p, ...rest } = row
+        return intentar(rest)
+      }
+      if (/orden_id/i.test(msg) && 'orden_id' in row) {
+        const { orden_id: _o, ...rest } = row
+        return intentar(rest)
+      }
+      throw e
+    }
   }
+  const data = await intentar(orden_id ? { ...base, orden_id } : base)
+  const id = data?.id ?? null
+  // Segunda pasada: si el insert no trajo proveedor (caché de esquema / null forzado),
+  // lo escribe con UPDATE explícito.
+  if (id && prov && !data?.proveedor) {
+    const { error: uErr } = await supabase.from('raw_material_lots').update({ proveedor: prov }).eq('id', id)
+    if (uErr) throw new Error('El lote se creó pero el proveedor no se guardó: ' + (uErr.message || 'error desconocido'))
+  }
+  return { id }
+}
+
+/**
+ * Corrige la cantidad disponible de un lote PEPS concreto (reconteo o ingreso mal digitado).
+ * Ajusta el stock de la MP por el delta. No puede bajar de lo reservado para órdenes.
+ * Si el lote no se ha tocado (inicial === actual), también alinea cantidad_inicial.
+ */
+export async function corregirCantidadLote({ lote_id, cantidad_nueva }) {
+  const { data: l, error } = await supabase.from('raw_material_lots').select('*').eq('id', lote_id).single()
+  if (error || !l) throw new Error('El lote no existe')
+  const actual = Number(l.cantidad_actual) || 0
+  const reservado = Number(l.cantidad_reservada) || 0
+  const inicial = Number(l.cantidad_inicial) || 0
+  const nueva = Number(cantidad_nueva)
+  if (!Number.isFinite(nueva) || nueva < 0) throw new Error('Cantidad inválida')
+  if (nueva + 0.0001 < reservado) {
+    throw new Error(`No puedes dejar menos de lo reservado en órdenes (${reservado})`)
+  }
+  const delta = nueva - actual
+  if (Math.abs(delta) <= 0.0001) return { delta: 0, mp_id: l.mp_id, lote: l, costo_unitario: Number(l.costo_unitario) || 0 }
+
+  const upd = { cantidad_actual: nueva }
+  // Ingreso mal digitado sin consumo aún → también corrige el "inicial" del lote.
+  if (Math.abs(inicial - actual) <= 0.0001) upd.cantidad_inicial = nueva
+
+  const { error: uErr } = await supabase.from('raw_material_lots').update(upd).eq('id', lote_id)
+  if (uErr) throw uErr
+  const { error: sErr } = await supabase.rpc('ajustar_stock_mp', { p_mp_id: l.mp_id, p_delta: delta })
+  if (sErr) throw sErr
+  return {
+    delta, mp_id: l.mp_id, lote: l,
+    costo_unitario: Number(l.costo_unitario) || 0,
+  }
+}
+
+/** Actualiza el proveedor de un lote (corrección / dato omitido al ingresar). */
+export async function actualizarProveedorLote({ lote_id, proveedor }) {
+  const { error } = await supabase.from('raw_material_lots')
+    .update({ proveedor: String(proveedor || '').trim() || null })
+    .eq('id', lote_id)
+  if (error) throw error
 }
 
 // Revierte los lotes que generó una orden de producción (al devolverla). Solo descuenta lo que

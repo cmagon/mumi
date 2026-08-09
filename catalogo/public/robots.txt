@@ -1,0 +1,6 @@
+# Fallback estático. En producción el Worker genera robots.txt dinámico
+# (respeta seo_indexar y apunta al sitemap).
+User-agent: *
+Allow: /
+Disallow: /favoritos
+Disallow: /mayorista
