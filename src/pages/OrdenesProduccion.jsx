@@ -3,7 +3,11 @@ import { useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, uploadFile, beginSilentWrites, endSilentWrites } from '../lib/supabase'
 import { startDownload, updateDownload, endDownload, isDownloadCanceled } from '../lib/downloadProgress'
-import { reservarPEPS, liberarReservaLotes, consumirReservaLotes, consumirPEPS, reponerPEPS, estadoLote, crearLoteEntrada, costoPEPS, revertirLotesDeOrden } from '../lib/lotes'
+import {
+  reservarPEPS, liberarReservaLotes, consumirReservaLotes, consumirPEPS, reponerPEPS,
+  estadoLote, crearLoteEntrada, costoPEPS, revertirLotesDeOrden,
+  reponerCantidadesLotes, reducirLote, sincronizarPEPSAlStock,
+} from '../lib/lotes'
 import { analizarSugerenciaLote, normalizarMetodoLoteo, expandirLotes } from '../lib/loteoProducto'
 import { writeOrQueue } from '../lib/offlineQueue'
 import { encolarEfectos, aplicarEfectos, contarEfectos, onEfectosChange, ordenesConEfectosPendientes } from '../lib/efectosPendientes'
@@ -705,8 +709,15 @@ export default function OrdenesProduccion() {
   const confirmarEliminarOrden = (o) => {
     // Una orden ya enviada/cerrada consumió MP definitivamente → no se puede eliminar
     if (o.estado === 'ejecutada' || o.estado === 'aprobada') {
-      toast('No se puede eliminar una orden ya enviada/cerrada (la materia prima ya fue consumida). Solo puedes rechazarla.', 'warning')
+      toast('No se puede eliminar una orden ya enviada/cerrada (la materia prima ya fue consumida). Usa Rechazar o Devolver.', 'warning')
       return
+    }
+    if (o.estado === 'rechazada') {
+      const consumida = Array.isArray(o.lotes_mp) && o.lotes_mp.length && !(Array.isArray(o.lotes_reservados) && o.lotes_reservados.length)
+      if (consumida) {
+        toast('Esta orden rechazada aún tiene MP consumida. Usa "Devolver" antes de eliminar.', 'warning')
+        return
+      }
     }
     const n = recordsDeOrden(o.id).length
     const msg = n > 0
@@ -1045,7 +1056,12 @@ export default function OrdenesProduccion() {
       if (o.estado === 'pendiente') {
         const { error } = await supabase.from('production_orders').update({ estado: 'en_proceso' }).eq('id', o.id)
         if (error) throw error
-        try { await reservarMP(o) } catch (e) { console.warn('No se pudo reservar MP:', e) }
+        try {
+          await reservarMP(o)
+        } catch (e) {
+          await supabase.from('production_orders').update({ estado: 'pendiente' }).eq('id', o.id)
+          throw new Error('No se pudo reservar la MP: ' + (e?.message || e))
+        }
         qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
         // Trae la orden FRESCA (con lotes_reservados ya escrito por reservarMP).
         try { const { data: fresh } = await supabase.from('production_orders').select('*').eq('id', o.id).single(); if (fresh) ord = fresh } catch { ord = { ...o, estado: 'en_proceso' } }
@@ -1698,7 +1714,8 @@ export default function OrdenesProduccion() {
       })
       plan = rec.plan
     }
-    try { await aplicarEmpaque(o, plan) } catch (e) { console.warn('No se pudo descontar empaque:', e) }
+    // Empaque: falla ruidosa — si se traga el error, al reenviar/offline se descuadra o se pierde el descuento.
+    await aplicarEmpaque(o, plan)
 
     // 4) Si un subproducto se auto-aprueba (admin), genera la entrada de inventario MP igual que al aprobar.
     //    Misma rutina que al aprobar: movimiento + lote PEPS + stock atómico + costo ponderado.
@@ -2165,8 +2182,13 @@ export default function OrdenesProduccion() {
         const { error: e2 } = await supabase.from('production_orders').update({ estado: 'en_proceso' }).eq('id', o.id)
         if (e2) throw e2
       } else if (error) throw error
-      // Reserva la MP de los lotes (PEPS) al iniciar producción
-      try { await reservarMP(o) } catch (e) { console.warn('No se pudo reservar MP:', e) }
+      // Reserva PEPS al iniciar. Si falla, vuelve a pendiente (no dejar en proceso sin reserva).
+      try {
+        await reservarMP(o)
+      } catch (e) {
+        await supabase.from('production_orders').update({ estado: 'pendiente' }).eq('id', o.id)
+        throw new Error('No se pudo reservar la MP: ' + (e?.message || e))
+      }
     },
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] }); toast('Orden en proceso — MP reservada ✓') },
     onError: (e) => toast(e.message, 'error'),
@@ -2181,14 +2203,27 @@ export default function OrdenesProduccion() {
     return new Date() <= limite
   }
 
+  // Alinea lotes PEPS al stock general de una MP (crea "sin lote" o consume exceso).
+  // Se usa tras operaciones que pueden descuadrar (empaque histórico, liberaciones parciales).
+  const alinearPepsAlStock = async (mp_id) => {
+    if (!mp_id) return
+    const { data: mp } = await supabase.from('raw_materials').select('stock, precio').eq('id', mp_id).maybeSingle()
+    if (!mp) return
+    await sincronizarPEPSAlStock({
+      mp_id,
+      stock: Number(mp.stock) || 0,
+      costo_unitario: Number(mp.precio) || 0,
+      creado_por: profile?.nombre || 'sistema',
+    })
+  }
+
   // Revierte TODO lo que el cierre de una orden movió en inventario, dejándola como estaba
   // justo antes de enviarse: MP de vuelta a RESERVADA, empaque devuelto al stock, ajustes de
   // planta deshechos, saldos de mezcla repuestos y el sobrante creado eliminado.
   //
-  // Es la base compartida de "Anular envío" (operario, dentro de la ventana) y "Devolver orden"
-  // (admin). Antes solo existía dentro de "Devolver orden" y "Anular envío" se limitaba a cambiar
-  // el estado, así que la MP quedaba consumida y el empaque descontado: al corregir y reenviar se
-  // descontaba por segunda vez. Devuelve los lotes para volver a marcarlos como reservados.
+  // Es la base compartida de "Anular envío" (operario, dentro de la ventana), "Devolver orden"
+  // (admin) y "Rechazar" (admin). Antes "Rechazar" no revertía inventario y al reenviar se
+  // descontaba empaque/ajustes otra vez. Devuelve los lotes para volver a marcarlos como reservados.
   const revertirConsumosOrden = async (o) => {
     // 1) Eliminar el saldo (sobrante de mezcla) que creó esta orden
     await supabase.from('mezcla_saldos').delete().eq('orden_origen', o.id)
@@ -2216,11 +2251,9 @@ export default function OrdenesProduccion() {
       lotesReservados = o.lotes_mp
     }
 
-    // 4) Deshacer los movimientos de stock que sí salieron directo del inventario al cerrar:
-    //    · empaque: salió del stock (no se reserva) → se devuelve
-    //    · ajustes de ingredientes en planta: movieron la DIFERENCIA contra la receta → signo opuesto
-    //    · subproducto: entró a inventario de MP → se retira
-    //    El consumo de MP no entra aquí (ya volvió a reservado en el paso 3).
+    // 4) Deshacer movimientos de cierre (empaque + ajustes) en stock Y en lotes PEPS.
+    //    Sin reponer/reducir lotes, anular/devolver deja descuadre permanente stock vs PEPS.
+    const mpsAAlinear = new Set()
     try {
       const { data: movsOrden } = await supabase.from('inventory_movements')
         .select('mp_id, cantidad, tipo, extra').eq('extra->>orden_id', String(o.id))
@@ -2229,12 +2262,31 @@ export default function OrdenesProduccion() {
         const cant = Number(m.cantidad) || 0
         const signo = m.tipo === 'salida' ? 1 : -1        // salida → devolver; entrada → retirar
         if (m.extra?.empaque || m.extra?.ajuste_ingrediente) {
-          await supabase.rpc('ajustar_stock_mp', { p_mp_id: m.mp_id, p_delta: signo * cant })
+          const { error: sErr } = await supabase.rpc('ajustar_stock_mp', { p_mp_id: m.mp_id, p_delta: signo * cant })
+          if (sErr) throw sErr
+          if (m.tipo === 'salida' && Array.isArray(m.extra?.lotes_consumidos) && m.extra.lotes_consumidos.length) {
+            await reponerCantidadesLotes(m.extra.lotes_consumidos)
+          } else if (m.tipo === 'entrada' && Array.isArray(m.extra?.lotes_repuestos) && m.extra.lotes_repuestos.length) {
+            for (const l of m.extra.lotes_repuestos) {
+              if (!l.id || !(Number(l.cantidad) > 0)) continue
+              await reducirLote({ lote_id: l.id, cantidad: Number(l.cantidad) })
+            }
+          } else {
+            // Movimientos viejos sin trazabilidad de lote: alinear PEPS al stock tras el ajuste.
+            mpsAAlinear.add(m.mp_id)
+          }
         } else if (m.tipo === 'entrada' && o.es_subproducto) {
-          await supabase.rpc('ajustar_stock_mp', { p_mp_id: m.mp_id, p_delta: -cant })
+          const { error: sErr } = await supabase.rpc('ajustar_stock_mp', { p_mp_id: m.mp_id, p_delta: -cant })
+          if (sErr) throw sErr
+          mpsAAlinear.add(m.mp_id)
         }
       }
-    } catch (e) { console.warn('No se pudo revertir el stock de la orden:', e) }
+      for (const mpId of mpsAAlinear) {
+        try { await alinearPepsAlStock(mpId) } catch (e) { console.warn('No se pudo alinear PEPS de MP', mpId, e) }
+      }
+    } catch (e) {
+      throw new Error('No se pudo revertir el inventario de la orden: ' + (e?.message || e))
+    }
 
     // 5) Eliminar los lotes que generó la orden (subproducto) y avisar si ya se consumieron
     if (o.es_subproducto) {
@@ -2302,16 +2354,21 @@ export default function OrdenesProduccion() {
       // 3) Revertir todo el inventario que movió el cierre: saldos, MP a reservada, empaque,
       //    ajustes de planta y lotes de subproducto (lógica compartida con "Anular envío").
       const lotesReservados = await revertirConsumosOrden(o)
+      // Si ya estaba revertida (p. ej. rechazada nueva), conservar la reserva vigente.
+      const reservasFinales = lotesReservados
+        || (Array.isArray(o.lotes_reservados) && o.lotes_reservados.length ? o.lotes_reservados : null)
       // 4) Regresar la orden a 'en_proceso' para reeditarla, con la MP de nuevo reservada
       const { error } = await supabase.from('production_orders').update({
         estado: 'en_proceso', fecha_envio: null, aprobado_por: null, fecha_aprob: null,
-        lotes_reservados: lotesReservados, lotes_mp: null, saldos_consumidos: null,
+        motivo_rechazo: null,
+        lotes_reservados: reservasFinales, lotes_mp: null, saldos_consumidos: null,
       }).eq('id', o.id)
       if (error) throw error
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['production_records'] })
       qc.invalidateQueries({ queryKey: ['finished_products'] }); qc.invalidateQueries({ queryKey: ['finished_movements'] }); qc.invalidateQueries({ queryKey: ['mezcla_saldos'] })
+      qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
       toast('Orden devuelta — registro eliminado y stock devuelto ✓')
     },
     onError: (e) => toast(e.message, 'error'),
@@ -2321,9 +2378,15 @@ export default function OrdenesProduccion() {
   // A diferencia de "Eliminar", conserva el registro (queda como "Cerrada sin ejecutar") y libera la MP reservada.
   const cerrarSinEjecutar = useMutation({
     mutationFn: async (o) => {
-      if (o.estado === 'en_proceso') { try { await liberarMP(o) } catch (e) { console.warn('No se pudo liberar MP:', e) } }
-      const { error } = await supabase.from('production_orders').update({ estado: 'cancelada' }).eq('id', o.id)
-      if (error) throw error
+      if (o.estado === 'en_proceso') {
+        // Debe devolver la MP; si falla, NO marcar cancelada (evita reserva fantasma).
+        await liberarMP(o)
+      }
+      const { error } = await supabase.from('production_orders').update({ estado: 'cancelada', saldos_reservados: null }).eq('id', o.id)
+      if (error && /saldos_reservados/i.test(error.message || '')) {
+        const { error: e2 } = await supabase.from('production_orders').update({ estado: 'cancelada' }).eq('id', o.id)
+        if (e2) throw e2
+      } else if (error) throw error
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
@@ -2335,9 +2398,13 @@ export default function OrdenesProduccion() {
   const eliminarOrden = useMutation({
     mutationFn: async (o) => {
       if (typeof o === 'object' && o.estado === 'cancelada') throw new Error('Esta orden ya está cerrada ("Cerrada sin ejecutar") y no se puede eliminar.')
+      if (typeof o === 'object' && o.estado === 'rechazada') {
+        const consumida = Array.isArray(o.lotes_mp) && o.lotes_mp.length && !(Array.isArray(o.lotes_reservados) && o.lotes_reservados.length)
+        if (consumida) throw new Error('Esta orden rechazada aún tiene MP consumida. Usa "Devolver" para restaurar el inventario antes de eliminar.')
+      }
       const id = typeof o === 'object' ? o.id : o
       // Devuelve al inventario la MP reservada que no se consumió (orden no ejecutada)
-      if (typeof o === 'object') { try { await liberarMP(o) } catch (e) { console.warn('No se pudo liberar MP:', e) } }
+      if (typeof o === 'object') await liberarMP(o)
       // Si la orden tiene registros de producción vinculados, se eliminan también
       await supabase.from('production_records').delete().eq('orden_id', id)
       const { error } = await supabase.from('production_orders').delete().eq('id', id)
@@ -2432,44 +2499,85 @@ export default function OrdenesProduccion() {
     const sinLote = !!o.forzar_sin_lote   // forzar: no descontar de lotes, solo del stock
     const preferidos = (o.lotes_preferidos && typeof o.lotes_preferidos === 'object') ? o.lotes_preferidos : {}
     const reservas = []
-    for (const it of items) {
-      let lotes = [], faltanteLotes = 0
-      if (!it.esEmp && !sinLote) {
-        const r = await reservarPEPS({ mp_id: it.mpId, cantidad: it.consumo, preferLoteId: preferidos[it.mpId] || preferidos[String(it.mpId)] || null })
-        lotes = r.reservados; faltanteLotes = r.faltante || 0
+    const rollback = async () => {
+      for (const it of reservas) {
+        try {
+          await liberarReservaLotes(it.lotes || [])
+          await supabase.rpc('ajustar_stock_mp', { p_mp_id: it.mp_id, p_delta: it.consumo || 0 })
+        } catch (e) { console.warn('Rollback reserva MP parcial:', e) }
       }
-      // El stock (disponible) baja al reservar (con o sin lote). Ajuste atómico en BD (evita
-      // condición de carrera con otro movimiento de inventario simultáneo).
-      await supabase.rpc('ajustar_stock_mp', { p_mp_id: it.mpId, p_delta: -it.consumo })
-      // Si los lotes no cubrieron todo el consumo (sin lotes cargados, o insuficientes), se registra
-      // explícitamente cuánto salió del stock GENERAL sin trazabilidad de lote — para no perderlo en silencio.
-      reservas.push({ mp_id: it.mpId, nombre: it.nombre, unidad: it.unidad, consumo: it.consumo, lotes, sin_lote: sinLote, ...(faltanteLotes > 0 ? { sin_lote_cantidad: faltanteLotes } : {}) })
+      try { await supabase.from('production_orders').update({ lotes_reservados: null }).eq('id', o.id) } catch { /* ignore */ }
     }
-    await supabase.from('production_orders').update({ lotes_reservados: reservas }).eq('id', o.id)
+    try {
+      for (const it of items) {
+        let lotes = [], faltanteLotes = 0
+        if (!it.esEmp && !sinLote) {
+          const r = await reservarPEPS({ mp_id: it.mpId, cantidad: it.consumo, preferLoteId: preferidos[it.mpId] || preferidos[String(it.mpId)] || null })
+          lotes = r.reservados; faltanteLotes = r.faltante || 0
+        }
+        // El stock (disponible) baja al reservar (con o sin lote). Ajuste atómico en BD.
+        const { error: sErr } = await supabase.rpc('ajustar_stock_mp', { p_mp_id: it.mpId, p_delta: -it.consumo })
+        if (sErr) throw sErr
+        reservas.push({ mp_id: it.mpId, nombre: it.nombre, unidad: it.unidad, consumo: it.consumo, lotes, sin_lote: sinLote, ...(faltanteLotes > 0 ? { sin_lote_cantidad: faltanteLotes } : {}) })
+        // Snapshot incremental: si cae a mitad, liberarMP / rollback pueden deshacer lo ya hecho.
+        const { error: uErr } = await supabase.from('production_orders').update({ lotes_reservados: reservas }).eq('id', o.id)
+        if (uErr) throw uErr
+      }
+    } catch (e) {
+      await rollback()
+      throw e
+    }
     return reservas
   }
 
   // 2) LIBERAR la reserva si la orden se elimina / no se ejecuta (vuelve a "disponible")
   const liberarMP = async (o) => {
     const reservas = Array.isArray(o.lotes_reservados) ? o.lotes_reservados : null
-    if (!reservas) return
-    for (const it of reservas) {
-      await liberarReservaLotes(it.lotes || [])
-      await supabase.rpc('ajustar_stock_mp', { p_mp_id: it.mp_id, p_delta: it.consumo || 0 })
+    if (!reservas?.length) {
+      try { await supabase.from('production_orders').update({ saldos_reservados: null }).eq('id', o.id) } catch { /* columna opcional */ }
+      return
     }
-    await supabase.from('production_orders').update({ lotes_reservados: null }).eq('id', o.id)
+    const errores = []
+    for (const it of reservas) {
+      try {
+        await liberarReservaLotes(it.lotes || [])
+        const { error } = await supabase.rpc('ajustar_stock_mp', { p_mp_id: it.mp_id, p_delta: it.consumo || 0 })
+        if (error) throw error
+        // Si la liberación de lotes fue parcial (datos corruptos), alinea PEPS al stock restaurado.
+        try { await alinearPepsAlStock(it.mp_id) } catch (e) { console.warn('Alinear PEPS tras liberar:', e) }
+      } catch (e) {
+        errores.push(`${it.nombre || it.mp_id}: ${e?.message || e}`)
+      }
+    }
+    if (errores.length) {
+      throw new Error('No se pudo devolver toda la MP reservada:\n' + errores.join('\n'))
+    }
+    const { error: clearErr } = await supabase.from('production_orders').update({ lotes_reservados: null, saldos_reservados: null }).eq('id', o.id)
+    if (clearErr && /saldos_reservados/i.test(clearErr.message || '')) {
+      await supabase.from('production_orders').update({ lotes_reservados: null }).eq('id', o.id)
+    } else if (clearErr) throw clearErr
   }
 
   // 3) CONSUMIR definitivo cuando la orden se CIERRA/ENVÍA (de "reservado" → consumido; el stock ya bajó)
   const consumirMP = async (o) => {
     const reservas = Array.isArray(o.lotes_reservados) ? o.lotes_reservados : null
-    if (!reservas) return
+    if (!reservas?.length) return
     const hoy = o.fecha_prod || new Date().toISOString().split('T')[0]
+    // Movimientos ya escritos de esta orden (idempotencia si el cierre se reintenta a medias)
+    let movsPrevios = []
+    try {
+      const { data } = await supabase.from('inventory_movements')
+        .select('id, mp_id, extra').eq('extra->>orden_id', String(o.id)).eq('tipo', 'salida')
+      movsPrevios = data || []
+    } catch { movsPrevios = [] }
+    const yaConsumida = (mpId) => movsPrevios.some(m =>
+      String(m.mp_id) === String(mpId) && !m.extra?.empaque && !m.extra?.ajuste_ingrediente
+    )
+
     for (const it of reservas) {
       await consumirReservaLotes(it.lotes || [])
+      if (yaConsumida(it.mp_id)) continue
       const sinLote = it.sin_lote || !(it.lotes && it.lotes.length)
-      // Costo real PEPS de esta salida (cada lote a su propio costo); lo no cubierto por lotes
-      // se valora al precio promedio de la MP, que es la única referencia disponible.
       const precioRef = mps.find(m => String(m.id) === String(it.mp_id))?.precio || 0
       const cp = costoPEPS(it.lotes || [], it.sin_lote_cantidad || (sinLote ? it.consumo : 0), precioRef)
       const movBase = {
@@ -2563,16 +2671,41 @@ export default function OrdenesProduccion() {
   const puedeCompartirArchivos = typeof navigator !== 'undefined' && !!navigator.canShare
 
   const errorEmpaque = (faltantes) => 'Empaque insuficiente para cerrar: ' + faltantes.map(p => `${p.mp.nombre} (necesita ${fNum(p.qty)}, hay ${fNum(p.stock)})`).join(' · ')
-  // Descuenta el empaque del stock (+ movimiento de salida). Se llama tras cerrar la orden.
+  // Descuenta el empaque del stock Y de los lotes PEPS (+ movimiento de salida).
+  // Antes solo bajaba stock → descuadre permanente frente a Σ cantidad_actual.
   const aplicarEmpaque = async (o, plan) => {
     if (!plan || !plan.length) return
     const hoy = o.fecha_prod || new Date().toISOString().split('T')[0]
+    // Idempotencia: no volver a descontar empaque ya registrado para esta orden
+    let movsPrevios = []
+    try {
+      const { data } = await supabase.from('inventory_movements')
+        .select('id, mp_id, extra').eq('extra->>orden_id', String(o.id)).eq('tipo', 'salida')
+      movsPrevios = data || []
+    } catch { movsPrevios = [] }
+    const yaEmpaque = (mpId) => movsPrevios.some(m => String(m.mp_id) === String(mpId) && m.extra?.empaque)
+
     for (const p of plan) {
-      await supabase.rpc('ajustar_stock_mp', { p_mp_id: p.mp.id, p_delta: -p.qty })
+      if (yaEmpaque(p.mp.id)) continue
+      const r = await consumirPEPS({ mp_id: p.mp.id, cantidad: p.qty, ajustarStock: true })
+      if (!r.stockAjustado) {
+        const { error } = await supabase.rpc('ajustar_stock_mp', { p_mp_id: p.mp.id, p_delta: -p.qty })
+        if (error) throw error
+        // Sin RPC v138: alinear PEPS manualmente tras bajar solo stock
+        try { await alinearPepsAlStock(p.mp.id) } catch (e) { console.warn('Alinear PEPS empaque:', e) }
+      } else if (r.faltante > 0) {
+        // Stock bajó el pedido completo pero faltó lote: el descuadre se corrige creando "sin lote" negativo… no;
+        // stock < lotes no aplica: lotes bajaron menos → stock < porLotes → sincronizar consumiría más.
+        // Aquí el faltante ya refleja stock sin respaldo de lote (aceptable / stock negativo).
+      }
       await supabase.from('inventory_movements').insert({
         mp_id: p.mp.id, tipo: 'salida', cantidad: p.qty, fecha: hoy,
         responsable: o.operario || '', obs: `Empaque (${p.tipo}) orden #${opNum(o.id)} (${o.producto})`,
-        extra: { orden_id: o.id, empaque: true, tipo: p.tipo },
+        extra: {
+          orden_id: o.id, empaque: true, tipo: p.tipo,
+          lotes_consumidos: r.consumidos || [],
+          ...(r.faltante > 0 ? { faltante_sin_lote: r.faltante } : {}),
+        },
       })
     }
   }
@@ -2773,12 +2906,32 @@ export default function OrdenesProduccion() {
   })
 
   const rechazar = useMutation({
+    meta: { label: 'Rechazando y devolviendo inventario…' },
     mutationFn: async ({ o, motivo = '' }) => {
-      const { error } = await supabase.from('production_orders').update({ estado: 'rechazada', motivo_rechazo: motivo }).eq('id', o.id)
+      if (!navigator.onLine) throw new Error('Necesitas conexión para rechazar (hay que devolver la MP y el empaque)')
+      // Revierte consumo/empaque/ajustes y deja la MP otra vez reservada, para que al corregir
+      // y reenviar no se descuente dos veces.
+      const lotesReservados = await revertirConsumosOrden(o)
+      await supabase.from('production_records').delete().eq('orden_id', o.id)
+      const { error } = await supabase.from('production_orders').update({
+        estado: 'rechazada',
+        motivo_rechazo: motivo,
+        fecha_envio: null,
+        lotes_reservados: lotesReservados,
+        lotes_mp: null,
+        saldos_consumidos: null,
+      }).eq('id', o.id)
       if (error) throw error
       if (o.operario) await notificar({ destinatario: o.operario, tipo: 'orden_rechazada', mensaje: `Tu orden #${opNum(o.id)} (${o.producto}) fue rechazada${motivo ? ': ' + motivo : ''}`, link: '/ordenes', ref_id: o.id })
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['production_orders'] }); toast('Orden rechazada') },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['production_orders'] })
+      qc.invalidateQueries({ queryKey: ['production_records'] })
+      qc.invalidateQueries({ queryKey: ['raw_materials'] })
+      qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
+      qc.invalidateQueries({ queryKey: ['mezcla_saldos'] })
+      toast('Orden rechazada — inventario revertido; el operario puede corregir y reenviar')
+    },
     onError: (e) => toast(e.message, 'error'),
   })
 
@@ -3051,9 +3204,9 @@ export default function OrdenesProduccion() {
                           {/* Admin */}
                           {esAdmin && o.estado === 'ejecutada' && <>
                             <button className="btn btn-xs btn-success" onClick={() => aprobar.mutate(o)} disabled={aprobar.isPending}><Ico as={Check} size={13} />Aprobar</button>
-                            <button className="btn btn-xs btn-danger" onClick={() => pedir('Motivo del rechazo:', { title: 'Rechazar orden' }).then(motivo => { if (motivo !== null) rechazar.mutate({ o, motivo: motivo || '' }) })}><Ico as={X} size={13} />Rechazar</button>
+                            <button className="btn btn-xs btn-danger" onClick={() => pedir('Motivo del rechazo (se devolverá la MP y el empaque al inventario):', { title: 'Rechazar orden' }).then(motivo => { if (motivo !== null) rechazar.mutate({ o, motivo: motivo || '' }) })}><Ico as={X} size={13} />Rechazar</button>
                           </>}
-                          {esAdmin && (o.estado === 'ejecutada' || o.estado === 'aprobada') && (
+                          {esAdmin && (o.estado === 'ejecutada' || o.estado === 'aprobada' || o.estado === 'rechazada') && (
                             <button className="btn btn-xs btn-secondary" title="Devolver orden: elimina el registro, devuelve el stock terminado y vuelve a 'en proceso' para reeditarla" disabled={devolverOrden.isPending} onClick={() => confirmar(`¿Devolver la orden #${opNum(o.id)}?\n\nSe ELIMINA su registro de producción, se DEVUELVE el stock que sumó al producto terminado y vuelve a "en proceso" para reeditarla.`).then(ok => ok && devolverOrden.mutate(o))}><Ico as={Undo2} size={13} />Devolver</button>
                           )}
                           {/* Cierre por antigüedad: orden atascada (pendiente/en proceso) sin ejecutar hace tiempo */}

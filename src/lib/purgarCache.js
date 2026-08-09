@@ -1,12 +1,16 @@
 import { del } from 'idb-keyval'
 
 /**
- * Recarga en frío: borra caché de React Query, desregistra el service worker
- * y vacía Cache Storage. Usado al detectar un deploy nuevo y desde el menú
- * "Recargar app".
+ * Recarga en frío: borra caché de React Query, colas offline, desregistra el
+ * service worker y vacía Cache Storage. Usado al detectar un deploy nuevo y
+ * desde el menú "Recargar aplicación".
  */
 export async function purgarCacheYRecargar() {
+  // Caché persistida de React Query (IndexedDB)
   try { await del('mumi-query-cache') } catch { /* noop */ }
+  // Colas offline que pueden reaplicar movimientos de inventario viejos
+  try { await del('mumi-write-queue') } catch { /* noop */ }
+  try { await del('mumi-efectos-inventario') } catch { /* noop */ }
   try {
     if ('serviceWorker' in navigator) {
       const rs = await navigator.serviceWorker.getRegistrations()
