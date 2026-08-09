@@ -331,24 +331,26 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 }
 
 /* ==================== HERO (full-bleed del ancho de la app) ==================== */
+/* Proporciones = recorte admin: móvil 4:5 · tablet 4:3 · web 16:9 (no alturas fijas). */
 .hero { position: relative; margin: 0 0 4px; border-radius: 0; overflow: hidden; background: linear-gradient(135deg, var(--banner-bg, var(--dorado)), var(--banner-bg-medio, var(--selva-medio))); color: var(--banner-fg, #fff); box-shadow: none; cursor: pointer; transition: transform .18s ease, box-shadow .18s ease; }
-/* <picture> es el hijo flex real (BannerPicture); la img hereda el tamaño del picture */
-.hero > picture { display: block; width: 100%; position: relative; z-index: 1; }
-.hero > picture .hero-img { width: 100%; height: 230px; object-fit: cover; display: block; }
+.hero > picture.banner-picture,
+.hero > picture { display: block; width: 100%; position: relative; z-index: 1; aspect-ratio: 4 / 5; }
+.hero > picture .hero-img,
+.hero-img { width: 100%; height: 100%; object-fit: cover; object-position: center; display: block; }
 .hero-img, .hero-emoji, .hero-yt { position: relative; z-index: 1; }
-.hero-img { width: 100%; height: 230px; object-fit: cover; display: block; }
-/* Tablet: imagen recortada 4:3 (cover) cuando hay imagen_tablet */
-@media (min-width: 701px) and (max-width: 1024px) {
-  .hero-img[data-tablet="1"],
-  .bsec-media[data-tablet="1"],
-  .brand-hero-img[data-tablet="1"] {
-    object-fit: cover;
-    background: color-mix(in srgb, var(--banner-bg, var(--dorado)) 35%, #1a1a1a);
-  }
-}
-.hero-emoji { height: 230px; display: flex; align-items: center; justify-content: center; font-size: 5rem; color: var(--selva); opacity: .55; }
+.hero-emoji { width: 100%; aspect-ratio: 4 / 5; display: flex; align-items: center; justify-content: center; font-size: 5rem; color: var(--selva); opacity: .55; }
 .ph-fruto { display: flex; align-items: center; justify-content: center; width: 100%; height: 100%; color: var(--selva); opacity: .4; }
-.hero-yt { width: 100%; height: 230px; border: 0; display: block; pointer-events: none; }
+.hero-yt { width: 100%; aspect-ratio: 4 / 5; height: auto; border: 0; display: block; pointer-events: none; }
+@media (min-width: 701px) and (max-width: 1024px) {
+  .hero > picture,
+  .hero-emoji,
+  .hero-yt { aspect-ratio: 4 / 3; }
+}
+@media (min-width: 1025px) {
+  .hero > picture,
+  .hero-emoji,
+  .hero-yt { aspect-ratio: 16 / 9; }
+}
 /* Panel/capa del texto — móvil/tablet: degradado largo para no notar el borde con la imagen */
 .hero-body { position: relative; z-index: 2; padding: 88px 20px 20px; margin-top: -110px;
   background: linear-gradient(to bottom,
@@ -378,12 +380,21 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 
 /* ==================== BANNER SECUNDARIO (full-bleed) ==================== */
 .bsec { position: relative; margin: 14px 0; border-radius: 0; overflow: hidden; box-shadow: none; background: linear-gradient(135deg, var(--banner-bg, var(--dorado)), var(--banner-bg-medio, var(--selva-medio))); display: flex; }
-.bsec > picture { display: block; width: 100%; }
-/* Conserva la proporción del recorte del banner secundario (320×100) */
-.bsec-media { width: 100%; aspect-ratio: 320 / 100; height: auto; object-fit: cover; display: block; border: 0; pointer-events: none; filter: brightness(0.78) saturate(1.05); }
+.bsec > picture { display: block; width: 100%; aspect-ratio: 4 / 5; }
+/* Misma proporción que el recorte: móvil 4:5 · tablet 4:3 · web 16:9 */
+.bsec-media { width: 100%; height: 100%; aspect-ratio: 4 / 5; object-fit: cover; object-position: center; display: block; border: 0; pointer-events: none; filter: brightness(0.78) saturate(1.05); }
+.bsec > picture .bsec-media { aspect-ratio: auto; height: 100%; }
 .bsec-ph { background: linear-gradient(135deg, var(--banner-bg, var(--dorado)), var(--banner-bg-medio, var(--dorado))); }
 /* Banner sin textos: imagen a full color (sin oscurecer) */
 .bsec-limpio .bsec-media { filter: none; }
+@media (min-width: 701px) and (max-width: 1024px) {
+  .bsec > picture,
+  .bsec-media { aspect-ratio: 4 / 3; }
+}
+@media (min-width: 1025px) {
+  .bsec > picture,
+  .bsec-media { aspect-ratio: 16 / 9; }
+}
 .bsec-overlay { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; gap: 8px; padding: 24px; background: radial-gradient(120% 120% at 50% 45%, var(--banner-overlay-soft, color-mix(in srgb, var(--banner-capa, #000) calc(var(--banner-overlay-op, 0.72) * 40%), transparent)), var(--banner-overlay-fill, color-mix(in srgb, var(--banner-capa, #000) calc(var(--banner-overlay-op, 0.72) * 100%), transparent))); color: var(--banner-fg, #fff); }
 .bsec-title { font-size: 1.8rem; line-height: 1.1; text-shadow: 0 2px 16px rgba(0,0,0,0.7); }
 .bsec-sub { font-size: 1rem; opacity: 0.96; max-width: 34ch; text-shadow: 0 1px 12px rgba(0,0,0,0.65); }
@@ -411,8 +422,6 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
   .hero-price { font-size: 0.92rem; }
   .hero-cat { font-size: 0.6rem; letter-spacing: 1px; }
   .hero-cta { margin-top: 8px; font-size: 0.7rem; padding: 6px 13px; }
-  /* En mÃ³vil el banner secundario se recorta un poco mÃ¡s (320Ã—70) */
-  .bsec-media { aspect-ratio: 320 / 70; }
   .bsec-overlay { padding: 14px; gap: 4px; }
   .bsec-title { font-size: 1.1rem; }
   .bsec-sub { font-size: 0.76rem; }
@@ -682,8 +691,6 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
   .grid { grid-template-columns: repeat(3, 1fr); gap: 16px; }
   .wrap:not(.dis-atelier)[data-productos-vista="grid"] .row { grid-template-columns: repeat(3, 1fr); gap: 16px; }
   .row .card { flex-basis: 30%; max-width: 240px; }
-  .hero > picture .hero-img,
-  .hero-img, .hero-emoji, .hero-yt { height: 300px; }
   .hero-name { font-size: 1.8rem; }
   .overlay { align-items: center; padding: 24px; }
   .sheet { border-radius: 20px; max-height: 88vh; box-shadow: var(--sombra-lg); }
@@ -700,7 +707,7 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
   .chips, .toolbar, .sec-head, .row, .frutos, .det-thumbs { padding-left: 28px; padding-right: 28px; }
   .news { margin-left: 28px; margin-right: 28px; }
   .hero { margin-left: 0; margin-right: 0; border-radius: 0; }
-  /* Hero con texto: imagen web 100% + capa de texto (min 30%) sobrepuesta a la derecha */
+  /* Hero con texto: imagen 16:9 a ancho completo + capa de texto a la derecha */
   .hero.hero-con-texto {
     display: block;
     position: relative;
@@ -710,7 +717,8 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
   .hero.hero-con-texto .hero-emoji,
   .hero.hero-con-texto .hero-yt {
     width: 100%;
-    height: 360px;
+    aspect-ratio: 16 / 9;
+    height: auto;
     display: block;
   }
   .hero.hero-con-texto > picture { overflow: hidden; }
@@ -718,12 +726,13 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
     width: 100%;
     height: 100%;
     object-fit: cover;
+    object-position: center;
   }
   .hero.hero-limpio { display: block; background: #111; }
   .hero.hero-limpio > picture,
   .hero.hero-limpio .hero-img,
   .hero.hero-limpio .hero-emoji,
-  .hero.hero-limpio .hero-yt { width: 100%; height: 360px; }
+  .hero.hero-limpio .hero-yt { width: 100%; aspect-ratio: 16 / 9; height: auto; }
   .hero.hero-limpio > picture .hero-img { width: 100%; height: 100%; }
   /* Capa: min 30%, más padding izq; degradado 0% → 100% a mitad del panel */
   .hero.hero-con-texto .hero-body {

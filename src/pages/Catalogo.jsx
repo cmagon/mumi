@@ -3474,7 +3474,8 @@ function EditorBanner({ banner, toast, qc, onClose, modoAtelier = false }) {
           <div className="form-group">
             <label className="form-label">Imágenes por dispositivo</label>
             <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', margin: '0 0 10px' }}>
-              Sube las <strong>tres versiones</strong> con recorte: <strong>Web</strong> 16:9, <strong>Tablet</strong> 4:3 y <strong>Móvil</strong> 4:5.
+              Sube las <strong>tres versiones</strong>. El catálogo las muestra con esa misma proporción:
+              móvil <strong>4:5</strong>, tablet <strong>4:3</strong>, web <strong>16:9</strong>.
             </p>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 10 }}>
               {BANNER_IMG_SLOTS.map(slot => {
@@ -3483,10 +3484,15 @@ function EditorBanner({ banner, toast, qc, onClose, modoAtelier = false }) {
                 const busy = subiendo === slot.key
                 return (
                   <div key={slot.key} style={{ border: url ? '1.5px solid var(--selva)' : '1px dashed var(--crema-oscuro)', borderRadius: 10, padding: 10, background: '#fff' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8, fontWeight: 700, fontSize: '0.82rem', color: 'var(--selva)' }}>
-                      <Icon size={15} /> {slot.label}
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 8 }}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: '0.82rem', color: 'var(--selva)' }}>
+                        <Icon size={15} /> {slot.label}
+                      </span>
+                      <span style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--tierra)', background: 'color-mix(in srgb, var(--dorado) 18%, #fff)', padding: '2px 6px', borderRadius: 999, whiteSpace: 'nowrap' }}>
+                        {slot.w}×{slot.h}
+                      </span>
                     </div>
-                    <div style={{ aspectRatio: slot.previewRatio, background: 'var(--crema)', borderRadius: 8, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8 }}>
+                    <div style={{ aspectRatio: slot.previewRatio, background: 'var(--crema)', borderRadius: 8, overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', marginBottom: 8, position: 'relative' }}>
                       {url
                         ? <img
                             key={url}
@@ -3496,6 +3502,9 @@ function EditorBanner({ banner, toast, qc, onClose, modoAtelier = false }) {
                             style={{ width: '100%', height: '100%', objectFit: 'cover' }}
                           />
                         : <span style={{ fontSize: '0.7rem', color: 'var(--texto-suave)', textAlign: 'center', padding: 6 }}>Sin imagen</span>}
+                      <span style={{ position: 'absolute', left: 6, bottom: 6, fontSize: '0.62rem', fontWeight: 700, color: '#fff', background: 'rgba(0,0,0,0.55)', padding: '2px 6px', borderRadius: 4 }}>
+                        {slot.previewRatio.replace(/\s/g, '')}
+                      </span>
                     </div>
                     <div style={{ fontSize: '0.66rem', color: 'var(--texto-suave)', marginBottom: 8, lineHeight: 1.35 }}>{slot.hint}</div>
                     <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>

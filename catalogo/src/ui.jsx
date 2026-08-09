@@ -13,23 +13,29 @@ export function ytId(u) {
   return m ? m[1] : (/^[\w-]{11}$/.test(u) ? u : '')
 }
 
-/** Imagen de banner responsive: móvil ≤700 · tablet ≤1024 · web resto. Fallbacks encadenados. */
+/**
+ * Imagen de banner responsive (mismas proporciones del recorte en admin):
+ * · Móvil ≤700 → 4:5 (1080×1350)
+ * · Tablet 701–1024 → 4:3 (1200×900)
+ * · Web ≥1025 → 16:9 (1600×900)
+ */
 export function BannerPicture({ b, className = '', alt = '' }) {
   const web = (b?.imagen_url || '').trim()
   const tablet = (b?.imagen_tablet || '').trim()
   const mobile = (b?.imagen_mobile || '').trim()
   const src = web || tablet || mobile
   if (!src) return null
-  const hasTablet = !!tablet
   return (
-    <picture>
+    <picture className="banner-picture">
       {mobile ? <source media="(max-width: 700px)" srcSet={mobile} /> : null}
       {tablet ? <source media="(min-width: 701px) and (max-width: 1024px)" srcSet={tablet} /> : null}
       <img
         className={className}
         src={src}
         alt={alt}
-        data-tablet={hasTablet ? '1' : undefined}
+        data-web={web ? '1' : undefined}
+        data-tablet={tablet ? '1' : undefined}
+        data-mobile={mobile ? '1' : undefined}
       />
     </picture>
   )
