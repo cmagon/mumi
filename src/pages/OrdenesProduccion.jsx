@@ -9,6 +9,7 @@ import {
   reponerCantidadesLotes, reducirLote, sincronizarPEPSAlStock,
 } from '../lib/lotes'
 import { analizarSugerenciaLote, normalizarMetodoLoteo, expandirLotes } from '../lib/loteoProducto'
+import { esCategoriaEmpaque, stockSeMovioAlReservar } from '../lib/reservasMp'
 import { writeOrQueue } from '../lib/offlineQueue'
 import { encolarEfectos, aplicarEfectos, contarEfectos, onEfectosChange, ordenesConEfectosPendientes } from '../lib/efectosPendientes'
 import { puedeVerSeccion, puedeSeccionExplicita } from '../lib/permisos'
@@ -2458,7 +2459,7 @@ export default function OrdenesProduccion() {
         if (!ing.mpId || !(Number(ing.gramos) > 0)) continue
         const mpRow = mps.find(m => String(m.id) === String(ing.mpId))
         const consumo = /^(kg|kilo|litro)/i.test(String(mpRow?.unidad || '')) ? Number(ing.gramos) / 1000 : Number(ing.gramos)
-        out.push({ mpId: Number(ing.mpId), nombre: mpRow?.nombre || ing.nombre || '', unidad: mpRow?.unidad || '', stock: Number(mpRow?.stock) || 0, consumo, esEmp: /empaque|envase/i.test(mpRow?.categoria || '') })
+        out.push({ mpId: Number(ing.mpId), nombre: mpRow?.nombre || ing.nombre || '', unidad: mpRow?.unidad || '', stock: Number(mpRow?.stock) || 0, consumo, esEmp: esCategoriaEmpaque(mpRow?.categoria) })
       }
       return out
     }
@@ -2476,7 +2477,7 @@ export default function OrdenesProduccion() {
       const mpId = parseInt(ing.mpId)
       const { data: mpRow } = await supabase.from('raw_materials').select('nombre, stock, unidad, categoria').eq('id', mpId).single()
       const consumo = ['Kg', 'Litro'].includes(mpRow?.unidad) ? gramos / 1000 : gramos
-      out.push({ mpId, nombre: mpRow?.nombre || '', unidad: mpRow?.unidad || '', stock: mpRow?.stock || 0, consumo, esEmp: /empaque|envase/i.test(mpRow?.categoria || '') })
+      out.push({ mpId, nombre: mpRow?.nombre || '', unidad: mpRow?.unidad || '', stock: mpRow?.stock || 0, consumo, esEmp: esCategoriaEmpaque(mpRow?.categoria) })
     }
     return out
   }
@@ -2495,7 +2496,6 @@ export default function OrdenesProduccion() {
     if (o.origen !== 'producto' || !o.origen_id) return []
     if (Array.isArray(o.lotes_reservados) && o.lotes_reservados.length) return o.lotes_reservados  // ya reservado (idempotente)
     const items = await calcularConsumoOrden(o)
-    if (!items.length) return []
     const sinLote = !!o.forzar_sin_lote   // forzar: no descontar de lotes, solo del stock
     const preferidos = (o.lotes_preferidos && typeof o.lotes_preferidos === 'object') ? o.lotes_preferidos : {}
     const reservas = []
@@ -2503,10 +2503,16 @@ export default function OrdenesProduccion() {
       for (const it of reservas) {
         try {
           await liberarReservaLotes(it.lotes || [])
-          await supabase.rpc('ajustar_stock_mp', { p_mp_id: it.mp_id, p_delta: it.consumo || 0 })
+          if (stockSeMovioAlReservar(it)) {
+            await supabase.rpc('ajustar_stock_mp', { p_mp_id: it.mp_id, p_delta: it.consumo || 0 })
+          }
         } catch (e) { console.warn('Rollback reserva MP parcial:', e) }
       }
       try { await supabase.from('production_orders').update({ lotes_reservados: null }).eq('id', o.id) } catch { /* ignore */ }
+    }
+    const guardarSnap = async () => {
+      const { error: uErr } = await supabase.from('production_orders').update({ lotes_reservados: reservas }).eq('id', o.id)
+      if (uErr) throw uErr
     }
     try {
       for (const it of items) {
@@ -2515,13 +2521,41 @@ export default function OrdenesProduccion() {
           const r = await reservarPEPS({ mp_id: it.mpId, cantidad: it.consumo, preferLoteId: preferidos[it.mpId] || preferidos[String(it.mpId)] || null })
           lotes = r.reservados; faltanteLotes = r.faltante || 0
         }
-        // El stock (disponible) baja al reservar (con o sin lote). Ajuste atómico en BD.
+        // Empaque: baja stock (sale de disponible) pero no lote PEPS. Cancelar lo devuelve; cerrar lo consume.
         const { error: sErr } = await supabase.rpc('ajustar_stock_mp', { p_mp_id: it.mpId, p_delta: -it.consumo })
         if (sErr) throw sErr
-        reservas.push({ mp_id: it.mpId, nombre: it.nombre, unidad: it.unidad, consumo: it.consumo, lotes, sin_lote: sinLote, ...(faltanteLotes > 0 ? { sin_lote_cantidad: faltanteLotes } : {}) })
-        // Snapshot incremental: si cae a mitad, liberarMP / rollback pueden deshacer lo ya hecho.
-        const { error: uErr } = await supabase.from('production_orders').update({ lotes_reservados: reservas }).eq('id', o.id)
-        if (uErr) throw uErr
+        reservas.push({
+          mp_id: it.mpId, nombre: it.nombre, unidad: it.unidad, consumo: it.consumo, lotes,
+          sin_lote: sinLote || it.esEmp,
+          stock_movido: true,
+          ...(it.esEmp ? { es_empaque: true } : {}),
+          ...(faltanteLotes > 0 || it.esEmp ? { sin_lote_cantidad: it.esEmp ? it.consumo : faltanteLotes } : {}),
+        })
+        await guardarSnap()
+      }
+      const uni = parseFloat(o.cantidad_plan) || 0
+      const subp = parseFloat(o.cant_subporciones) || 0
+      const { plan } = await prepararEmpaque({ ...o, lotes_reservados: reservas }, {
+        unidadesEmpacadas: uni,
+        subpTotal: subp || uni,
+        surtidoUnid: uni,
+        esPorcionado: subp > 0,
+        esSurtido: false,
+      })
+      for (const p of plan) {
+        const ya = reservas.find(r => String(r.mp_id) === String(p.mp.id))
+        if (ya) {
+          ya.es_empaque = true
+          continue
+        }
+        const { error: sErr } = await supabase.rpc('ajustar_stock_mp', { p_mp_id: p.mp.id, p_delta: -p.qty })
+        if (sErr) throw sErr
+        reservas.push({
+          mp_id: p.mp.id, nombre: p.mp.nombre, unidad: p.mp.unidad, consumo: p.qty,
+          lotes: [], sin_lote: true, es_empaque: true, tipo_empaque: p.tipo,
+          sin_lote_cantidad: p.qty, stock_movido: true,
+        })
+        await guardarSnap()
       }
     } catch (e) {
       await rollback()
@@ -2541,10 +2575,11 @@ export default function OrdenesProduccion() {
     for (const it of reservas) {
       try {
         await liberarReservaLotes(it.lotes || [])
-        const { error } = await supabase.rpc('ajustar_stock_mp', { p_mp_id: it.mp_id, p_delta: it.consumo || 0 })
-        if (error) throw error
-        // Si la liberación de lotes fue parcial (datos corruptos), alinea PEPS al stock restaurado.
-        try { await alinearPepsAlStock(it.mp_id) } catch (e) { console.warn('Alinear PEPS tras liberar:', e) }
+        if (stockSeMovioAlReservar(it)) {
+          const { error } = await supabase.rpc('ajustar_stock_mp', { p_mp_id: it.mp_id, p_delta: it.consumo || 0 })
+          if (error) throw error
+          try { await alinearPepsAlStock(it.mp_id) } catch (e) { console.warn('Alinear PEPS tras liberar:', e) }
+        }
       } catch (e) {
         errores.push(`${it.nombre || it.mp_id}: ${e?.message || e}`)
       }
@@ -2576,6 +2611,8 @@ export default function OrdenesProduccion() {
 
     for (const it of reservas) {
       await consumirReservaLotes(it.lotes || [])
+      // Empaque se descuenta en aplicarEmpaque (cantidad real empacada), no aquí.
+      if (it.es_empaque) continue
       if (yaConsumida(it.mp_id)) continue
       const sinLote = it.sin_lote || !(it.lotes && it.lotes.length)
       const precioRef = mps.find(m => String(m.id) === String(it.mp_id))?.precio || 0
@@ -2629,9 +2666,13 @@ export default function OrdenesProduccion() {
         : porRatio
       qty = Math.round(qty)
       if (qty <= 0) continue
-      plan.push({ mp, qty, tipo, stock: Math.round(Number(mp.stock) || 0) })
+      const reservadoMovido = (o.lotes_reservados || [])
+        .filter(it => String(it.mp_id) === String(mp.id) && stockSeMovioAlReservar(it))
+        .reduce((s, it) => s + (Number(it.consumo) || 0), 0)
+      const stockDisp = Math.round(Number(mp.stock) || 0) + reservadoMovido
+      plan.push({ mp, qty, tipo, stock: stockDisp, reservado: reservadoMovido })
     }
-    const faltantes = plan.filter(p => (Number(p.mp.stock) || 0) < p.qty)
+    const faltantes = plan.filter(p => (Number(p.stock) || 0) < p.qty)
     return { plan, faltantes }
   }
   // ---- Insumos imprimibles: abrir para imprimir, o compartir con apps del dispositivo ----
@@ -2685,18 +2726,25 @@ export default function OrdenesProduccion() {
     } catch { movsPrevios = [] }
     const yaEmpaque = (mpId) => movsPrevios.some(m => String(m.mp_id) === String(mpId) && m.extra?.empaque)
 
+    const reservasOrden = Array.isArray(o.lotes_reservados) ? o.lotes_reservados : []
     for (const p of plan) {
       if (yaEmpaque(p.mp.id)) continue
-      const r = await consumirPEPS({ mp_id: p.mp.id, cantidad: p.qty, ajustarStock: true })
-      if (!r.stockAjustado) {
+      const reserva = reservasOrden.find(it => String(it.mp_id) === String(p.mp.id))
+      const reservado = reserva && stockSeMovioAlReservar(reserva) ? (Number(reserva.consumo) || 0) : 0
+      // Si ya se bajó stock al reservar, solo mueve lotes PEPS y ajusta la diferencia vs lo empacado real.
+      const r = await consumirPEPS({ mp_id: p.mp.id, cantidad: p.qty, ajustarStock: reservado <= 0 })
+      if (reservado > 0) {
+        const delta = p.qty - reservado
+        if (Math.abs(delta) > 0.001) {
+          const { error } = await supabase.rpc('ajustar_stock_mp', { p_mp_id: p.mp.id, p_delta: -delta })
+          if (error) throw error
+        }
+      } else if (!r.stockAjustado) {
         const { error } = await supabase.rpc('ajustar_stock_mp', { p_mp_id: p.mp.id, p_delta: -p.qty })
         if (error) throw error
-        // Sin RPC v138: alinear PEPS manualmente tras bajar solo stock
         try { await alinearPepsAlStock(p.mp.id) } catch (e) { console.warn('Alinear PEPS empaque:', e) }
       } else if (r.faltante > 0) {
-        // Stock bajó el pedido completo pero faltó lote: el descuadre se corrige creando "sin lote" negativo… no;
-        // stock < lotes no aplica: lotes bajaron menos → stock < porLotes → sincronizar consumiría más.
-        // Aquí el faltante ya refleja stock sin respaldo de lote (aceptable / stock negativo).
+        // Stock bajó el pedido completo pero faltó lote (aceptable / stock negativo).
       }
       await supabase.from('inventory_movements').insert({
         mp_id: p.mp.id, tipo: 'salida', cantidad: p.qty, fecha: hoy,

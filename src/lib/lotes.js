@@ -219,6 +219,27 @@ export async function sincronizarPEPSAlStock({ mp_id, stock, costo_unitario = 0,
   return { diff, porLotes, stock: objetivo, accion: 'consumir_exceso' }
 }
 
+/** Fija el stock general de una MP a un valor absoluto (p. ej. 0) y alinea los lotes PEPS. */
+export async function fijarStockMp({ mp_id, stockObjetivo, costo_unitario = 0, creado_por = '' }) {
+  const { data: mp, error } = await supabase.from('raw_materials').select('stock, precio').eq('id', mp_id).single()
+  if (error || !mp) throw new Error('La materia prima no existe')
+  const actual = Number(mp.stock) || 0
+  const objetivo = Number(stockObjetivo)
+  if (!Number.isFinite(objetivo) || objetivo < 0) throw new Error('El stock objetivo no puede ser negativo')
+  const delta = objetivo - actual
+  if (Math.abs(delta) > 0.0001) {
+    const { error: sErr } = await supabase.rpc('ajustar_stock_mp', { p_mp_id: mp_id, p_delta: delta })
+    if (sErr) throw sErr
+  }
+  const peps = await sincronizarPEPSAlStock({
+    mp_id,
+    stock: objetivo,
+    costo_unitario: costo_unitario || Number(mp.precio) || 0,
+    creado_por,
+  })
+  return { stockAntes: actual, stockDespues: objetivo, delta, peps }
+}
+
 function mapConsumidos(lista) {
   return (lista || []).map(c => ({
     id: c.id,
