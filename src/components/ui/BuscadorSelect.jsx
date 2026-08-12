@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect, useMemo } from 'react'
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react'
+import { createPortal } from 'react-dom'
 
 // Combobox con BÚSQUEDA EN VIVO: el usuario escribe y la lista se filtra en tiempo real,
 // mostrando primero los más parecidos. Reemplaza los <select> largos (MPs, ítems de Alegra...).
@@ -11,19 +12,19 @@ import { useState, useRef, useEffect, useMemo } from 'react'
 //  - onSelect(value, opcion): al elegir
 //  - placeholder
 // La coincidencia ignora tildes y ordena por: empieza-con > todas las palabras > alguna palabra.
+// El menú usa position:fixed + portal para no quedar debajo de acordeones/overflow.
 export default function BuscadorSelect({ opciones = [], value = '', onSelect, placeholder = 'Escribe para buscar...', style, disabled = false }) {
   const [texto, setTexto] = useState('')
   const [abierto, setAbierto] = useState(false)
   const [idx, setIdx] = useState(0)
+  const [pos, setPos] = useState(null)
   const cajaRef = useRef(null)
+  const menuRef = useRef(null)
 
   const sel = opciones.find(o => String(o.value) === String(value))
-  // Cuando hay selección y no se está escribiendo, el input muestra la etiqueta elegida
   const mostrado = abierto ? texto : (sel?.label || '')
 
   const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').trim()
-  // Mantiene juntas las opciones del mismo grupo, respetando el orden en que aparece cada grupo.
-  // Sin esto, al ordenar por relevancia los encabezados se repetirían intercalados.
   const agrupar = (lista) => {
     if (!lista.some(o => o.grupo)) return lista
     const orden = [], porGrupo = new Map()
@@ -55,13 +56,44 @@ export default function BuscadorSelect({ opciones = [], value = '', onSelect, pl
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [opciones, texto])
 
+  const ubicar = useCallback(() => {
+    const el = cajaRef.current
+    if (!el) return
+    const r = el.getBoundingClientRect()
+    const espacioAbajo = window.innerHeight - r.bottom - 12
+    const espacioArriba = r.top - 12
+    const abrirArriba = espacioAbajo < 220 && espacioArriba > espacioAbajo
+    const maxHeight = Math.min(300, Math.max(140, abrirArriba ? espacioArriba : espacioAbajo))
+    setPos({
+      left: r.left,
+      width: Math.max(r.width, 180),
+      top: abrirArriba ? undefined : r.bottom + 4,
+      bottom: abrirArriba ? window.innerHeight - r.top + 4 : undefined,
+      maxHeight,
+    })
+  }, [])
+
   useEffect(() => { setIdx(0) }, [texto, abierto])
+
   useEffect(() => {
-    if (!abierto) return
-    const fuera = (e) => { if (cajaRef.current && !cajaRef.current.contains(e.target)) setAbierto(false) }
+    if (!abierto) { setPos(null); return }
+    ubicar()
+    const fuera = (e) => {
+      if (cajaRef.current?.contains(e.target) || menuRef.current?.contains(e.target)) return
+      setAbierto(false)
+    }
+    const onScroll = () => ubicar()
     document.addEventListener('mousedown', fuera)
-    return () => document.removeEventListener('mousedown', fuera)
-  }, [abierto])
+    document.addEventListener('touchstart', fuera)
+    window.addEventListener('resize', onScroll)
+    window.addEventListener('scroll', onScroll, true)
+    return () => {
+      document.removeEventListener('mousedown', fuera)
+      document.removeEventListener('touchstart', fuera)
+      window.removeEventListener('resize', onScroll)
+      window.removeEventListener('scroll', onScroll, true)
+    }
+  }, [abierto, ubicar])
 
   const elegir = (o) => { onSelect?.(o.value, o); setAbierto(false); setTexto('') }
   const teclas = (e) => {
@@ -75,18 +107,20 @@ export default function BuscadorSelect({ opciones = [], value = '', onSelect, pl
   return (
     <div ref={cajaRef} style={{ position: 'relative', ...style }}>
       <input className="form-control" disabled={disabled} value={mostrado} placeholder={sel ? sel.label : placeholder}
-        // La barra lateral del campo repite el color del tipo elegido: se ve qué clase de
-        // producto está seleccionado sin abrir la lista.
         style={sel?.color ? { borderLeft: `4px solid ${sel.color}` } : undefined}
         onFocus={(e) => { setAbierto(true); setTexto(''); e.target.select() }}
         onChange={e => { setTexto(e.target.value); setAbierto(true) }}
         onKeyDown={teclas} />
-      {abierto && (
-        <div style={{ position: 'absolute', zIndex: 40, left: 0, right: 0, top: '100%', marginTop: 3, background: 'var(--blanco, #fff)', border: '1px solid var(--crema-oscuro)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.15)', maxHeight: 300, overflowY: 'auto' }}>
+      {abierto && pos && createPortal(
+        <div ref={menuRef} style={{
+          position: 'fixed', zIndex: 4000, left: pos.left, width: pos.width,
+          top: pos.top, bottom: pos.bottom, maxHeight: pos.maxHeight, overflowY: 'auto',
+          background: 'var(--blanco, #fff)', border: '1px solid var(--crema-oscuro)',
+          borderRadius: 8, boxShadow: '0 10px 30px rgba(0,0,0,0.18)',
+        }}>
           {filtradas.length === 0
             ? <div style={{ padding: '9px 12px', fontSize: '0.82rem', color: 'var(--texto-suave)' }}>Sin coincidencias con "{texto}"</div>
             : filtradas.map((o, i) => {
-              // Encabezado de grupo cuando cambia respecto de la opción anterior
               const grupoNuevo = o.grupo && o.grupo !== filtradas[i - 1]?.grupo
               const elegido = String(o.value) === String(value)
               return (
@@ -111,7 +145,8 @@ export default function BuscadorSelect({ opciones = [], value = '', onSelect, pl
                 </div>
               )
             })}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   )
