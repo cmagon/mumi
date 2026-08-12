@@ -14,7 +14,7 @@ import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import {
   crearLoteEntrada, consumirPEPS, consumirLote, bajarLote, estadoLote, costoPEPS,
   reponerCantidadesLotes, reducirLote, stockDesdeLotes, sincronizarPEPSAlStock, LOTE_SIN_CODIGO,
-  corregirCantidadLote,
+  corregirCantidadLote, fijarStockMp,
 } from '../lib/lotes'
 
 /** Fecha + hora local (para ingresos PEPS / auditoría). Acepta date o timestamptz. */
@@ -29,7 +29,9 @@ const fFechaHora = (s) => {
   } catch { return String(s) }
 }
 import * as XLSX from 'xlsx'
-import { Download, Tags, Tag, Plus, Pencil, X, Package, ClipboardList, FileText, AlertTriangle, Trash2, Undo2 } from 'lucide-react'
+import { Download, Tags, Tag, Plus, Pencil, X, Package, ClipboardList, FileText, AlertTriangle, Trash2, Undo2, Lock } from 'lucide-react'
+import ReservasMPPanel from '../components/ReservasMPPanel'
+import { explicarDescuadrePeps, resumenReservasPorMp, reservadoEnLotes } from '../lib/reservasMp'
 import Select from '../components/ui/Select'
 import PaginacionTabla from '../components/ui/PaginacionTabla'
 import { usePaginacion } from '../hooks/usePaginacion'
@@ -115,6 +117,7 @@ export default function Inventario() {
   const [modalMov, setModalMov] = useState(false)
   const [modalCats, setModalCats] = useState(false)
   const [modalUltMovs, setModalUltMovs] = useState(false)
+  const [modalReservas, setModalReservas] = useState(false)
   const [modalHist, setModalHist] = useState(false)
   const [histMP, setHistMP] = useState(null)
   const [formMP, setFormMP] = useState(EMPTY_MP)
@@ -156,6 +159,15 @@ export default function Inventario() {
     queryKey: ['raw_material_lots'],
     queryFn: async () => { const { data } = await supabase.from('raw_material_lots').select('*').order('vencimiento', { ascending: true, nullsFirst: false }); return data || [] },
   })
+  const { data: ordenesReserva = [] } = useQuery({
+    queryKey: ['production_orders', 'reservas'],
+    queryFn: async () => {
+      const { data } = await supabase.from('production_orders')
+        .select('id, producto, estado, lotes_reservados, created_at')
+        .order('created_at', { ascending: false })
+      return data || []
+    },
+  })
   const [modalLotes, setModalLotes] = useState(false)
   const [bajaLote, setBajaLote] = useState(null)   // lote a dar de baja: { lote, mp }
   const [bajaForm, setBajaForm] = useState({ cantidad: '', motivo: 'vencido', obs: '' })
@@ -177,17 +189,21 @@ export default function Inventario() {
   }, [lotesMP?.id, lotesDB])
   const pagLotes = usePaginacion(lotesModalOrdenados, { defaultSize: 10, resetDeps: [lotesMP?.id] })
   const pagUltMovs = usePaginacion(movimientos, { defaultSize: 10, resetDeps: [modalUltMovs] })
-  // Descuadre PEPS: stock general vs suma de lotes (incluye empaque / MP sin trazabilidad).
-  // Si hay stock y cero lotes, también cuenta: se puede crear el respaldo "sin lote".
+  // Descuadre PEPS: stock general vs suma de lotes disponibles.
+  // No cuenta como descuadre lo que una orden abierta ya amarró (empaque sin PEPS o reserva de lote).
+  const reservasPorMp = useMemo(() => resumenReservasPorMp(ordenesReserva), [ordenesReserva])
   const descuadrePEPS = (m) => {
     if (!m) return null
-    const porLotes = stockLotes(m.id)
-    const stock = Number(m.stock) || 0
-    const diff = stock - porLotes
-    if (Math.abs(diff) <= 0.001) return null
-    return { stock, porLotes, diff }
+    const lotesMp = lotesDe(m.id)
+    const porLotes = stockDesdeLotes(lotesMp)
+    const claimed = reservasPorMp.get(String(m.id))
+    return explicarDescuadrePeps({
+      stock: Number(m.stock) || 0,
+      porLotes,
+      reservadoLotes: reservadoEnLotes(lotesMp),
+      sinLotesOrdenes: claimed?.sinLotes || 0,
+    })
   }
-  const mpsDescuadrados = mps.filter(m => descuadrePEPS(m))
   // Proveedores ya registrados en lotes anteriores (para autocompletar en nuevas entradas)
   const proveedoresConocidos = [...new Set(lotesDB.map(l => (l.proveedor || '').trim()).filter(Boolean))].sort()
 
@@ -334,25 +350,43 @@ export default function Inventario() {
       let vencMov = formMov.vencimiento || null
 
       if (formMov.tipo === 'ajuste') {
-        // Ajuste de conteo = corregir cantidad ABSOLUTA de un lote PEPS (incluye dejar en 0).
-        if (!formMov.lote_id) throw new Error('Selecciona el lote PEPS a corregir')
-        if (!Number.isFinite(cantBaseRaw) || cantBaseRaw < 0) throw new Error('Ingresa la cantidad correcta del lote (puede ser 0)')
-        const loteId = parseInt(formMov.lote_id)
-        const loteSel = lotesDB.find(l => l.id === loteId)
-        const cantidadNueva = cantBaseRaw / fac
-        const r = await corregirCantidadLote({ lote_id: loteId, cantidad_nueva: cantidadNueva })
-        stockYaAjustado = true
-        if (Math.abs(r.delta) <= 0.0001) throw new Error('La cantidad es igual a la actual — no hay nada que corregir')
-        cantidad = r.delta
-        extra.correccion_lote = true
-        extra.lote_id = loteId
-        extra.cantidad_antes = Number(loteSel?.cantidad_actual) || 0
-        extra.cantidad_despues = cantidadNueva
-        extra.motivo = 'ajuste'
-        loteNombre = loteSel?.lote || ''
-        vencMov = loteSel?.vencimiento || null
-        obsFinal = `[Ajuste de conteo · lote ${loteNombre || 's/n'}] ${formMov.obs || ''}`.trim()
-        costoMovimiento = r.costo_unitario || mp?.precio || 0
+        if (!Number.isFinite(cantBaseRaw) || cantBaseRaw < 0) throw new Error('Ingresa la cantidad correcta (puede ser 0)')
+        if (!formMov.lote_id) {
+          // Sin lote: fija el stock GENERAL (p. ej. 0 si quedó negativo) y alinea PEPS.
+          const objetivo = cantBaseRaw / fac
+          const r = await fijarStockMp({
+            mp_id: mpId, stockObjetivo: objetivo,
+            costo_unitario: mp?.precio || 0, creado_por: profile?.nombre || '',
+          })
+          stockYaAjustado = true
+          if (Math.abs(r.delta) <= 0.0001 && r.peps?.accion === 'ok') throw new Error('El stock ya está en ese valor — no hay nada que corregir')
+          cantidad = r.delta
+          extra.fijar_stock = true
+          extra.stock_antes = r.stockAntes
+          extra.stock_despues = r.stockDespues
+          extra.peps_accion = r.peps?.accion || null
+          extra.motivo = 'ajuste'
+          obsFinal = `[Ajuste stock general → ${fBase(objetivo, mp?.unidad)}] ${formMov.obs || ''}`.trim()
+          costoMovimiento = mp?.precio || 0
+        } else {
+          // Ajuste de conteo = corregir cantidad ABSOLUTA de un lote PEPS (incluye dejar en 0).
+          const loteId = parseInt(formMov.lote_id)
+          const loteSel = lotesDB.find(l => l.id === loteId)
+          const cantidadNueva = cantBaseRaw / fac
+          const r = await corregirCantidadLote({ lote_id: loteId, cantidad_nueva: cantidadNueva })
+          stockYaAjustado = true
+          if (Math.abs(r.delta) <= 0.0001) throw new Error('La cantidad es igual a la actual — no hay nada que corregir')
+          cantidad = r.delta
+          extra.correccion_lote = true
+          extra.lote_id = loteId
+          extra.cantidad_antes = Number(loteSel?.cantidad_actual) || 0
+          extra.cantidad_despues = cantidadNueva
+          extra.motivo = 'ajuste'
+          loteNombre = loteSel?.lote || ''
+          vencMov = loteSel?.vencimiento || null
+          obsFinal = `[Ajuste de conteo · lote ${loteNombre || 's/n'}] ${formMov.obs || ''}`.trim()
+          costoMovimiento = r.costo_unitario || mp?.precio || 0
+        }
       } else if (formMov.tipo === 'entrada') {
         if (!(cantidad > 0)) throw new Error('Ingresa una cantidad')
         const creado = await crearLoteEntrada({
@@ -503,6 +537,7 @@ export default function Inventario() {
     mutationFn: async (mp) => {
       const d = descuadrePEPS(mp)
       if (!d) return
+      if (!d.igualar) throw new Error('Ese hueco es una reserva de orden, no un descuadre. Míralo en Reservas MP.')
       const r = await sincronizarPEPSAlStock({
         mp_id: mp.id,
         stock: d.stock,
@@ -630,6 +665,7 @@ export default function Inventario() {
   const pasaEstado = (m) => {
     if (!filtroEstado) return true
     if (filtroEstado === 'sin_stock') return (m.stock || 0) <= 0
+    if (filtroEstado === 'negativo') return (m.stock || 0) < 0
     if (filtroEstado === 'bajo') return (m.stock || 0) > 0 && (m.stock_min || 0) > 0 && m.stock <= m.stock_min
     if (filtroEstado === 'por_vencer') return tieneLotePorVencer(m)
     return true
@@ -674,6 +710,7 @@ export default function Inventario() {
               <Ico as={ClipboardList} size={14} />Últimos movimientos
             </button>
           )}
+          {esAdmin && <button className="btn btn-secondary btn-sm" title="Ver MP reservada y amarre a cada orden" onClick={() => setModalReservas(true)}><Ico as={Lock} size={14} />Ver reservas MP</button>}
           {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalCats(true)}><Ico as={Tag} size={14} />Categorías</button>}
           {puedeEditarInv && <button className="btn btn-secondary btn-sm" onClick={() => { setFormMP(EMPTY_MP); setEditMPId(null); setModalMP(true) }}><Ico as={Plus} size={14} />Nueva MP</button>}
           {puedeEditarInv && <button className="btn btn-primary btn-sm" onClick={() => openMovimiento()}><Ico as={Plus} size={14} />Movimiento</button>}
@@ -686,14 +723,26 @@ export default function Inventario() {
         <div className="kpi-card tierra"><div className="kpi-label">Sin Stock</div><div className="kpi-value">{cero}</div></div>
       </div>
 
-      {mpsDescuadrados.length > 0 && (
-        <div className="alert alert-warning" style={{ fontSize: '0.85rem', marginBottom: 12 }}>
-          <strong style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><AlertTriangle size={15} aria-hidden="true" /> Descuadre PEPS</strong>
-          {' '}{mpsDescuadrados.length} materia(s) prima(s) tienen stock distinto a la suma de lotes
-          ({mpsDescuadrados.slice(0, 4).map(m => m.nombre).join(', ')}{mpsDescuadrados.length > 4 ? '…' : ''}).
-          {esAdmin && ' Usa “Crear/igualar PEPS”: si falta respaldo crea lote “sin lote”; si sobran lotes, los ajusta al stock.'}
-        </div>
-      )}
+      <ReservasMPPanel
+        esAdmin={esAdmin}
+        mps={mps}
+        open={modalReservas}
+        onClose={() => setModalReservas(false)}
+        historicos={mps.flatMap(m => {
+          const d = descuadrePEPS(m)
+          return d?.igualar ? [{ mp: m, descuadre: d }] : []
+        })}
+        igualarPending={reconciliarPEPS.isPending}
+        onIgualar={(mp) => {
+          const d = descuadrePEPS(mp)
+          if (!d?.igualar) return
+          confirmar(
+            d.diff > 0
+              ? `¿Crear/ajustar PEPS "sin lote" por ${fBase(d.diff, mp.unidad)} para "${mp.nombre}"?\nEl stock (${fBase(d.stock, mp.unidad)}) no se modifica.`
+              : `¿Consumir ${fBase(Math.abs(d.diff), mp.unidad)} de lotes PEPS de "${mp.nombre}" para igualarlos al stock (${fBase(d.stock, mp.unidad)})?\nEl stock no se modifica.`
+          ).then(ok => ok && reconciliarPEPS.mutate(mp))
+        }}
+      />
 
       <div className="card">
         <div className="card-title"><Ico as={Package} size={16} />Estado del Inventario</div>
@@ -708,6 +757,7 @@ export default function Inventario() {
           <Select className="form-control" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} style={{ width: 'auto' }}>
             <option value="">Todos</option>
             <option value="sin_stock">Sin stock</option>
+            <option value="negativo">Stock negativo</option>
             <option value="bajo">Stock bajo</option>
             <option value="por_vencer">Por vencer / vencidas</option>
           </Select>
@@ -728,7 +778,7 @@ export default function Inventario() {
                   titulo={<>
                     {((m.stock || 0) <= 0 || ((m.stock_min || 0) > 0 && m.stock <= m.stock_min) || desq) && <AlertTriangle size={14} aria-hidden="true" style={{ color: desq ? 'var(--tierra)' : (m.stock || 0) <= 0 ? 'var(--rojo)' : 'var(--dorado)', display: 'inline', verticalAlign: '-2px', marginRight: 4 }} />}
                     {m.nombre} {m.tipo === 'interno' && <span className="badge badge-dorado" style={{ fontSize: '0.6rem' }}>interno</span>}
-                    {desq && <span className="badge badge-dorado" style={{ fontSize: '0.6rem', marginLeft: 4 }}>PEPS</span>}
+                    {desq && <span className="badge badge-dorado" style={{ fontSize: '0.6rem', marginLeft: 4 }}>{desq.igualar ? 'PEPS ≠' : 'Reservado'}</span>}
                   </>}
                   sub={<><span className={`badge ${badge}`} style={{ fontSize: '0.62rem' }}>{label}</span> · {fBase(m.stock, m.unidad)}</>}
                 >
@@ -742,12 +792,13 @@ export default function Inventario() {
                   <div className="acordeon-acciones">
                     {puedeEditarInv && <button className="btn btn-xs btn-primary" onClick={() => openMovimiento(m.id)}>+/− Mov.</button>}
                     <button className="btn btn-xs btn-secondary" onClick={() => openHistorial(m)}>🕑 Historial</button>
-                    {esAdmin && desq && (
+                    <button className="btn btn-xs btn-secondary" onClick={() => { setLotesMP(m); setModalLotes(true) }}>Lotes PEPS</button>
+                    {esAdmin && desq?.igualar && (
                       <button className="btn btn-xs btn-dorado" disabled={reconciliarPEPS.isPending}
                         onClick={() => confirmar(
                           desq.diff > 0
                             ? `¿Crear/ajustar PEPS "sin lote" por ${fBase(desq.diff, m.unidad)} para "${m.nombre}"?\nEl stock (${fBase(desq.stock, m.unidad)}) no se modifica.`
-                            : `¿Consumir ${fBase(Math.abs(desq.diff), m.unidad)} de lotes PEPS de "${m.nombre}" para igualarlos al stock (${fBase(desq.stock, m.unidad)})?\nEl stock no se modifica.`
+                            : `¿Consumir ${fBase(Math.abs(desq.diff), m.unidad)} de lotes PEPS de "${m.nombre}" para igualarlos al stock (${fBase(desq.stock, m.unidad)})?\nEl stock no se modifica.\n\nNo uses esto si esa cantidad está amarrada a una orden (mira Reservas MP).`
                         ).then(ok => ok && reconciliarPEPS.mutate(m))}>
                         {desq.diff > 0 ? 'Crear PEPS' : 'Igualar PEPS'}
                       </button>
@@ -777,7 +828,7 @@ export default function Inventario() {
                       <td>
                         <strong>{m.nombre}</strong>
                         {m.tipo === 'interno' && <span className="badge badge-dorado" style={{ marginLeft: 6, fontSize: '0.7rem' }}>interno</span>}
-                        {desq && <span className="badge badge-dorado" style={{ marginLeft: 6, fontSize: '0.7rem' }} title={`Stock ${fBase(desq.stock, m.unidad)} vs lotes ${fBase(desq.porLotes, m.unidad)}`}>PEPS ≠</span>}
+                        {desq && <span className="badge badge-dorado" style={{ marginLeft: 6, fontSize: '0.7rem' }} title={desq.igualar ? `Stock ${fBase(desq.stock, m.unidad)} vs lotes ${fBase(desq.porLotes, m.unidad)}` : 'El hueco es reserva de una orden (empaque o lote PEPS), no un descuadre'}>{desq.igualar ? 'PEPS ≠' : 'Reservado'}</span>}
                       </td>
                       <td className="col-opcional-2"><span className="badge badge-gris">{m.categoria}</span></td>
                       <td className="col-opcional-2">{m.unidad}</td>
@@ -792,13 +843,13 @@ export default function Inventario() {
                           {puedeEditarInv && <button className="btn btn-xs btn-primary" onClick={() => openMovimiento(m.id)} title="Compra, salida o ajuste de conteo">+/− Mov.</button>}
                           <button className="btn btn-xs btn-secondary" onClick={() => openHistorial(m)}>🕑</button>
                           <button className="btn btn-xs btn-secondary" title="Lotes (PEPS)" onClick={() => { setLotesMP(m); setModalLotes(true) }}>🧊</button>
-                          {esAdmin && desq && (
+                          {esAdmin && desq?.igualar && (
                             <button className="btn btn-xs btn-dorado" disabled={reconciliarPEPS.isPending}
                               title={desq.diff > 0 ? `Crear PEPS "sin lote" por ${fBase(desq.diff, m.unidad)}` : `Igualar lotes al stock`}
                               onClick={() => confirmar(
                                 desq.diff > 0
                                   ? `¿Crear/ajustar PEPS "sin lote" por ${fBase(desq.diff, m.unidad)} para "${m.nombre}"?\nEl stock (${fBase(desq.stock, m.unidad)}) no se modifica.`
-                                  : `¿Consumir ${fBase(Math.abs(desq.diff), m.unidad)} de lotes PEPS de "${m.nombre}" para igualarlos al stock (${fBase(desq.stock, m.unidad)})?\nEl stock no se modifica.`
+                                  : `¿Consumir ${fBase(Math.abs(desq.diff), m.unidad)} de lotes PEPS de "${m.nombre}" para igualarlos al stock (${fBase(desq.stock, m.unidad)})?\nEl stock no se modifica.\n\nNo uses esto si esa cantidad está amarrada a una orden (mira Reservas MP).`
                               ).then(ok => ok && reconciliarPEPS.mutate(m))}>
                               {desq.diff > 0 ? 'Crear PEPS' : 'Igualar'}
                             </button>
@@ -938,14 +989,30 @@ export default function Inventario() {
               <div className="form-grid-2">
                 <div className="form-group">
                   <label className="form-label">Materia Prima</label>
-                  <Select className="form-control" value={formMov.mp_id} onChange={e => setFormMov(f => ({ ...f, mp_id: e.target.value, lote_id: '', cantidad: '' }))}>
+                  <Select className="form-control" value={formMov.mp_id} onChange={e => {
+                    const mpId = e.target.value
+                    const mp = mps.find(m => String(m.id) === String(mpId))
+                    const stockBase = (Number(mp?.stock) || 0) * factorU(mp?.unidad)
+                    setFormMov(f => ({
+                      ...f, mp_id: mpId, lote_id: '',
+                      cantidad: f.tipo === 'ajuste' ? String(stockBase < 0 ? 0 : '') : '',
+                    }))
+                  }}>
                     <option value="">Seleccionar...</option>
                     {mps.map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
                   </Select>
                 </div>
                 <div className="form-group">
                   <label className="form-label">Motivo / tipo</label>
-                  <Select className="form-control" value={formMov.tipo} onChange={e => setFormMov(f => ({ ...f, tipo: e.target.value, lote_id: '', cantidad: '' }))}>
+                  <Select className="form-control" value={formMov.tipo} onChange={e => {
+                    const tipo = e.target.value
+                    const mp = mps.find(m => String(m.id) === String(formMov.mp_id))
+                    const stockBase = (Number(mp?.stock) || 0) * factorU(mp?.unidad)
+                    setFormMov(f => ({
+                      ...f, tipo, lote_id: '',
+                      cantidad: tipo === 'ajuste' ? String(stockBase < 0 ? 0 : '') : '',
+                    }))
+                  }}>
                     <option value="entrada">Compra / recepción</option>
                     <option value="salida">Salida</option>
                     <option value="ajuste">Ajuste de conteo (PEPS)</option>
@@ -961,13 +1028,16 @@ export default function Inventario() {
                     <Select className="form-control" value={formMov.lote_id} onChange={e => {
                       const id = e.target.value
                       const l = lotesMp.find(x => String(x.id) === String(id))
+                      const stockBase = (Number(mpSel?.stock) || 0) * factorU(mpSel?.unidad)
                       setFormMov(f => ({
                         ...f,
                         lote_id: id,
-                        cantidad: l ? String((Number(l.cantidad_actual) || 0) * factorU(mpSel?.unidad)) : '',
+                        cantidad: l
+                          ? String((Number(l.cantidad_actual) || 0) * factorU(mpSel?.unidad))
+                          : String(stockBase < 0 ? 0 : stockBase),
                       }))
                     }}>
-                      <option value="">Seleccionar lote…</option>
+                      <option value="">Stock general (toda la MP → p. ej. 0)</option>
                       {lotesMp.map(l => (
                         <option key={l.id} value={l.id}>
                           Ingreso {fFechaHora(l.created_at || l.fecha_entrada)} · Lote {l.lote || '(s/n)'} · {fBase(l.cantidad_actual, mpSel?.unidad)} disp.
@@ -976,7 +1046,9 @@ export default function Inventario() {
                       ))}
                     </Select>
                     <small style={{ color: 'var(--texto-suave)' }}>
-                      Escribe lo que <strong>queda realmente</strong> en ese lote (no suma ni resta). Puedes dejarlo en <strong>0</strong>.
+                      {formMov.lote_id
+                        ? <>Escribe lo que <strong>queda realmente</strong> en ese lote (no suma ni resta). Puedes dejarlo en <strong>0</strong>.</>
+                        : <>Sin lote: fija el <strong>stock general</strong> a esa cantidad (usa <strong>0</strong> si quedó negativo) y alinea PEPS.</>}
                     </small>
                   </div>
                   {loteSel && (
@@ -988,7 +1060,7 @@ export default function Inventario() {
                   <div className="form-group" style={{ marginBottom: 0 }}>
                     <label className="form-label">Cantidad correcta {mpSel && <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(en {uBase})</small>}</label>
                     <input type="number" className="form-control" value={formMov.cantidad} min={0} step="any"
-                      onChange={e => setFormMov(f => ({ ...f, cantidad: e.target.value }))} disabled={!formMov.lote_id} />
+                      onChange={e => setFormMov(f => ({ ...f, cantidad: e.target.value }))} />
                   </div>
                 </div>
               )}
@@ -1096,49 +1168,97 @@ export default function Inventario() {
       </Modal>
 
       {/* Modal Lotes PEPS por MP — listado reciente→antiguo, máx. 10 por página */}
-      <Modal open={modalLotes} onClose={() => setModalLotes(false)} title={`🧊 Lotes (PEPS) — ${lotesMP?.nombre || ''}`} size="modal-lg">
+      <Modal open={modalLotes} onClose={() => setModalLotes(false)} title={`Lotes PEPS — ${lotesMP?.nombre || ''}`} size="modal-xl">
         {lotesMP && (() => {
           const activos = lotesDe(lotesMP.id).filter(l => (l.cantidad_actual || 0) > 0)
           const totalLotes = stockLotes(lotesMP.id)
           const desfase = Math.round((totalLotes - (lotesMP.stock || 0)) * 100) / 100
+          const badgeEst = (l) => {
+            const est = estadoLote(l.vencimiento)
+            const agotado = (l.cantidad_actual || 0) <= 0
+            if (agotado) return <span className="badge">Agotado</span>
+            if (est === 'vencido') return <span className="badge badge-rojo">Vencido</span>
+            if (est === 'por_vencer') return <span className="badge badge-dorado">Por vencer</span>
+            return <span className="badge badge-verde">Vigente</span>
+          }
+          const darBaja = (l) => {
+            const est = estadoLote(l.vencimiento)
+            setBajaLote({ lote: l, mp: lotesMP })
+            setBajaForm({ cantidad: String(l.cantidad_actual || ''), motivo: est === 'vencido' ? 'vencido' : 'dañado', obs: '' })
+          }
           return (
             <>
-              <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>
-                Las salidas consumen primero el lote <strong>más próximo a vencer / más antiguo</strong> (PEPS).
-                Este listado se muestra del <strong>más reciente al más antiguo</strong>.
-                Saldo en lotes: <strong>{fBase(totalLotes, lotesMP.unidad)}</strong>.
-                {desfase !== 0 && <span style={{ color: 'var(--rojo)', display: 'inline-flex', alignItems: 'center', gap: 3 }}> <AlertTriangle size={12} aria-hidden="true" /> Difiere del stock general ({fNum(lotesMP.stock || 0)}) en {fNum(desfase)}.</span>}
-                <br />
-                <strong>¿Reconteo o ingreso mal digitado?</strong> Usa <em>+/− Mov.</em> → <strong>Ajuste de conteo</strong> y elige el lote (puedes dejarlo en 0).
-                <strong> ¿Venció o se dañó?</strong> Usa la papelera (dar de baja).
+              <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', margin: '0 0 10px' }}>
+                Saldo en lotes: <strong>{fBase(totalLotes, lotesMP.unidad)}</strong>
+                {desfase !== 0 && <span style={{ color: 'var(--rojo)' }}> · difiere del stock ({fNum(lotesMP.stock || 0)}) en {fNum(desfase)}</span>}
+                {' · '}Las salidas siguen PEPS (vence primero). Ajuste de conteo en +/− Mov.; vencido o dañado: papelera.
+              </p>
+              <div className="solo-movil">
+                {pagLotes.slice.length === 0
+                  ? <p className="empty-table">Sin lotes. Registra una entrada para crear el primero.</p>
+                  : pagLotes.slice.map((l) => {
+                    const agotado = (l.cantidad_actual || 0) <= 0
+                    return (
+                      <AccordionItem
+                        key={l.id}
+                        titulo={<span style={{ opacity: agotado ? 0.55 : 1 }}>{l.lote || 's/lote'}</span>}
+                        sub={<>{fBase(l.cantidad_actual, lotesMP.unidad)} · {badgeEst(l)}</>}
+                      >
+                        <Fila et="Disponible"><strong>{fBase(l.cantidad_actual, lotesMP.unidad)}</strong></Fila>
+                        <Fila et="Reservado">{(l.cantidad_reservada || 0) > 0 ? fBase(l.cantidad_reservada, lotesMP.unidad) : '—'}</Fila>
+                        <Fila et="Inicial">{fBase(l.cantidad_inicial, lotesMP.unidad)}</Fila>
+                        <Fila et="Vence">{l.vencimiento ? fFecha(l.vencimiento) : '—'}</Fila>
+                        <Fila et="Ingreso">{fFechaHora(l.created_at || l.fecha_entrada)}</Fila>
+                        <Fila et="Proveedor">{l.proveedor || '—'}</Fila>
+                        <Fila et="Costo/u">{l.costo_unitario ? fNum(l.costo_unitario) : '—'}</Fila>
+                        {!agotado && (
+                          <div className="acordeon-acciones">
+                            <button className="btn btn-xs btn-danger" onClick={() => darBaja(l)}>
+                              <Ico as={Trash2} size={13} />Dar de baja
+                            </button>
+                          </div>
+                        )}
+                      </AccordionItem>
+                    )
+                  })}
               </div>
-              <div className="table-wrap">
+              <div className="table-wrap solo-desktop">
                 <table>
-                  <thead><tr><th>#PEPS</th><th>Lote</th><th>Ingreso</th><th>Proveedor</th><th>Vence</th><th className="td-number">Inicial</th><th className="td-number">Disponible</th><th className="td-number">Reservado</th><th className="td-number">Costo/u</th><th>Estado</th><th></th></tr></thead>
+                  <thead>
+                    <tr>
+                      <th className="col-opcional-2">#</th>
+                      <th>Lote</th>
+                      <th className="col-opcional">Ingreso</th>
+                      <th className="col-opcional">Proveedor</th>
+                      <th>Vence</th>
+                      <th className="td-number col-opcional">Inicial</th>
+                      <th className="td-number">Disponible</th>
+                      <th className="td-number col-opcional-2">Reservado</th>
+                      <th className="td-number col-opcional">Costo/u</th>
+                      <th>Estado</th>
+                      <th></th>
+                    </tr>
+                  </thead>
                   <tbody>
                     {lotesModalOrdenados.length === 0
                       ? <tr><td colSpan={11} className="empty-table">Sin lotes. Registra una entrada para crear el primero.</td></tr>
                       : pagLotes.slice.map((l) => {
-                        const est = estadoLote(l.vencimiento)
                         const agotado = (l.cantidad_actual || 0) <= 0
                         return (
                           <tr key={l.id} style={{ opacity: agotado ? 0.5 : 1 }}>
-                            <td>{agotado ? '—' : activos.indexOf(l) + 1}</td>
-                            <td>{l.lote || '—'}</td>
-                            <td style={{ whiteSpace: 'nowrap' }} title={l.created_at || l.fecha_entrada}>
-                              {fFechaHora(l.created_at || l.fecha_entrada)}
-                            </td>
-                            <td>{l.proveedor || '—'}</td>
+                            <td className="col-opcional-2">{agotado ? '—' : activos.indexOf(l) + 1}</td>
+                            <td><strong>{l.lote || '—'}</strong></td>
+                            <td className="col-opcional" title={l.created_at || l.fecha_entrada}>{fFecha((l.created_at || l.fecha_entrada || '').toString().slice(0, 10))}</td>
+                            <td className="col-opcional">{l.proveedor || '—'}</td>
                             <td>{l.vencimiento ? fFecha(l.vencimiento) : '—'}</td>
-                            <td className="td-number">{fBase(l.cantidad_inicial, lotesMP.unidad)}</td>
+                            <td className="td-number col-opcional">{fBase(l.cantidad_inicial, lotesMP.unidad)}</td>
                             <td className="td-number"><strong>{fBase(l.cantidad_actual, lotesMP.unidad)}</strong></td>
-                            <td className="td-number">{(l.cantidad_reservada || 0) > 0 ? <span style={{ color: 'var(--tierra)' }}>{fBase(l.cantidad_reservada, lotesMP.unidad)}</span> : '—'}</td>
-                            <td className="td-number">{l.costo_unitario ? fNum(l.costo_unitario) : '—'}</td>
-                            <td>{agotado ? <span className="badge">Agotado</span> : est === 'vencido' ? <span className="badge badge-rojo">Vencido</span> : est === 'por_vencer' ? <span className="badge badge-dorado">Por vencer</span> : <span className="badge badge-verde">Vigente</span>}</td>
+                            <td className="td-number col-opcional-2">{(l.cantidad_reservada || 0) > 0 ? <span style={{ color: 'var(--tierra)' }}>{fBase(l.cantidad_reservada, lotesMP.unidad)}</span> : '—'}</td>
+                            <td className="td-number col-opcional">{l.costo_unitario ? fNum(l.costo_unitario) : '—'}</td>
+                            <td>{badgeEst(l)}</td>
                             <td>
                               {!agotado && (
-                                <button className="btn btn-xs btn-danger" title="Dar de baja (vencido, dañado…)"
-                                  onClick={() => { setBajaLote({ lote: l, mp: lotesMP }); setBajaForm({ cantidad: String(l.cantidad_actual || ''), motivo: est === 'vencido' ? 'vencido' : 'dañado', obs: '' }) }}>
+                                <button className="btn btn-xs btn-danger" title="Dar de baja (vencido, dañado…)" onClick={() => darBaja(l)}>
                                   <Ico as={Trash2} size={13} />
                                 </button>
                               )}

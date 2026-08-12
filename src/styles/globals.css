@@ -549,6 +549,26 @@ tr:hover td { background: rgba(26,58,42,0.03); }
 .modal-body .table-wrap { overflow-x: auto; }         /* las tablas dentro del modal hacen su propio scroll */
 .modal-footer { padding: 16px 24px; border-top: 1px solid var(--crema-oscuro); display: flex; gap: 8px; justify-content: flex-end; flex-shrink: 0; flex-wrap: wrap; }
 
+/* Tablas dentro de modales: más compactas (Inventario, reservas, lotes PEPS, historial) */
+.modal-body table { font-size: 0.78rem; }
+.modal-body th {
+  padding: 6px 8px;
+  font-size: 0.68rem;
+  letter-spacing: 0.3px;
+}
+.modal-body td {
+  padding: 5px 8px;
+  line-height: 1.25;
+}
+.modal-body .badge { padding: 1px 7px; font-size: 0.65rem; }
+.modal-body .btn-xs { padding: 3px 7px; font-size: 0.72rem; }
+.modal-body .acordeon-item { margin-bottom: 6px; }
+.modal-body .acordeon-item > summary { padding: 8px 10px; font-size: 0.82rem; gap: 8px; }
+.modal-body .acordeon-sub { font-size: 0.72rem; }
+.modal-body .acordeon-body { padding: 8px 10px; }
+.modal-body .acordeon-fila { padding: 3px 0; font-size: 0.8rem; }
+.modal-body h4 { font-size: 0.82rem !important; }
+
 /* ==================== TABS ==================== */
 .tabs { display: flex; gap: 0; border-bottom: 2px solid var(--crema-oscuro); margin-bottom: 24px; overflow-x: auto; }
 .tab-btn {
@@ -1020,6 +1040,45 @@ details.card > .card-acc-body { padding: 20px 24px; }
   /* La celda de acciones ocupa todo el ancho de la tarjeta (los botones se alinean a la derecha) */
   .table-wrap td.celda-acciones { display: block; }
   .table-wrap td.celda-acciones::before { display: none; }
+
+  /* En modal no convertir filas en tarjetas: queda una tabla chica con scroll horizontal */
+  .modal-body .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+  .modal-body .table-wrap table,
+  .modal-body .table-wrap thead,
+  .modal-body .table-wrap tbody,
+  .modal-body .table-wrap tfoot,
+  .modal-body .table-wrap tr {
+    display: revert;
+    width: auto;
+    margin: 0;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    background: transparent;
+  }
+  .modal-body .table-wrap table { display: table; width: max-content; min-width: 100%; }
+  .modal-body .table-wrap thead { display: table-header-group; }
+  .modal-body .table-wrap tbody { display: table-row-group; }
+  .modal-body .table-wrap tr { display: table-row; }
+  .modal-body .table-wrap td,
+  .modal-body .table-wrap th {
+    display: table-cell;
+    width: auto;
+    text-align: inherit;
+    white-space: nowrap;
+    padding: 5px 7px;
+    font-size: 0.72rem;
+  }
+  .modal-body .table-wrap td::before { content: none !important; display: none !important; }
+  .modal-body .table-wrap td.celda-acciones { display: table-cell; }
+  .modal-body .table-wrap td.celda-acciones > div { justify-content: flex-start; }
+  .modal-body th.col-opcional,
+  .modal-body td.col-opcional,
+  .modal-body th.col-opcional-2,
+  .modal-body td.col-opcional-2 { display: none; }
 }
 
 /* ===== ACCESIBILIDAD: RESPETAR "REDUCIR MOVIMIENTO" =====
