@@ -3164,7 +3164,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
 const BANNER_VACIO = {
   nombre: '', tipo: 'imagen', imagen_url: '', imagen_tablet: '', imagen_mobile: '',
   youtube: '', titulo: '', subtitulo: '', boton_texto: '', boton_link: '',
-  color_overlay: '', overlay_opacidad: 72, color_texto: '', color_boton: '',
+  color_overlay: '', overlay_opacidad: 72, overlay_fade: 48, color_texto: '', color_boton: '',
   orden: 0, activo: true, es_secundario: false, grupo: '',
 }
 
@@ -3207,6 +3207,12 @@ function normalizarBanner(raw = {}) {
   else {
     const num = Number(op)
     n.overlay_opacidad = Number.isFinite(num) ? (num <= 1 ? Math.round(num * 100) : Math.round(num)) : 72
+  }
+  const fade = raw.overlay_fade
+  if (fade == null || fade === '') n.overlay_fade = 48
+  else {
+    const num = Number(fade)
+    n.overlay_fade = Number.isFinite(num) ? (num <= 1 ? Math.round(num * 100) : Math.round(num)) : 48
   }
   n.activo = n.activo !== false
   n.es_secundario = !!n.es_secundario
@@ -3351,12 +3357,14 @@ function EditorBanner({ banner, toast, qc, onClose, modoAtelier = false }) {
     if (cargando) return
     const push = () => {
       const opN = Math.min(100, Math.max(0, Number(b.overlay_opacidad)))
+      const fadeN = Math.min(100, Math.max(0, Number(b.overlay_fade)))
       postToCatalogPreview({
         type: 'mumi-preview-banner',
         banner: {
           ...b,
           activo: true,
           overlay_opacidad: Number.isFinite(opN) ? opN : 72,
+          overlay_fade: Number.isFinite(fadeN) ? fadeN : 48,
           color_overlay: (b.color_overlay || '').trim() || (b.color_fondo || '').trim() || '',
         },
       })
@@ -3372,6 +3380,10 @@ function EditorBanner({ banner, toast, qc, onClose, modoAtelier = false }) {
   const setOpacidadCapa = (v) => {
     const n = Math.min(100, Math.max(0, Number(v)))
     setB(x => ({ ...x, overlay_opacidad: Number.isFinite(n) ? n : 72 }))
+  }
+  const setFadeVertical = (v) => {
+    const n = Math.min(100, Math.max(0, Number(v)))
+    setB(x => ({ ...x, overlay_fade: Number.isFinite(n) ? n : 48 }))
   }
   const aplicarCapa = (color, opacidad, forzarTexto = false) => {
     setB(x => {
@@ -3435,12 +3447,20 @@ function EditorBanner({ banner, toast, qc, onClose, modoAtelier = false }) {
         color_overlay: overlay,
         color_fondo: overlay, // compat catálogo / v147
         overlay_opacidad: b.overlay_opacidad == null || b.overlay_opacidad === '' ? null : Math.min(100, Math.max(0, Number(b.overlay_opacidad) || 0)),
+        overlay_fade: b.overlay_fade == null || b.overlay_fade === '' ? null : Math.min(100, Math.max(0, Number(b.overlay_fade) || 0)),
         color_texto: vacio(b.color_texto),
         color_boton: vacio(b.color_boton),
       }
       const { error: eEstilo } = await supabase.from('banners_catalogo').update(estilo).eq('id', id)
       if (eEstilo) {
-        toast('Imágenes guardadas. Para colores/opacidad ejecuta migration_v148 en Supabase.', 'error')
+        // Sin migración v159: reintentar sin overlay_fade
+        const { overlay_fade: _omit, ...estiloSinFade } = estilo
+        const { error: e2 } = await supabase.from('banners_catalogo').update(estiloSinFade).eq('id', id)
+        if (e2) {
+          toast('Imágenes guardadas. Para colores/opacidad ejecuta migration_v148 en Supabase.', 'error')
+        } else {
+          toast('Banner guardado ✓ (aplica migration_v159 para guardar el alcance vertical de la capa)')
+        }
       } else {
         toast('Banner guardado ✓')
       }
@@ -3453,6 +3473,7 @@ function EditorBanner({ banner, toast, qc, onClose, modoAtelier = false }) {
   const faltanSlots = BANNER_IMG_SLOTS.filter(s => !b[s.field]).map(s => s.label)
   const soloImagen = !(b.titulo?.trim() || b.subtitulo?.trim() || b.boton_texto?.trim())
   const op = Math.min(100, Math.max(0, Number(b.overlay_opacidad) || 72))
+  const fade = Math.min(100, Math.max(0, Number(b.overlay_fade) || 48))
   const fgFallback = contrasteSobre(b.color_overlay || '#111111')
   const btnFallback = '#ffffff'
 
@@ -3555,7 +3576,7 @@ function EditorBanner({ banner, toast, qc, onClose, modoAtelier = false }) {
       <div style={{ marginBottom: 12, padding: 12, borderRadius: 10, border: '1px solid var(--crema-oscuro)', background: '#fff' }}>
         <label className="form-label" style={{ display: 'block', marginBottom: 6 }}>Colores del panel de texto</label>
         <small style={{ display: 'block', color: 'var(--texto-suave)', fontSize: '0.72rem', marginBottom: 8 }}>
-          La <strong>capa</strong> es el panel (PC) / degradado (móvil) detrás del texto — no el fondo de la página.
+          La <strong>capa de opacidad</strong> va detrás del texto: en PC de lado (horizontal) y en móvil de abajo hacia arriba (vertical).
           El color del texto se ajusta solo al elegir un preset; puedes cambiarlo. Mira el resultado en la <strong>vista previa</strong> (arrastra este modal).
         </small>
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 10 }}>
@@ -3579,11 +3600,18 @@ function EditorBanner({ banner, toast, qc, onClose, modoAtelier = false }) {
             onChange={v => set('color_boton', v)}
             onClear={() => set('color_boton', '')} />
         </div>
-        <div className="form-group" style={{ marginBottom: 0 }}>
+        <div className="form-group" style={{ marginBottom: 10 }}>
           <label className="form-label">Opacidad de la capa · {op}%</label>
           <input type="range" min={0} max={100} step={1} value={op} onChange={e => setOpacidadCapa(e.target.value)} style={{ width: '100%' }} />
           <small style={{ display: 'block', color: 'var(--texto-suave)', fontSize: '0.68rem', marginTop: 4 }}>
-            0% = transparente a la izquierda · 100% = color pleno desde la mitad del panel.
+            Intensidad del color de la capa detrás del texto (PC y móvil).
+          </small>
+        </div>
+        <div className="form-group" style={{ marginBottom: 0 }}>
+          <label className="form-label">Capa de opacidad vertical (móvil) · {fade}%</label>
+          <input type="range" min={0} max={100} step={1} value={fade} onChange={e => setFadeVertical(e.target.value)} style={{ width: '100%' }} />
+          <small style={{ display: 'block', color: 'var(--texto-suave)', fontSize: '0.68rem', marginTop: 4 }}>
+            El tono se mantiene pleno hasta este %; a partir de ahí baja a transparente. 48% es el valor por defecto. En PC la capa va de lado (horizontal).
           </small>
         </div>
       </div>

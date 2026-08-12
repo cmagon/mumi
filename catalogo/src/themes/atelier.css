@@ -139,8 +139,8 @@
   padding: 40px var(--margin-m) 44px;
   background: linear-gradient(
     to top,
-    var(--banner-overlay-fill, rgba(250, 249, 246, 0.96)) 8%,
-    var(--banner-overlay-soft, rgba(250, 249, 246, 0.55)) 42%,
+    var(--banner-overlay-fill, rgba(250, 249, 246, 0.96)) 0%,
+    var(--banner-overlay-fill, rgba(250, 249, 246, 0.96)) var(--bf-solid, 48%),
     transparent 100%
   );
 }
@@ -195,9 +195,9 @@
     padding: 64px var(--margin-d);
     background: linear-gradient(
       to right,
-      var(--banner-overlay-fill, rgba(250, 249, 246, 0.94)) 26%,
-      var(--banner-overlay-soft, rgba(250, 249, 246, 0.35)) 55%,
-      transparent 78%
+      var(--banner-overlay-fill, rgba(250, 249, 246, 0.94)) 0%,
+      var(--banner-overlay-fill, rgba(250, 249, 246, 0.94)) var(--bfh-solid, 48%),
+      transparent 100%
     );
   }
 }

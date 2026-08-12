@@ -70,14 +70,18 @@ export function estiloBanner(b) {
   const s = {}
   const ov = (b.color_overlay || b.color_fondo || '').trim()
   const op = opacidadBanner(b.overlay_opacidad)
-  // Opacidad siempre (0–1). Degradado CSS: 0% izq → fill a ~50% del panel
+  // Alcance de la capa: 0 = corta · 1 = llega más sobre la foto. Por defecto ~48% sólido.
+  const fade = opacidadBanner(b.overlay_fade, 0.48)
   s['--banner-overlay-op'] = String(op)
+  s['--banner-fade'] = String(fade)
+  // Punto donde el tono pleno termina y empieza a ir a transparente (móvil: desde abajo)
+  const solid = Math.round(18 + fade * 62) // 0%→18 · 48%→48 · 100%→80
+  s['--bf-solid'] = `${solid}%`
+  s['--bfh-solid'] = `${Math.round(28 + fade * 40)}%`
   if (ov) {
     s['--banner-capa'] = ov
     s['--banner-bg'] = ov
     s['--banner-bg-medio'] = ov
-    s['--banner-overlay-soft'] = hexToRgba(ov, op * 0.1)
-    s['--banner-overlay-mid'] = hexToRgba(ov, op * 0.38)
     s['--banner-overlay-fill'] = hexToRgba(ov, op)
   }
   // Tipografía: color explícito, o contraste automático sobre la capa
