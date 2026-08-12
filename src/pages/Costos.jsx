@@ -1375,6 +1375,41 @@ export default function Costos({ vista = 'productos' }) {
     setIngredientes(p => p.map(r => r._id === id ? { ...r, mpId, nombre: mp?.nombre||'', precio: mp?String(mp.precio):'', presentacion: presDeUnidad(mp?.unidad), precioOverride: false } : r))
   }
 
+  /** Precio de inventario (promedio ponderado) vs el guardado en la ficha. */
+  const precioInventarioIng = (ing) => {
+    if (!ing?.mpId) return null
+    const mp = mps.find(m => String(m.id) === String(ing.mpId))
+    return mp ? Number(mp.precio) || 0 : null
+  }
+  const costoDesfasado = (ing) => {
+    const inv = precioInventarioIng(ing)
+    if (inv == null) return false
+    return Math.abs((parseFloat(ing.precio) || 0) - inv) > 0.01 || !!ing.precioOverride
+  }
+  const actualizarCostoIng = (id) => {
+    setIngredientes(p => p.map(r => {
+      if (r._id !== id) return r
+      const mp = mps.find(m => String(m.id) === String(r.mpId))
+      if (!mp) return r
+      return { ...r, precio: String(mp.precio ?? ''), precioOverride: false, presentacion: presDeUnidad(mp.unidad) }
+    }))
+  }
+  const actualizarCostosTodos = () => {
+    const ids = new Set(ingredientes.filter(r => r.mpId && costoDesfasado(r)).map(r => r._id))
+    if (!ids.size) {
+      toast('Todos los costos ya coinciden con el inventario')
+      return
+    }
+    setIngredientes(p => p.map(r => {
+      if (!ids.has(r._id)) return r
+      const mp = mps.find(m => String(m.id) === String(r.mpId))
+      if (!mp) return r
+      return { ...r, precio: String(mp.precio ?? ''), precioOverride: false, presentacion: presDeUnidad(mp.unidad) }
+    }))
+    toast(`${ids.size} costo(s) actualizado(s) desde inventario ✓`)
+  }
+  const ingsConDesfase = ingredientes.filter(r => r.mpId && costoDesfasado(r)).length
+
   // Toggle lista ↔ manual
   const toggleModo = (id, modo) => {
     setIngredientes(p => p.map(r => r._id === id ? { ...r, modo, mpId: '', nombre: modo==='lista'?'':r.nombre, precio: '' } : r))
@@ -1910,36 +1945,48 @@ export default function Costos({ vista = 'productos' }) {
 
           {/* ── Ingredientes (integrado con toggle lista/manual de Calculadora de Receta) ── */}
           <details className="card" {...secProps(!!editingId || ingredientes.length > 0)}>
-            <summary className="card-title">
-              🌿 Materias Primas e Insumos
+            <summary className="card-title ed-sec-title">
+              <span className="ed-sec-title-main">🌿 Materias Primas e Insumos</span>
               <span className="card-hint">{ingredientes.length} ingrediente{ingredientes.length === 1 ? '' : 's'}</span>
-              <div onClick={e => e.stopPropagation()} style={{ marginLeft:8, display:'flex', gap:6 }}>
+              <div className="ed-sec-actions" onClick={e => e.stopPropagation()}>
                 <button className="btn btn-sm btn-secondary" onClick={addIngrediente}>+ Normal</button>
-                <button className="btn btn-sm btn-dorado" onClick={addIngredienteRelativo}>+ Relativo a...</button>
+                <button className="btn btn-sm btn-dorado" onClick={addIngredienteRelativo}>+ Relativo</button>
               </div>
             </summary>
             <div className="card-acc-body">
             {/* Modo de ingreso: gramos/bache o porcentaje */}
-            <div style={{ display:'flex', alignItems:'center', gap:10, marginBottom:10, flexWrap:'wrap' }}>
-              <span style={{ fontSize:'0.8rem', color:'var(--texto-suave)' }}>Ingresar por:</span>
-              {[['gramos','g / bache'],['porcentaje','% (porcentaje)']].map(([m,lbl],i) => (
-                <button key={m} type="button" onClick={() => cambiarModoIng(m)} style={{
-                  padding:'4px 10px', fontSize:'0.78rem', cursor:'pointer', fontWeight:600,
-                  background: modoIng===m ? 'var(--selva)' : 'transparent',
-                  color: modoIng===m ? 'var(--crema)' : 'var(--texto-suave)',
-                  border:`1px solid ${modoIng===m ? 'var(--selva)' : 'var(--crema-oscuro)'}`,
-                  borderRadius: i===0 ? '4px 0 0 4px' : '0 4px 4px 0', marginLeft: i===1 ? -1 : 0,
-                }}>{lbl}</button>
-              ))}
-              {modoIng==='porcentaje' && (
-                <label style={{ display:'flex', alignItems:'center', gap:6, fontSize:'0.8rem', marginLeft:8 }}>
-                  Peso total del bache (g):
-                  <input type="number" className="form-control" style={{ width:130 }} value={pesoBacheTotal} onChange={e => setPesoBacheTotal(e.target.value)} placeholder="Ej: 10000" min={1} />
-                </label>
+            <div className="ed-toolbar">
+              <div className="ed-toolbar-modo">
+                <span style={{ fontSize:'0.8rem', color:'var(--texto-suave)' }}>Ingresar por:</span>
+                {[['gramos','g / bache'],['porcentaje','% (porcentaje)']].map(([m,lbl],i) => (
+                  <button key={m} type="button" onClick={() => cambiarModoIng(m)} style={{
+                    padding:'4px 10px', fontSize:'0.78rem', cursor:'pointer', fontWeight:600,
+                    background: modoIng===m ? 'var(--selva)' : 'transparent',
+                    color: modoIng===m ? 'var(--crema)' : 'var(--texto-suave)',
+                    border:`1px solid ${modoIng===m ? 'var(--selva)' : 'var(--crema-oscuro)'}`,
+                    borderRadius: i===0 ? '4px 0 0 4px' : '0 4px 4px 0', marginLeft: i===1 ? -1 : 0,
+                  }}>{lbl}</button>
+                ))}
+                {modoIng==='porcentaje' && (
+                  <label className="ed-toolbar-peso" style={{ display:'flex', alignItems:'center', gap:6, fontSize:'0.8rem' }}>
+                    Peso total del bache (g):
+                    <input type="number" className="form-control" style={{ width:130 }} value={pesoBacheTotal} onChange={e => setPesoBacheTotal(e.target.value)} placeholder="Ej: 10000" min={1} />
+                  </label>
+                )}
+              </div>
+              {ingsConDesfase > 0 && (
+                <button type="button" className="btn btn-xs btn-dorado ed-toolbar-sync"
+                  title="Trae el costo promedio actual de cada MP desde Inventario (borra overrides). El costo de la ficha ya se recalcula en vivo si no hay override; este botón sincroniza el valor guardado."
+                  onClick={actualizarCostosTodos}>
+                  Actualizar {ingsConDesfase} costo{ingsConDesfase === 1 ? '' : 's'} desde inventario
+                </button>
               )}
             </div>
-            <div style={{ overflowX:'auto' }}>
-              <div className="ed-wrap" style={{ minWidth:820 }}>
+            <p className="ed-hint-costo" style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', margin: '0 0 10px' }}>
+              El costo de cada MP sigue el <strong>promedio ponderado</strong> del inventario (se actualiza al ingresar lotes). Sin override, la ficha lo usa en vivo; el botón sirve si quedó un costo fijo o desfasado.
+            </p>
+            <div className="ed-scroll">
+              <div className="ed-wrap ed-ings" style={{ minWidth:820 }}>
                 {/* Header */}
                 <div className="ed-head" style={{ display:'grid', gridTemplateColumns:'2.2fr 0.7fr 0.9fr 0.8fr 0.9fr 44px', gap:8, paddingBottom:6, fontSize:'0.72rem', fontWeight:700, color:'var(--texto-suave)', textTransform:'uppercase' }}>
                   <span>Ingrediente</span>
@@ -1962,8 +2009,8 @@ export default function Costos({ vista = 'productos' }) {
                   return (
                     <div key={r._id} className={ordIng.rowClassName(idx)} {...ordIng.rowProps(idx)} style={{ display:'grid', gridTemplateColumns:'2.2fr 0.7fr 0.9fr 0.8fr 0.9fr 44px', gap:8, alignItems:'start', marginBottom:10 }}>
                       {/* Asa de arrastre + Nombre (toggle + input/select + base si es relativo) */}
-                      <div style={{ display:'flex', gap:6, alignItems:'flex-start' }}>
-                        <span {...ordIng.handleProps(idx)}>⠿</span>
+                      <div className="ed-col-nombre" style={{ display:'flex', gap:6, alignItems:'flex-start' }}>
+                        <span className="ed-drag solo-desktop" {...ordIng.handleProps(idx)}>⠿</span>
                         <div style={{ display:'flex', flexDirection:'column', gap:3, flex:1, minWidth:0 }}>
                         <div style={{ display:'flex' }}>
                           {['lista','manual'].map((m, i) => (
@@ -2016,6 +2063,7 @@ export default function Costos({ vista = 'productos' }) {
                       </div>
 
                       {/* % receta */}
+                      <div className="ed-col-pct" data-label="% receta">
                       {esRelativo
                         ? <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
                             <input type="number" className="form-control" placeholder="0" value={r.pct||''} onFocus={e => e.target.select()} onChange={e => updIng(r._id,'pct',e.target.value)} step="0.01" style={{ textAlign:'right', paddingRight:16, borderColor: accent }} />
@@ -2025,8 +2073,10 @@ export default function Costos({ vista = 'productos' }) {
                             {pctRow > 0 ? pctRow.toFixed(1) + '%' : '—'}
                           </span>
                       }
+                      </div>
 
                       {/* g/bache (modo gramos) o % (modo porcentaje) — calculado para relativo */}
+                      <div className="ed-col-cant" data-label={modoIng === 'porcentaje' && !esRelativo ? '% ingreso' : 'g / bache'}>
                       {esRelativo
                         ? <span style={{ textAlign:'right', paddingTop:8, fontSize:'0.88rem', color:'var(--tierra)' }} title="Calculado desde la base">
                             {cantEff > 0 ? cantEff.toFixed(1) + ' g' : '—'}
@@ -2041,19 +2091,35 @@ export default function Costos({ vista = 'productos' }) {
                             </div>
                           : <input type="number" className="form-control" placeholder="g/bache" value={r.cantidad||''} onFocus={e => e.target.select()} onChange={e => handleCantidadChange(r._id, e.target.value)} style={{ textAlign:'right', background:'rgba(124,179,66,0.06)' }} />
                       }
+                      </div>
 
                       {/* $/Kg — editable; si es de lista y se cambia, queda como override (no toca la MP hasta confirmar al guardar) */}
-                      <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
-                        <span style={{ position:'absolute', left:6, fontSize:'0.78rem', color:'var(--texto-suave)', pointerEvents:'none' }}>$</span>
-                        {r.mpId
-                          ? <MoneyInput value={r.precio || ''} onChange={v => setIngredientes(p => p.map(x => x._id === r._id ? { ...x, precio: v, precioOverride: true } : x))} style={{ paddingLeft:16, background: r.precioOverride ? 'rgba(200,169,74,0.12)' : 'rgba(124,179,66,0.08)', borderColor: r.precioOverride ? 'var(--dorado)' : undefined }} />
-                          : <MoneyInput value={r.precio||''} onChange={v => updIng(r._id,'precio',v)} style={{ paddingLeft:16, borderColor: accent }} />
-                        }
+                      <div className="ed-col-precio" data-label="$ / Kg" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
+                          <span style={{ position:'absolute', left:6, fontSize:'0.78rem', color:'var(--texto-suave)', pointerEvents:'none' }}>$</span>
+                          {r.mpId
+                            ? <MoneyInput
+                                value={r.precioOverride ? (r.precio || '') : String(precioEff || r.precio || '')}
+                                onChange={v => setIngredientes(p => p.map(x => x._id === r._id ? { ...x, precio: v, precioOverride: true } : x))}
+                                style={{ paddingLeft:16, background: r.precioOverride ? 'rgba(200,169,74,0.12)' : 'rgba(124,179,66,0.08)', borderColor: r.precioOverride || costoDesfasado(r) ? 'var(--dorado)' : undefined }}
+                              />
+                            : <MoneyInput value={r.precio||''} onChange={v => updIng(r._id,'precio',v)} style={{ paddingLeft:16, borderColor: accent }} />
+                          }
+                        </div>
+                        {r.mpId && costoDesfasado(r) && (
+                          <button type="button" className="btn-link-emp" style={{ fontSize: '0.68rem', textAlign: 'right' }}
+                            title={`Inventario: ${fCOP(precioInventarioIng(r) || 0)}/${mps.find(m => String(m.id) === String(r.mpId))?.unidad || 'Kg'}`}
+                            onClick={() => actualizarCostoIng(r._id)}>
+                            Actualizar costo
+                          </button>
+                        )}
                       </div>
 
                       {/* Subtotal */}
-                      <span className="ed-sub" style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', paddingTop:8, textAlign:'right' }}>{fCOP(sub)}</span>
+                      <span className="ed-sub ed-col-sub" data-label="Subtotal" style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', paddingTop:8, textAlign:'right' }}>{fCOP(sub)}</span>
                       <div className="ed-controls" style={{ display:'flex', alignItems:'center', gap:2, marginTop:6 }}>
+                        <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === 0} title="Subir" onClick={() => ordIng.moverArriba(idx)}>↑</button>
+                        <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === ingredientes.length - 1} title="Bajar" onClick={() => ordIng.moverAbajo(idx)}>↓</button>
                         <button className="btn btn-danger btn-xs" onClick={() => setIngredientes(p => p.filter(x => x._id !== r._id))}><X size={13} aria-hidden="true" /></button>
                       </div>
                     </div>
@@ -2062,7 +2128,7 @@ export default function Costos({ vista = 'productos' }) {
                 {ingredientes.length === 0 && <p style={{ color:'var(--texto-suave)', fontSize:'0.88rem', padding:'8px 0' }}>Agrega ingredientes (Normal o Relativo a...)</p>}
               </div>
             </div>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginTop:10 }}>
+            <div className="ed-footer-ings">
               <small style={{ color:'var(--texto-suave)', fontSize:'0.78rem' }}>
                 <strong>g/bache</strong> = gramos usados por bache (define el costo) · <strong>%</strong> receta se calcula automáticamente
               </small>

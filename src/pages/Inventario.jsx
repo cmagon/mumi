@@ -389,16 +389,33 @@ export default function Inventario() {
         }
       } else if (formMov.tipo === 'entrada') {
         if (!(cantidad > 0)) throw new Error('Ingresa una cantidad')
+        const costoLote = formMov.costo !== '' && formMov.costo != null
+          ? (parseFloat(formMov.costo) || 0)
+          : (mp?.precio || 0)
+        costoMovimiento = costoLote
+        // Promedio ponderado ANTES de mover stock (para historial y para actualizar raw_materials).
+        const { data: frescoPre } = await supabase.from('raw_materials').select('stock, precio').eq('id', mpId).single()
+        const stockPrevio = Math.max(0, Number(frescoPre?.stock) || 0)
+        const precioPrevio = Number(frescoPre?.precio) || 0
+        const precioPromedio = (stockPrevio + cantidad) > 0
+          ? (stockPrevio * precioPrevio + cantidad * costoLote) / (stockPrevio + cantidad)
+          : costoLote
+        extra.precio_antes = precioPrevio
+        extra.precio_despues = precioPromedio
+        extra.costo_lote = costoLote
+        if (Math.abs(precioPrevio - precioPromedio) > 0.01) extra.cambio_precio_promedio = true
         const creado = await crearLoteEntrada({
           mp_id: mpId,
           lote: formMov.lote || (esEmpaque(mp?.categoria) ? LOTE_SIN_CODIGO : ''),
           vencimiento: formMov.vencimiento, fecha: fechaHoy,
-          cantidad, costo_unitario: formMov.costo !== '' ? parseFloat(formMov.costo) || 0 : (mp?.precio || 0),
+          cantidad, costo_unitario: costoLote,
           creado_por: profile?.nombre || '', proveedor: formMov.proveedor || '',
         })
         if (creado?.id) extra.lote_id = creado.id
         const prov = String(formMov.proveedor || '').trim()
         if (prov) extra.proveedor = prov
+        // Se aplica abajo en `upd` junto con lote/vencimiento
+        extra._precio_promedio_nuevo = precioPromedio
       } else if (formMov.tipo === 'salida') {
         if (!(cantidad > 0)) throw new Error('Ingresa una cantidad')
         if (!formMov.motivo) throw new Error('Indica el motivo de la salida')
@@ -421,6 +438,9 @@ export default function Inventario() {
         throw new Error('Tipo de movimiento no válido')
       }
 
+      const precioPromedioNuevo = extra._precio_promedio_nuevo
+      delete extra._precio_promedio_nuevo
+
       const movBase = {
         mp_id: mpId, tipo: formMov.tipo, cantidad, fecha: fechaHoy,
         responsable: formMov.responsable, obs: obsFinal,
@@ -440,15 +460,8 @@ export default function Inventario() {
         if (formMov.tipo === 'entrada') {
           if (formMov.lote) upd.lote = formMov.lote
           if (formMov.vencimiento) upd.vencimiento = formMov.vencimiento
-          if (formMov.costo !== '' && formMov.costo != null) {
-            const costoNuevo = parseFloat(formMov.costo) || 0
-            const { data: fresco } = await supabase.from('raw_materials').select('stock, precio').eq('id', mpId).single()
-            const stockPrevio = Math.max(0, (Number(fresco?.stock) || 0) - cantidad)
-            const precioPrevio = Number(fresco?.precio) || 0
-            upd.precio = (stockPrevio + cantidad) > 0
-              ? (stockPrevio * precioPrevio + cantidad * costoNuevo) / (stockPrevio + cantidad)
-              : costoNuevo
-          }
+          // Siempre actualiza el promedio ponderado con el costo del lote ingresado
+          if (precioPromedioNuevo != null) upd.precio = precioPromedioNuevo
         }
         if (Object.keys(upd).length) await supabase.from('raw_materials').update(upd).eq('id', mpId)
       }
@@ -1347,7 +1360,7 @@ export default function Inventario() {
               <div><strong>Stock mínimo:</strong> {fBase(histMP.stock_min, histMP.unidad)}</div>
               <div><strong>Lote actual:</strong> {histMP.lote || '—'}</div>
               <div><strong>Vence:</strong> {histMP.vencimiento ? fFecha(histMP.vencimiento) : '—'}</div>
-              <div><strong>Precio:</strong> ${fNum(histMP.precio || 0)}</div>
+              <div><strong>Precio promedio:</strong> ${fNum(histMP.precio || 0)}</div>
             </div>
             {histMP.obs && <div style={{ marginBottom: 12, fontSize: '0.85rem' }}><strong>Obs:</strong> {histMP.obs}</div>}
             {histMP.extra && Object.keys(histMP.extra).length > 0 && (
@@ -1359,22 +1372,34 @@ export default function Inventario() {
             <div className="card-title" style={{ fontSize: '0.95rem' }}><Ico as={ClipboardList} size={15} />Movimientos ({histMovs.length})</div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Fecha</th><th>Tipo</th><th>Cantidad</th><th>Lote</th><th>Proveedor</th><th>Vence</th><th>Responsable</th><th>Obs</th>{esAdmin && <th></th>}</tr></thead>
+                <thead><tr><th>Fecha</th><th>Tipo</th><th>Cantidad</th><th className="td-number">Costo/u</th><th>Lote</th><th className="col-opcional">Proveedor</th><th className="col-opcional">Vence</th><th>Responsable</th><th className="col-opcional">Obs</th>{esAdmin && <th></th>}</tr></thead>
                 <tbody>
                   {histMovs.length === 0
-                    ? <tr><td colSpan={esAdmin ? 9 : 8} className="empty-table">Sin movimientos registrados</td></tr>
+                    ? <tr><td colSpan={esAdmin ? 10 : 9} className="empty-table">Sin movimientos registrados</td></tr>
                     : histMovs.map(mv => {
                       const anulado = mv.extra?.anulado
+                      const costoU = mv.costo_unitario != null && mv.costo_unitario !== '' ? Number(mv.costo_unitario) : null
+                      const precioAntes = mv.extra?.precio_antes != null ? Number(mv.extra.precio_antes) : null
+                      const precioDespues = mv.extra?.precio_despues != null ? Number(mv.extra.precio_despues) : null
+                      const cambioPrecio = precioAntes != null && precioDespues != null && Math.abs(precioAntes - precioDespues) > 0.01
                       return (
                       <tr key={mv.id} style={anulado ? { opacity: 0.5, textDecoration: 'line-through' } : undefined}>
                         <td style={{ whiteSpace: 'nowrap' }}>{fFechaHora(mv.created_at || mv.fecha)}</td>
                         <td><span className={`badge ${mv.tipo === 'entrada' ? 'badge-verde' : mv.tipo === 'salida' ? 'badge-rojo' : 'badge-gris'}`}>{mv.tipo}</span></td>
                         <td className="td-number">{fCantMov(mv.cantidad, histMP?.unidad)}</td>
+                        <td className="td-number" style={{ whiteSpace: 'nowrap' }}>
+                          {costoU != null ? `$${fNum(costoU)}` : '—'}
+                          {cambioPrecio && (
+                            <div style={{ fontSize: '0.68rem', color: 'var(--tierra)' }} title="Promedio ponderado de la ficha MP">
+                              avg ${fNum(precioAntes)}→${fNum(precioDespues)}
+                            </div>
+                          )}
+                        </td>
                         <td>{mv.lote || '—'}</td>
-                        <td>{mv.extra?.proveedor || '—'}</td>
-                        <td>{mv.vencimiento ? fFecha(mv.vencimiento) : '—'}</td>
+                        <td className="col-opcional">{mv.extra?.proveedor || '—'}</td>
+                        <td className="col-opcional">{mv.vencimiento ? fFecha(mv.vencimiento) : '—'}</td>
                         <td>{mv.responsable || '—'}</td>
-                        <td>{mv.obs || '—'}{anulado && <span className="badge badge-gris" style={{ marginLeft: 4, fontSize: '0.62rem' }}>anulado</span>}</td>
+                        <td className="col-opcional">{mv.obs || '—'}{anulado && <span className="badge badge-gris" style={{ marginLeft: 4, fontSize: '0.62rem' }}>anulado</span>}</td>
                         {esAdmin && <td>
                           {puedeAnular(mv)
                             ? <button className="btn btn-xs btn-danger" title="Anular este movimiento y revertir el stock" onClick={() => setAnularMov(mv)}><Ico as={Undo2} size={13} /></button>
