@@ -2913,15 +2913,15 @@ export default function Costos({ vista = 'productos' }) {
               {calcResult && (() => {
                 const pMayor = parseFloat(formProd.precio_mayor) || 0
                 const pDetal = parseFloat(formProd.precio_detal) || 0
-                const cProd = calcResult.costoTotalUnit                       // costo de PRODUCCIÓN
-                const gastosU = cProd * tasaGastosOper                        // gastos del período prorrateados
-                const cPleno = cProd + gastosU                                // costo PLENO (lo que cuesta de verdad)
-                // Utilidad NETA: tras comisión y gastos del período. Sin ICA (impuesto del período).
-                const utilNeta = pMayor - calcResult.comUnit - cPleno
-                const utilNetaDetal = pDetal - cPleno
-                // Utilidad BRUTA (antes de gastos) = precio − costo de PRODUCCIÓN. Es el margen, protagonista.
+                const cProd = calcResult.costoTotalUnit
+                const gastosU = cProd * tasaGastosOper
+                // Brutas: precio − costo de producción (− comisión). Neta: además − gastos operativos.
                 const utilBrutaMayor = pMayor - cProd
+                const utilBrutaConCom = pMayor - (calcResult.comUnit || 0) - cProd
+                const utilBrutaDetal = pDetal - cProd
+                const utilNeta = pMayor - (calcResult.comUnit || 0) - cProd - gastosU
                 const utilBrutaMayorPct = pMayor > 0 ? (utilBrutaMayor / pMayor * 100) : 0
+                const utilNetaPct = pMayor > 0 ? (utilNeta / pMayor * 100) : 0
                 const pct = (v) => (cProd > 0 ? (v / cProd * 100).toFixed(0) + '%' : '—')
                 const unidsMes = calcResult.unidsMesTot || 0
                 const ivaTot = (parseFloat(formProd.iva_pct) || 0) + (parseFloat(formProd.imp_saludable_pct) || 0)
@@ -2937,42 +2937,40 @@ export default function Costos({ vista = 'productos' }) {
                   </div>
                   <div className="total">
                     <div className="row"><span>Precio de venta por mayor</span><span>{fCOP(pMayor)}</span></div>
-                    {/* Utilidad BRUTA (antes de gastos): el margen, protagonista y en grande. */}
                     <div className="row ganancia" style={{ fontWeight:800, borderTop:'1px solid rgba(245,240,232,0.25)', paddingTop:8, marginTop:2, alignItems:'baseline' }}>
-                      <span style={{ cursor:'help' }} title="Utilidad bruta = precio − costo de PRODUCCIÓN, antes de comisión y gastos de administración/ventas/financieros. Es el margen con el que la empresa paga esos gastos y deja utilidad.">UTILIDAD BRUTA (antes de gastos) ⓘ</span>
+                      <span>UTILIDAD BRUTA por unidad</span>
                       <span style={{ color: utilBrutaMayor >= 0 ? 'var(--lima)' : 'var(--rojo)' }}><strong style={{ fontSize:'1.5rem' }}>{utilBrutaMayorPct.toFixed(1)}%</strong> <small style={{ opacity:0.85 }}>· {fCOP(utilBrutaMayor)}/u</small></span>
                     </div>
-                    {/* Gastos del período, DESPUÉS del margen bruto (no se suman al costo del producto). */}
-                    {(calcResult.comUnit || 0) > 0 && <div className="row"><span>− Comisión distribuidor <small style={{opacity:0.6,fontSize:'0.72rem'}}>({formProd.comision}%)</small></span><span style={{color:'var(--dorado)'}}>−{fCOP(calcResult.comUnit)}</span></div>}
-                    <div className="row"><span>− Gastos admin/ventas/financieros <small style={{opacity:0.6,fontSize:'0.72rem'}}>({(tasaGastosOper*100).toFixed(1)}% del costo de producción)</small></span><span style={{color:'var(--dorado)'}}>−{fCOP(gastosU)}</span></div>
-                    <div className="row ganancia" style={{ fontWeight:700, borderTop:'1px solid rgba(245,240,232,0.25)', paddingTop:6 }}>
-                      <span>= UTILIDAD NETA por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>{(calcResult.comUnit || 0) > 0 ? '(con comisión)' : ''}</small></span>
-                      <span style={{ color: utilNeta >= 0 ? undefined : 'var(--rojo)' }}>{fCOP(utilNeta)} ({pMayor > 0 ? (utilNeta / pMayor * 100).toFixed(1) + '%' : '-'})</span>
-                    </div>
-                    {/* La comisión solo se paga a distribuidores: en venta directa esa plata se queda */}
                     {(calcResult.comUnit || 0) > 0 && (
-                      <div className="row ganancia" style={{ fontWeight:700 }}>
-                        <span>UTILIDAD NETA sin comisión <small style={{opacity:0.6,fontSize:'0.72rem'}}>(venta directa)</small></span>
-                        <span style={{ color: (utilNeta + calcResult.comUnit) >= 0 ? 'var(--lima)' : 'var(--rojo)' }}>
-                          {fCOP(utilNeta + calcResult.comUnit)} ({pMayor > 0 ? ((utilNeta + calcResult.comUnit) / pMayor * 100).toFixed(1) + '%' : '-'})
-                        </span>
-                      </div>
+                      <>
+                        <div className="row"><span>− Comisión distribuidor <small style={{opacity:0.6,fontSize:'0.72rem'}}>({formProd.comision}%)</small></span><span style={{color:'var(--dorado)'}}>−{fCOP(calcResult.comUnit)}</span></div>
+                        <div className="row ganancia" style={{ fontWeight:700, borderTop:'1px solid rgba(245,240,232,0.25)', paddingTop:6 }}>
+                          <span>= UTILIDAD BRUTA por unidad <small style={{opacity:0.6,fontSize:'0.72rem'}}>(con comisión)</small></span>
+                          <span style={{ color: utilBrutaConCom >= 0 ? undefined : 'var(--rojo)' }}>{fCOP(utilBrutaConCom)} ({pMayor > 0 ? (utilBrutaConCom / pMayor * 100).toFixed(1) + '%' : '-'})</span>
+                        </div>
+                      </>
                     )}
-                    <div className="row ganancia"><span>Utilidad neta al detal</span><span style={{ color: utilNetaDetal >= 0 ? undefined : 'var(--rojo)' }}>{fCOP(utilNetaDetal)} ({pDetal > 0 ? (utilNetaDetal / pDetal * 100).toFixed(1) + '%' : '-'})</span></div>
+                    {pDetal > 0 && (
+                      <div className="row ganancia"><span>Utilidad bruta al detal</span><span style={{ color: utilBrutaDetal >= 0 ? undefined : 'var(--rojo)' }}>{fCOP(utilBrutaDetal)} ({(utilBrutaDetal / pDetal * 100).toFixed(1)}%)</span></div>
+                    )}
+                    <div className="row"><span>− Gastos admin/ventas/financieros <small style={{opacity:0.6,fontSize:'0.72rem'}}>({(tasaGastosOper * 100).toFixed(1)}%)</small></span><span style={{color:'var(--dorado)'}}>−{fCOP(gastosU)}</span></div>
+                    <div className="row ganancia" style={{ fontWeight:700, borderTop:'1px solid rgba(245,240,232,0.25)', paddingTop:6 }}>
+                      <span>= UTILIDAD NETA por unidad</span>
+                      <span style={{ color: utilNeta >= 0 ? 'var(--lima)' : 'var(--rojo)' }}><strong style={{ fontSize:'1.15rem' }}>{pMayor > 0 ? utilNetaPct.toFixed(1) + '%' : '-'}</strong> <small style={{ opacity:0.85 }}>· {fCOP(utilNeta)}/u</small></span>
+                    </div>
                   </div>
 
-                  {/* Lo que este producto significa al mes y su margen de contribución */}
                   <div style={{ marginTop:10, paddingTop:8, borderTop:'1px dashed rgba(245,240,232,0.2)', fontSize:'0.78rem' }}>
                     <div className="row"><span style={{ cursor:'help' }} title="Precio menos el costo VARIABLE (materia prima + empaque). Es lo que cada unidad aporta para cubrir los costos fijos. Si es negativo, vender más aumenta la pérdida.">Margen de contribución/u ⓘ</span><span style={{ color: (pMayor - calcResult.cvu) > 0 ? 'var(--lima)' : 'var(--rojo)' }}>{fCOP(pMayor - calcResult.cvu)}</span></div>
                     <div className="row"><span>Unidades/mes proyectadas</span><span>{fNum(unidsMes)}</span></div>
-                    <div className="row"><span style={{ cursor:'help' }} title="Utilidad neta por unidad × unidades que produces al mes. Es lo que este producto le deja al negocio si se vende todo.">Utilidad del producto al mes ⓘ</span><span style={{ color: utilNeta * unidsMes >= 0 ? 'var(--lima)' : 'var(--rojo)', fontWeight:600 }}>{fCOP(utilNeta * unidsMes)}</span></div>
+                    <div className="row"><span>Utilidad bruta del producto al mes</span><span style={{ color: utilBrutaMayor * unidsMes >= 0 ? 'var(--lima)' : 'var(--rojo)', fontWeight:600 }}>{fCOP(utilBrutaMayor * unidsMes)}</span></div>
                     <div className="row"><span style={{ cursor:'help' }} title="Unidades a vender al mes para cubrir los costos fijos, si este fuera el único producto. El mínimo real, repartido entre todo tu portafolio, está en Costos y Gastos.">Punto de equilibrio (solo) ⓘ</span><span>{calcResult.pe > 0 ? fNum(calcResult.pe) + ' unid/mes' : '—'}</span></div>
                     <div className="row"><span style={{ cursor:'help' }} title="CIF del mes ÷ minutos productivos disponibles. Reparte el overhead SEGÚN EL TIEMPO que usa cada producto.">Costo fijo por minuto ⓘ</span><span>{fCOP(calcResult.costoMin)}/min</span></div>
                     {ivaTot > 0 && <div className="row"><span>Precio mayor con impuestos <small style={{opacity:0.6,fontSize:'0.72rem'}}>(IVA/ICUI {ivaTot}%{(parseFloat(formProd.ibua_valor) || 0) > 0 ? ` + IBUA ${fCOP(formProd.ibua_valor)}` : ''})</small></span><span>{fCOP(pMayor * (1 + ivaTot / 100) + (parseFloat(formProd.ibua_valor) || 0))}</span></div>}
                   </div>
-                  {utilNeta < 0 && pMayor > 0 && (
+                  {utilBrutaMayor < 0 && pMayor > 0 && (
                     <div style={{ marginTop:8, padding:'8px 10px', background:'rgba(192,57,43,0.20)', borderRadius:6, fontSize:'0.78rem' }}>
-                      ⚠ Con este precio <strong>pierdes {fCOP(-utilNeta)} por unidad</strong> una vez cubiertos costos y gastos.
+                      ⚠ Con este precio <strong>pierdes {fCOP(-utilBrutaMayor)} por unidad</strong> frente al costo de producción.
                       Mira el precio sugerido a la izquierda.
                     </div>
                   )}
