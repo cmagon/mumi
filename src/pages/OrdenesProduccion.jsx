@@ -218,8 +218,8 @@ export default function OrdenesProduccion() {
   const [prodReceta, setProdReceta] = useState(null)   // { ings, unidsBacheNet, bache, pesoUnidad, pesoSubp }
   // Empaque de saldo pendiente al crear la orden: null = sin preguntar aún, true/false = decisión
   const [empacarSaldo, setEmpacarSaldo] = useState(null)
-  const [saldoSelId, setSaldoSelId] = useState('')
-  const [saldoCant, setSaldoCant] = useState('')
+  // Empaque de saldo(s): mapa id → { cantidad } — se pueden marcar varios del mismo producto.
+  const [saldoPackSel, setSaldoPackSel] = useState({})
   const [ingIdx, setIngIdx] = useState('')
   const [ingDisp, setIngDisp] = useState('')
   // Opciones rápidas de vencimiento (personalizables, en meses)
@@ -388,6 +388,16 @@ export default function OrdenesProduccion() {
     .map(s => ({ ...s, peso: dispSaldo(s, exceptId), pesoTotal: Number(s.peso) || 0 }))
     .filter(s => s.peso > 0 || (ordenPrep && prepLotesExtra.some(e => e.saldo_id === s.id)))
 
+  // Unidades estimadas a partir de un peso/cantidad de saldo (según ficha del producto).
+  const unidadesDesdeSaldoCant = (cant, unidadSaldo, ficha = prodReceta) => {
+    const c = parseFloat(cant) || 0
+    const pu = parseFloat(ficha?.pesoUnidad) || 0
+    if (!(c > 0) || !(pu > 0)) return 0
+    const esSubp = String(unidadSaldo || '').toLowerCase().includes('subp')
+    const pesoEquiv = esSubp && (ficha.pesoSubp > 0) ? c * ficha.pesoSubp : c
+    return Math.round(pesoEquiv / pu)
+  }
+  const limpiarSaldoPack = () => { setEmpacarSaldo(null); setSaldoPackSel({}) }
   // Devuelve el/los lote(s) de MP usados por un ingrediente, cruzando por mp_id (o nombre) contra la trazabilidad.
   // ---- Ajustes de ingredientes en planta ----
   // Reaplica sobre la receta los ajustes que ya estaban guardados en la orden, para que al
@@ -454,10 +464,25 @@ export default function OrdenesProduccion() {
     if (ok) { setEditIngs(false); toast(`${ajustes.length} ajuste(s) registrados — se aplicarán al enviar la orden`, 'success') }
   }
 
-  const loteDeTraza = (traza, ing) => {
+  const trazaItemDeIng = (traza, ing) => {
     const key = String(ing?.nombre || '').trim().toLowerCase()
-    const t = (traza || []).find(x => (ing?.mpId != null && String(x.mp_id) === String(ing.mpId)) || String(x.nombre || '').trim().toLowerCase() === key)
+    return (traza || []).find(x => (ing?.mpId != null && String(x.mp_id) === String(ing.mpId)) || String(x.nombre || '').trim().toLowerCase() === key)
+  }
+  const loteDeTraza = (traza, ing) => {
+    const t = trazaItemDeIng(traza, ing)
     return t && Array.isArray(t.lotes) ? t.lotes.map(l => l.lote).filter(Boolean).join(' · ') : ''
+  }
+  const proveedorDeTraza = (traza, ing) => {
+    const t = trazaItemDeIng(traza, ing)
+    if (!t || !Array.isArray(t.lotes)) return ''
+    const provs = [...new Set(t.lotes.map(l => String(l.proveedor || '').trim()).filter(Boolean))]
+    return provs.join(' · ')
+  }
+  const fmtLoteTraza = (l, u) => {
+    const lot = l.lote || 's/lote'
+    const prov = String(l.proveedor || '').trim()
+    const qty = fmtCantLote(l.cantidad, u)
+    return prov ? `${lot} (${prov}): ${qty}` : `${lot}: ${qty}`
   }
   const lotesDeMP = (mpId) => lotesMP.filter(l => String(l.mp_id) === String(mpId))
     .sort((a, b) => ((a.vencimiento || '9999-99-99') < (b.vencimiento || '9999-99-99') ? -1 : a.vencimiento === b.vencimiento ? ((a.fecha_entrada || '') < (b.fecha_entrada || '') ? -1 : 1) : 1))
@@ -529,13 +554,32 @@ export default function OrdenesProduccion() {
     }
     if (st.nuevaOrden) {
       const n = st.nuevaOrden
-      setForm({ ...EMPTY_ORDEN, producto: n.producto || '', origen: n.origen || 'producto', origen_id: n.origen_id || '', cantidad_plan: n.cantidad_plan || '' })
+      setForm({ ...EMPTY_ORDEN, producto: n.producto || '', origen: n.origen || 'producto', origen_id: n.origen_id || '', cantidad_plan: n.cantidad_plan || '', vence: n.vence || '', operario: esOperario ? (profile?.nombre || '') : '' })
       setProdReceta(null); setIngIdx(''); setIngDisp('')
       setModalNueva(true)
-      if (n.origen_id) {
-        const val = `${n.origen === 'receta' ? 'recipe' : 'prod'}-${n.origen_id}`
-        selectProducto(val, { ancla: n.ancla, cantidad: n.cantidad_ancla })
+      const afterProd = async () => {
+        if (n.origen_id) {
+          const val = `${n.origen === 'receta' ? 'recipe' : 'prod'}-${n.origen_id}`
+          await selectProducto(val, { ancla: n.ancla, cantidad: n.cantidad_ancla })
+        }
+        if (n.empacar_saldo) {
+          setEmpacarSaldo(true)
+          const ids = Array.isArray(n.saldo_ids) ? n.saldo_ids : (n.saldo_id ? [n.saldo_id] : [])
+          const cants = n.saldo_cantidades && typeof n.saldo_cantidades === 'object' ? n.saldo_cantidades : {}
+          const pack = {}
+          for (const id of ids) {
+            const s = saldosMezcla.find(x => String(x.id) === String(id))
+            pack[id] = { cantidad: String(cants[id] ?? cants[String(id)] ?? s?.peso ?? '') }
+          }
+          setSaldoPackSel(pack)
+          const unids = Object.entries(pack).reduce((sum, [id, v]) => {
+            const s = saldosMezcla.find(x => String(x.id) === String(id))
+            return sum + unidadesDesdeSaldoCant(v?.cantidad, s?.unidad)
+          }, 0)
+          if (unids > 0) setForm(f => ({ ...f, cantidad_plan: String(unids), baches_plan: '', vence: n.vence || f.vence }))
+        }
       }
+      afterProd()
       acted = true
     }
     if (st.filtrarProducto) {
@@ -1002,22 +1046,34 @@ export default function OrdenesProduccion() {
   // Abre el modal de Iniciar proceso (fecha de inicio + tiempos por subproceso, con autoguardado)
   const openProceso = async (o) => {
     setAutoSavedAt('')
-    // Empaque de saldo: la salida real son las unidades empacadas del saldo (van como "lote empacado"),
-    // por eso la producción principal queda en 0 y el saldo se pre-carga listo para consumir.
-    const packInfo = (o.empaque_saldo && Array.isArray(o.saldo_pack) && o.saldo_pack[0]) ? o.saldo_pack[0] : null
+    // Empaque de saldo: precarga TODOS los saldos de saldo_pack (pueden ser varios del mismo producto).
+    const packs = (o.empaque_saldo && Array.isArray(o.saldo_pack)) ? o.saldo_pack : []
     // Respuestas SI/NO guardadas tal cual (si existe el borrador); si no, sin marcar
     const ps = (o.prep_sino && typeof o.prep_sino === 'object') ? o.prep_sino : {}
     const triState = (v) => (v === true || v === false) ? v : null
-    // Empaque de saldo: las unidades obtenidas de la producción SON las unidades empacadas del saldo.
+    // Empaque de saldo: las unidades obtenidas = suma de lo empacado de cada saldo.
     setPrepUnidades(o.empaque_saldo ? String(o.cantidad_result || o.cantidad_plan || '') : (o.cantidad_result || '')); setPrepPesoFinal(o.peso_final || ''); setPrepPesoDesp(o.peso_desperdicio || '')
     setPrepObs(o.obs_result || ''); setPrepResp(o.operario || profile?.nombre || ''); setPrepConforme(triState(ps.conforme))
     // Surtido y sobrante SIEMPRE arrancan sin marcar (el usuario debe elegir); solo se restauran si ya se respondieron en el borrador.
     setPrepSurtido(triState(ps.surtido)); setPrepLoteMezcla(o.lote_mezcla || ''); setPrepProductoSurtido(o.producto_surtido || '')
     setPrepPorciona(false); setPrepCantSubp(o.cant_subporciones || '')
     setPrepFotoFile(null); setPrepFotoPrev(o.foto_url || '')
-    if (packInfo) {
-      const s = saldosMezcla.find(x => String(x.id) === String(packInfo.saldo_id))
-      setPrepLotesExtra([{ lote: s?.lote || o.lote || '', vence: s?.vencimiento || o.vence || '', unidades: String(o.cantidad_plan || ''), conforme: true, saldo_id: packInfo.saldo_id, peso_consumido: String(packInfo.cantidad || ''), surtido: false, lote_mezcla: '' }])
+    if (packs.length) {
+      const filas = packs.map(p => {
+        const s = saldosMezcla.find(x => String(x.id) === String(p.saldo_id))
+        const unidsGuardadas = parseFloat(p.unidades)
+        const unids = Number.isFinite(unidsGuardadas) && unidsGuardadas > 0
+          ? String(unidsGuardadas)
+          : (packs.length === 1 ? String(o.cantidad_plan || '') : '')
+        return {
+          lote: s?.lote || o.lote || '', vence: s?.vencimiento || o.vence || '',
+          unidades: unids, conforme: true, saldo_id: p.saldo_id,
+          peso_consumido: String(p.cantidad || ''), surtido: false, lote_mezcla: '',
+        }
+      })
+      setPrepLotesExtra(filas)
+      const sumU = filas.reduce((s, f) => s + (parseFloat(f.unidades) || 0), 0)
+      if (sumU > 0) setPrepUnidades(String(sumU))
     } else setPrepLotesExtra([])
     setPrepHaySobrante(triState(ps.hay_sobrante)); setPrepSobrantePeso(o.sobrante_peso || ''); setPrepSobranteUnidad(o.sobrante_unidad || 'g')
     // Siempre arranca en NO-manual para que RECALCULE la sugerencia en cada apertura. (Antes, como el
@@ -1418,6 +1474,7 @@ export default function OrdenesProduccion() {
     let traza = (live && prepTraza.length) ? prepTraza : (Array.isArray(o.lotes_mp) ? o.lotes_mp : (Array.isArray(o.lotes_reservados) ? o.lotes_reservados : []))
     if (!traza.length) { try { const { data } = await supabase.from('production_orders').select('lotes_mp, lotes_reservados').eq('id', o.id).single(); traza = (Array.isArray(data?.lotes_mp) && data.lotes_mp) || (Array.isArray(data?.lotes_reservados) && data.lotes_reservados) || [] } catch { /* sin traza */ } }
     const loteIng = (ing) => loteDeTraza(traza, ing)
+    const proveedorIng = (ing) => proveedorDeTraza(traza, ing)
     const filas = ings.map(i => `<tr><td>${i.nombre}</td><td class="r">${g(i.gramos)} g</td></tr>`).join('')
     const totalG = ings.reduce((s, i) => s + (i.gramos || 0), 0)
     const fecha = new Date().toLocaleDateString('es-CO')
@@ -1528,8 +1585,8 @@ export default function OrdenesProduccion() {
       </table>
 
       <div class="seccion">LISTA DE INGREDIENTES</div>
-      <table class="ingr"><thead><tr><th>Ingrediente</th><th class="r">Porcentaje</th><th class="r">Cantidad (gr)</th><th>Lote MP</th></tr></thead>
-        <tbody>${filas ? ings.map(i => `<tr><td>${i.nombre}</td><td class="r">${totalG > 0 ? (i.gramos / totalG * 100).toFixed(1) : '0'}%</td><td class="r">${g(i.gramos)}</td><td>${loteIng(i)}</td></tr>`).join('') + `<tr><td><b>TOTAL</b></td><td class="r"><b>100%</b></td><td class="r"><b>${g(totalG)}</b></td><td></td></tr>` : '<tr><td colspan="4">Sin receta vinculada</td></tr>'}</tbody>
+      <table class="ingr"><thead><tr><th>Ingrediente</th><th class="r">Porcentaje</th><th class="r">Cantidad (gr)</th><th>Lote MP</th><th>Proveedor MP</th></tr></thead>
+        <tbody>${filas ? ings.map(i => `<tr><td>${i.nombre}</td><td class="r">${totalG > 0 ? (i.gramos / totalG * 100).toFixed(1) : '0'}%</td><td class="r">${g(i.gramos)}</td><td>${loteIng(i)}</td><td>${proveedorIng(i)}</td></tr>`).join('') + `<tr><td><b>TOTAL</b></td><td class="r"><b>100%</b></td><td class="r"><b>${g(totalG)}</b></td><td></td><td></td></tr>` : '<tr><td colspan="5">Sin receta vinculada</td></tr>'}</tbody>
       </table>
 
       ${d ? `<div class="seccion">DATOS PREVISTOS</div>${filasPrev}` : ''}
@@ -1845,8 +1902,7 @@ export default function OrdenesProduccion() {
         const ext = prepFotoFile.name.split('.').pop()
         foto_url = await uploadFile('production-photos', `produccion/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`, prepFotoFile)
       }
-      const unidades = parseFloat(prepUnidades) || 0
-      const estado = prepConforme && unidades > 0 ? 'conforme' : 'no conforme'
+      const unidadesRaw = parseFloat(prepUnidades) || 0
       // Consumo de saldos de los lotes combinados en el surtido.
       // Si el campo quedó vacío y hay UN solo lote combinado, por defecto se consume la cantidad surtida.
       const surtidoConsumos = []
@@ -1866,11 +1922,13 @@ export default function OrdenesProduccion() {
         ...prepLotesExtra.filter(e => e.saldo_id && (parseFloat(e.peso_consumido) || 0) > 0).map(e => ({ saldo_id: e.saldo_id, cantidad: parseFloat(e.peso_consumido) || 0 })),
       ]
       // Lotes empacados adicionales (saldos de mezcla / partes empacadas con otro lote).
-      // En empaque de saldo NO se cuentan aparte: sus unidades ya están en la producción principal
-      // (evita duplicar el registro y el stock). El saldo igual se descuenta por su peso más abajo.
-      const extras = ordenPrep.empaque_saldo ? [] : prepLotesExtra.filter(e => (parseFloat(e.unidades) || 0) > 0)
+      // Empaque de saldo (solo saldos, sin producción nueva): cada saldo genera su propio registro
+      // de producción (lote original). La producción principal queda en 0 para no duplicar stock.
+      const extras = prepLotesExtra.filter(e => (parseFloat(e.unidades) || 0) > 0)
       const extrasUnid = extras.reduce((s, e) => s + (parseFloat(e.unidades) || 0), 0)
+      const unidades = ordenPrep.empaque_saldo ? 0 : unidadesRaw
       const unidadesTotal = unidades + extrasUnid
+      const estado = prepConforme && unidadesTotal > 0 ? 'conforme' : 'no conforme'
       // ===== EMPAQUE a descontar (se permite stock negativo, igual que los ingredientes; no bloquea).
       // Bolsas = TOTAL de subporciones producidas (cada una lleva su bolsa aunque quede como saldo).
       const { plan: empaquePlan } = await prepararEmpaque(o, {
@@ -1882,24 +1940,41 @@ export default function OrdenesProduccion() {
       const autoAprob = esAdmin
       // 1) Crear/actualizar el registro de producción vinculado a la orden
       const recExist = recordsDeOrden(o.id)[0]
-      const regData = {
-        producto: o.producto, fecha: fechaIni, lote: prepLote, vence: prepVence || null,
-        empaque: o.unidad || 'UNIDADES', cantidad: unidades, inicio: inicioGlobal || null, fin: finGlobal || null,
-        labor: 'PRODUCCION', responsable: prepResp || o.operario || '', obs: prepObs || '',
-        peso_final: parseFloat(prepPesoFinal) || 0, peso_desperdicio: parseFloat(prepPesoDesp) || 0,
-        estado, completado: true, foto_url, orden_id: o.id, aprobado: autoAprob,
-        tipo_registro: o.es_subproducto ? 'subproducto' : 'final', subprocesos: procs,
-        peso_subporcion: prepPorciona ? (parseFloat(prepPesoSubp) || 0) : null,
-        cant_subporciones: prepPorciona ? (parseFloat(prepCantSubp) || 0) : null,
-        surtido: !!prepSurtido, lote_mezcla: prepSurtido ? (prepLoteMezcla || null) : null,
-        producto_surtido: prepSurtido ? (prepProductoSurtido || null) : null,
-        surtido_cantidad: prepSurtido && prepSurtidoCantidad !== '' ? (parseFloat(prepSurtidoCantidad) || 0) : null,
-        lotes_origen: prepSurtido ? (prepLoteMezcla || '') : '',
+      // Empaque solo-saldo: un registro por cada lote de saldo (no un registro vacío principal).
+      const skipMain = !!(ordenPrep.empaque_saldo && extras.length > 0)
+      if (!skipMain) {
+        const regData = {
+          producto: o.producto, fecha: fechaIni, lote: prepLote, vence: prepVence || null,
+          empaque: o.unidad || 'UNIDADES', cantidad: unidades, inicio: inicioGlobal || null, fin: finGlobal || null,
+          labor: 'PRODUCCION', responsable: prepResp || o.operario || '', obs: prepObs || '',
+          peso_final: parseFloat(prepPesoFinal) || 0, peso_desperdicio: parseFloat(prepPesoDesp) || 0,
+          estado, completado: true, foto_url, orden_id: o.id, aprobado: autoAprob,
+          tipo_registro: o.es_subproducto ? 'subproducto' : 'final', subprocesos: procs,
+          peso_subporcion: prepPorciona ? (parseFloat(prepPesoSubp) || 0) : null,
+          cant_subporciones: prepPorciona ? (parseFloat(prepCantSubp) || 0) : null,
+          surtido: !!prepSurtido, lote_mezcla: prepSurtido ? (prepLoteMezcla || null) : null,
+          producto_surtido: prepSurtido ? (prepProductoSurtido || null) : null,
+          surtido_cantidad: prepSurtido && prepSurtidoCantidad !== '' ? (parseFloat(prepSurtidoCantidad) || 0) : null,
+          lotes_origen: prepSurtido ? (prepLoteMezcla || '') : '',
+        }
+        if (recExist) await writeOrQueue({ table: 'production_records', action: 'update', match: { id: recExist.id }, payload: regData })
+        else await writeOrQueue({ table: 'production_records', action: 'insert', payload: regData })
+      } else if (recExist) {
+        // Había un borrador del registro principal: lo actualiza con el primer saldo empacado.
+        const ex0 = extras[0]
+        const exUnid0 = parseFloat(ex0.unidades) || 0
+        await writeOrQueue({ table: 'production_records', action: 'update', match: { id: recExist.id }, payload: {
+          producto: o.producto, fecha: fechaIni, lote: ex0.lote || prepLote, vence: ex0.vence || prepVence || null,
+          empaque: o.unidad || 'UNIDADES', cantidad: exUnid0, inicio: inicioGlobal || null, fin: finGlobal || null,
+          labor: 'PRODUCCION', responsable: prepResp || o.operario || '',
+          obs: (prepObs ? prepObs + ' · ' : '') + 'Empacado de saldo en proceso',
+          estado: prepConforme && exUnid0 > 0 ? 'conforme' : 'no conforme', completado: true, foto_url, orden_id: o.id, aprobado: autoAprob,
+          tipo_registro: o.es_subproducto ? 'subproducto' : 'final', subprocesos: procs,
+        } })
       }
-      if (recExist) await writeOrQueue({ table: 'production_records', action: 'update', match: { id: recExist.id }, payload: regData })
-      else await writeOrQueue({ table: 'production_records', action: 'insert', payload: regData })
       // 1b) Un registro de producción por cada lote empacado adicional (con su propio conforme)
-      for (const ex of extras) {
+      const extrasAInsertar = skipMain && recExist ? extras.slice(1) : extras
+      for (const ex of extrasAInsertar) {
         const exUnid = parseFloat(ex.unidades) || 0
         await writeOrQueue({ table: 'production_records', action: 'insert', payload: {
           producto: o.producto, fecha: fechaIni, lote: ex.lote || prepLote, vence: ex.vence || prepVence || null,
@@ -2107,15 +2182,37 @@ export default function OrdenesProduccion() {
   // Ingredientes cuyo consumo excede el STOCK REAL de la MP (no solo los lotes). Se usa para
   // avisar antes de crear la orden: producir igual es válido (el stock puede reponerse), pero el
   // usuario debe saberlo — no descubrirlo cuando el inventario quede negativo.
-  const faltantesStock = () => {
-    if (!prodReceta || form.origen !== 'producto' || form.forzar_sin_lote) return []
-    return (prodReceta.ings || []).filter(i => i.mpId).map(i => {
-      const mp = mps.find(m => String(m.id) === String(i.mpId))
-      const unidad = mp?.unidad || ''
-      const necesita = gramosAUnidadMP(Number(i.gramos) || 0, unidad)
-      const stock = Number(mp?.stock) || 0
-      return necesita > stock + 0.001 ? { nombre: i.nombre, falta: necesita - stock, unidad } : null
+  // Vista previa de MP según cantidad planificada (crear/editar orden).
+  const previewIngsOrden = () => {
+    if (!prodReceta || form.orden_blanca || empacarSaldo) return []
+    const cantidad = parseFloat(form.cantidad_plan) || 0
+    if (!(cantidad > 0)) return []
+    const bachesPlan = parseFloat(form.baches_plan) || 0
+    const unidsBache = prodReceta.unidsBacheNet || form.unidadesPorBache || 0
+    const baches = bachesPlan > 0 ? bachesPlan : (unidsBache > 0 ? snapBaches(cantidad / unidsBache) : 0)
+    if (!(baches > 0)) return []
+    return (prodReceta.ings || []).map(ing => {
+      const gramos = (parseFloat(ing.cantidad) || 0) * baches
+      if (!(gramos > 0)) return null
+      const mp = ing.mpId ? mps.find(m => String(m.id) === String(ing.mpId)) : null
+      const unidad = mp?.unidad || 'g'
+      const requiere = mp ? gramosAUnidadMP(gramos, unidad) : gramos
+      const disponible = mp != null ? (Number(mp.stock) || 0) : null
+      return {
+        nombre: ing.nombre,
+        mpId: ing.mpId || null,
+        unidad,
+        requiere,
+        disponible,
+        queda: disponible != null ? disponible - requiere : null,
+      }
     }).filter(Boolean)
+  }
+  const faltantesStock = () => {
+    if (form.forzar_sin_lote) return []
+    return previewIngsOrden()
+      .filter(r => r.disponible != null && r.requiere > r.disponible + 0.001)
+      .map(r => ({ nombre: r.nombre, falta: r.requiere - r.disponible, unidad: r.unidad }))
   }
   // Envoltura del botón crear: si falta stock, confirma antes de continuar.
   const intentarCrearOrden = async () => {
@@ -2134,24 +2231,41 @@ export default function OrdenesProduccion() {
   const crearOrden = useMutation({
     mutationFn: async () => {
       if (!form.producto.trim()) throw new Error('Indica el producto/receta')
-      if (!(parseFloat(form.cantidad_plan) > 0)) throw new Error('Ingresa la cantidad planificada')
       if (!form.operario) throw new Error('Asigna un operario')
       if (form.es_subproducto && !form.mp_id) throw new Error(form.es_mp ? 'Esta MP vendible no está vinculada a una materia prima (revísala en la ficha)' : 'Indica qué materia prima alimenta el subproducto')
       const esEmp = empacarSaldo === true
-      if (esEmp && !(saldoSelId && parseFloat(saldoCant) > 0)) throw new Error('Elige el saldo y la cantidad a empacar')
-      if (esEmp) { const enProc = ordenEnProcesoDeSaldo(saldoSelId, editOrdenId); if (enProc) throw new Error(`Ese saldo ya está reservado por la orden #${opNum(enProc.id)} (${enProc.estado === 'pendiente' ? 'pendiente, sin cerrar' : 'en proceso'}). Ciérrala y envíala primero para poder empacarlo en otra orden.`) }
-      const saldoUnidad = saldosMezcla.find(s => String(s.id) === String(saldoSelId))?.unidad || 'g'
+      const packsElegidos = Object.entries(saldoPackSel)
+        .map(([id, v]) => {
+          const s = saldosMezcla.find(x => String(x.id) === String(id))
+          if (!s) return null
+          const cant = parseFloat(v?.cantidad)
+          if (!(cant > 0)) return null
+          const unids = unidadesDesdeSaldoCant(cant, s.unidad)
+          return { saldo_id: s.id, cantidad: cant, unidad: s.unidad || 'g', unidades: unids }
+        })
+        .filter(Boolean)
+      if (esEmp && !packsElegidos.length) throw new Error('Marca al menos un saldo e indica la cantidad a empacar')
+      if (esEmp) {
+        for (const p of packsElegidos) {
+          const enProc = ordenEnProcesoDeSaldo(p.saldo_id, editOrdenId)
+          if (enProc) throw new Error(`El saldo lote ${saldosMezcla.find(s => String(s.id) === String(p.saldo_id))?.lote || p.saldo_id} ya está en la orden #${opNum(enProc.id)}. Ciérrala primero.`)
+        }
+      }
+      const cantPlan = esEmp
+        ? packsElegidos.reduce((s, p) => s + (Number(p.unidades) || 0), 0) || (parseFloat(form.cantidad_plan) || 0)
+        : (parseFloat(form.cantidad_plan) || 0)
+      if (!(cantPlan > 0)) throw new Error('Ingresa la cantidad planificada')
       const campos = {
         producto: form.producto, origen: form.origen, origen_id: form.origen_id ? parseInt(form.origen_id) : null,
         es_subproducto: form.es_subproducto, mp_id: form.es_subproducto && form.mp_id ? parseInt(form.mp_id) : null,
-        cantidad_plan: parseFloat(form.cantidad_plan) || 0, unidad: form.unidad,
+        cantidad_plan: cantPlan, unidad: form.unidad,
         operario: form.operario, notas_orden: form.notas_orden,
         lote: form.lote || '', vence: form.vence || null, baches_plan: parseFloat(form.baches_plan) || null, inicio: form.inicio || null,
         es_prueba: form.origen === 'receta', forzar_sin_lote: !!form.forzar_sin_lote,
         orden_blanca: !!form.orden_blanca,
         lotes_preferidos: form.lotes_elegidos && Object.keys(form.lotes_elegidos).length ? form.lotes_elegidos : null,
         empaque_saldo: esEmp,
-        saldo_pack: esEmp ? [{ saldo_id: saldoSelId, cantidad: parseFloat(saldoCant) || 0, unidad: saldoUnidad }] : null,
+        saldo_pack: esEmp ? packsElegidos : null,
       }
       if (editOrdenId) {
         // Editar una orden aún PENDIENTE (no tomada)
@@ -2171,7 +2285,7 @@ export default function OrdenesProduccion() {
       // Notificar al operario asignado
       await notificar({ destinatario: form.operario, tipo: 'orden_asignada', mensaje: `Nueva orden de producción asignada: ${form.producto}`, link: '/ordenes', ref_id: data?.id })
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['mezcla_saldos'] }); closeNueva(); setForm(EMPTY_ORDEN); setEmpacarSaldo(null); setSaldoSelId(''); setSaldoCant(''); toast(editOrdenId ? 'Orden actualizada ✓' : 'Orden creada y asignada ✓') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['mezcla_saldos'] }); closeNueva(); setForm(EMPTY_ORDEN); limpiarSaldoPack(); toast(editOrdenId ? 'Orden actualizada ✓' : 'Orden creada y asignada ✓') },
     onError: (e) => toast(e.message, 'error'),
   })
 
@@ -3034,13 +3148,24 @@ export default function OrdenesProduccion() {
       orden_blanca: !!o.orden_blanca,
       lotes_elegidos: (o.lotes_preferidos && typeof o.lotes_preferidos === 'object') ? o.lotes_preferidos : {},
     }))
+    if (o.empaque_saldo && Array.isArray(o.saldo_pack) && o.saldo_pack.length) {
+      setEmpacarSaldo(true)
+      const pack = {}
+      for (const p of o.saldo_pack) {
+        if (p?.saldo_id == null) continue
+        pack[p.saldo_id] = { cantidad: String(p.cantidad ?? '') }
+      }
+      setSaldoPackSel(pack)
+    } else {
+      limpiarSaldoPack()
+    }
     setModalNueva(true)
   }
 
   const selectProducto = async (val, prefill) => {
     // val = 'prod-{id}' | 'recipe-{id}'; prefill = { ancla, cantidad } para precargar el ingrediente disponible
     setProdReceta(null); setIngIdx(''); setIngDisp('')
-    setEmpacarSaldo(null); setSaldoSelId(''); setSaldoCant('')
+    setEmpacarSaldo(null); setSaldoPackSel({})
     setForm(f => ({ ...f, baches_plan: '' }))
     const aplicarPrefill = (ings, unidsBacheNet) => {
       if (!prefill?.ancla) return
@@ -3111,7 +3236,7 @@ export default function OrdenesProduccion() {
           {esAdmin && pendientesAprob > 0 && <span className="badge badge-dorado" style={{ alignSelf: 'center' }}>{pendientesAprob} por aprobar</span>}
           {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => setModalAudit(true)}><Ico as={ScrollText} size={14} />Registro de creación</button>}
           <button className="btn btn-secondary btn-sm" title="Descargar un PDF con todas las órdenes visibles (cada una en su hoja)" onClick={() => descargarOrdenesPDF(visibles)}><Ico as={Download} size={14} />Descargar órdenes</button>
-          {puedeCrearOrdenes && <button className="btn btn-primary btn-sm" onClick={() => { setEditOrdenId(null); setForm({ ...EMPTY_ORDEN, operario: esOperario ? (profile?.nombre || '') : '' }); setProdReceta(null); setIngIdx(''); setIngDisp(''); setEmpacarSaldo(null); setSaldoSelId(''); setSaldoCant(''); setModalNueva(true) }}><Ico as={Plus} size={14} />Nueva Orden</button>}
+          {puedeCrearOrdenes && <button className="btn btn-primary btn-sm" onClick={() => { setEditOrdenId(null); setForm({ ...EMPTY_ORDEN, operario: esOperario ? (profile?.nombre || '') : '' }); setProdReceta(null); setIngIdx(''); setIngDisp(''); limpiarSaldoPack(); setModalNueva(true) }}><Ico as={Plus} size={14} />Nueva Orden</button>}
         </div>
       </div>
 
@@ -3125,12 +3250,12 @@ export default function OrdenesProduccion() {
           </summary>
           <div className="acordeon-body">
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
-              <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', margin: 0 }}>Sobrantes de producción sin empacar. Se pueden empacar al diligenciar una orden del mismo producto.</p>
+              <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', margin: 0 }}>Sobrantes sin empacar. Puedes crear una orden solo para empacar uno o varios saldos del mismo producto (sin producir mezcla nueva).</p>
               <button className="btn btn-sm btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => pushTo('/porempacar')}>Gestionar productos por empacar</button>
             </div>
             <div className="table-wrap">
               <table>
-                <thead><tr><th>Producto</th><th>Lote</th><th className="td-number">Disponible</th><th>Vence</th><th>Origen</th></tr></thead>
+                <thead><tr><th>Producto</th><th>Lote</th><th className="td-number">Disponible</th><th>Vence</th><th>Origen</th>{puedeCrearOrdenes && <th></th>}</tr></thead>
                 <tbody>
                   {saldosMezcla.map(s => {
                     const est = estadoLote(s.vencimiento)
@@ -3141,6 +3266,35 @@ export default function OrdenesProduccion() {
                         <td className="td-number">{fCant(s.peso)} {s.unidad}</td>
                         <td style={{ color: est === 'vencido' ? 'var(--rojo)' : est === 'por_vencer' ? 'var(--tierra)' : undefined }}>{fmtVence(s.vencimiento)} {est === 'vencido' ? '⛔' : est === 'por_vencer' ? '⚠' : ''}</td>
                         <td style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>{s.orden_origen ? `OP-${opNum(s.orden_origen)}` : '—'}</td>
+                        {puedeCrearOrdenes && (
+                          <td>
+                            <button type="button" className="btn btn-xs btn-primary" title="Crear orden solo para empacar este saldo"
+                              onClick={() => {
+                                setEditOrdenId(null)
+                                limpiarSaldoPack()
+                                setIngIdx(''); setIngDisp('')
+                                setModalNueva(true)
+                                const oid = s.origen_id ? String(s.origen_id) : ''
+                                const val = oid ? `prod-${oid}` : ''
+                                const abrir = async () => {
+                                  if (val) await selectProducto(val)
+                                  setEmpacarSaldo(true)
+                                  setSaldoPackSel({ [s.id]: { cantidad: String(s.peso) } })
+                                  setForm(f => ({
+                                    ...f,
+                                    producto: s.producto || f.producto,
+                                    origen: 'producto',
+                                    origen_id: oid || f.origen_id,
+                                    vence: s.vencimiento || f.vence || '',
+                                    operario: f.operario || (esOperario ? (profile?.nombre || '') : ''),
+                                  }))
+                                }
+                                abrir()
+                              }}>
+                              <Ico as={Recycle} size={12} />Empacar
+                            </button>
+                          </td>
+                        )}
                       </tr>
                     )
                   })}
@@ -3283,7 +3437,7 @@ export default function OrdenesProduccion() {
       <Modal open={modalNueva} onClose={closeNueva} title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>{editOrdenId ? <Pencil size={18} aria-hidden="true" /> : <Factory size={18} aria-hidden="true" />}{editOrdenId ? 'Editar Orden de Producción' : 'Nueva Orden de Producción'}</span>} size="modal-lg"
         footer={<>
           <button className="btn btn-secondary" onClick={closeNueva}>Cancelar</button>
-          <button className="btn btn-primary" onClick={intentarCrearOrden} disabled={crearOrden.isPending || (empacarSaldo === true && saldoSelId && !!ordenEnProcesoDeSaldo(saldoSelId, editOrdenId))}>{editOrdenId ? 'Guardar cambios' : 'Crear y asignar'}</button>
+          <button className="btn btn-primary" onClick={intentarCrearOrden} disabled={crearOrden.isPending || (empacarSaldo === true && Object.keys(saldoPackSel).some(id => !!ordenEnProcesoDeSaldo(id, editOrdenId)))}>{editOrdenId ? 'Guardar cambios' : 'Crear y asignar'}</button>
         </>}
       >
         <div className="form-group">
@@ -3337,56 +3491,100 @@ export default function OrdenesProduccion() {
             </span>
           </label>
         )}
-        {/* Empaque de saldo pendiente: si el producto elegido tiene saldos, se ofrece empacarlos */}
+        {/* Empaque de saldo pendiente: si el producto elegido tiene saldos, se ofrece empacarlos (uno o varios) */}
         {(() => {
           const saldosProd = form.origen === 'producto' && form.origen_id ? saldosDeProducto(form.producto, form.origen_id).filter(s => (s.peso || 0) > 0) : []
           if (!saldosProd.length) return null
           const ordenados = [...saldosProd].sort((a, b) => String(a.vencimiento || '9').localeCompare(String(b.vencimiento || '9')))
-          const sel = ordenados.find(s => String(s.id) === String(saldoSelId)) || null
-          const esSubp = (sel?.unidad || '').toLowerCase().includes('subp')
-          const cant = parseFloat(saldoCant) || 0
-          const pesoEquiv = esSubp && (prodReceta?.pesoSubp > 0) ? cant * prodReceta.pesoSubp : cant
-          const unids = (prodReceta?.pesoUnidad > 0) ? Math.round(pesoEquiv / prodReceta.pesoUnidad) : 0
+          const elegidos = ordenados.filter(s => saldoPackSel[s.id])
+          const totalUnids = elegidos.reduce((sum, s) => {
+            const cant = parseFloat(saldoPackSel[s.id]?.cantidad) || 0
+            return sum + unidadesDesdeSaldoCant(cant, s.unidad)
+          }, 0)
+          const algunoBloqueado = elegidos.some(s => !!ordenEnProcesoDeSaldo(s.id, editOrdenId))
+          const toggleSaldo = (s, on) => {
+            setSaldoPackSel(m => {
+              const next = !on ? (() => { const { [s.id]: _, ...rest } = m; return rest })() : { ...m, [s.id]: { cantidad: String(s.peso) } }
+              const unids = Object.entries(next).reduce((sum, [id, v]) => {
+                const row = ordenados.find(x => String(x.id) === String(id))
+                return sum + unidadesDesdeSaldoCant(v?.cantidad, row?.unidad)
+              }, 0)
+              if (unids > 0) setForm(f => ({ ...f, cantidad_plan: String(unids), baches_plan: '' }))
+              return next
+            })
+            if (on && s.vencimiento) setForm(f => ({ ...f, vence: f.vence || s.vencimiento }))
+          }
+          const setCantSaldo = (s, cantidad) => {
+            setSaldoPackSel(m => {
+              const next = { ...m, [s.id]: { cantidad } }
+              const unids = Object.entries(next).reduce((sum, [id, v]) => {
+                const row = ordenados.find(x => String(x.id) === String(id))
+                return sum + unidadesDesdeSaldoCant(v?.cantidad, row?.unidad)
+              }, 0)
+              setForm(f => ({ ...f, cantidad_plan: unids > 0 ? String(unids) : f.cantidad_plan, baches_plan: '' }))
+              return next
+            })
+          }
           return (
             <div className="form-group" style={{ background: 'rgba(200,169,74,0.12)', border: '1px solid rgba(200,169,74,0.45)', borderRadius: 'var(--radio)', padding: 12 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <strong style={{ color: 'var(--tierra)', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Recycle size={16} aria-hidden="true" /> Hay {ordenados.length} saldo(s) de mezcla anteriores por empacar</strong>
-                <span>¿Deseas empacarlo?</span>
-                <SiNo value={empacarSaldo} onChange={setEmpacarSaldo} />
+                <strong style={{ color: 'var(--tierra)', display: 'inline-flex', alignItems: 'center', gap: 6 }}><Recycle size={16} aria-hidden="true" /> Hay {ordenados.length} saldo(s) de mezcla por empacar</strong>
+                <span>¿Empacar solo saldo(s)?</span>
+                <SiNo value={empacarSaldo} onChange={v => { setEmpacarSaldo(v); if (v !== true) setSaldoPackSel({}) }} />
               </div>
               {empacarSaldo === true && (
                 <div style={{ marginTop: 10, display: 'grid', gap: 8 }}>
-                  <div>
-                    <label style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>Saldo a empacar (ordenado por vencimiento)</label>
-                    <Select className="form-control" value={saldoSelId} onChange={e => {
-                      const id = e.target.value
-                      setSaldoSelId(id); setSaldoCant('')
-                      // Precargar SOLO el vencimiento del saldo (misma mezcla). El lote debe ser NUEVO para no confundir.
-                      const sSel = ordenados.find(x => String(x.id) === String(id))
-                      if (sSel && sSel.vencimiento) setForm(f => ({ ...f, vence: sSel.vencimiento }))
-                    }}>
-                      <option value="">Seleccionar saldo...</option>
-                      {ordenados.map(s => { const enP = ordenEnProcesoDeSaldo(s.id); return <option key={s.id} value={s.id}>Lote {s.lote || '(s/n)'} · disp. {fCant(s.peso)} {s.unidad}{s.vencimiento ? ` · vence ${s.vencimiento}` : ''}{enP ? ` · ⏳ en orden #${opNum(enP.id)} (ciérrala primero)` : ''}</option> })}
-                    </Select>
-                    {/* Alerta naranja si el saldo elegido ya está en una orden abierta: se deshabilita "Crear y asignar" */}
-                    {(() => { const enProc = saldoSelId ? ordenEnProcesoDeSaldo(saldoSelId) : null; return enProc ? (
-                      <div style={{ marginTop: 6, padding: '6px 10px', borderRadius: 6, background: 'rgba(230,126,34,0.12)', border: '1px solid rgba(230,126,34,0.5)', color: '#c0620f', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 6 }}>
-                        <AlertTriangle size={14} aria-hidden="true" /> Este saldo ya está reservado por la orden #{opNum(enProc.id)} ({enProc.estado === 'pendiente' ? 'pendiente, sin cerrar' : 'en proceso'}). Ciérrala y envíala primero para poder empacarlo aquí.
+                  <small style={{ color: 'var(--texto-suave)', fontSize: '0.75rem' }}>
+                    Marca uno o varios saldos del mismo producto (ej. dos bocadillos). No consume MP nueva: solo empaca lo ya producido. Cada lote queda como registro de producción.
+                  </small>
+                  {ordenados.map(s => {
+                    const enP = ordenEnProcesoDeSaldo(s.id, editOrdenId)
+                    const checked = !!saldoPackSel[s.id]
+                    const cant = saldoPackSel[s.id]?.cantidad ?? ''
+                    const unids = unidadesDesdeSaldoCant(cant, s.unidad)
+                    const est = estadoLote(s.vencimiento)
+                    return (
+                      <div key={s.id} style={{ border: '1px dashed rgba(200,169,74,0.5)', borderRadius: 6, padding: 8, opacity: enP ? 0.65 : 1 }}>
+                        <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, cursor: enP ? 'not-allowed' : 'pointer', margin: 0 }}>
+                          <input type="checkbox" checked={checked} disabled={!!enP}
+                            onChange={e => toggleSaldo(s, e.target.checked)}
+                            style={{ marginTop: 3, width: 18, height: 18 }} />
+                          <span style={{ flex: 1 }}>
+                            <strong>Lote {s.lote || '(s/n)'}</strong>
+                            {' · '}disp. {fCant(s.peso)} {s.unidad}
+                            {s.vencimiento ? ` · vence ${fmtVence(s.vencimiento)}` : ''}
+                            {est === 'vencido' ? ' ⛔' : est === 'por_vencer' ? ' ⚠' : ''}
+                            {enP && <span style={{ color: '#c0620f', display: 'block', fontSize: '0.72rem' }}>⏳ Ya en orden #{opNum(enP.id)} — ciérrala primero</span>}
+                          </span>
+                        </label>
+                        {checked && !enP && (
+                          <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap', marginTop: 6, marginLeft: 26 }}>
+                            <div>
+                              <label style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Cantidad ({s.unidad})</label>
+                              <input type="number" className="form-control" style={{ maxWidth: 140 }} value={cant}
+                                onChange={e => setCantSaldo(s, e.target.value)} min={0} max={s.peso} step="any" />
+                            </div>
+                            <button type="button" className="btn btn-sm btn-secondary" onClick={() => setCantSaldo(s, String(s.peso))}>Todo</button>
+                            <span style={{ paddingBottom: 8, fontSize: '0.85rem' }}>= <strong>{fNum(unids)}</strong> und</span>
+                          </div>
+                        )}
                       </div>
-                    ) : null })()}
-                  </div>
-                  {sel && (
-                    <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, flexWrap: 'wrap' }}>
-                      <div>
-                        <label style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>Cantidad a empacar ({sel.unidad})</label>
-                        <input type="number" className="form-control" style={{ maxWidth: 150 }} value={saldoCant} onChange={e => setSaldoCant(e.target.value)} min={0} max={sel.peso} />
-                      </div>
-                      <button type="button" className="btn btn-sm btn-secondary" onClick={() => setSaldoCant(String(sel.peso))}>Todo ({fCant(sel.peso)})</button>
-                      <span style={{ paddingBottom: 8, fontSize: '0.9rem' }}>= <strong>{fNum(unids)}</strong> unidades a salir</span>
-                      <button type="button" className="btn btn-sm btn-primary" disabled={!(cant > 0) || !(unids > 0)} onClick={() => setForm(f => ({ ...f, cantidad_plan: String(unids), baches_plan: '' }))}>Usar cantidad</button>
+                    )
+                  })}
+                  {elegidos.length > 0 && (
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+                      <span style={{ fontSize: '0.9rem' }}>Total estimado: <strong>{fNum(totalUnids)}</strong> unidades · {elegidos.length} lote(s)</span>
+                      <button type="button" className="btn btn-sm btn-primary" disabled={!(totalUnids > 0) || algunoBloqueado}
+                        onClick={() => setForm(f => ({ ...f, cantidad_plan: String(totalUnids), baches_plan: '' }))}>
+                        Usar como cantidad planificada
+                      </button>
                     </div>
                   )}
-                  <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>No consume MP (ya está producido). En el diligenciamiento se cargan los ingredientes de referencia y asignas el nuevo lote.</small>
+                  {algunoBloqueado && (
+                    <div style={{ padding: '6px 10px', borderRadius: 6, background: 'rgba(230,126,34,0.12)', border: '1px solid rgba(230,126,34,0.5)', color: '#c0620f', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: 6 }}>
+                      <AlertTriangle size={14} aria-hidden="true" /> Uno o más saldos ya están en otra orden abierta.
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -3396,17 +3594,7 @@ export default function OrdenesProduccion() {
           <div className="form-group"><label className="form-label">Cantidad planificada (unidades) *</label><input type="number" className="form-control" value={form.cantidad_plan} onChange={e => {
             const v = e.target.value
             setForm(f => ({ ...f, cantidad_plan: v, baches_plan: '' }))
-            // Empaque de saldo: al escribir las UNIDADES, se calcula automáticamente cuánto del saldo corresponde.
-            const sSel = saldosMezcla.find(x => String(x.id) === String(saldoSelId))
-            if (empacarSaldo && sSel && (prodReceta?.pesoUnidad > 0) && (parseFloat(v) || 0) > 0) {
-              const units = parseFloat(v) || 0
-              const esSubp = (sSel.unidad || '').toLowerCase().includes('subp')
-              const amount = esSubp && prodReceta.pesoSubp > 0
-                ? Math.round(units * prodReceta.pesoUnidad / prodReceta.pesoSubp)
-                : Math.round(units * prodReceta.pesoUnidad)
-              setSaldoCant(String(Math.min(amount, sSel.peso)))
-            }
-          }} min={0} /></div>
+          }} min={0} readOnly={empacarSaldo === true && Object.keys(saldoPackSel).length > 0} style={empacarSaldo === true && Object.keys(saldoPackSel).length > 0 ? { background: 'var(--crema)' } : undefined} /></div>
           <div className="form-group"><label className="form-label">Unidad</label>
             <Select className="form-control" value={form.unidad} onChange={e => setForm(f => ({ ...f, unidad: e.target.value }))}>
               <option value="unidades">unidades</option><option value="cajas">cajas</option><option value="kilos">kilos</option><option value="bolsas">bolsas</option>
@@ -3420,6 +3608,52 @@ export default function OrdenesProduccion() {
             {parseFloat(form.cantidad_plan) > 0 && <> Tu cantidad ({fNum(parseFloat(form.cantidad_plan))} unid) equivale a <strong>{(parseFloat(form.cantidad_plan) / form.unidadesPorBache).toFixed(2)}</strong> bache(s).</>}
           </div>
         )}
+        {/* Vista previa: ingredientes requeridos vs stock disponible */}
+        {(() => {
+          const filas = previewIngsOrden()
+          if (!filas.length) return null
+          const hayFalta = filas.some(r => r.queda != null && r.queda < -0.001)
+          return (
+            <div className="form-group" style={{ background: hayFalta ? 'rgba(192,57,43,0.06)' : 'rgba(124,179,66,0.06)', padding: 10, borderRadius: 'var(--radio)', border: `1px solid ${hayFalta ? 'rgba(192,57,43,0.25)' : 'rgba(124,179,66,0.25)'}` }}>
+              <label className="form-label" style={{ marginBottom: 6 }}>Ingredientes según la cantidad a producir</label>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ingrediente</th>
+                      <th className="td-number">Se requiere</th>
+                      <th className="td-number">Disponible</th>
+                      <th className="td-number">Quedaría</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filas.map((r, i) => {
+                      const falta = r.queda != null && r.queda < -0.001
+                      const justo = r.queda != null && !falta && r.queda < r.requiere * 0.05
+                      return (
+                        <tr key={i} style={falta ? { background: 'rgba(192,57,43,0.08)' } : undefined}>
+                          <td>{r.nombre}{!r.mpId && <small style={{ color: 'var(--texto-suave)', display: 'block' }}>sin MP enlazada</small>}</td>
+                          <td className="td-number">{fMP(r.requiere, r.unidad)}</td>
+                          <td className="td-number" style={{ color: r.disponible == null ? 'var(--texto-suave)' : undefined }}>
+                            {r.disponible == null ? '—' : fMP(r.disponible, r.unidad)}
+                          </td>
+                          <td className="td-number" style={{ fontWeight: 600, color: falta ? 'var(--rojo)' : justo ? 'var(--tierra)' : 'var(--selva)' }}>
+                            {r.queda == null ? '—' : fMP(r.queda, r.unidad)}
+                            {falta ? ' ⚠' : ''}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: 6 }}>
+                Se actualiza al cambiar la cantidad. Disponible = stock actual en Inventario MP.
+                {hayFalta && <> En rojo: no alcanza el stock; puedes crear la orden igual, pero el inventario quedará negativo al consumir.</>}
+              </small>
+            </div>
+          )
+        })()}
         {/* Planear según la cantidad disponible de un ingrediente */}
         {!empacarSaldo && prodReceta && prodReceta.ings.length > 0 && (
           <div className="form-group" style={{ background: 'rgba(124,179,66,0.06)', padding: 10, borderRadius: 'var(--radio)' }}>
@@ -3461,14 +3695,17 @@ export default function OrdenesProduccion() {
             </label>
             {form.forzar_sin_lote
               ? <div style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>El consumo se registrará como <strong>salida sin lote</strong>; los lotes no se modifican.</div>
-              : prodReceta.ings.filter(i => i.mpId).map((ing, k) => {
+              : (() => {
+              const previewByMp = Object.fromEntries(previewIngsOrden().filter(r => r.mpId).map(r => [String(r.mpId), r]))
+              return prodReceta.ings.filter(i => i.mpId).map((ing, k) => {
               const lts = lotesDeMP(ing.mpId)
               const mpRow = mps.find(m => String(m.id) === String(ing.mpId))
               const mpUnidad = mpRow?.unidad || ''
               // Stock REAL de la MP (fuente de verdad en Inventario), independiente de si tiene lotes cargados.
               const stockReal = Number(mpRow?.stock) || 0
-              // Cuánto se necesita para esta orden, en la unidad de la MP (la receta trae gramos/ml).
-              const necesita = gramosAUnidadMP(Number(ing.gramos) || 0, mpUnidad)
+              // Cuánto se necesita para esta orden (según cantidad planificada), en la unidad de la MP.
+              const prev = previewByMp[String(ing.mpId)]
+              const necesita = prev?.requiere || 0
               // Suma de los lotes disponibles y reservados (lo que la trazabilidad "conoce").
               const dispLotes = lts.reduce((s, l) => s + (Number(l.cantidad_actual) || 0), 0)
               const totalLotes = lts.reduce((s, l) => s + (Number(l.cantidad_actual) || 0) + (Number(l.cantidad_reservada) || 0), 0)
@@ -3493,6 +3730,7 @@ export default function OrdenesProduccion() {
                     {necesita > 0 && (
                       <span style={{ fontWeight: 400, color: faltaStock ? 'var(--rojo)' : 'var(--texto-suave)', fontSize: '0.76rem' }}>
                         necesita {fMP(necesita, mpUnidad)} · stock real {fMP(stockReal, mpUnidad)}
+                        {prev && <> · quedaría {fMP(prev.queda, mpUnidad)}</>}
                       </span>
                     )}
                   </div>
@@ -3528,7 +3766,8 @@ export default function OrdenesProduccion() {
                   }
                 </div>
               )
-            })}
+            })
+              })()}
             <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>👉 = lote sugerido a consumir primero (más próximo a vencer / más antiguo). Si hay 2+ lotes vigentes puedes elegir cuál usar; «Automático (PEPS)» reserva el sugerido. Al iniciar la orden se reserva el lote elegido (y PEPS para el resto si falta).</small>
           </div>
         )}
@@ -3764,11 +4003,12 @@ export default function OrdenesProduccion() {
                       return (
                         <div className="table-wrap">
                           <table>
-                            <thead><tr><th style={{ width: 40 }}>✓</th><th>Ingrediente</th><th className="td-number">Cantidad a usar</th>{ordenPrep?.orden_blanca && <th className="td-number">Costo MP</th>}<th className="td-number">Queda en stock</th><th>Lote MP</th>{ordenPrep?.orden_blanca && <th></th>}</tr></thead>
+                            <thead><tr><th style={{ width: 40 }}>✓</th><th>Ingrediente</th><th className="td-number">Cantidad a usar</th>{ordenPrep?.orden_blanca && <th className="td-number">Costo MP</th>}<th className="td-number">Queda en stock</th><th>Lote MP</th><th>Proveedor</th>{ordenPrep?.orden_blanca && <th></th>}</tr></thead>
                             <tbody>
                               {prepIngs.map((i, k) => {
                                 const ok = !!alistado[k]
                                 const loteMp = loteDeTraza(prepTraza, i)
+                                const provMp = proveedorDeTraza(prepTraza, i)
                                 const mp = i.mpId ? mps.find(m => String(m.id) === String(i.mpId)) : null
                                 // El stock que muestra la app YA tiene descontada la reserva de esta
                                 // orden (se reserva al iniciar producción), así que es lo que queda
@@ -3811,11 +4051,12 @@ export default function OrdenesProduccion() {
                                         : <>{fMP(queda, mp.unidad)}{negativo && ' ⚠'}</>}
                                     </td>
                                     <td style={{ fontSize: '0.82rem', color: loteMp ? 'var(--selva)' : 'var(--texto-suave)' }}>{loteMp || '—'}</td>
+                                    <td style={{ fontSize: '0.82rem', color: provMp ? 'var(--texto)' : 'var(--texto-suave)' }}>{provMp || '—'}</td>
                                     {ordenPrep?.orden_blanca && <td><button type="button" className="btn btn-xs btn-danger" onClick={() => { setPrepIngs(arr => arr.filter((_, idx) => idx !== k)); setPrepIngsBase(arr => arr.filter((_, idx) => idx !== k)) }}><X size={12} aria-hidden="true" /></button></td>}
                                   </tr>
                                 )
                               })}
-                              <tr style={{ fontWeight: 700, background: 'rgba(124,179,66,0.08)' }}><td></td><td>TOTAL</td><td className="td-number">{fCant(totalG)} g</td>{ordenPrep?.orden_blanca && <td className="td-number">{fCOP(prepIngs.reduce((s, i) => s + (Number(i.costo) || 0), 0))}</td>}<td></td><td></td>{ordenPrep?.orden_blanca && <td></td>}</tr>
+                              <tr style={{ fontWeight: 700, background: 'rgba(124,179,66,0.08)' }}><td></td><td>TOTAL</td><td className="td-number">{fCant(totalG)} g</td>{ordenPrep?.orden_blanca && <td className="td-number">{fCOP(prepIngs.reduce((s, i) => s + (Number(i.costo) || 0), 0))}</td>}<td></td><td></td><td></td>{ordenPrep?.orden_blanca && <td></td>}</tr>
                             </tbody>
                           </table>
                           <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
@@ -4151,8 +4392,8 @@ export default function OrdenesProduccion() {
                 return (
                   <div className="form-group" style={{ background: 'rgba(124,179,66,0.07)', borderRadius: 'var(--radio)', padding: 10 }}>
                     <label className="form-label"><Ico as={Recycle} size={14} />Empacar saldo de mezcla en proceso (lotes anteriores)</label>
-                    {/* Los botones de agregar solo cuando NO viene ya precargado (empaque de saldo) */}
-                    {!ordenPrep.empaque_saldo && saldos.length > 0 && (
+                    {/* Los botones de agregar: también en empaque de saldo, para sumar otro saldo del mismo producto */}
+                    {saldos.length > 0 && (
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 8 }}>
                         {saldos.map(s => (
                           <button key={s.id} type="button" className="btn btn-xs btn-secondary"
@@ -4188,11 +4429,16 @@ export default function OrdenesProduccion() {
                       // salvo que el usuario haya ajustado "quedó" a mano. En empaque de saldo también sincroniza
                       // el campo principal "Unidades obtenidas" de arriba.
                       const setUnidades = v => {
-                        setPrepLotesExtra(arr => arr.map((x, idx) => idx === i
-                          // Cambiar las UNIDADES siempre recalcula lo gastado (y "quedó"), reseteando el ajuste manual.
-                          ? { ...x, unidades: v, pesoManual: false, peso_consumido: (x.saldo_id != null && factorGasto > 0 && v !== '') ? String(+((parseFloat(v) || 0) * factorGasto).toFixed(2)) : x.peso_consumido }
-                          : x))
-                        if (ordenPrep.empaque_saldo && ex.saldo_id != null) setPrepUnidades(v)
+                        setPrepLotesExtra(arr => {
+                          const next = arr.map((x, idx) => idx === i
+                            ? { ...x, unidades: v, pesoManual: false, peso_consumido: (x.saldo_id != null && factorGasto > 0 && v !== '') ? String(+((parseFloat(v) || 0) * factorGasto).toFixed(2)) : x.peso_consumido }
+                            : x)
+                          if (ordenPrep.empaque_saldo) {
+                            const sum = next.reduce((s, x) => s + (parseFloat(x.unidades) || 0), 0)
+                            setPrepUnidades(String(sum || ''))
+                          }
+                          return next
+                        })
                       }
                       // Lote y vence quedan fijos (vienen del saldo). Las unidades SÍ son editables.
                       const bloqLV = ex.saldo_id != null
@@ -4529,7 +4775,7 @@ export default function OrdenesProduccion() {
                   <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 12 }}><Ico as={Link2} size={15} />Materia Prima — Trazabilidad de lotes (PEPS) {(Array.isArray(o.lotes_mp) && o.lotes_mp.length) ? 'consumidos' : 'reservados'}</div>
                   <div className="table-wrap">
                     <table>
-                      <thead><tr><th>Materia prima</th><th className="td-number">Consumo</th><th>Lotes usados (PEPS)</th></tr></thead>
+                      <thead><tr><th>Materia prima</th><th className="td-number">Consumo</th><th>Lotes usados (PEPS)</th><th>Proveedor</th></tr></thead>
                       <tbody>
                         {trz.map((t, i) => (
                           <tr key={i}>
@@ -4543,14 +4789,17 @@ export default function OrdenesProduccion() {
                                       <button type="button" onClick={() => abrirDetalleLoteMp(t, l)}
                                         title="Ver detalles del lote (compra, proveedor, costo)"
                                         style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--selva-claro)', textDecoration: 'underline', fontSize: 'inherit', fontFamily: 'inherit' }}>
-                                        {l.lote || 's/lote'}
+                                        {fmtLoteTraza(l, t.unidad)}
                                       </button>
-                                      {l.vencimiento ? ` (vence ${fFecha(l.vencimiento)})` : ''}: {aBase(l.cantidad, t.unidad)}
+                                      {l.vencimiento ? ` (vence ${fFecha(l.vencimiento)})` : ''}
                                     </span>
                                   ))
                                 : (t.sin_lote_cantidad > 0 || t.sin_lote) ? '' : '—'}
                               {t.sin_lote_cantidad > 0 && <span style={{ color: 'var(--tierra)' }}>{(t.lotes || []).length ? ' · ' : ''}⚠ {aBase(t.sin_lote_cantidad, t.unidad)} sin lote (stock general)</span>}
                               {t.sin_lote && !t.sin_lote_cantidad && <span style={{ color: 'var(--texto-suave)' }}>Sin lote (forzado)</span>}
+                            </td>
+                            <td style={{ fontSize: '0.8rem' }}>
+                              {[...new Set((t.lotes || []).map(l => String(l.proveedor || '').trim()).filter(Boolean))].join(' · ') || '—'}
                             </td>
                           </tr>
                         ))}

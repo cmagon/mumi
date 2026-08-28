@@ -704,8 +704,7 @@ export default function Costos({ vista = 'productos' }) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mps, ordenesProduccionAnalisis, productos, cifTotal, equipos, equipoLinks, operariosActivos, op.dias, op.jornadaHoras, op.improductividad])
 
-  // Indicadores REALES de un producto guardado: costo pleno (producción + gastos del período) y
-  // utilidad neta (tras comisión). Sin ICA: ese impuesto es del período, no de la ficha.
+  // Indicadores de producto: utilidad bruta y margen operacional estimado (prorrateo; no es resultado contable).
   const indicadoresProducto = (p, rc) => {
     const pMayor = parseFloat(p.precio_mayor) || 0
     const cPleno = rc.costoTotalUnit * (1 + tasaGastosOper)
@@ -1626,9 +1625,8 @@ export default function Costos({ vista = 'productos' }) {
         <div className="card fichas-lista">
           <div className="card-title"><Ico as={Package} size={14} />Fichas de Productos</div>
           <div className="alert alert-info" style={{ fontSize:'0.82rem' }}>
-            ℹ Todo se recalcula <strong>en vivo</strong> con el CIF y los precios de MP actuales. La <strong>utilidad neta</strong> ya
-            descuenta costo de producción, gastos de administración/ventas/financieros y comisión: es lo que de verdad te queda.
-            El ICA no se calcula en la ficha (es impuesto del período).
+            ℹ Todo se recalcula <strong>en vivo</strong> con el CIF y los precios de MP actuales.
+            El <strong>margen operacional estimado</strong> prorratea gastos admin/ventas/financieros y comisión sobre el costo de producción: es referencia de gestión, no la utilidad neta contable del ejercicio (ver Tablero).
             Los valores <strong>guardados</strong> (los que usan Producto Terminado, Órdenes y el Tablero) solo cambian al guardar la
             ficha o con <strong>"↻ Aplicar a las fichas"</strong> en Costos y Gastos.
           </div>
@@ -1680,7 +1678,7 @@ export default function Costos({ vista = 'productos' }) {
                         <Fila et="Costo pleno/u (+ gastos)">{fCOP(ind.cPleno)}</Fila>
                         <Fila et="P. Mayor">{fCOP(p.precio_mayor)}</Fila>
                         <Fila et="Margen bruto/u"><span style={{ color: ind.utilidadBruta >= 0 ? 'var(--selva)' : 'var(--rojo)' }}>{fCOP(ind.utilidadBruta)}{ind.margenBrutoPct != null ? ` (${ind.margenBrutoPct.toFixed(1)}%)` : ''}</span></Fila>
-                        <Fila et="Utilidad neta/u"><span style={{ color: colorUtil }}>{fCOP(ind.utilNeta)}</span></Fila>
+                        <Fila et="Margen op. est./u"><span style={{ color: colorUtil }} title="Estimado: precio − costo producción − comisión − gastos prorrateados. No es utilidad neta contable del ejercicio.">{fCOP(ind.utilNeta)}</span></Fila>
                         <Fila et="Utilidad al mes"><span style={{ color: colorUtil }}>{fCOP(ind.utilMes)}</span></Fila>
                         {produccionDesviada && (
                           <div className="ficha-alerta-produccion" role="status">
@@ -2739,7 +2737,7 @@ export default function Costos({ vista = 'productos' }) {
                             <tbody>
                               <tr><td>(−) Comisión de ventas <small>({comisionPct}%)</small></td><td className="td-number">{fCOP(sug.precioObjetivo * comisionPct / 100)}</td></tr>
                               <tr><td>(−) Gastos admin/ventas/financieros por u <small>({(tasaGastosOper*100).toFixed(1)}% del costo de producción · informativo)</small></td><td className="td-number">{fCOP(sug.gastosOperUnit)}</td></tr>
-                              <tr style={{ fontWeight:600, color:'var(--texto)' }}><td>= Utilidad neta estimada/u</td><td className="td-number">{fCOP(utilBrutaUnit - sug.precioObjetivo * comisionPct / 100 - sug.gastosOperUnit)}</td></tr>
+                              <tr style={{ fontWeight:600, color:'var(--texto)' }}><td>= Margen operacional estimado/u</td><td className="td-number">{fCOP(utilBrutaUnit - sug.precioObjetivo * comisionPct / 100 - sug.gastosOperUnit)}</td></tr>
                             </tbody>
                           </table>
                           <div style={{ marginTop:8, display:'flex', gap:8, flexWrap:'wrap', alignItems:'center' }}>
@@ -2955,9 +2953,13 @@ export default function Costos({ vista = 'productos' }) {
                     )}
                     <div className="row"><span>− Gastos admin/ventas/financieros <small style={{opacity:0.6,fontSize:'0.72rem'}}>({(tasaGastosOper * 100).toFixed(1)}%)</small></span><span style={{color:'var(--dorado)'}}>−{fCOP(gastosU)}</span></div>
                     <div className="row ganancia" style={{ fontWeight:700, borderTop:'1px solid rgba(245,240,232,0.25)', paddingTop:6 }}>
-                      <span>= UTILIDAD NETA por unidad</span>
+                      <span>= MARGEN OPERACIONAL ESTIMADO por unidad</span>
                       <span style={{ color: utilNeta >= 0 ? 'var(--lima)' : 'var(--rojo)' }}><strong style={{ fontSize:'1.15rem' }}>{pMayor > 0 ? utilNetaPct.toFixed(1) + '%' : '-'}</strong> <small style={{ opacity:0.85 }}>· {fCOP(utilNeta)}/u</small></span>
                     </div>
+                    <p style={{ fontSize:'0.7rem', color:'var(--texto-suave)', margin:'6px 0 0', lineHeight:1.4 }}>
+                      Con el precio mayor, costo de producción, comisión y gastos prorrateados vigentes en Costos y Gastos.
+                      Referencia de gestión: <strong>no es la utilidad neta contable</strong> del negocio (faltan impuestos, ventas reales del período, otros ingresos/gastos y la asignación exacta por producto). La utilidad neta real está en el Tablero.
+                    </p>
                   </div>
 
                   <div style={{ marginTop:10, paddingTop:8, borderTop:'1px dashed rgba(245,240,232,0.2)', fontSize:'0.78rem' }}>

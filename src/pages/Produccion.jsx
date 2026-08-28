@@ -1214,10 +1214,15 @@ export default function Produccion() {
                       <div className="card-title" style={{ fontSize: '0.95rem' }}><Ico as={Link2} size={15} />Materias primas consumidas (lotes)</div>
                       <div className="table-wrap" style={{ marginBottom: 12 }}>
                         <table>
-                          <thead><tr><th>Materia prima</th><th className="td-number">Consumo</th><th>Lotes (PEPS)</th></tr></thead>
+                          <thead><tr><th>Materia prima</th><th className="td-number">Consumo</th><th>Lotes (PEPS)</th><th>Proveedor</th></tr></thead>
                           <tbody>
                             {ord.lotes_mp.map((t, i) => (
-                              <tr key={i}><td>{t.nombre}</td><td className="td-number">{fNum(t.consumo)} {t.unidad}</td><td style={{ fontSize: '0.8rem' }}>{(t.lotes || []).map(l => `${l.lote || 's/lote'}: ${fNum(l.cantidad)}`).join(' · ') || '—'}</td></tr>
+                              <tr key={i}>
+                                <td>{t.nombre}</td>
+                                <td className="td-number">{fNum(t.consumo)} {t.unidad}</td>
+                                <td style={{ fontSize: '0.8rem' }}>{(t.lotes || []).map(l => `${l.lote || 's/lote'}: ${fNum(l.cantidad)}`).join(' · ') || '—'}</td>
+                                <td style={{ fontSize: '0.8rem' }}>{[...new Set((t.lotes || []).map(l => String(l.proveedor || '').trim()).filter(Boolean))].join(' · ') || '—'}</td>
+                              </tr>
                             ))}
                           </tbody>
                         </table>

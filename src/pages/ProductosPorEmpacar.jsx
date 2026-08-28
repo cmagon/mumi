@@ -5,6 +5,7 @@ import { fFecha, fCOP } from '../lib/businessLogic'
 import { estadoLote } from '../lib/lotes'
 import { useToast } from '../hooks/useToast'
 import { useAuth } from '../context/AuthContext'
+import { useNavTrail } from '../hooks/useNavTrail'
 import Modal from '../components/ui/Modal'
 import { Recycle, Trash2, Pencil } from 'lucide-react'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
@@ -16,6 +17,7 @@ export default function ProductosPorEmpacar() {
   const toast = useToast()
   const qc = useQueryClient()
   const { profile } = useAuth()
+  const { pushTo } = useNavTrail()
   const [tab, setTab] = useState('saldos')
   const [buscar, setBuscar] = useState('')
   const [modalBaja, setModalBaja] = useState(null)   // saldo a dar de baja
@@ -89,8 +91,9 @@ export default function ProductosPorEmpacar() {
       </div>
 
       <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>
-        Semielaborados pendientes de empacar (sobrantes de mezcla y subporciones). Se empacan al diligenciar una orden del mismo producto (bloque "♻ Empacar saldo"). Aquí puedes <strong>darlos de baja</strong> si no se van a empacar.
-        {' '}Es tu <strong>inventario de producto en proceso</strong>: ya consumió materia prima, mano de obra y CIF, así que su valor todavía es tuyo — al darlo de baja, esa plata se pierde.
+        Semielaborados pendientes de empacar. Para empacarlos <strong>sin producir mezcla nueva</strong>: usa <strong>Empacar</strong> (crea una orden solo de empaque) o, en Órdenes, elige el producto → “¿Empacar solo saldo(s)?” y marca uno o varios lotes.
+        Aquí también puedes <strong>darlos de baja</strong> si no se van a empacar.
+        {' '}Es tu <strong>inventario de producto en proceso</strong>: ya consumió materia prima, mano de obra y CIF.
       </div>
 
       <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
@@ -133,6 +136,20 @@ export default function ProductosPorEmpacar() {
                           <td className="col-opcional" style={{ color: est === 'vencido' ? 'var(--rojo)' : est === 'por_vencer' ? 'var(--tierra)' : undefined }}>{fmtV(s.vencimiento)} {est === 'vencido' ? '⛔' : est === 'por_vencer' ? '⚠' : ''}</td>
                           <td className="col-opcional-2" style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>{s.created_at ? fFecha(s.created_at.slice(0, 10)) : '—'}</td>
                           <td style={{ whiteSpace: 'nowrap' }}>
+                            <button className="btn btn-xs btn-primary" title="Crear orden solo para empacar este saldo"
+                              onClick={() => pushTo('/ordenes', {
+                                nuevaOrden: {
+                                  producto: s.producto || '',
+                                  origen: 'producto',
+                                  origen_id: s.origen_id ? String(s.origen_id) : '',
+                                  empacar_saldo: true,
+                                  saldo_ids: [s.id],
+                                  saldo_cantidades: { [s.id]: String(s.peso) },
+                                  vence: s.vencimiento || '',
+                                },
+                              })}>
+                              <Ico as={Recycle} size={14} />Empacar
+                            </button>{' '}
                             <button className="btn btn-xs btn-secondary" onClick={() => abrirEditar(s)}><Ico as={Pencil} size={14} />Editar</button>{' '}
                             <button className="btn btn-xs btn-danger" onClick={() => abrirBaja(s)}><Ico as={Trash2} size={14} />Dar de baja</button>
                           </td>

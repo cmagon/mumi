@@ -33,6 +33,7 @@ import Select from '../components/ui/Select'
 import { useUnsavedGuard, snapConfig } from '../hooks/useUnsavedGuard'
 import { useConfirm } from '../context/ConfirmContext'
 import { TabClientes, TabMetricasCrm } from './catalogoCrm'
+import { sincronizarCatalogoSheets } from '../lib/syncSheetsCatalog'
 
 // Fuentes de Google disponibles para el catálogo (títulos, subtítulos, párrafos)
 const FUENTES = [
@@ -261,6 +262,7 @@ function TabProductos({ toast, qc, onDirtyChange }) {
   const [gestFrutos, setGestFrutos] = useState(false)
   const [dirtyExtra, setDirtyExtra] = useState(false)
   const [dirtyEditor, setDirtyEditor] = useState(false)
+  const [syncingSheets, setSyncingSheets] = useState(false)
   useEffect(() => { onDirtyChange?.(!!(dirtyExtra || dirtyEditor)) }, [dirtyExtra, dirtyEditor, onDirtyChange])
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
   const { data: frutosCat = [] } = useQuery({
@@ -291,11 +293,27 @@ function TabProductos({ toast, qc, onDirtyChange }) {
     },
   })
 
+  const syncSheets = (opts = {}) => { void sincronizarCatalogoSheets(opts) }
+
+  const syncSheetsManual = async () => {
+    setSyncingSheets(true)
+    try {
+      const r = await sincronizarCatalogoSheets({ silencioso: false, forzar: true })
+      if (r?.error) throw new Error(r.error)
+      toast(`Google Sheets: ${r.productos ?? 0} productos (${r.en_stock ?? 0} en stock)${r.omitidos_sin_imagen ? ` · ${r.omitidos_sin_imagen} sin imagen` : ''} ✓`)
+    } catch (e) {
+      toast(e.message || 'No se pudo sincronizar la hoja', 'error')
+    } finally {
+      setSyncingSheets(false)
+    }
+  }
+
   const toggleVisible = async (p) => {
     try {
       const { error } = await supabase.from('finished_products').update({ catalogo_visible: !p.catalogo_visible }).eq('id', p.id)
       if (error) throw error
       qc.invalidateQueries({ queryKey: ['catalogo_admin_productos'] })
+      syncSheets({ forzar: true })
     } catch (e) { toast(e.message, 'error') }
   }
 
@@ -304,11 +322,16 @@ function TabProductos({ toast, qc, onDirtyChange }) {
   return (
     <>
     <div className="card">
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 12 }}>
-        <p style={{ fontSize: '0.85rem', color: 'var(--texto-suave)', margin: 0, flex: 1 }}>
-          La <strong>categoría</strong> se toma automáticamente del tipo de la ficha. Precio, descripción e imágenes provienen del producto terminado (aquí también las puedes editar). Marca <strong>Visible</strong> para publicar.
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
+        <p style={{ fontSize: '0.85rem', color: 'var(--texto-suave)', margin: 0, flex: 1, minWidth: 200 }}>
+          La <strong>categoría</strong> se toma automáticamente del tipo de la ficha. Precio, descripción e imágenes provienen del producto terminado (aquí también las puedes editar). Marca <strong>Visible</strong> para publicar. Los visibles se sincronizan a Google Sheets (Meta).
         </p>
-        <button className="btn btn-sm btn-secondary" style={{ flexShrink: 0 }} onClick={() => setGestFrutos(true)}><Ico as={Pencil} size={13} />Gestionar frutos</button>
+        <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+          <button className="btn btn-sm btn-secondary" disabled={syncingSheets} onClick={syncSheetsManual} title="Empuja el catálogo a la hoja de Drive">
+            <Ico as={RefreshCw} size={13} />{syncingSheets ? 'Sincronizando…' : 'Sync Google Sheets'}
+          </button>
+          <button className="btn btn-sm btn-secondary" onClick={() => setGestFrutos(true)}><Ico as={Pencil} size={13} />Gestionar frutos</button>
+        </div>
       </div>
       <div className="table-wrap">
         <table>
@@ -340,7 +363,7 @@ function TabProductos({ toast, qc, onDirtyChange }) {
         </table>
       </div>
 
-      {editar && <EditorProducto producto={editar} frutosCat={frutosCat} toast={toast} qc={qc} onDirtyChange={setDirtyEditor} onClose={() => { setDirtyEditor(false); setEditar(null) }} />}
+      {editar && <EditorProducto producto={editar} frutosCat={frutosCat} toast={toast} qc={qc} onDirtyChange={setDirtyEditor} onSyncedSheets={() => syncSheets({ forzar: true })} onClose={() => { setDirtyEditor(false); setEditar(null) }} />}
       {gestFrutos && <GestionFrutos frutos={frutosCat} toast={toast} qc={qc} onClose={() => setGestFrutos(false)} />}
     </div>
     <ProductosExtra toast={toast} baseProductos={productos} onDirtyChange={setDirtyExtra} />
@@ -541,7 +564,7 @@ function OrdenCategorias({ categorias, toast }) {
 }
 
 // ---- Editor de un producto del catálogo (modal) ----
-function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyChange }) {
+function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyChange, onSyncedSheets }) {
   // Frutos: si ya tiene, se respetan; si no, se autodetectan desde el nombre del producto
   const [frutos, setFrutos] = useState(producto.catalogo_frutos?.length ? producto.catalogo_frutos : detectarFrutos(producto.nombre, frutosCat))
   const [beneficios, setBeneficios] = useState(Array.isArray(producto.catalogo_beneficios) ? producto.catalogo_beneficios : [])
@@ -639,6 +662,7 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
       toast(packSinMigracion
         ? 'Guardado sin packs: aplica migration_v154 en Supabase'
         : 'Producto actualizado ✓')
+      onSyncedSheets?.()
       onClose()
     } catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
   }

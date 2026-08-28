@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { sincronizarCatalogoSheets } from './syncSheetsCatalog'
 
 // Sincroniza el stock de producto terminado trayendo ventas de Alegra (remisiones reservan,
 // facturas descuentan). Es el "respaldo del webhook": Alegra no envía eventos de remisión y
@@ -22,6 +23,8 @@ export async function sincronizarStockAlegra({ silencioso = true } = {}) {
     if (error) throw error
     if (data?.error) throw new Error(data.error)
     localStorage.setItem(CLAVE, String(Date.now()))
+    // Stock puede haber cambiado → disponibilidad en la hoja Meta
+    void sincronizarCatalogoSheets({ silencioso: true })
     return data
   } catch (e) {
     if (!silencioso) throw e
