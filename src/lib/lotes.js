@@ -247,6 +247,7 @@ function mapConsumidos(lista) {
     vencimiento: c.vencimiento,
     cantidad: Number(c.cantidad) || 0,
     costo_unitario: Number(c.costo_unitario) || 0,
+    proveedor: c.proveedor || null,
   }))
 }
 
@@ -275,7 +276,7 @@ export async function consumirPEPS({ mp_id, cantidad, ajustarStock = false }) {
     if (restante <= 0) break
     const toma = Math.min(l.cantidad_actual, restante)
     await supabase.from('raw_material_lots').update({ cantidad_actual: l.cantidad_actual - toma }).eq('id', l.id)
-    consumidos.push({ id: l.id, lote: l.lote, vencimiento: l.vencimiento, cantidad: toma, costo_unitario: l.costo_unitario || 0 })
+    consumidos.push({ id: l.id, lote: l.lote, vencimiento: l.vencimiento, cantidad: toma, costo_unitario: l.costo_unitario || 0, proveedor: l.proveedor || null })
     restante -= toma
   }
   if (ajustarStock && cantidad > 0) {
@@ -291,12 +292,16 @@ export async function reservarPEPS({ mp_id, cantidad, preferLoteId = null }) {
   const { data, error } = await supabase.rpc('reservar_peps_lotes', { p_mp_id: mp_id, p_cantidad: cantidad, p_prefer_lote: preferLoteId || null })
   if (!error && data) {
     let reservados = data.reservados || []
-    if (reservados.length && reservados.some(r => r.costo_unitario == null)) {
+    if (reservados.length && reservados.some(r => r.costo_unitario == null || r.proveedor == null)) {
       try {
         const { data: costos } = await supabase.from('raw_material_lots')
-          .select('id, costo_unitario').in('id', reservados.map(r => r.id).filter(Boolean))
-        const porId = Object.fromEntries((costos || []).map(c => [String(c.id), c.costo_unitario || 0]))
-        reservados = reservados.map(r => ({ ...r, costo_unitario: r.costo_unitario ?? (porId[String(r.id)] || 0) }))
+          .select('id, costo_unitario, proveedor').in('id', reservados.map(r => r.id).filter(Boolean))
+        const porId = Object.fromEntries((costos || []).map(c => [String(c.id), c]))
+        reservados = reservados.map(r => ({
+          ...r,
+          costo_unitario: r.costo_unitario ?? (porId[String(r.id)]?.costo_unitario || 0),
+          proveedor: r.proveedor ?? (porId[String(r.id)]?.proveedor || null),
+        }))
       } catch { /* sin costos: la orden cae al precio promedio */ }
     }
     return { reservados, faltante: Number(data.faltante) || 0 }
@@ -320,7 +325,7 @@ export async function reservarPEPS({ mp_id, cantidad, preferLoteId = null }) {
       cantidad_actual: l.cantidad_actual - toma,
       cantidad_reservada: (l.cantidad_reservada || 0) + toma,
     }).eq('id', l.id)
-    reservados.push({ id: l.id, lote: l.lote, vencimiento: l.vencimiento, cantidad: toma, costo_unitario: l.costo_unitario || 0 })
+    reservados.push({ id: l.id, lote: l.lote, vencimiento: l.vencimiento, cantidad: toma, costo_unitario: l.costo_unitario || 0, proveedor: l.proveedor || null })
     restante -= toma
   }
   return { reservados, faltante: restante > 0 ? restante : 0 }
@@ -388,7 +393,7 @@ export async function consumirLote({ lote_id, cantidad, ajustarStock = false }) 
     await supabase.rpc('ajustar_stock_mp', { p_mp_id: l.mp_id, p_delta: -cantidad })
     return {
       consumidos: toma > 0
-        ? [{ id: l.id, lote: l.lote, vencimiento: l.vencimiento, cantidad: toma, costo_unitario: l.costo_unitario || 0 }]
+        ? [{ id: l.id, lote: l.lote, vencimiento: l.vencimiento, cantidad: toma, costo_unitario: l.costo_unitario || 0, proveedor: l.proveedor || null }]
         : [],
       faltante: cantidad - toma,
       stockAjustado: true,
@@ -396,7 +401,7 @@ export async function consumirLote({ lote_id, cantidad, ajustarStock = false }) 
   }
   return {
     consumidos: toma > 0
-      ? [{ id: l.id, lote: l.lote, vencimiento: l.vencimiento, cantidad: toma, costo_unitario: l.costo_unitario || 0 }]
+      ? [{ id: l.id, lote: l.lote, vencimiento: l.vencimiento, cantidad: toma, costo_unitario: l.costo_unitario || 0, proveedor: l.proveedor || null }]
       : [],
     faltante: cantidad - toma,
     stockAjustado: false,

@@ -319,6 +319,10 @@ export default function Inventario() {
     return faltante > 0 ? faltante * factorU(mp.unidad) : 0   // a unidad BASE para mostrar al usuario
   }
   const guardarMovimiento = async () => {
+    if (formMov.tipo === 'entrada' && !String(formMov.proveedor || '').trim()) {
+      toast('Indica el proveedor de esta compra', 'warning')
+      return
+    }
     const faltante = await chequearFaltanteLotes()
     if (faltante > 0) {
       const mp = mps.find(m => m.id === parseInt(formMov.mp_id))
@@ -389,6 +393,8 @@ export default function Inventario() {
         }
       } else if (formMov.tipo === 'entrada') {
         if (!(cantidad > 0)) throw new Error('Ingresa una cantidad')
+        const prov = String(formMov.proveedor || '').trim()
+        if (!prov) throw new Error('Indica el proveedor de esta compra')
         const costoLote = formMov.costo !== '' && formMov.costo != null
           ? (parseFloat(formMov.costo) || 0)
           : (mp?.precio || 0)
@@ -409,11 +415,10 @@ export default function Inventario() {
           lote: formMov.lote || (esEmpaque(mp?.categoria) ? LOTE_SIN_CODIGO : ''),
           vencimiento: formMov.vencimiento, fecha: fechaHoy,
           cantidad, costo_unitario: costoLote,
-          creado_por: profile?.nombre || '', proveedor: formMov.proveedor || '',
+          creado_por: profile?.nombre || '', proveedor: prov,
         })
         if (creado?.id) extra.lote_id = creado.id
-        const prov = String(formMov.proveedor || '').trim()
-        if (prov) extra.proveedor = prov
+        extra.proveedor = prov
         // Se aplica abajo en `upd` junto con lote/vencimiento
         extra._precio_promedio_nuevo = precioPromedio
       } else if (formMov.tipo === 'salida') {
@@ -1124,12 +1129,15 @@ export default function Inventario() {
                     <div className="form-group"><label className="form-label">Lote</label><input className="form-control" value={formMov.lote} onChange={e => setFormMov(f => ({ ...f, lote: e.target.value }))} placeholder="N° de lote" /></div>
                     <div className="form-group"><label className="form-label">Fecha de vencimiento</label><input type="date" className="form-control" value={formMov.vencimiento || ''} onChange={e => setFormMov(f => ({ ...f, vencimiento: e.target.value }))} /></div>
                   </div>
+                </>
+              )}
+
+              {formMov.tipo === 'entrada' && (
                   <div className="form-group">
-                    <label className="form-label">Proveedor <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(a quién se le compró este lote)</small></label>
-                    <input className="form-control" list="dl-proveedores-mp" value={formMov.proveedor || ''} onChange={e => setFormMov(f => ({ ...f, proveedor: e.target.value }))} />
+                    <label className="form-label">Proveedor * <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(obligatorio — a quién se le compró)</small></label>
+                    <input className="form-control" list="dl-proveedores-mp" value={formMov.proveedor || ''} required onChange={e => setFormMov(f => ({ ...f, proveedor: e.target.value }))} placeholder="Nombre del proveedor" />
                     <datalist id="dl-proveedores-mp">{proveedoresConocidos.map(p => <option key={p} value={p} />)}</datalist>
                   </div>
-                </>
               )}
 
               <div className="form-group"><label className="form-label">Responsable</label><input className="form-control" value={formMov.responsable} onChange={e => setFormMov(f => ({ ...f, responsable: e.target.value }))} placeholder="Nombre del responsable" /></div>
