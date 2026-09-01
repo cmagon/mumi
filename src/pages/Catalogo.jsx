@@ -324,7 +324,7 @@ function TabProductos({ toast, qc, onDirtyChange }) {
     <div className="card">
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 12, flexWrap: 'wrap' }}>
         <p style={{ fontSize: '0.85rem', color: 'var(--texto-suave)', margin: 0, flex: 1, minWidth: 200 }}>
-          La <strong>categoría</strong> se toma automáticamente del tipo de la ficha. Precio, descripción e imágenes provienen del producto terminado (aquí también las puedes editar). Marca <strong>Visible</strong> para publicar. Los visibles se sincronizan a Google Sheets (Meta).
+          La <strong>categoría</strong> se toma automáticamente del tipo de la ficha. En <strong>Editar</strong> puedes cambiar nombre, descripción, imágenes y más (el nombre también actualiza la ficha de producto). Marca <strong>Visible</strong> para publicar.
         </p>
         <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
           <button className="btn btn-sm btn-secondary" disabled={syncingSheets} onClick={syncSheetsManual} title="Empuja el catálogo a la hoja de Drive">
@@ -565,6 +565,7 @@ function OrdenCategorias({ categorias, toast }) {
 
 // ---- Editor de un producto del catálogo (modal) ----
 function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyChange, onSyncedSheets }) {
+  const [nombre, setNombre] = useState(producto.nombre || '')
   // Frutos: si ya tiene, se respetan; si no, se autodetectan desde el nombre del producto
   const [frutos, setFrutos] = useState(producto.catalogo_frutos?.length ? producto.catalogo_frutos : detectarFrutos(producto.nombre, frutosCat))
   const [beneficios, setBeneficios] = useState(Array.isArray(producto.catalogo_beneficios) ? producto.catalogo_beneficios : [])
@@ -588,7 +589,7 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
   const [saving, setSaving] = useState(false)
   const confirmar = useConfirm()
   const formSnap = () => snapConfig({
-    frutos, beneficios, destacado, novedad, descripcion, precioOferta, seoTitulo, seoDesc, contenido, origen, grupo, packLabel, packOrden, imgs,
+    nombre, frutos, beneficios, destacado, novedad, descripcion, precioOferta, seoTitulo, seoDesc, contenido, origen, grupo, packLabel, packOrden, imgs,
   })
   const savedEditor = useRef(null)
   useEffect(() => { savedEditor.current = formSnap() }, [producto.id]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -614,16 +615,16 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
   const subirBlobPar = async (blobs) => {
     setSubiendo(true)
     try {
-      const nombre = (producto.nombre || '').trim() || 'producto'
+      const nombreArchivo = nombre.trim() || 'producto'
       const subirUno = async (blob, suf) => {
-        const path = pathImgProducto(nombre, { carpeta: 'productos', sufijo: suf })
+        const path = pathImgProducto(nombreArchivo, { carpeta: 'productos', sufijo: suf })
         const { error } = await supabase.storage.from('product-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
         if (error) throw error
         return supabase.storage.from('product-images').getPublicUrl(path).data.publicUrl
       }
       const url = await subirUno(blobs.web || blobs.main, 'web')
       const url_mobile = blobs.mobile ? await subirUno(blobs.mobile, 'mob') : url
-      setImgs(a => [...a, { url, url_mobile, alt: nombre }])
+      setImgs(a => [...a, { url, url_mobile, alt: nombreArchivo }])
     } catch (e) { toast('No se pudo subir la imagen: ' + e.message, 'error') } finally { setSubiendo(false) }
   }
   const quitarImg = (i) => setImgs(a => a.filter((_, k) => k !== i))
@@ -631,9 +632,12 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
   const guardar = async () => {
     setSaving(true)
     try {
-      const imagenes = conAltProducto(imgs.map(normalizeImgAdmin).filter(Boolean), producto.nombre)
+      const nombreLimpio = nombre.trim()
+      if (!nombreLimpio) throw new Error('Indica el nombre del producto')
+      const imagenes = conAltProducto(imgs.map(normalizeImgAdmin).filter(Boolean), nombreLimpio)
       const imagen_url = imagenes[0]?.url || null
       const baseUpd = {
+        nombre: nombreLimpio,
         catalogo_frutos: frutos, catalogo_beneficios: beneficios, catalogo_destacado: destacado, catalogo_novedad: novedad,
         catalogo_descripcion: descripcion || null, catalogo_precio_oferta: (precioOferta === '' || Number(precioOferta) <= 0) ? null : Number(precioOferta),
         catalogo_seo_titulo: seoTitulo.trim() || null, catalogo_seo_desc: seoDesc.trim() || null,
@@ -654,9 +658,18 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
       }
       if (error) throw error
       if (producto.product_id) {
-        try { await supabase.from('products_costing').update({ imagen_url, imagenes }).eq('id', producto.product_id) } catch { /* opcional */ }
+        try {
+          await supabase.from('products_costing').update({
+            nombre: nombreLimpio,
+            imagen_url,
+            imagenes,
+          }).eq('id', producto.product_id)
+        } catch { /* opcional */ }
       }
       qc.invalidateQueries({ queryKey: ['catalogo_admin_productos'] })
+      qc.invalidateQueries({ queryKey: ['finished_products'] })
+      qc.invalidateQueries({ queryKey: ['products_costing'] })
+      qc.invalidateQueries({ queryKey: ['fichas_costo_terminado'] })
       savedEditor.current = formSnap()
       onDirtyChange?.(false)
       toast(packSinMigracion
@@ -669,12 +682,19 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
 
   return (
     <Modal open onClose={forzarCerrar} size="modal-lg"
-      title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Store size={18} /> {producto.nombre}</span>}
+      title={<span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}><Store size={18} /> Editar producto</span>}
       footer={<>
         <button className="btn btn-secondary" onClick={cerrar}>Cancelar</button>
         <button className="btn btn-primary" onClick={guardar} disabled={saving || subiendo}><Ico as={Save} size={14} />{saving ? 'Guardando…' : 'Guardar'}</button>
       </>}
     >
+      <div className="form-group" style={{ marginBottom: 14 }}>
+        <label className="form-label">Nombre del producto</label>
+        <input className="form-control" value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Nombre comercial" />
+        <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
+          Se guarda en el catálogo y en la ficha de producto enlazada.
+        </small>
+      </div>
       {/* Datos jalados de la ficha (solo lectura) */}
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 10, fontSize: '0.85rem' }}>
         <span className="badge badge-verde">Categoría: {capital(producto.categoria)}</span>
@@ -705,7 +725,7 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
       <div className="form-grid-2">
         <div className="form-group">
           <label className="form-label">Título SEO <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({seoTitulo.length}/60)</small></label>
-          <input className="form-control" value={seoTitulo} maxLength={70} onChange={e => setSeoTitulo(e.target.value)} placeholder={producto.nombre} />
+          <input className="form-control" value={seoTitulo} maxLength={70} onChange={e => setSeoTitulo(e.target.value)} placeholder={nombre.trim() || producto.nombre} />
         </div>
         <div className="form-group">
           <label className="form-label">Descripción SEO <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({seoDesc.length}/155)</small></label>
@@ -713,7 +733,7 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
         </div>
       </div>
       <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginBottom: 12 }}>
-        URL pública: <code>/producto/{(producto.nombre || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-').slice(0, 70) || '…'}</code>.
+        URL pública: <code>/producto/{sinTildes(nombre).replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-').replace(/-+/g, '-').slice(0, 70) || '…'}</code>.
         Si los dejas vacíos se usan el <strong>nombre</strong> y la <strong>descripción</strong>. Incluye datos estructurados (precio y disponibilidad).
       </small>
 
@@ -758,7 +778,7 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
           const n = normalizeImgAdmin(im)
           return (
             <div key={n.url + i} style={{ position: 'relative', width: 84, height: 84 }}>
-              <img src={thumbUrl(n)} alt={producto.nombre || ''} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8, border: i === 0 ? '2px solid var(--selva)' : '1px solid var(--crema-oscuro)' }} />
+              <img src={thumbUrl(n)} alt={nombre || ''} style={{ width: '100%', height: '100%', objectFit: 'cover', borderRadius: 8, border: i === 0 ? '2px solid var(--selva)' : '1px solid var(--crema-oscuro)' }} />
               {i === 0 && <span style={{ position: 'absolute', top: -8, left: -6, fontSize: '0.6rem', background: 'var(--selva)', color: '#fff', padding: '1px 5px', borderRadius: 6 }}>Principal</span>}
               {n.url_mobile && n.url_mobile !== n.url && <span style={{ position: 'absolute', bottom: 22, left: 2, fontSize: '0.55rem', background: 'rgba(0,0,0,0.55)', color: '#fff', padding: '0 4px', borderRadius: 4 }}>web+mób</span>}
               <button type="button" className="btn btn-xs btn-danger" style={{ position: 'absolute', top: -8, right: -8, padding: 3 }} onClick={() => quitarImg(i)}><X size={12} /></button>
@@ -790,7 +810,7 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
       <div className="form-group">
         <label className="form-label">Frutos relacionados <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(autoseleccionados según el nombre; puedes ajustar)</small></label>
         <div style={{ marginBottom: 8, display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <button type="button" className="btn btn-xs btn-secondary" onClick={() => setFrutos(detectarFrutos(producto.nombre, frutosCat))}>↻ Detectar según el nombre</button>
+          <button type="button" className="btn btn-xs btn-secondary" onClick={() => setFrutos(detectarFrutos(nombre, frutosCat))}>↻ Detectar según el nombre</button>
           <button type="button" className="btn btn-xs btn-primary" onClick={() => setNuevoFruto({ ...FRUTO_VACIO, _nuevo: true })}><Plus size={12} /> Nuevo fruto</button>
           <button type="button" className="btn btn-xs btn-secondary" onClick={() => setGestionFrutos(true)}><Ico as={Pencil} size={12} /> Gestionar frutos</button>
         </div>

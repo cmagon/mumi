@@ -93,6 +93,64 @@ const desdeFechaVidaUtil = (base, valor, unidad) => {
 const horaAhora = () => new Date().toTimeString().slice(0, 5)
 // ¿La unidad de inventario se mide por peso/volumen (se produce por gramaje/kilos), no por conteo?
 const esUnidadPeso = (u) => /kg|kilo|gramo|^g$|^gr$|litro|^l$|^ml$|mili|onza|lb|libra/i.test(String(u || '').trim())
+// MP en Kg/Litro guarda stock en esas unidades; los movimientos PEPS trabajan en gramos/ml.
+const mpUsaKilos = (u) => /kg|kilo|litro|^l$|lb|libra/i.test(String(u || '').trim())
+const entradaPesoAGramos = (valor, unidadEntrada) => {
+  const v = parseFloat(valor) || 0
+  return unidadEntrada === 'kg' ? v * 1000 : v
+}
+const gramosAUnidadEntrada = (gramos, unidadEntrada) => {
+  const g = parseFloat(gramos) || 0
+  return unidadEntrada === 'kg' ? g / 1000 : g
+}
+const cantidadMPAEntrada = (cantidadMP, unidadMP, unidadEntrada) =>
+  gramosAUnidadEntrada(mpUsaKilos(unidadMP) ? (parseFloat(cantidadMP) || 0) * 1000 : (parseFloat(cantidadMP) || 0), unidadEntrada)
+const obtenidoEnUnidadMP = (valorEntrada, unidadEntrada, unidadMP) => {
+  const gramos = entradaPesoAGramos(valorEntrada, unidadEntrada)
+  return mpUsaKilos(unidadMP) ? gramos / 1000 : gramos
+}
+const defaultUnidadEntradaObtenido = (unidadMP) => (mpUsaKilos(unidadMP) ? 'kg' : 'g')
+const labelUnidadEntrada = (u) => (u === 'kg' ? 'Kg' : 'Gramos')
+const parseJsonArr = (v, fb = []) => { try { return Array.isArray(v) ? v : JSON.parse(v || '[]') } catch { return fb } }
+const paramsCalidadDesdeFicha = (fuente) => {
+  if (!fuente) return []
+  const list = parseJsonArr(fuente.parametros_calidad, []).filter(pc => (pc.nombre || '').trim())
+  const params = list.map(pc => ({
+    nombre: String(pc.nombre).trim(),
+    esperado: String(pc.valor ?? ''),
+    unidad: pc.unidad || '',
+    obtenido: '',
+    cumple: null,
+  }))
+  if (fuente.brix_aplica) {
+    const hasBrix = params.some(p => /brix/i.test(p.nombre))
+    if (!hasBrix) params.unshift({ nombre: 'Brix', esperado: String(fuente.brix ?? ''), unidad: '°Bx', obtenido: '', cumple: null })
+  }
+  return params
+}
+const mergeParamsCalidadGuardados = (desdeFicha, guardados) => {
+  const saved = Array.isArray(guardados) ? guardados : parseJsonArr(guardados, [])
+  if (!saved.length) return desdeFicha
+  const byName = Object.fromEntries(saved.map(s => [String(s.nombre || '').trim().toLowerCase(), s]))
+  return desdeFicha.map(p => {
+    const g = byName[p.nombre.trim().toLowerCase()]
+    if (!g) return p
+    return {
+      ...p,
+      obtenido: g.obtenido ?? g.valor_obtenido ?? '',
+      cumple: g.cumple === true || g.cumple === false ? g.cumple : null,
+    }
+  })
+}
+const serializarParamsCalidad = (arr) =>
+  (arr || []).filter(p => (p.nombre || '').trim()).map(p => ({
+    nombre: p.nombre,
+    esperado: p.esperado ?? '',
+    unidad: p.unidad || '',
+    obtenido: p.obtenido || '',
+    cumple: p.cumple === true || p.cumple === false ? p.cumple : null,
+  }))
+const fmtCumpleCalidad = (v) => (v === true ? 'Cumple' : v === false ? 'No cumple' : '—')
 const hoyISO = () => fechaLocalISO()
 const labelMeses = (m) => m % 12 === 0 ? `${m / 12} año${m / 12 > 1 ? 's' : ''}` : `${m} mes${m > 1 ? 'es' : ''}`
 const VENCE_OPTS_DEFAULT = [1, 2, 3, 6, 12, 24]
@@ -185,10 +243,14 @@ export default function OrdenesProduccion() {
   const [prepLotesExtra, setPrepLotesExtra] = useState([])
   // Campos adicionales personalizados de la orden (MP vendibles: Productor, Finca, etc.)
   const [prepCamposExtra, setPrepCamposExtra] = useState([])
+  // Parámetros de calidad de la ficha (Brix, acidez, pH…): valor obtenido + cumple/no cumple.
+  const [prepParamsCalidad, setPrepParamsCalidad] = useState([])
   const [prepEsMpVend, setPrepEsMpVend] = useState(false)
   // Unidad de INVENTARIO de la MP interna vinculada (Kg, Gramo, Litro…). Cuando es por peso, el
   // resultado de la orden se captura y acredita al stock en ESA unidad, no en "unidades".
   const [prepMpUnidad, setPrepMpUnidad] = useState('')
+  // Unidad en que el operario escribe lo obtenido (Kg o gramos) en productos internos por peso.
+  const [prepUnidadEntrada, setPrepUnidadEntrada] = useState('kg')
   const [prepCamposOpen, setPrepCamposOpen] = useState(false)   // acordeón de campos adicionales (arriba)
   // Sobrante de mezcla que NO se empacó y queda como saldo en proceso (en peso)
   const [prepHaySobrante, setPrepHaySobrante] = useState(null)   // null = sin marcar (obligatorio)
@@ -410,6 +472,26 @@ export default function OrdenesProduccion() {
       return a && a.real != null ? { ...i, gramos: Number(a.real) || 0 } : i
     })
   }
+  const ajusteDeIng = (o, ing) => (Array.isArray(o?.ajustes_ingredientes) ? o.ajustes_ingredientes : [])
+    .find(x => (ing?.mpId != null && String(x.mp_id) === String(ing.mpId))
+      || (ing?.mp_id != null && String(x.mp_id) === String(ing.mp_id))
+      || String(x.nombre || '').trim().toLowerCase() === String(ing?.nombre || '').trim().toLowerCase())
+  const gramosUsadosIng = (o, ing) => {
+    const a = ajusteDeIng(o, ing)
+    if (a?.real != null) return Number(a.real) || 0
+    if (ing?.gramos != null) return Number(ing.gramos) || 0
+    return 0
+  }
+  const consumoTrazaGramos = (t, o, ings) => {
+    const a = ajusteDeIng(o, t)
+    if (a?.real != null) return Number(a.real) || 0
+    const ing = (ings || []).find(i => (t.mp_id != null && String(i.mpId) === String(t.mp_id))
+      || String(i.nombre || '').trim().toLowerCase() === String(t.nombre || '').trim().toLowerCase())
+    if (ing?.gramos != null) return Number(ing.gramos) || 0
+    const u = String(t.unidad || '').toLowerCase()
+    const c = Number(t.consumo) || 0
+    return (u.startsWith('kg') || u.startsWith('kilo') || u.startsWith('litro') || u === 'l') ? c * 1000 : c
+  }
   // Diferencias vigentes entre lo que se va a usar y lo que pedía la receta
   const calcAjustes = () => prepIngs.map((i, k) => {
     const previsto = Number(prepIngsBase[k]?.gramos) || 0
@@ -417,6 +499,129 @@ export default function OrdenesProduccion() {
     const delta = real - previsto
     return Math.abs(delta) < 0.01 ? null : { mp_id: i.mpId ?? null, nombre: i.nombre, previsto, real, delta }
   }).filter(Boolean)
+
+  const gramosAUnidadMP = (gramos, unidad) => {
+    const u = String(unidad || '').trim().toLowerCase()
+    return (u === 'kg' || u.startsWith('kilo') || u === 'litro' || u.startsWith('lit')) ? gramos / 1000 : gramos
+  }
+  const pctMezcla = (gramos, totalGramos) => {
+    const t = Number(totalGramos) || 0
+    return t > 0 ? (Number(gramos) || 0) / t * 100 : 0
+  }
+  const fPct = (pct) => `${(Number(pct) || 0).toFixed(2)}%`
+  const fPctCant = (pct, gramos, extra) => (
+    <>
+      <span style={{ fontWeight: 600 }}>{fPct(pct)}</span>
+      <span style={{ color: 'var(--texto-suave)' }}> · </span>
+      <span>{fCant(gramos)} g</span>
+      {extra ? <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', marginTop: 1 }}>{extra}</div> : null}
+    </>
+  )
+  const keyTrazaMp = (t) => t?.mp_id != null ? `mp:${t.mp_id}` : `n:${String(t?.nombre || '').trim().toLowerCase()}`
+
+  const fusionarLotesReserva = (base, extra) => {
+    const map = new Map()
+    for (const l of [...(base || []), ...(extra || [])]) {
+      if (!l?.id) continue
+      const k = String(l.id)
+      const prev = map.get(k)
+      if (prev) prev.cantidad = (Number(prev.cantidad) || 0) + (Number(l.cantidad) || 0)
+      else map.set(k, { ...l })
+    }
+    return [...map.values()]
+  }
+
+  // Ajusta lotes_reservados al consumo real confirmado (extra → reserva más; sobrante → libera).
+  const sincronizarReservaAjustes = async (ordenId, ajustes) => {
+    if (!ajustes?.length) return null
+    const { data: orden, error } = await supabase.from('production_orders')
+      .select('id, lotes_reservados, forzar_sin_lote, lotes_preferidos').eq('id', ordenId).single()
+    if (error || !orden) throw new Error('No se pudo leer la reserva de la orden')
+    const reservas = Array.isArray(orden.lotes_reservados)
+      ? orden.lotes_reservados.map(it => ({ ...it, lotes: [...(it.lotes || [])] }))
+      : []
+    if (!reservas.length) return null
+    const sinLote = !!orden.forzar_sin_lote
+    const preferidos = (orden.lotes_preferidos && typeof orden.lotes_preferidos === 'object') ? orden.lotes_preferidos : {}
+    for (const a of ajustes) {
+      if (a.mp_id == null) continue
+      const mp = mps.find(m => String(m.id) === String(a.mp_id))
+      const idx = reservas.findIndex(it => String(it.mp_id) === String(a.mp_id) && !it.es_empaque)
+      if (idx < 0) continue
+      const item = reservas[idx]
+      const targetMP = gramosAUnidadMP(a.real, mp?.unidad)
+      const diff = targetMP - (Number(item.consumo) || 0)
+      if (Math.abs(diff) < 0.00001) continue
+      if (diff > 0) {
+        if (!sinLote && !item.sin_lote) {
+          const r = await reservarPEPS({
+            mp_id: a.mp_id, cantidad: diff,
+            preferLoteId: preferidos[a.mp_id] || preferidos[String(a.mp_id)] || null,
+          })
+          item.lotes = fusionarLotesReserva(item.lotes, r.reservados)
+          const falt = Number(r.faltante) || 0
+          if (falt > 0) item.sin_lote_cantidad = (Number(item.sin_lote_cantidad) || 0) + falt
+        } else {
+          item.sin_lote_cantidad = (Number(item.sin_lote_cantidad) || 0) + diff
+        }
+        if (stockSeMovioAlReservar(item)) {
+          const { error: sErr } = await supabase.rpc('ajustar_stock_mp', { p_mp_id: a.mp_id, p_delta: -diff })
+          if (sErr) throw sErr
+        }
+        item.consumo = targetMP
+      } else {
+        const liberar = Math.abs(diff)
+        let rest = liberar
+        if (!sinLote && item.lotes?.length) {
+          const lotes = [...item.lotes]
+          const liberarList = []
+          for (let i = lotes.length - 1; i >= 0 && rest > 0.00001; i--) {
+            const l = lotes[i]
+            const c = Number(l.cantidad) || 0
+            const toma = Math.min(c, rest)
+            if (toma > 0.00001) {
+              liberarList.push({ id: l.id, cantidad: toma })
+              lotes[i] = { ...l, cantidad: c - toma }
+              rest -= toma
+            }
+          }
+          item.lotes = lotes.filter(l => (Number(l.cantidad) || 0) > 0.00001)
+          if (liberarList.length) await liberarReservaLotes(liberarList)
+        }
+        if (rest > 0.00001) {
+          const sl = Number(item.sin_lote_cantidad) || 0
+          item.sin_lote_cantidad = Math.max(0, sl - rest)
+        }
+        if (stockSeMovioAlReservar(item)) {
+          const { error: sErr } = await supabase.rpc('ajustar_stock_mp', { p_mp_id: a.mp_id, p_delta: liberar })
+          if (sErr) throw sErr
+        }
+        item.consumo = targetMP
+      }
+      reservas[idx] = item
+    }
+    const { error: uErr } = await supabase.from('production_orders').update({ lotes_reservados: reservas }).eq('id', ordenId)
+    if (uErr) throw uErr
+    setPrepTraza(reservas)
+    return reservas
+  }
+
+  const guardarAjustesIngredientes = async (ajustes, { reserva_sincronizada = false } = {}) => {
+    if (!ordenPrep?.id) return
+    const prev = Array.isArray(ordenPrep.ajustes_ingredientes) ? ordenPrep.ajustes_ingredientes : []
+    const payload = ajustes.length
+      ? ajustes.map(a => {
+        const old = prev.find(x => (a.mp_id != null && String(x.mp_id) === String(a.mp_id))
+          || String(x.nombre || '').trim().toLowerCase() === String(a.nombre || '').trim().toLowerCase())
+        const sync = reserva_sincronizada || old?.reserva_sincronizada
+        return sync ? { ...a, reserva_sincronizada: true } : a
+      })
+      : null
+    try {
+      await supabase.from('production_orders').update({ ajustes_ingredientes: payload }).eq('id', ordenPrep.id)
+      setOrdenPrep(prev => prev ? { ...prev, ajustes_ingredientes: payload } : prev)
+    } catch { /* columna v131 opcional */ }
+  }
 
   // La MP guarda su stock en SU unidad (Kg, Litro, Gramo…); la receta trabaja en gramos/ml
   // Texto de ayuda de la equivalencia entre unidades y subporciones (ej. "1 unidad = 8 subporciones")
@@ -427,9 +632,20 @@ export default function OrdenesProduccion() {
     return `1 unidad = ${Number.isInteger(n) ? n : n.toFixed(1)} subporción(es) de ${fNum(ps)} g`
   }
 
-  const gramosAUnidadMP = (gramos, unidad) => {
-    const u = String(unidad || '').trim().toLowerCase()
-    return (u === 'kg' || u.startsWith('kilo') || u === 'litro' || u.startsWith('lit')) ? gramos / 1000 : gramos
+  const esInternoPeso = !!(ordenPrep && (ordenPrep.es_mp || ordenPrep.es_subproducto) && esUnidadPeso(prepMpUnidad))
+  const prepObtenidoMP = () => {
+    const raw = parseFloat(prepUnidades) || 0
+    if (!esInternoPeso) return raw
+    return obtenidoEnUnidadMP(prepUnidades, prepUnidadEntrada, prepMpUnidad)
+  }
+  const cambiarUnidadEntradaObtenido = (nueva) => {
+    if (nueva === prepUnidadEntrada) return
+    if (prepUnidades !== '') {
+      const gramos = entradaPesoAGramos(prepUnidades, prepUnidadEntrada)
+      const v = Math.round(gramosAUnidadEntrada(gramos, nueva) * 1000) / 1000
+      setPrepUnidades(String(v))
+    }
+    setPrepUnidadEntrada(nueva)
   }
 
   // 1ª advertencia: cambiar la receta en planta no es lo habitual, así que se pide confirmación
@@ -443,10 +659,21 @@ export default function OrdenesProduccion() {
       { title: 'Corregir cantidades de la receta', confirmText: 'Sí, corregir' })
     if (ok) setEditIngs(true)
   }
-  const cancelarEdicionIngs = () => { setPrepIngs(prepIngsBase.map(i => ({ ...i }))); setEditIngs(false) }
+  const cancelarEdicionIngs = async () => {
+    const ajustesPrev = calcAjustes()
+    setPrepIngs(prepIngsBase.map(i => ({ ...i })))
+    setEditIngs(false)
+    if (!ajustesPrev.length || !ordenPrep?.id) return
+    try {
+      await sincronizarReservaAjustes(ordenPrep.id, ajustesPrev.map(a => ({ ...a, real: a.previsto })))
+      await guardarAjustesIngredientes([])
+      qc.invalidateQueries({ queryKey: ['production_orders'] })
+      qc.invalidateQueries({ queryKey: ['raw_materials'] })
+      qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
+    } catch (e) { toast('No se pudo revertir la reserva: ' + e.message, 'warning') }
+  }
 
-  // 2ª advertencia: al aplicar se detalla exactamente qué se descuenta y qué se devuelve.
-  // El ajuste de stock ocurre al ENVIAR la orden, no aquí (si no, cancelar dejaría el stock movido).
+  // 2ª advertencia: al aplicar se reserva (o libera) la diferencia ya mismo; al enviar se consume.
   const confirmarAjustesIngs = async () => {
     const ajustes = calcAjustes()
     if (!ajustes.length) { setEditIngs(false); return }
@@ -454,35 +681,121 @@ export default function OrdenesProduccion() {
       const mp = a.mp_id != null ? mps.find(m => String(m.id) === String(a.mp_id)) : null
       const sufijo = mp ? '' : '  (sin materia prima enlazada: NO ajusta stock)'
       return a.delta > 0
-        ? `• ${a.nombre}: se DESCUENTAN ${fCant(a.delta)} g adicionales del inventario${sufijo}`
-        : `• ${a.nombre}: se DEVUELVEN ${fCant(-a.delta)} g al inventario${sufijo}`
+        ? `• ${a.nombre}: se RESERVAN ${fCant(a.delta)} g adicionales del inventario${sufijo}`
+        : `• ${a.nombre}: se LIBERAN ${fCant(-a.delta)} g al inventario disponible${sufijo}`
     }).join('\n')
     const ok = await confirmar(
-      `Confirma el movimiento de inventario que se hará al enviar la orden:\n\n${detalle}\n\n` +
-      'Estos cambios quedan registrados en la orden y se le avisará al administrador.',
+      `Confirma el ajuste de materia prima para este lote:\n\n${detalle}\n\n` +
+      'La diferencia queda reservada ahora y se consumirá al enviar la orden. Quedará registrada para el administrador.',
       { title: 'Confirmar ajuste de materia prima', confirmText: 'Confirmar ajuste' })
-    if (ok) { setEditIngs(false); toast(`${ajustes.length} ajuste(s) registrados — se aplicarán al enviar la orden`, 'success') }
+    if (!ok) return
+    setEditIngs(false)
+    try {
+      await sincronizarReservaAjustes(ordenPrep.id, ajustes)
+      await guardarAjustesIngredientes(ajustes, { reserva_sincronizada: true })
+      qc.invalidateQueries({ queryKey: ['production_orders'] })
+      qc.invalidateQueries({ queryKey: ['raw_materials'] })
+      qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
+      toast(`${ajustes.length} ajuste(s) guardados y reservados en inventario ✓`, 'success')
+    } catch (e) {
+      await guardarAjustesIngredientes(ajustes)
+      toast('Ajustes guardados, pero no se pudo actualizar la reserva: ' + e.message, 'warning')
+    }
   }
 
   const trazaItemDeIng = (traza, ing) => {
     const key = String(ing?.nombre || '').trim().toLowerCase()
     return (traza || []).find(x => (ing?.mpId != null && String(x.mp_id) === String(ing.mpId)) || String(x.nombre || '').trim().toLowerCase() === key)
   }
-  const loteDeTraza = (traza, ing) => {
-    const t = trazaItemDeIng(traza, ing)
-    return t && Array.isArray(t.lotes) ? t.lotes.map(l => l.lote).filter(Boolean).join(' · ') : ''
+  const escHtml = (s) => String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  const NA_TRAZA = 'N.A.'
+  const fmtLoteTraza = (l, u) => fmtCantLote(l.cantidad, u)
+  const vencimientoCrudoLote = (l) => {
+    if (!l || typeof l !== 'object') return null
+    const v = l.vencimiento
+    if (v == null) return null
+    const s = String(v).trim()
+    if (!s || s === 'null' || s === 'undefined' || s === '—' || s === '-') return null
+    return s
   }
-  const proveedorDeTraza = (traza, ing) => {
-    const t = trazaItemDeIng(traza, ing)
-    if (!t || !Array.isArray(t.lotes)) return ''
-    const provs = [...new Set(t.lotes.map(l => String(l.proveedor || '').trim()).filter(Boolean))]
-    return provs.join(' · ')
+  const vencimientoLoteValido = (v) => {
+    const raw = vencimientoCrudoLote({ vencimiento: v })
+    if (!raw) return null
+    try {
+      const iso = (raw.includes('T') ? raw.split('T')[0] : raw).trim()
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) return null
+      const [y, m, d] = iso.split('-').map(Number)
+      if (y < 1900 || y > 2100 || m < 1 || m > 12 || d < 1 || d > 31) return null
+      const dt = new Date(iso + 'T12:00:00')
+      if (Number.isNaN(dt.getTime())) return null
+      if (dt.getFullYear() !== y || dt.getMonth() + 1 !== m || dt.getDate() !== d) return null
+      const fmt = fFecha(iso)
+      if (!fmt || fmt === '—' || /^[\s—-]+$/.test(fmt) || /invalid/i.test(fmt)) return null
+      return fmt
+    } catch { return null }
   }
-  const fmtLoteTraza = (l, u) => {
-    const lot = l.lote || 's/lote'
-    const prov = String(l.proveedor || '').trim()
-    const qty = fmtCantLote(l.cantidad, u)
-    return prov ? `${lot} (${prov}): ${qty}` : `${lot}: ${qty}`
+  const lineaLoteVenceTraza = (l) => {
+    const lot = (l?.lote || '').trim() || 's/lote'
+    const vence = vencimientoLoteValido(vencimientoCrudoLote(l)) || NA_TRAZA
+    const prov = String(l?.proveedor || '').trim() || NA_TRAZA
+    return { lot, vence, prov }
+  }
+  const htmlLineaTrazaLote = (l, unidad) => {
+    const { lot, vence, prov } = lineaLoteVenceTraza(l)
+    const qty = fmtLoteTraza(l, unidad)
+    let html = `Lote: ${escHtml(lot)}`
+    if (qty) html += ` · ${escHtml(qty)}`
+    html += `<br>Vence: ${escHtml(vence)}`
+    html += `<br>Proveedor: ${escHtml(prov)}`
+    return html
+  }
+  const htmlTrazabilidadTraza = (t) => {
+    if (!t) return ''
+    const lines = (t.lotes || []).map(l => htmlLineaTrazaLote(l, t.unidad))
+    if (t.sin_lote_cantidad > 0) {
+      const n = Number(t.sin_lote_cantidad) || 0
+      const un = String(t.unidad || '').toLowerCase()
+      let sin = `${fNum(n)} ${t.unidad || ''}`
+      if (un.startsWith('kg') || un.startsWith('kilo')) sin = `${fCant(n * 1000)} g`
+      else if (un.startsWith('g')) sin = `${fCant(n)} g`
+      else if (un.startsWith('litro') || un === 'l') sin = `${fCant(n * 1000)} ml`
+      else if (un.startsWith('mililitro') || un === 'ml') sin = `${fCant(n)} ml`
+      lines.push(`⚠ ${escHtml(sin)} sin lote`)
+    }
+    return lines.join('<br>')
+  }
+  const htmlTrazabilidadIng = (traza, ing) => htmlTrazabilidadTraza(trazaItemDeIng(traza, ing))
+  const subMetaTraza = { fontSize: '0.72rem', color: 'var(--texto-suave)', lineHeight: 1.35, marginTop: 2 }
+  const renderLineasTrazaLotes = (t, { clicLote = false } = {}) => {
+    if (!t) return null
+    return (
+      <>
+        {(t.lotes || []).map((l, li) => {
+          const { lot, vence, prov } = lineaLoteVenceTraza(l)
+          const qty = fmtLoteTraza(l, t.unidad)
+          const lineStyle = li > 0 ? { ...subMetaTraza, marginTop: 3 } : subMetaTraza
+          return (
+            <div key={li} style={lineStyle}>
+              <div>
+                <span>Lote: </span>
+                {clicLote ? (
+                  <button type="button" onClick={() => abrirDetalleLoteMp(t, l)}
+                    title="Ver detalles del lote"
+                    style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--selva-claro)', textDecoration: 'underline', fontSize: 'inherit', fontFamily: 'inherit', fontWeight: 600 }}>
+                    {lot}
+                  </button>
+                ) : (
+                  <strong style={{ color: 'var(--selva)' }}>{lot}</strong>
+                )}
+                {qty ? <span style={{ color: 'var(--texto-suave)' }}> · {qty}</span> : null}
+              </div>
+              <div>Vence: {vence}</div>
+              <div>Proveedor: {prov}</div>
+            </div>
+          )
+        })}
+      </>
+    )
   }
   const lotesDeMP = (mpId) => lotesMP.filter(l => String(l.mp_id) === String(mpId))
     .sort((a, b) => ((a.vencimiento || '9999-99-99') < (b.vencimiento || '9999-99-99') ? -1 : a.vencimiento === b.vencimiento ? ((a.fecha_entrada || '') < (b.fecha_entrada || '') ? -1 : 1) : 1))
@@ -800,7 +1113,7 @@ export default function OrdenesProduccion() {
   const prepararDatos = async (o) => {
     // Al abrir otra orden se descarta cualquier edición de ingredientes a medio hacer
     setOrdenPrep(o); setPrepIngs([]); setPrepIngsBase([]); setEditIngs(false); setPrepManualMpId(''); setPrepCostosHora([]); setPrepPermiteSurtido(false)
-    setPrepInfo(null); setPrepDatos(null); setPrepFicha(null)
+    setPrepInfo(null); setPrepDatos(null); setPrepFicha(null); setPrepParamsCalidad([])
     // No se auto-asigna el lote: se deja el que ya tuviera la orden (si venía de una edición previa);
     // en el modal de proceso solo se SUGIERE (placeholder + botón "Usar sugerido").
     setPrepLote(o.lote || ''); setPrepVence(o.vence || '')
@@ -943,6 +1256,18 @@ export default function OrdenesProduccion() {
         setPrepFicha(rec.ficha_url ? { url: rec.ficha_url, nombre: rec.ficha_nombre } : null)
       }
     }
+    // Parámetros de calidad definidos en la ficha (producto o receta) + resultados ya guardados.
+    let paramsFicha = []
+    try {
+      if (o.origen === 'producto' && o.origen_id) {
+        const { data: pq } = await supabase.from('products_costing').select('parametros_calidad, brix, brix_aplica').eq('id', o.origen_id).single()
+        if (pq) paramsFicha = paramsCalidadDesdeFicha(pq)
+      } else if (o.origen === 'receta' && o.origen_id) {
+        const { data: rq } = await supabase.from('recipes').select('parametros_calidad, brix, brix_aplica').eq('id', o.origen_id).single()
+        if (rq) paramsFicha = paramsCalidadDesdeFicha(rq)
+      }
+    } catch { /* columnas opcionales */ }
+    setPrepParamsCalidad(mergeParamsCalidadGuardados(paramsFicha, o.parametros_calidad_resultado))
   }
 
   // Calcula SOLO la lista de ingredientes (nombre + gramos) de una orden, sin tocar el estado del
@@ -982,11 +1307,25 @@ export default function OrdenesProduccion() {
     return () => { cancel = true }
   }, [modalProceso, ordenPrep?.id])
 
-  // Carga los ingredientes cada vez que se abre el modal de Detalles
+  // Carga los ingredientes cada vez que se abre el modal de Detalles (orden fresca + cantidades reales)
   useEffect(() => {
+    if (!ordenDetalle?.id) { setDetalleIngs([]); setDetalleFicha(null); return }
     let cancel = false
-    if (!ordenDetalle) { setDetalleIngs([]); setDetalleFicha(null); return }
-    calcIngredientesOrden(ordenDetalle).then(res => { if (!cancel) { setDetalleIngs(res.ings || []); setDetalleFicha(res.ficha || null) } }).catch(() => { if (!cancel) { setDetalleIngs([]); setDetalleFicha(null) } })
+    const id = ordenDetalle.id
+    ;(async () => {
+      try {
+        const { data: fresh } = await supabase.from('production_orders').select('*').eq('id', id).single()
+        const o = fresh || ordenDetalle
+        if (cancel) return
+        if (fresh) setOrdenDetalle(fresh)
+        const res = await calcIngredientesOrden(o)
+        if (cancel) return
+        setDetalleIngs(aplicarAjustesGuardados(res.ings || [], o.ajustes_ingredientes))
+        setDetalleFicha(res.ficha || null)
+      } catch {
+        if (!cancel) { setDetalleIngs([]); setDetalleFicha(null) }
+      }
+    })()
     return () => { cancel = true }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ordenDetalle?.id])
@@ -1045,28 +1384,33 @@ export default function OrdenesProduccion() {
 
   // Abre el modal de Iniciar proceso (fecha de inicio + tiempos por subproceso, con autoguardado)
   const openProceso = async (o) => {
+    let ord = o
+    try {
+      const { data: fresh } = await supabase.from('production_orders').select('*').eq('id', o.id).single()
+      if (fresh) ord = fresh
+    } catch { /* usar la fila del listado */ }
     setAutoSavedAt('')
     // Empaque de saldo: precarga TODOS los saldos de saldo_pack (pueden ser varios del mismo producto).
-    const packs = (o.empaque_saldo && Array.isArray(o.saldo_pack)) ? o.saldo_pack : []
+    const packs = (ord.empaque_saldo && Array.isArray(ord.saldo_pack)) ? ord.saldo_pack : []
     // Respuestas SI/NO guardadas tal cual (si existe el borrador); si no, sin marcar
-    const ps = (o.prep_sino && typeof o.prep_sino === 'object') ? o.prep_sino : {}
+    const ps = (ord.prep_sino && typeof ord.prep_sino === 'object') ? ord.prep_sino : {}
     const triState = (v) => (v === true || v === false) ? v : null
     // Empaque de saldo: las unidades obtenidas = suma de lo empacado de cada saldo.
-    setPrepUnidades(o.empaque_saldo ? String(o.cantidad_result || o.cantidad_plan || '') : (o.cantidad_result || '')); setPrepPesoFinal(o.peso_final || ''); setPrepPesoDesp(o.peso_desperdicio || '')
-    setPrepObs(o.obs_result || ''); setPrepResp(o.operario || profile?.nombre || ''); setPrepConforme(triState(ps.conforme))
+    setPrepUnidades(ord.empaque_saldo ? String(ord.cantidad_result || ord.cantidad_plan || '') : (ord.cantidad_result || '')); setPrepPesoFinal(ord.peso_final || ''); setPrepPesoDesp(ord.peso_desperdicio || '')
+    setPrepObs(ord.obs_result || ''); setPrepResp(ord.operario || profile?.nombre || ''); setPrepConforme(triState(ps.conforme))
     // Surtido y sobrante SIEMPRE arrancan sin marcar (el usuario debe elegir); solo se restauran si ya se respondieron en el borrador.
-    setPrepSurtido(triState(ps.surtido)); setPrepLoteMezcla(o.lote_mezcla || ''); setPrepProductoSurtido(o.producto_surtido || '')
-    setPrepPorciona(false); setPrepCantSubp(o.cant_subporciones || '')
-    setPrepFotoFile(null); setPrepFotoPrev(o.foto_url || '')
+    setPrepSurtido(triState(ps.surtido)); setPrepLoteMezcla(ord.lote_mezcla || ''); setPrepProductoSurtido(ord.producto_surtido || '')
+    setPrepPorciona(false); setPrepCantSubp(ord.cant_subporciones || '')
+    setPrepFotoFile(null); setPrepFotoPrev(ord.foto_url || '')
     if (packs.length) {
       const filas = packs.map(p => {
         const s = saldosMezcla.find(x => String(x.id) === String(p.saldo_id))
         const unidsGuardadas = parseFloat(p.unidades)
         const unids = Number.isFinite(unidsGuardadas) && unidsGuardadas > 0
           ? String(unidsGuardadas)
-          : (packs.length === 1 ? String(o.cantidad_plan || '') : '')
+          : (packs.length === 1 ? String(ord.cantidad_plan || '') : '')
         return {
-          lote: s?.lote || o.lote || '', vence: s?.vencimiento || o.vence || '',
+          lote: s?.lote || ord.lote || '', vence: s?.vencimiento || ord.vence || '',
           unidades: unids, conforme: true, saldo_id: p.saldo_id,
           peso_consumido: String(p.cantidad || ''), surtido: false, lote_mezcla: '',
         }
@@ -1075,14 +1419,25 @@ export default function OrdenesProduccion() {
       const sumU = filas.reduce((s, f) => s + (parseFloat(f.unidades) || 0), 0)
       if (sumU > 0) setPrepUnidades(String(sumU))
     } else setPrepLotesExtra([])
-    setPrepHaySobrante(triState(ps.hay_sobrante)); setPrepSobrantePeso(o.sobrante_peso || ''); setPrepSobranteUnidad(o.sobrante_unidad || 'g')
+    setPrepHaySobrante(triState(ps.hay_sobrante)); setPrepSobrantePeso(ord.sobrante_peso || ''); setPrepSobranteUnidad(ord.sobrante_unidad || 'g')
     // Siempre arranca en NO-manual para que RECALCULE la sugerencia en cada apertura. (Antes, como el
     // autoguardado persiste el sobrante, quedaba "manual" para siempre y ya no volvía a sugerir nada.)
     setPrepSobranteManual(false)
-    setPrepSurtidoCantidad(o.surtido_cantidad != null ? String(o.surtido_cantidad) : '')
+    setPrepSurtidoCantidad(ord.surtido_cantidad != null ? String(ord.surtido_cantidad) : '')
     setPrepSurtidoConsumos({})
-    setPrepCamposExtra(Array.isArray(o.campos_extra) ? o.campos_extra.map(c => ({ ...c, _id: Date.now() + Math.random() })) : [])
-    await prepararDatos(o); setModalProceso(true)
+    setPrepCamposExtra(Array.isArray(ord.campos_extra) ? ord.campos_extra.map(c => ({ ...c, _id: Date.now() + Math.random() })) : [])
+    await prepararDatos(ord)
+    const mpInt = (ord.es_mp || ord.es_subproducto) && ord.mp_id ? mps.find(m => String(m.id) === String(ord.mp_id)) : null
+    if (mpInt && esUnidadPeso(mpInt.unidad) && !ord.empaque_saldo) {
+      const ue = defaultUnidadEntradaObtenido(mpInt.unidad)
+      setPrepUnidadEntrada(ue)
+      if (ord.cantidad_result != null && ord.cantidad_result !== '') {
+        setPrepUnidades(String(Math.round(cantidadMPAEntrada(ord.cantidad_result, mpInt.unidad, ue) * 1000) / 1000))
+      }
+    } else {
+      setPrepUnidadEntrada(defaultUnidadEntradaObtenido(mpInt?.unidad || 'Kg'))
+    }
+    setModalProceso(true)
   }
 
   // Abre proceso con feedback visual y anti doble-clic (prepararDatos puede tardar varios segundos).
@@ -1165,7 +1520,7 @@ export default function OrdenesProduccion() {
         modo_avanzado: prepModoAvanzado,
         inicio: inicioGlobal || null, fin: finGlobal || null,
         procesos_tiempos: procs,
-        cantidad_result: prepUnidades !== '' ? (parseFloat(prepUnidades) || 0) : null,
+        cantidad_result: prepUnidades !== '' ? prepObtenidoMP() : null,
         peso_final: prepPesoFinal !== '' ? (parseFloat(prepPesoFinal) || 0) : null,
         peso_desperdicio: prepPesoDesp !== '' ? (parseFloat(prepPesoDesp) || 0) : null,
         peso_subporcion: prepPorciona && prepPesoSubp !== '' ? (parseFloat(prepPesoSubp) || 0) : null,
@@ -1182,6 +1537,8 @@ export default function OrdenesProduccion() {
       try { await supabase.from('production_orders').update({ saldos_reservados: calcSaldosConsumidos() }).eq('id', ordenPrep.id) } catch { /* columna opcional */ }
       // Campos adicionales personalizados (MP vendibles) — escritura aparte y tolerante (columna v85 opcional).
       try { await supabase.from('production_orders').update({ campos_extra: prepCamposExtra.filter(c => (c.nombre || '').trim()).map(c => ({ nombre: c.nombre, valor: c.valor || '' })) }).eq('id', ordenPrep.id) } catch { /* columna opcional */ }
+      try { await supabase.from('production_orders').update({ parametros_calidad_resultado: serializarParamsCalidad(prepParamsCalidad) }).eq('id', ordenPrep.id) } catch { /* columna v161 opcional */ }
+      await guardarAjustesIngredientes(calcAjustes())
       setAutoSavedAt(new Date().toLocaleTimeString('es-CO'))
       qc.invalidateQueries({ queryKey: ['production_orders'] })
       if (!silent) toast(r.queued ? 'Progreso guardado sin conexión — se sincronizará 📴' : 'Guardado ✓')
@@ -1195,7 +1552,7 @@ export default function OrdenesProduccion() {
     const t = setTimeout(() => guardarProcesoData(true), 1200)
     return () => clearTimeout(t)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prepLote, prepVence, prepFechaInicio, prepModoAvanzado, prepHoraInicio, prepHoraFin, prepProcesos, prepUnidades, prepPesoFinal, prepPesoDesp, prepPesoSubp, prepCantSubp, prepObs, prepSurtido, prepLoteMezcla, prepProductoSurtido, prepSurtidoCantidad, prepHaySobrante, prepSobrantePeso, prepSobranteUnidad, prepResp, prepConforme, prepLotesExtra, prepDestajo, prepCamposExtra, autoguardar, modalProceso])
+  }, [prepLote, prepVence, prepFechaInicio, prepModoAvanzado, prepHoraInicio, prepHoraFin, prepProcesos, prepUnidades, prepUnidadEntrada, prepPesoFinal, prepPesoDesp, prepPesoSubp, prepCantSubp, prepObs, prepSurtido, prepLoteMezcla, prepProductoSurtido, prepSurtidoCantidad, prepHaySobrante, prepSobrantePeso, prepSobranteUnidad, prepResp, prepConforme, prepLotesExtra, prepDestajo, prepCamposExtra, prepParamsCalidad, prepIngs, prepIngsBase, autoguardar, modalProceso, ordenPrep, prepMpUnidad])
 
   // Prellena la CANTIDAD del sobrante (solo como ayuda) — NUNCA marca el SÍ/NO, eso es siempre manual.
   // Solo actúa si el usuario ya marcó "¿Sobró? = SÍ" y no ha editado la cantidad a mano.
@@ -1435,6 +1792,7 @@ export default function OrdenesProduccion() {
     const vSobranteUnidad = live ? prepSobranteUnidad : (o.sobrante_unidad || 'g')
     const vLoteMezcla = live ? prepLoteMezcla : (o.lote_mezcla || '')
     const vCamposExtra = live ? prepCamposExtra : (Array.isArray(o.campos_extra) ? o.campos_extra : [])
+    const vParamsCalidad = live ? prepParamsCalidad : (Array.isArray(o.parametros_calidad_resultado) ? o.parametros_calidad_resultado : parseJsonArr(o.parametros_calidad_resultado, []))
     // Valores REALES diligenciados por el operario (no los previstos de la ficha).
     const vPesoFinal = live ? prepPesoFinal : (o.peso_final != null ? String(o.peso_final) : '')
     const vPesoDesp = live ? prepPesoDesp : (o.peso_desperdicio != null ? String(o.peso_desperdicio) : '')
@@ -1456,7 +1814,11 @@ export default function OrdenesProduccion() {
     // Ingredientes / peso unidad / datos previstos: del estado si es viva; de la ficha si es guardada.
     let ings = prepIngs, pesoUnidad = prepInfo?.pesoUnidad, d = prepDatos
     if (!live) {
-      try { const r = await calcIngredientesOrden(o); ings = r.ings || []; pesoUnidad = r.ficha?.pu } catch { ings = []; pesoUnidad = null }
+      try {
+        const r = await calcIngredientesOrden(o)
+        ings = aplicarAjustesGuardados(r.ings || [], o.ajustes_ingredientes)
+        pesoUnidad = r.ficha?.pu
+      } catch { ings = []; pesoUnidad = null }
       d = null
     }
     // Empaque que se usa (bolsas/cajas) según lo empacado — se calcula al vuelo para la impresión.
@@ -1473,10 +1835,24 @@ export default function OrdenesProduccion() {
     // Trazabilidad de lotes de MP usados por ingrediente (para la columna "Lote MP" de la impresión).
     let traza = (live && prepTraza.length) ? prepTraza : (Array.isArray(o.lotes_mp) ? o.lotes_mp : (Array.isArray(o.lotes_reservados) ? o.lotes_reservados : []))
     if (!traza.length) { try { const { data } = await supabase.from('production_orders').select('lotes_mp, lotes_reservados').eq('id', o.id).single(); traza = (Array.isArray(data?.lotes_mp) && data.lotes_mp) || (Array.isArray(data?.lotes_reservados) && data.lotes_reservados) || [] } catch { /* sin traza */ } }
-    const loteIng = (ing) => loteDeTraza(traza, ing)
-    const proveedorIng = (ing) => proveedorDeTraza(traza, ing)
-    const filas = ings.map(i => `<tr><td>${i.nombre}</td><td class="r">${g(i.gramos)} g</td></tr>`).join('')
     const totalG = ings.reduce((s, i) => s + (i.gramos || 0), 0)
+    const filasIngPrint = []
+    const trazaImpresa = new Set()
+    for (const i of ings) {
+      const t = trazaItemDeIng(traza, i)
+      if (t) trazaImpresa.add(keyTrazaMp(t))
+      filasIngPrint.push({ nombre: i.nombre, gramos: i.gramos, traza: t })
+    }
+    for (const t of traza) {
+      if (!trazaImpresa.has(keyTrazaMp(t))) filasIngPrint.push({ nombre: t.nombre, gramos: null, traza: t, esEmpaque: !!t.es_empaque })
+    }
+    const filaIngPrintHtml = (f) => {
+      const trHtml = htmlTrazabilidadTraza(f.traza)
+      const pct = f.gramos != null && totalG > 0 ? (f.gramos / totalG * 100).toFixed(2) : ''
+      const cant = f.gramos != null ? g(f.gramos) : '—'
+      const nom = escHtml(f.nombre) + (f.esEmpaque ? ' <small>(empaque)</small>' : '')
+      return `<tr><td>${nom}${trHtml ? `<div style="font-size:9px;color:#444;margin-top:3px;line-height:1.35">${trHtml}</div>` : ''}</td><td class="r">${pct !== '' ? pct + '%' : '—'}</td><td class="r">${cant}</td></tr>`
+    }
     const fecha = new Date().toLocaleDateString('es-CO')
     const emision = o.created_at ? new Date(o.created_at).toLocaleDateString('es-CO') : fecha
     const fabIni = vFechaIni || ''
@@ -1495,10 +1871,10 @@ export default function OrdenesProduccion() {
           <tr><td class="lbl">Lote producto</td><td><b>${rotLote || '(lote original)'}</b> — mantiene el formato del lote original</td></tr>
           <tr><td class="lbl">Lote de la caja</td><td><b>${loteCaja(loteMezcla, rotLote) || rotLote || '(sin especificar)'}</b> (lote más reciente del surtido)</td></tr>
           <tr><td class="lbl">Empacado surtido con lote(s)</td><td><b>${loteMezcla || '(sin especificar)'}</b></td></tr>
-          <tr><td class="lbl">Vence (Exp.)</td><td><b>${ddmmaa(rotVence)}</b> (ddmmaa)</td></tr>
+          <tr><td class="lbl">Vence (Exp.)</td><td>${rotVence ? `<b>${ddmmaa(rotVence)}</b> (ddmmaa)` : ''}</td></tr>
         ` : `
           <tr><td class="lbl">Lote (Lot.)</td><td><b>${rotLote || '(el lote ingresado)'}</b></td></tr>
-          <tr><td class="lbl">Vence (Exp.)</td><td><b>${ddmmaa(rotVence)}</b> (ddmmaa)</td></tr>
+          <tr><td class="lbl">Vence (Exp.)</td><td>${rotVence ? `<b>${ddmmaa(rotVence)}</b> (ddmmaa)` : ''}</td></tr>
         `}
       </table>`
     const filasPrev = d ? `
@@ -1523,6 +1899,18 @@ export default function OrdenesProduccion() {
       let celdas = ''
       camposEx.forEach((c, idx) => { celdas += `<td class="lbl">${c.nombre}</td><td>${c.valor || ''}</td>${idx % 2 === 1 ? '</tr><tr>' : ''}` })
       camposExtraHtml = `<div class="seccion">DATOS ADICIONALES</div><table class="campos"><tr>${celdas}</tr></table>`
+    }
+    const paramsCal = (vParamsCalidad || []).filter(p => (p.nombre || '').trim())
+    let paramsCalidadHtml = ''
+    if (paramsCal.length) {
+      paramsCalidadHtml = `<div class="seccion">PARÁMETROS DE CALIDAD</div>
+        <table class="ingr"><thead><tr><th>Parámetro</th><th>Especificación ficha</th><th>Valor obtenido</th><th>¿Cumple?</th></tr></thead>
+        <tbody>${paramsCal.map(p => `<tr>
+          <td>${p.nombre}</td>
+          <td>${p.esperado || ''}${p.unidad ? ` ${p.unidad}` : ''}</td>
+          <td>${p.obtenido || ''}${p.obtenido && p.unidad ? ` ${p.unidad}` : ''}</td>
+          <td>${p.cumple === true ? 'Cumple ✓' : p.cumple === false ? 'No cumple ✗' : ''}</td>
+        </tr>`).join('')}</tbody></table>`
     }
     const archivoNombre = `OP-${opNum(o.id)} - ${(o.producto || 'PRODUCTO').toUpperCase()} - PTZ-OR-01`
     const html = `<html><head><title>${archivoNombre}</title><style>
@@ -1584,9 +1972,9 @@ export default function OrdenesProduccion() {
         <tr><td class="lbl">¿Quedó sin empacar?</td><td colspan="3">${chk(vHaySobrante)}${vHaySobrante && vSobrantePeso ? ` · CANT: <b>${fNum(vSobrantePeso)} ${vSobranteUnidad || ''}</b>` : ''}</td></tr>
       </table>
 
-      <div class="seccion">LISTA DE INGREDIENTES</div>
-      <table class="ingr"><thead><tr><th>Ingrediente</th><th class="r">Porcentaje</th><th class="r">Cantidad (gr)</th><th>Lote MP</th><th>Proveedor MP</th></tr></thead>
-        <tbody>${filas ? ings.map(i => `<tr><td>${i.nombre}</td><td class="r">${totalG > 0 ? (i.gramos / totalG * 100).toFixed(1) : '0'}%</td><td class="r">${g(i.gramos)}</td><td>${loteIng(i)}</td><td>${proveedorIng(i)}</td></tr>`).join('') + `<tr><td><b>TOTAL</b></td><td class="r"><b>100%</b></td><td class="r"><b>${g(totalG)}</b></td><td></td><td></td></tr>` : '<tr><td colspan="5">Sin receta vinculada</td></tr>'}</tbody>
+      <div class="seccion">LISTA DE INGREDIENTES Y TRAZABILIDAD</div>
+      <table class="ingr"><thead><tr><th>Ingrediente / trazabilidad</th><th class="r">Porcentaje</th><th class="r">Cantidad (gr)</th></tr></thead>
+        <tbody>${filasIngPrint.length ? filasIngPrint.map(filaIngPrintHtml).join('') + `<tr><td><b>TOTAL mezcla</b></td><td class="r"><b>100%</b></td><td class="r"><b>${g(totalG)}</b></td></tr>` : '<tr><td colspan="3">Sin receta vinculada</td></tr>'}</tbody>
       </table>
 
       ${d ? `<div class="seccion">DATOS PREVISTOS</div>${filasPrev}` : ''}
@@ -1596,6 +1984,8 @@ export default function OrdenesProduccion() {
       ${rotuladoHtml}
 
       ${camposExtraHtml}
+
+      ${paramsCalidadHtml}
 
       <div class="seccion">OBSERVACIONES</div>
       <table class="campos"><tr><td id="obsbox" style="height:5em; vertical-align:top">${o.notas_orden || ''}</td></tr></table>
@@ -1664,7 +2054,9 @@ export default function OrdenesProduccion() {
     if (!prepLote.trim()) { toast('Completa el LOTE', 'warning'); return }
     if (!prepVence) { toast('Completa la FECHA DE VENCIMIENTO', 'warning'); return }
     if (!prepFechaInicio) { toast('Completa la FECHA DE INICIO DE FABRICACIÓN', 'warning'); return }
-    if (!(parseFloat(prepUnidades) >= 0) || prepUnidades === '') { toast(esUnidadPeso(prepMpUnidad) ? `Ingresa los ${prepMpUnidad} obtenidos` : 'Ingresa las unidades obtenidas', 'warning'); return }
+    if (!(parseFloat(prepUnidades) >= 0) || prepUnidades === '') {
+      toast(esInternoPeso ? `Ingresa la cantidad obtenida (${labelUnidadEntrada(prepUnidadEntrada)})` : esUnidadPeso(prepMpUnidad) ? `Ingresa los ${prepMpUnidad} obtenidos` : 'Ingresa las unidades obtenidas', 'warning'); return
+    }
     if (prepPorciona && !(parseFloat(prepCantSubp) > 0)) { toast('Ingresa la CANTIDAD DE SUBPORCIONES', 'warning'); return }
     if (prepSurtido && !(parseFloat(prepSurtidoCantidad) > 0)) { toast('Ingresa la CANTIDAD EMPACADA SURTIDA', 'warning'); return }
     if (prepSurtido) {
@@ -1711,12 +2103,13 @@ export default function OrdenesProduccion() {
     //    así que aquí solo se mueve la DIFERENCIA. Además de stock, se mueven lotes PEPS
     //    (extra → consumirPEPS; sobró → reponer a los lotes de la orden) para no descuadrar.
     const ajustesIngs = d.ajustesIngs || []
-    if (ajustesIngs.length) {
+    const pendientesReserva = ajustesIngs.filter(a => !a.reserva_sincronizada)
+    if (pendientesReserva.length) {
       try {
         const trazaOrden = Array.isArray(o.lotes_mp) && o.lotes_mp.length
           ? o.lotes_mp
           : (Array.isArray(o.lotes_reservados) ? o.lotes_reservados : [])
-        for (const a of ajustesIngs) {
+        for (const a of pendientesReserva) {
           if (a.mp_id == null) continue   // ingrediente sin MP enlazada: no hay stock que mover
           const mp = mps.find(m => String(m.id) === String(a.mp_id))
           const deltaMP = gramosAUnidadMP(a.delta, mp?.unidad)   // a la unidad en que se guarda el stock
@@ -1757,8 +2150,10 @@ export default function OrdenesProduccion() {
           if (mErr) await supabase.from('inventory_movements').insert(movBase)
         }
         // Se guardan en la orden para poder auditarlos y para reabrir el modal con las cantidades reales
-        try { await supabase.from('production_orders').update({ ajustes_ingredientes: ajustesIngs }).eq('id', o.id) } catch { /* columna v131 opcional */ }
+        try { await supabase.from('production_orders').update({ ajustes_ingredientes: ajustesIngs.length ? ajustesIngs : null }).eq('id', o.id) } catch { /* columna v131 opcional */ }
       } catch (e) { console.warn('No se pudieron aplicar los ajustes de ingredientes:', e) }
+    } else if (ajustesIngs.length) {
+      try { await supabase.from('production_orders').update({ ajustes_ingredientes: ajustesIngs }).eq('id', o.id) } catch { /* columna v131 opcional */ }
     }
 
     // 3) Descuento del EMPAQUE realmente usado (bolsas por porción, cajas por surtido).
@@ -1902,7 +2297,7 @@ export default function OrdenesProduccion() {
         const ext = prepFotoFile.name.split('.').pop()
         foto_url = await uploadFile('production-photos', `produccion/${Date.now()}-${Math.random().toString(36).slice(2, 7)}.${ext}`, prepFotoFile)
       }
-      const unidadesRaw = parseFloat(prepUnidades) || 0
+      const unidadesRaw = prepObtenidoMP()
       // Consumo de saldos de los lotes combinados en el surtido.
       // Si el campo quedó vacío y hay UN solo lote combinado, por defecto se consume la cantidad surtida.
       const surtidoConsumos = []
@@ -2094,6 +2489,7 @@ export default function OrdenesProduccion() {
         } else throw e
       }
       try { await supabase.from('production_orders').update({ campos_extra: prepCamposExtra.filter(c => (c.nombre || '').trim()).map(c => ({ nombre: c.nombre, valor: c.valor || '' })) }).eq('id', o.id) } catch { /* columna opcional */ }
+      try { await supabase.from('production_orders').update({ parametros_calidad_resultado: serializarParamsCalidad(prepParamsCalidad) }).eq('id', o.id) } catch { /* columna v161 opcional */ }
       // (8) Si se empacó surtido con otro(s) lote(s), marca también ESA orden como empacada surtida
       //     con este lote — aunque ya esté cerrada. Solo en línea.
       if (!r.queued && prepSurtido && prepLoteMezcla) {
@@ -2110,7 +2506,10 @@ export default function OrdenesProduccion() {
       // ===== EFECTOS DE INVENTARIO DEL CIERRE =====
       // MP, ajustes de planta, empaque, subproducto, terminado y saldos. En línea se aplican ya;
       // sin conexión se guardan como pendientes y se aplican al reconectar (ver efectosPendientes).
-      const ajustesIngs = calcAjustes()
+      const ajustesCalc = calcAjustes()
+      const ajustesIngs = ajustesCalc.length
+        ? ajustesCalc
+        : (Array.isArray(ordenPrep?.ajustes_ingredientes) ? ordenPrep.ajustes_ingredientes : [])
       const efectos = {
         fechaIni, unidadesTotal, empaquePlan, ajustesIngs, surtidoConsumos, autoAprob,
         lotesExtra: prepLotesExtra.map(e => ({ saldo_id: e.saldo_id || null, peso_consumido: e.peso_consumido, surtido: !!e.surtido, lote_mezcla: e.lote_mezcla || null })),
@@ -3721,7 +4120,8 @@ export default function OrdenesProduccion() {
                 const etq = est === 'vencido' ? ' ⛔ Vencido' : est === 'por_vencer' ? ' ⚠ Por vencer' : ''
                 // Disponible EXACTO: cantidad_actual YA excluye lo reservado (al reservar se mueve a cantidad_reservada).
                 const disp = Number(l.cantidad_actual) || 0
-                return `Lote ${l.lote || '(s/n)'} · ${fMP(disp, mpUnidad)} disp. · Vence ${fmtVence(l.vencimiento)}${etq}`
+                const vTxt = vencimientoLoteValido(l.vencimiento) || NA_TRAZA
+                return `Lote ${l.lote || '(s/n)'} · ${fMP(disp, mpUnidad)} disp. · Vence ${vTxt}${etq}`
               }
               return (
                 <div key={k} style={{ marginBottom: 8 }}>
@@ -4003,12 +4403,11 @@ export default function OrdenesProduccion() {
                       return (
                         <div className="table-wrap">
                           <table>
-                            <thead><tr><th style={{ width: 40 }}>✓</th><th>Ingrediente</th><th className="td-number">Cantidad a usar</th>{ordenPrep?.orden_blanca && <th className="td-number">Costo MP</th>}<th className="td-number">Queda en stock</th><th>Lote MP</th><th>Proveedor</th>{ordenPrep?.orden_blanca && <th></th>}</tr></thead>
+                            <thead><tr><th style={{ width: 40 }}>✓</th><th>Ingrediente</th><th className="td-number">%</th><th className="td-number">Cantidad a usar</th>{ordenPrep?.orden_blanca && <th className="td-number">Costo MP</th>}<th className="td-number">Queda en stock</th><th>Trazabilidad</th>{ordenPrep?.orden_blanca && <th></th>}</tr></thead>
                             <tbody>
                               {prepIngs.map((i, k) => {
                                 const ok = !!alistado[k]
-                                const loteMp = loteDeTraza(prepTraza, i)
-                                const provMp = proveedorDeTraza(prepTraza, i)
+                                const trazaIng = trazaItemDeIng(prepTraza, i)
                                 const mp = i.mpId ? mps.find(m => String(m.id) === String(i.mpId)) : null
                                 // El stock que muestra la app YA tiene descontada la reserva de esta
                                 // orden (se reserva al iniciar producción), así que es lo que queda
@@ -4024,6 +4423,7 @@ export default function OrdenesProduccion() {
                                         aria-label={`Alistado: ${i.nombre}`} style={{ width: 20, height: 20, cursor: 'pointer', accentColor: 'var(--selva)' }} />
                                     </td>
                                     <td style={{ fontWeight: ok ? 600 : 400, color: ok ? 'var(--selva)' : 'inherit' }}>{i.nombre}</td>
+                                    <td className="td-number">{fPct(pctMezcla(i.gramos, totalG))}</td>
                                     <td className="td-number">
                                       {(editIngs || ordenPrep?.orden_blanca) ? (() => {
                                         const previsto = Number(prepIngsBase[k]?.gramos) || 0
@@ -4050,13 +4450,14 @@ export default function OrdenesProduccion() {
                                         ? <span title="Este ingrediente no está enlazado a una materia prima del inventario">—</span>
                                         : <>{fMP(queda, mp.unidad)}{negativo && ' ⚠'}</>}
                                     </td>
-                                    <td style={{ fontSize: '0.82rem', color: loteMp ? 'var(--selva)' : 'var(--texto-suave)' }}>{loteMp || '—'}</td>
-                                    <td style={{ fontSize: '0.82rem', color: provMp ? 'var(--texto)' : 'var(--texto-suave)' }}>{provMp || '—'}</td>
+                                    <td style={{ fontSize: '0.82rem', verticalAlign: 'top' }}>
+                                      {renderLineasTrazaLotes(trazaIng, { clicLote: true }) || <span style={{ color: 'var(--texto-suave)' }}>—</span>}
+                                    </td>
                                     {ordenPrep?.orden_blanca && <td><button type="button" className="btn btn-xs btn-danger" onClick={() => { setPrepIngs(arr => arr.filter((_, idx) => idx !== k)); setPrepIngsBase(arr => arr.filter((_, idx) => idx !== k)) }}><X size={12} aria-hidden="true" /></button></td>}
                                   </tr>
                                 )
                               })}
-                              <tr style={{ fontWeight: 700, background: 'rgba(124,179,66,0.08)' }}><td></td><td>TOTAL</td><td className="td-number">{fCant(totalG)} g</td>{ordenPrep?.orden_blanca && <td className="td-number">{fCOP(prepIngs.reduce((s, i) => s + (Number(i.costo) || 0), 0))}</td>}<td></td><td></td><td></td>{ordenPrep?.orden_blanca && <td></td>}</tr>
+                              <tr style={{ fontWeight: 700, background: 'rgba(124,179,66,0.08)' }}><td></td><td>TOTAL</td><td className="td-number">100%</td><td className="td-number">{fCant(totalG)} g</td>{ordenPrep?.orden_blanca && <td className="td-number">{fCOP(prepIngs.reduce((s, i) => s + (Number(i.costo) || 0), 0))}</td>}<td></td><td></td>{ordenPrep?.orden_blanca && <td></td>}</tr>
                             </tbody>
                           </table>
                           <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
@@ -4076,8 +4477,8 @@ export default function OrdenesProduccion() {
                               return (
                                 <div>
                                   <div className="alert alert-warning" style={{ fontSize: '0.8rem' }}>
-                                    ⚠ Estás cambiando la receta <strong>solo para este lote</strong>. Al enviar la orden, la diferencia
-                                    se descontará o se devolverá al inventario de materia prima. La ficha del producto no cambia.
+                                    ⚠ Estás cambiando la receta <strong>solo para este lote</strong>. Al confirmar el ajuste,
+                                    la diferencia queda <strong>reservada en inventario</strong> y se consume al enviar la orden. La ficha del producto no cambia.
                                   </div>
                                   {ajustes.length > 0 && (
                                     <div style={{ fontSize: '0.8rem', marginBottom: 8 }}>
@@ -4220,16 +4621,27 @@ export default function OrdenesProduccion() {
             <div style={{ background: 'rgba(200,169,74,0.08)', padding: 10, borderRadius: 'var(--radio)' }}>
               <strong style={{ fontSize: '0.9rem' }}><Ico as={Package} size={15} />Resultado de producción</strong>
               <div className="form-grid-2" style={{ marginTop: 8 }}>
-                <div className="form-group" style={{ margin: 0 }}><label className="form-label">{esUnidadPeso(prepMpUnidad) ? `${prepMpUnidad} obtenidos *` : 'Unidades obtenidas *'}{ordenPrep.empaque_saldo ? ' (del saldo empacado)' : ''}</label><input type="number" className="form-control" value={prepUnidades} onChange={e => {
-                  const v = e.target.value; setPrepUnidades(v)
-                  // Conversión inversa: al escribir las unidades (cajas) se calculan las
-                  // subporciones que caben en ellas. Antes solo funcionaba de subporciones a
-                  // unidades, así que quien contaba cajas tenía que hacer la cuenta a mano.
-                  if (prepPorciona) {
-                    const pu = parseFloat(prepInfo?.pesoUnidad) || 0, psub = parseFloat(prepPesoSubp) || 0
-                    if (pu > 0 && psub > 0 && v !== '') setPrepCantSubp(String(Math.round((parseFloat(v) || 0) * pu / psub)))
-                  }
-                }} min={0} step="0.01" placeholder={`Planificado: ${fNum(ordenPrep.cantidad_plan)}`} readOnly={ordenPrep.empaque_saldo} style={ordenPrep.empaque_saldo ? { background: 'var(--crema)' } : undefined} /></div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">
+                    {esInternoPeso ? 'Cantidad obtenida *' : esUnidadPeso(prepMpUnidad) ? `${prepMpUnidad} obtenidos *` : 'Unidades obtenidas *'}
+                    {ordenPrep.empaque_saldo ? ' (del saldo empacado)' : ''}
+                  </label>
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>
+                    <input type="number" className="form-control" style={{ flex: 1 }} value={prepUnidades} onChange={e => {
+                      const v = e.target.value; setPrepUnidades(v)
+                      if (prepPorciona) {
+                        const pu = parseFloat(prepInfo?.pesoUnidad) || 0, psub = parseFloat(prepPesoSubp) || 0
+                        if (pu > 0 && psub > 0 && v !== '') setPrepCantSubp(String(Math.round((parseFloat(v) || 0) * pu / psub)))
+                      }
+                    }} min={0} step={esInternoPeso && prepUnidadEntrada === 'kg' ? '0.001' : '0.01'} placeholder={esInternoPeso ? `Ej: ${prepUnidadEntrada === 'kg' ? '2.5' : '2500'}` : `Planificado: ${fNum(ordenPrep.cantidad_plan)}`} readOnly={ordenPrep.empaque_saldo} style={ordenPrep.empaque_saldo ? { background: 'var(--crema)' } : undefined} />
+                    {esInternoPeso ? (
+                      <select className="form-control" style={{ width: '7.5rem', flexShrink: 0 }} value={prepUnidadEntrada} onChange={e => cambiarUnidadEntradaObtenido(e.target.value)} disabled={ordenPrep.empaque_saldo}>
+                        <option value="kg">Kg</option>
+                        <option value="g">Gramos</option>
+                      </select>
+                    ) : null}
+                  </div>
+                </div>
                 <div className="form-group" style={{ margin: 0 }}><label className="form-label">Responsable</label><input className="form-control" value={prepResp} onChange={e => setPrepResp(e.target.value)} /></div>
                 <div className="form-group" style={{ margin: 0 }}><label className="form-label">Peso final (g/Kg)</label><input type="number" className="form-control" value={prepPesoFinal} onChange={e => setPrepPesoFinal(e.target.value)} min={0} placeholder="Peso conforme obtenido" /></div>
                 <div className="form-group" style={{ margin: 0 }}><label className="form-label">Peso desperdicio</label><input type="number" className="form-control" value={prepPesoDesp} onChange={e => setPrepPesoDesp(e.target.value)} min={0} placeholder="Dañado / quemado" /></div>
@@ -4245,22 +4657,61 @@ export default function OrdenesProduccion() {
                     ({psubUnidHint(prepInfo?.pesoUnidad, prepPesoSubp)}).
                   </div>
                 </>}
-                {esUnidadPeso(prepMpUnidad) && (
+                {esInternoPeso && (
                   <div style={{ gridColumn: '1 / -1', fontSize: '0.75rem', color: 'var(--texto-suave)', marginTop: -2 }}>
-                    ℹ Esta es una <strong>materia prima interna</strong> que se mide en <strong>{prepMpUnidad}</strong>: escribe arriba
-                    los <strong>{prepMpUnidad} producidos</strong> (no unidades). Ese peso es el que ingresa al inventario de MP.
+                    ℹ Escribe la cantidad en <strong>{labelUnidadEntrada(prepUnidadEntrada)}</strong>.
+                    {prepUnidades !== '' ? (
+                      <> Se registrará en inventario como <strong>{fNum(prepObtenidoMP())} {prepMpUnidad}</strong>
+                        {' '}(<strong>{fNum(entradaPesoAGramos(prepUnidades, prepUnidadEntrada))} g</strong> para movimientos de MP).</>
+                    ) : (
+                      <> El inventario de MP guarda en <strong>{prepMpUnidad}</strong>; los movimientos internos se calculan en gramos.</>
+                    )}
                     {(parseFloat(prepPesoFinal) || 0) > 0 && (() => {
-                      // El peso final se registra en gramos; si la MP está en Kg/Litro se convierte a esa unidad.
-                      const enKilos = /kg|kilo|litro|^l$|lb|libra/i.test(prepMpUnidad)
-                      const val = enKilos ? (parseFloat(prepPesoFinal) || 0) / 1000 : (parseFloat(prepPesoFinal) || 0)
+                      const pfG = parseFloat(prepPesoFinal) || 0
+                      const val = prepUnidadEntrada === 'kg' ? pfG / 1000 : pfG
                       const val2 = Math.round(val * 1000) / 1000
                       const val2Txt = val2.toLocaleString('es-CO', { maximumFractionDigits: 3 })
                       return <> <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 6 }}
-                        onClick={() => setPrepUnidades(String(val2))}>Usar peso final ({val2Txt} {prepMpUnidad})</button></>
+                        onClick={() => setPrepUnidades(String(val2))}>Usar peso final ({val2Txt} {labelUnidadEntrada(prepUnidadEntrada)})</button></>
                     })()}
                   </div>
                 )}
               </div>
+              {prepParamsCalidad.length > 0 && (
+                <div style={{ marginTop: 10 }}>
+                  <strong style={{ fontSize: '0.85rem', color: 'var(--selva)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                    <FlaskConical size={14} aria-hidden="true" /> Parámetros de calidad <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(según ficha del producto)</small>
+                  </strong>
+                  <div className="table-wrap" style={{ marginTop: 6 }}>
+                    <table style={{ fontSize: '0.82rem' }}>
+                      <thead>
+                        <tr>
+                          <th>Parámetro</th>
+                          <th>Especificación</th>
+                          <th>Valor obtenido</th>
+                          <th style={{ minWidth: 120 }}>¿Cumple?</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {prepParamsCalidad.map((p, i) => (
+                          <tr key={i}>
+                            <td><strong>{p.nombre}</strong></td>
+                            <td>{p.esperado || '—'}{p.unidad ? ` ${p.unidad}` : ''}</td>
+                            <td>
+                              <input className="form-control" value={p.obtenido || ''} placeholder={`Medición${p.unidad ? ` (${p.unidad})` : ''}`}
+                                onChange={e => setPrepParamsCalidad(arr => arr.map((x, idx) => idx === i ? { ...x, obtenido: e.target.value } : x))} />
+                            </td>
+                            <td>
+                              <SiNo value={p.cumple} onChange={v => setPrepParamsCalidad(arr => arr.map((x, idx) => idx === i ? { ...x, cumple: v } : x))} />
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                  <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Estos datos se guardan en la orden, salen en la impresión y en el detalle al cerrar.</small>
+                </div>
+              )}
               {/* Empaque que se descontará (bolsas/cajas) según lo empacado — informativo, sale en la impresión */}
               {empaquePrevio && empaquePrevio.plan.length > 0 && (
                 <div className="form-group" style={{ background: 'rgba(124,179,66,0.07)', borderRadius: 'var(--radio)', padding: 10 }}>
@@ -4590,14 +5041,61 @@ export default function OrdenesProduccion() {
               <tr><td><b>Fecha inicio fabricación</b></td><td>{prepFechaInicio ? fFecha(prepFechaInicio) : '—'}</td></tr>
               <tr><td><b>Horario</b></td><td>{tiemposGlobal().inicioGlobal || '—'} a {tiemposGlobal().finGlobal || '—'}</td></tr>
               <tr><td><b>Subprocesos</b></td><td>{tiemposGlobal().procs.length ? tiemposGlobal().procs.map(p => `${p.nombre}${p.inicio ? ' (' + p.inicio + (p.fin ? '–' + p.fin : '') + ')' : ''}`).join(' · ') : '—'}</td></tr>
-              <tr><td><b>{esUnidadPeso(prepMpUnidad) ? `${prepMpUnidad} obtenidos` : 'Unidades obtenidas'}</b></td><td>{fNum(parseFloat(prepUnidades) || 0)}{esUnidadPeso(prepMpUnidad) ? ` ${prepMpUnidad}` : ''}</td></tr>
+              <tr><td><b>{esInternoPeso ? 'Cantidad obtenida' : esUnidadPeso(prepMpUnidad) ? `${prepMpUnidad} obtenidos` : 'Unidades obtenidas'}</b></td><td>{esInternoPeso ? `${fNum(parseFloat(prepUnidades) || 0)} ${labelUnidadEntrada(prepUnidadEntrada)} → ${fNum(prepObtenidoMP())} ${prepMpUnidad} (${fNum(entradaPesoAGramos(prepUnidades, prepUnidadEntrada))} g)` : `${fNum(parseFloat(prepUnidades) || 0)}${esUnidadPeso(prepMpUnidad) ? ` ${prepMpUnidad}` : ''}`}</td></tr>
               <tr><td><b>Peso final / desperdicio</b></td><td>{fNum(parseFloat(prepPesoFinal) || 0)} / {fNum(parseFloat(prepPesoDesp) || 0)}</td></tr>
               {prepPorciona && <tr><td><b>Subporciones</b></td><td>{fNum(parseFloat(prepCantSubp) || 0)} de {fNum(parseFloat(prepPesoSubp) || 0)} g c/u</td></tr>}
+              {prepParamsCalidad.length > 0 && (
+                <tr><td colSpan={2} style={{ padding: 0, border: 'none' }}>
+                  <table style={{ width: '100%', fontSize: '0.85rem', marginTop: 4 }}>
+                    <thead><tr><th colSpan={4} style={{ textAlign: 'left', background: 'rgba(45,90,61,0.08)' }}>Parámetros de calidad</th></tr>
+                      <tr><th>Parámetro</th><th>Ficha</th><th>Obtenido</th><th>Cumple</th></tr></thead>
+                    <tbody>
+                      {prepParamsCalidad.map((p, i) => (
+                        <tr key={i}>
+                          <td>{p.nombre}</td>
+                          <td>{p.esperado || '—'}{p.unidad ? ` ${p.unidad}` : ''}</td>
+                          <td>{p.obtenido || '—'}{p.obtenido && p.unidad ? ` ${p.unidad}` : ''}</td>
+                          <td><span className={`badge ${p.cumple === true ? 'badge-verde' : p.cumple === false ? 'badge-rojo' : 'badge-gris'}`}>{fmtCumpleCalidad(p.cumple)}</span></td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </td></tr>
+              )}
               <tr><td><b>Empaque surtido</b></td><td>{prepSurtido ? `Sí — mezclado con: ${prepLoteMezcla || '(sin especificar)'}` : 'No'}</td></tr>
               <tr><td><b>Responsable</b></td><td>{prepResp || '—'}</td></tr>
               <tr><td><b>Estado</b></td><td>{prepConforme ? 'Conforme' : 'No conforme'}</td></tr>
               <tr><td><b>Observaciones</b></td><td>{prepObs || '—'}</td></tr>
               <tr><td><b>Foto</b></td><td>{prepFotoFile || prepFotoPrev ? '✓ adjunta' : '—'}</td></tr>
+              {(() => {
+                const ajustesCalc = calcAjustes()
+                const ajustes = ajustesCalc.length
+                  ? ajustesCalc
+                  : (Array.isArray(ordenPrep?.ajustes_ingredientes) ? ordenPrep.ajustes_ingredientes : [])
+                if (!ajustes.length) return null
+                const totalUsadoAj = ajustes.reduce((s, a) => s + (Number(a.real) || 0), 0)
+                return (
+                  <tr><td colSpan={2} style={{ padding: 0, border: 'none' }}>
+                    <table style={{ width: '100%', fontSize: '0.85rem', marginTop: 4 }}>
+                      <thead><tr><th colSpan={5} style={{ textAlign: 'left', background: 'rgba(200,100,50,0.10)' }}>Ajustes de ingredientes en planta</th></tr>
+                        <tr><th>Ingrediente</th><th>% usado</th><th>Receta</th><th>Usado</th><th>Diferencia</th></tr></thead>
+                      <tbody>
+                        {ajustes.map((a, i) => (
+                          <tr key={i}>
+                            <td>{a.nombre}</td>
+                            <td className="td-number">{fPct(pctMezcla(a.real, totalUsadoAj))}</td>
+                            <td className="td-number">{fCant(a.previsto)} g</td>
+                            <td className="td-number">{fCant(a.real)} g</td>
+                            <td className="td-number" style={{ color: a.delta > 0 ? 'var(--rojo)' : 'var(--selva)' }}>
+                              {a.delta > 0 ? '+' : ''}{fCant(a.delta)} g
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </td></tr>
+                )
+              })()}
             </tbody></table>
 
             {/* Previo del empaque a descontar */}
@@ -4636,7 +5134,7 @@ export default function OrdenesProduccion() {
           const D = ({ et, children }) => <div><strong style={{ color: 'var(--selva)' }}>{et}:</strong> {children}</div>
           return (
             <>
-              <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: '0.88rem', marginBottom: 14 }}>
+              <div className="grid-resp" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 6, fontSize: '0.82rem', marginBottom: 10 }}>
                 <D et="Estado"><span className={`badge ${est.badge}`}>{est.txt}</span></D>
                 <D et="Tipo">{o.es_subproducto ? 'Subproducto interno' : 'Producto terminado'}</D>
                 <D et="Cantidad planificada">{fNum(o.cantidad_plan)} {o.unidad}</D>
@@ -4657,7 +5155,7 @@ export default function OrdenesProduccion() {
                 )}
                 <D et="Origen">{o.origen === 'receta' ? 'Receta rápida' : 'Producto / ficha'}</D>
                 <D et="Lote">{o.lote || '—'}</D>
-                <D et="Vencimiento">{o.vence ? fFecha(o.vence) : '—'}</D>
+                <D et="Vencimiento">{o.vence ? fFecha(o.vence) : ''}</D>
                 <D et="Fecha producción">{o.fecha_prod ? fFecha(o.fecha_prod) : '—'}</D>
                 <D et="Empaque">{o.empaque || '—'}</D>
                 <D et="Horario">{(o.inicio || '—')} a {(o.fin || '—')}</D>
@@ -4674,6 +5172,24 @@ export default function OrdenesProduccion() {
                 {Array.isArray(o.campos_extra) && o.campos_extra.filter(c => (c.nombre || '').trim()).map((c, i) => (
                   <D key={i} et={c.nombre}>{c.valor || '—'}</D>
                 ))}
+                {Array.isArray(o.parametros_calidad_resultado) && o.parametros_calidad_resultado.filter(p => (p.nombre || '').trim()).length > 0 && (
+                  <div style={{ gridColumn: '1 / -1', marginTop: 4 }}>
+                    <div className="card-title" style={{ fontSize: '0.88rem', marginBottom: 4 }}><Ico as={FlaskConical} size={14} />Parámetros de calidad</div>
+                    <div className="table-wrap"><table style={{ fontSize: '0.8rem' }}>
+                      <thead><tr><th>Parámetro</th><th>Especificación ficha</th><th>Valor obtenido</th><th>Resultado</th></tr></thead>
+                      <tbody>
+                        {o.parametros_calidad_resultado.filter(p => (p.nombre || '').trim()).map((p, i) => (
+                          <tr key={i}>
+                            <td><strong>{p.nombre}</strong></td>
+                            <td>{p.esperado || '—'}{p.unidad ? ` ${p.unidad}` : ''}</td>
+                            <td>{p.obtenido || '—'}{p.obtenido && p.unidad ? ` ${p.unidad}` : ''}</td>
+                            <td><span className={`badge ${p.cumple === true ? 'badge-verde' : p.cumple === false ? 'badge-rojo' : 'badge-gris'}`}>{fmtCumpleCalidad(p.cumple)}</span></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table></div>
+                  </div>
+                )}
               </div>
               {/* Auditoría de creación — solo visible para administradores */}
               {esAdmin && (
@@ -4682,9 +5198,99 @@ export default function OrdenesProduccion() {
                   {o.created_at && <> el <strong>{new Date(o.created_at).toLocaleString('es-CO')}</strong></>}
                 </div>
               )}
-              {o.notas_orden && <p style={{ fontSize: '0.85rem' }}><strong>Notas de la orden:</strong> {o.notas_orden}</p>}
-              {o.obs_result && <p style={{ fontSize: '0.85rem' }}><strong>Observaciones del resultado:</strong> {o.obs_result}</p>}
-              {o.estado === 'rechazada' && o.motivo_rechazo && <p style={{ fontSize: '0.85rem', color: 'var(--rojo)' }}><strong>Motivo de rechazo:</strong> {o.motivo_rechazo}</p>}
+              {o.notas_orden && <p style={{ fontSize: '0.8rem', margin: '0 0 6px' }}><strong>Notas:</strong> {o.notas_orden}</p>}
+              {o.obs_result && <p style={{ fontSize: '0.8rem', margin: '0 0 6px' }}><strong>Obs. resultado:</strong> {o.obs_result}</p>}
+
+              {(detalleIngs.length > 0 || (Array.isArray(o.lotes_mp) && o.lotes_mp.length) || (Array.isArray(o.lotes_reservados) && o.lotes_reservados.length)) && (() => {
+                const trz = (Array.isArray(o.lotes_mp) && o.lotes_mp.length) ? o.lotes_mp : (Array.isArray(o.lotes_reservados) ? o.lotes_reservados : [])
+                const totalUsado = detalleIngs.reduce((s, i) => s + gramosUsadosIng(o, i), 0)
+                const matchedTraza = new Set()
+                const filasMp = []
+                for (const ing of detalleIngs) {
+                  const t = trazaItemDeIng(trz, ing)
+                  if (t) matchedTraza.add(keyTrazaMp(t))
+                  filasMp.push({ ing, traza: t })
+                }
+                for (const t of trz) {
+                  if (!matchedTraza.has(keyTrazaMp(t))) filasMp.push({ ing: null, traza: t })
+                }
+                const subMeta = subMetaTraza
+                const consumoEnBase = (v, u) => {
+                  const n = Number(v) || 0
+                  const un = String(u || '').toLowerCase()
+                  if (un.startsWith('kg') || un.startsWith('kilo')) return `${fCant(n * 1000)} g`
+                  if (un.startsWith('g')) return `${fCant(n)} g`
+                  if (un.startsWith('litro') || un === 'l') return `${fCant(n * 1000)} ml`
+                  if (un.startsWith('mililitro') || un === 'ml') return `${fCant(n)} ml`
+                  return `${fNum(n)} ${u || ''}`
+                }
+                return (
+                  <>
+                    <div className="card-title" style={{ fontSize: '0.88rem', marginTop: 8, marginBottom: 4 }}>
+                      <Ico as={Package} size={14} />Materia prima y trazabilidad
+                      {trz.length > 0 && (
+                        <small style={{ fontWeight: 400, color: 'var(--texto-suave)', marginLeft: 6 }}>
+                          ({Array.isArray(o.lotes_mp) && o.lotes_mp.length ? 'consumida' : 'reservada'})
+                        </small>
+                      )}
+                    </div>
+                    <div className="table-wrap">
+                      <table style={{ fontSize: '0.82rem' }}>
+                        <thead>
+                          <tr>
+                            <th style={{ width: '28%' }}>Ingrediente</th>
+                            <th className="td-number" style={{ width: '18%' }}>Usado</th>
+                            <th>Trazabilidad</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {filasMp.map(({ ing, traza: t }, k) => {
+                            const mp = ing?.mpId != null ? mps.find(m => String(m.id) === String(ing.mpId)) : (t?.mp_id ? mps.find(m => String(m.id) === String(t.mp_id)) : null)
+                            const aj = ing ? ajusteDeIng(o, ing) : null
+                            const usadoG = ing ? gramosUsadosIng(o, ing) : consumoTrazaGramos(t, o, detalleIngs)
+                            const hayAjuste = aj && Math.abs((aj.delta || 0)) >= 0.01
+                            const nombre = ing?.nombre || t?.nombre || '—'
+                            const unidadMp = mp?.unidad || t?.unidad || ''
+                            const extraUsado = mp && !t?.es_empaque ? fMP(gramosAUnidadMP(usadoG, unidadMp), unidadMp) : null
+                            const tieneTraza = (t?.lotes || []).length > 0 || (t?.sin_lote_cantidad > 0)
+                            return (
+                              <tr key={k} style={hayAjuste ? { background: 'rgba(200,100,50,0.05)' } : undefined}>
+                                <td style={{ verticalAlign: 'top' }}>
+                                  <div style={{ fontWeight: 600 }}>{nombre}{t?.es_empaque ? <span className="badge badge-gris" style={{ fontSize: '0.6rem', marginLeft: 4 }}>empaque</span> : null}</div>
+                                </td>
+                                <td className="td-number" style={{ verticalAlign: 'top' }}>
+                                  {fPctCant(pctMezcla(usadoG, totalUsado || usadoG), usadoG, extraUsado)}
+                                </td>
+                                <td style={{ verticalAlign: 'top' }}>
+                                  {tieneTraza ? (
+                                    <>
+                                      {(t?.lotes || []).length > 0 && renderLineasTrazaLotes(t, { clicLote: true })}
+                                      {t?.sin_lote_cantidad > 0 && (
+                                        <div style={{ ...subMeta, color: 'var(--tierra)' }}>
+                                          ⚠ {consumoEnBase(t.sin_lote_cantidad, t.unidad)} sin lote
+                                        </div>
+                                      )}
+                                    </>
+                                  ) : '—'}
+                                </td>
+                              </tr>
+                            )
+                          })}
+                          {detalleIngs.length > 0 && (
+                            <tr style={{ fontWeight: 700, background: 'rgba(124,179,66,0.08)', fontSize: '0.8rem' }}>
+                              <td>TOTAL mezcla</td>
+                              <td className="td-number">{fPctCant(100, totalUsado)}</td>
+                              <td />
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                  </>
+                )
+              })()}
+
+              {o.estado === 'rechazada' && o.motivo_rechazo && <p style={{ fontSize: '0.8rem', color: 'var(--rojo)', marginTop: 8 }}><strong>Motivo de rechazo:</strong> {o.motivo_rechazo}</p>}
               {o.estado === 'aprobada' && <p style={{ fontSize: '0.85rem', color: 'var(--selva)' }}><strong>Aprobada por:</strong> {o.aprobado_por} · {o.fecha_aprob ? fFecha(o.fecha_aprob.split('T')[0]) : ''}</p>}
               {o.foto_url && <div style={{ marginTop: 8 }}><img src={o.foto_url} alt="resultado" style={{ maxWidth: '100%', maxHeight: 240, borderRadius: 4 }} /></div>}
 
@@ -4702,8 +5308,8 @@ export default function OrdenesProduccion() {
                 const badge = cumpl >= 97 ? 'badge-verde' : cumpl >= 90 ? 'badge-dorado' : 'badge-rojo'
                 return (
                   <>
-                    <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 12 }}><Ico as={Calculator} size={15} />Rendimiento de los ingredientes</div>
-                    <div className="table-wrap"><table><tbody>
+                    <div className="card-title" style={{ fontSize: '0.88rem', marginTop: 8, marginBottom: 4 }}><Ico as={Calculator} size={14} />Rendimiento</div>
+                    <div className="table-wrap"><table style={{ fontSize: '0.82rem' }}><tbody>
                       <tr><td>Mezcla usada (ingredientes)</td><td className="td-number">{fCant(totalG)} g</td></tr>
                       <tr><td>Peso final producido</td><td className="td-number">{fCant(pesoFinalReal)} g {(parseFloat(o.peso_final) || 0) <= 0 && <small style={{ color: 'var(--texto-suave)' }}>(estimado)</small>}</td></tr>
                       <tr style={{ fontWeight: 700, background: 'rgba(124,179,66,0.08)' }}><td>Rendimiento real (final ÷ mezcla)</td><td className="td-number">{rendReal.toFixed(1)}%</td></tr>
@@ -4756,60 +5362,7 @@ export default function OrdenesProduccion() {
                 )
               })()}
 
-              {/* Trazabilidad lote-a-lote: lotes de MP consumidos */}
-              {(() => {
-                const trz = (Array.isArray(o.lotes_mp) && o.lotes_mp.length) ? o.lotes_mp : (Array.isArray(o.lotes_reservados) ? o.lotes_reservados : [])
-                // Cantidades guardadas en la unidad de PRECIO de la MP (Kg/Litro) o ya en base (Gramo/Mililitro/Unidad).
-                // Se muestran SIEMPRE en la unidad base (gramos/ml) para pesos y volúmenes; "Unidad" queda como conteo.
-                const aBase = (v, u) => {
-                  const n = Number(v) || 0
-                  const un = String(u || '').toLowerCase()
-                  if (un.startsWith('kg') || un.startsWith('kilo')) return `${fCant(n * 1000)} g`
-                  if (un.startsWith('g')) return `${fCant(n)} g`
-                  if (un.startsWith('litro') || un === 'l') return `${fCant(n * 1000)} ml`
-                  if (un.startsWith('mililitro') || un === 'ml') return `${fCant(n)} ml`
-                  return `${fNum(n)} ${u || ''}`
-                }
-                return trz.length > 0 && (
-                <>
-                  <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 12 }}><Ico as={Link2} size={15} />Materia Prima — Trazabilidad de lotes (PEPS) {(Array.isArray(o.lotes_mp) && o.lotes_mp.length) ? 'consumidos' : 'reservados'}</div>
-                  <div className="table-wrap">
-                    <table>
-                      <thead><tr><th>Materia prima</th><th className="td-number">Consumo</th><th>Lotes usados (PEPS)</th><th>Proveedor</th></tr></thead>
-                      <tbody>
-                        {trz.map((t, i) => (
-                          <tr key={i}>
-                            <td>{t.nombre}</td>
-                            <td className="td-number">{aBase(t.consumo, t.unidad)}</td>
-                            <td style={{ fontSize: '0.8rem' }}>
-                              {(t.lotes || []).length
-                                ? t.lotes.map((l, k) => (
-                                    <span key={k}>
-                                      {k > 0 && ' · '}
-                                      <button type="button" onClick={() => abrirDetalleLoteMp(t, l)}
-                                        title="Ver detalles del lote (compra, proveedor, costo)"
-                                        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', color: 'var(--selva-claro)', textDecoration: 'underline', fontSize: 'inherit', fontFamily: 'inherit' }}>
-                                        {fmtLoteTraza(l, t.unidad)}
-                                      </button>
-                                      {l.vencimiento ? ` (vence ${fFecha(l.vencimiento)})` : ''}
-                                    </span>
-                                  ))
-                                : (t.sin_lote_cantidad > 0 || t.sin_lote) ? '' : '—'}
-                              {t.sin_lote_cantidad > 0 && <span style={{ color: 'var(--tierra)' }}>{(t.lotes || []).length ? ' · ' : ''}⚠ {aBase(t.sin_lote_cantidad, t.unidad)} sin lote (stock general)</span>}
-                              {t.sin_lote && !t.sin_lote_cantidad && <span style={{ color: 'var(--texto-suave)' }}>Sin lote (forzado)</span>}
-                            </td>
-                            <td style={{ fontSize: '0.8rem' }}>
-                              {[...new Set((t.lotes || []).map(l => String(l.proveedor || '').trim()).filter(Boolean))].join(' · ') || '—'}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                </>
-              ) })()}
-
-              <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 12 }}><Ico as={ReceiptText} size={15} />Lotes de producción vinculados ({recs.length})</div>
+              <div className="card-title" style={{ fontSize: '0.88rem', marginTop: 8, marginBottom: 4 }}><Ico as={ReceiptText} size={14} />Lotes de producción ({recs.length})</div>
               {recs.length === 0
                 ? <p className="empty-table">Aún no hay registros de producción para esta orden.</p>
                 : (
@@ -4874,13 +5427,13 @@ export default function OrdenesProduccion() {
           <table key={lf.id} style={{ fontSize: '0.88rem', width: '100%', marginBottom: 10 }}>
             <tbody>
               <tr><td style={{ color: 'var(--texto-suave)', width: 190 }}>Fecha de compra/entrada</td><td><strong>{fFecha(lf.fecha_entrada)}</strong></td></tr>
-              <tr><td style={{ color: 'var(--texto-suave)' }}>Proveedor</td><td><strong>{lf.proveedor || '— (sin registrar)'}</strong></td></tr>
+              <tr><td style={{ color: 'var(--texto-suave)' }}>Proveedor</td><td><strong>{String(lf.proveedor || '').trim() || NA_TRAZA}</strong></td></tr>
               <tr><td style={{ color: 'var(--texto-suave)' }}>Costo unitario de compra</td><td>{lf.costo_unitario ? `${fCOP(lf.costo_unitario)}${u ? ` por ${u}` : ''}` : '—'}</td></tr>
               <tr><td style={{ color: 'var(--texto-suave)' }}>Cantidad inicial</td><td>{fmtCantLote(lf.cantidad_inicial, u)}</td></tr>
               <tr><td style={{ color: 'var(--texto-suave)' }}>Ya consumido</td><td>{fmtCantLote(consumido, u)}</td></tr>
               <tr><td style={{ color: 'var(--texto-suave)' }}>Reservado (órdenes en proceso)</td><td>{(lf.cantidad_reservada || 0) > 0 ? <strong style={{ color: 'var(--tierra)' }}>{fmtCantLote(lf.cantidad_reservada, u)}</strong> : <span>0 <small style={{ color: 'var(--texto-suave)' }}>(si la orden ya se cerró, su reserva pasó a "consumido")</small></span>}</td></tr>
               <tr><td style={{ color: 'var(--texto-suave)' }}>Disponible hoy</td><td><strong>{fmtCantLote(lf.cantidad_actual, u)}</strong></td></tr>
-              <tr><td style={{ color: 'var(--texto-suave)' }}>Vencimiento</td><td>{lf.vencimiento ? fFecha(lf.vencimiento) : '—'}</td></tr>
+              <tr><td style={{ color: 'var(--texto-suave)' }}>Vencimiento</td><td>{vencimientoLoteValido(lf.vencimiento) || NA_TRAZA}</td></tr>
               <tr><td style={{ color: 'var(--texto-suave)' }}>Registrado por</td><td>{lf.creado_por || '—'}</td></tr>
             </tbody>
           </table>
