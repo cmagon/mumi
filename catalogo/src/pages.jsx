@@ -408,16 +408,21 @@ export function Producto() {
   const swipe = useSwipeable({
     onSwiping: (e) => {
       if (galeria.length <= 1) return
+      // Dejar pasar scroll vertical; solo arrastrar galería en gestos horizontales
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) return
       const signo = e.dir === 'Left' ? 1 : e.dir === 'Right' ? -1 : 0
       if (!signo) return
       let d = signo * Math.abs(e.deltaX)
       if ((img === 0 && d < 0) || (img === galeria.length - 1 && d > 0)) d /= 3
       setDrag(d)
     },
-    onSwipedLeft: () => { pasar(1); setDrag(0) },
-    onSwipedRight: () => { pasar(-1); setDrag(0) },
+    onSwipedLeft: () => { if (galeria.length <= 1) return; pasar(1); setDrag(0) },
+    onSwipedRight: () => { if (galeria.length <= 1) return; pasar(-1); setDrag(0) },
     onSwiped: () => setDrag(0),
-    preventScrollOnSwipe: true, trackTouch: true, trackMouse: false, delta: 12,
+    preventScrollOnSwipe: false,
+    trackTouch: galeria.length > 1,
+    trackMouse: false,
+    delta: 12,
   })
 
   if (productos === null) return <div className="spin" />
@@ -485,8 +490,8 @@ export function Producto() {
 
         <div className="prod-grid atelier-grid">
           <div className="prod-media-col">
-            <div className="det-media det-media-atelier" {...swipe} onClick={() => galeria.length && setLightbox(true)}
-              style={{ cursor: galeria.length ? 'zoom-in' : 'default', touchAction: galeria.length > 1 ? 'pan-y' : undefined }}>
+            <div className="det-media det-media-atelier" {...(galeria.length > 1 ? swipe : {})} onClick={() => galeria.length && setLightbox(true)}
+              style={{ cursor: galeria.length ? 'zoom-in' : 'default' }}>
               <div className="det-ornament det-ornament-a" aria-hidden />
               <div className="det-ornament det-ornament-b" aria-hidden />
               {galeria.length
@@ -639,8 +644,8 @@ export function Producto() {
   // ——— Layout clásico ———
   const media = (
     <div className="prod-media-col">
-      <div className="det-media" {...swipe} onClick={() => galeria.length && setLightbox(true)}
-        style={{ cursor: galeria.length ? 'zoom-in' : 'default', touchAction: galeria.length > 1 ? 'pan-y' : undefined }}>
+      <div className="det-media" {...(galeria.length > 1 ? swipe : {})} onClick={() => galeria.length && setLightbox(true)}
+        style={{ cursor: galeria.length ? 'zoom-in' : 'default' }}>
         {galeria.length
           ? <div className="det-track" style={{ transform: `translate3d(calc(${-img * 100}% - ${drag}px), 0, 0)`, transition: drag ? 'none' : 'transform .38s cubic-bezier(.22,.61,.36,1)' }}>
               {galeria.map((g, k) => (

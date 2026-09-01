@@ -449,8 +449,8 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 }
 
 .card { background: #fff; border-radius: var(--radio); box-shadow: var(--sombra-sm); overflow: hidden; display: flex; flex-direction: column; transition: transform .15s ease, box-shadow .15s ease; }
-.card-media { position: relative; aspect-ratio: 1 / 1; background: var(--crema-oscuro); display: flex; align-items: center; justify-content: center; font-size: 2.8rem; cursor: pointer; }
-.card-media img { width: 100%; height: 100%; object-fit: cover; }
+.card-media { position: relative; aspect-ratio: 1 / 1; background: var(--crema-oscuro); display: flex; align-items: center; justify-content: center; font-size: 2.8rem; cursor: pointer; touch-action: pan-y pinch-zoom; }
+.card-media img { width: 100%; height: 100%; object-fit: cover; touch-action: pan-y pinch-zoom; }
 .card-body { padding: 11px 12px 12px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
 .card-name { font-size: 0.92rem; font-weight: 600; color: var(--texto); line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.3em; cursor: pointer; }
 .card-price { font-weight: 800; color: var(--selva); font-size: 1rem; }
@@ -558,7 +558,10 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 .icon-round.on { color: var(--rojo); border-color: var(--rojo); }
 .page { min-height: 46vh; }
 
-.det-media { position: relative; aspect-ratio: 1 / 1; max-height: 60vh; background: var(--crema-oscuro); display: flex; align-items: center; justify-content: center; font-size: 5rem; overflow: hidden; }
+.det-media { position: relative; aspect-ratio: 1 / 1; max-height: 60vh; background: var(--crema-oscuro); display: flex; align-items: center; justify-content: center; font-size: 5rem; overflow: hidden; touch-action: pan-y pinch-zoom; }
+.det-media .det-track,
+.det-media .det-slide,
+.det-media img { touch-action: pan-y pinch-zoom; }
 .det-media img { width: 100%; height: 100%; object-fit: cover; }
 /* Tira deslizante de la galerÃ­a del producto */
 .det-track { display: flex; width: 100%; height: 100%; flex: 0 0 100%; align-self: stretch; will-change: transform; backface-visibility: hidden; }
