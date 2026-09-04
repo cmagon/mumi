@@ -56,6 +56,7 @@ import Modal from '../components/ui/Modal'
 import Select from '../components/ui/Select'
 import EvidenciaModal from '../components/ordenes/EvidenciaModal'
 import AuditoriaOrdenesModal from '../components/ordenes/AuditoriaOrdenesModal'
+import DetalleLoteMpModal from '../components/ordenes/DetalleLoteMpModal'
 import {
   ESTADO_LABEL, DIAS_CIERRE_SIN_EJECUTAR, diasAbierta, EMPTY_ORDEN, BASE_RECETA,
   desdeFechaMeses, desdeFechaVidaUtil, horaAhora,
@@ -5320,33 +5321,10 @@ export default function OrdenesProduccion() {
       <AuditoriaOrdenesModal open={modalAudit} onClose={() => setModalAudit(false)} ordenes={ordenes} opNum={opNum} />
 
       {/* Modal: detalle de un lote de MP consumido (trazabilidad hacia la compra) */}
-      <Modal open={!!detalleLoteMp} onClose={() => setDetalleLoteMp(null)} guard={false}
-        title={`🧊 Lote "${detalleLoteMp?.lote || 's/lote'}" — ${detalleLoteMp?.mpNombre || ''}`}
-        footer={<button className="btn btn-secondary" onClick={() => setDetalleLoteMp(null)}>Cerrar</button>}>
-        {detalleLoteMp?.cargando && <p style={{ fontSize: '0.88rem' }}>Cargando detalles del lote…</p>}
-        {detalleLoteMp && !detalleLoteMp.cargando && detalleLoteMp.filas.length === 0 && (
-          <p className="empty-table">No se encontró este lote en el inventario (pudo haberse eliminado o renombrado).</p>
-        )}
-        {detalleLoteMp && !detalleLoteMp.cargando && detalleLoteMp.filas.map((lf) => {
-          const u = detalleLoteMp.unidad
-          const consumido = Math.max(0, (lf.cantidad_inicial || 0) - (lf.cantidad_actual || 0) - (lf.cantidad_reservada || 0))
-          return (
-          <table key={lf.id} style={{ fontSize: '0.88rem', width: '100%', marginBottom: 10 }}>
-            <tbody>
-              <tr><td style={{ color: 'var(--texto-suave)', width: 190 }}>Fecha de compra/entrada</td><td><strong>{fFecha(lf.fecha_entrada)}</strong></td></tr>
-              <tr><td style={{ color: 'var(--texto-suave)' }}>Proveedor</td><td><strong>{String(lf.proveedor || '').trim() || NA_TRAZA}</strong></td></tr>
-              <tr><td style={{ color: 'var(--texto-suave)' }}>Costo unitario de compra</td><td>{lf.costo_unitario ? `${fCOP(lf.costo_unitario)}${u ? ` por ${u}` : ''}` : '—'}</td></tr>
-              <tr><td style={{ color: 'var(--texto-suave)' }}>Cantidad inicial</td><td>{fmtCantLote(lf.cantidad_inicial, u)}</td></tr>
-              <tr><td style={{ color: 'var(--texto-suave)' }}>Ya consumido</td><td>{fmtCantLote(consumido, u)}</td></tr>
-              <tr><td style={{ color: 'var(--texto-suave)' }}>Reservado (órdenes en proceso)</td><td>{(lf.cantidad_reservada || 0) > 0 ? <strong style={{ color: 'var(--tierra)' }}>{fmtCantLote(lf.cantidad_reservada, u)}</strong> : <span>0 <small style={{ color: 'var(--texto-suave)' }}>(si la orden ya se cerró, su reserva pasó a "consumido")</small></span>}</td></tr>
-              <tr><td style={{ color: 'var(--texto-suave)' }}>Disponible hoy</td><td><strong>{fmtCantLote(lf.cantidad_actual, u)}</strong></td></tr>
-              <tr><td style={{ color: 'var(--texto-suave)' }}>Vencimiento</td><td>{vencimientoLoteValido(lf.vencimiento) || NA_TRAZA}</td></tr>
-              <tr><td style={{ color: 'var(--texto-suave)' }}>Registrado por</td><td>{lf.creado_por || '—'}</td></tr>
-            </tbody>
-          </table>
-          )
-        })}
-      </Modal>
+      <DetalleLoteMpModal
+        data={detalleLoteMp} onClose={() => setDetalleLoteMp(null)}
+        fmtCantLote={fmtCantLote} vencimientoLoteValido={vencimientoLoteValido} naTraza={NA_TRAZA}
+      />
     </div>
   )
 }
