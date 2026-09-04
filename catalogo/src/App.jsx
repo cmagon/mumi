@@ -454,7 +454,8 @@ function CartDrawer({ onClose }) {
   const [enviando, setEnviando] = useState(false)
   const emailOk = emailValido(email)
   const nombreOk = nombre.trim().length >= 2
-  const telOk = telefonoValido(telefono)
+  // Teléfono: opcional para pedir. Si lo escriben, debe ser válido (no bloquea si está vacío).
+  const telOk = !telefono.trim() || telefonoValido(telefono)
   const puedePedir = emailOk && nombreOk && telOk && !enviando
   useBodyLock(true)
 
@@ -517,10 +518,10 @@ function CartDrawer({ onClose }) {
               <input value={nombre} onChange={e => { setNombre(e.target.value); setCliente(e.target.value.trim()) }} placeholder="¿Con quién tenemos el gusto?"
                 style={{ width: '100%', marginTop: 6, padding: 11, borderRadius: 10, border: `1.5px solid ${nombreOk ? 'var(--crema-oscuro)' : 'var(--dorado)'}`, font: 'inherit' }} />
               {!nombreOk && <div style={{ fontSize: '0.76rem', color: 'var(--tierra)', marginTop: 4 }}>Escribe tu nombre para que sepamos quién hace el pedido.</div>}
-              <label style={{ fontSize: '0.82rem', color: 'var(--selva)', fontWeight: 700, display: 'block', marginTop: 12 }}>Teléfono / WhatsApp *</label>
+              <label style={{ fontSize: '0.82rem', color: 'var(--selva)', fontWeight: 700, display: 'block', marginTop: 12 }}>Teléfono / WhatsApp <span style={{ fontWeight: 400, color: 'var(--texto-suave)' }}>(opcional)</span></label>
               <input type="tel" inputMode="tel" value={telefono} onChange={e => { setTelefonoForm(e.target.value); setTelefono(e.target.value.trim()) }} placeholder="Ej: 300 123 4567"
                 style={{ width: '100%', marginTop: 6, padding: 11, borderRadius: 10, border: `1.5px solid ${telOk ? 'var(--crema-oscuro)' : 'var(--dorado)'}`, font: 'inherit' }} />
-              {!telOk && <div style={{ fontSize: '0.76rem', color: 'var(--tierra)', marginTop: 4 }}>Indica un celular válido para contactarte.</div>}
+              {!telOk && <div style={{ fontSize: '0.76rem', color: 'var(--tierra)', marginTop: 4 }}>Si escribes un teléfono, indícalo completo (o déjalo vacío).</div>}
               <label style={{ fontSize: '0.82rem', color: 'var(--texto-suave)', fontWeight: 600, display: 'block', marginTop: 12 }}>Nota (opcional)</label>
               <textarea rows={2} value={nota} onChange={e => setNota(e.target.value)} placeholder="Indicaciones adicionales para tu pedido" style={{ width: '100%', marginTop: 6, padding: 10, borderRadius: 10, border: '1.5px solid var(--crema-oscuro)', font: 'inherit', resize: 'vertical' }} />
             </div>

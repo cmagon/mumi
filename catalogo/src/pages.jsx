@@ -67,7 +67,7 @@ function Mosaico({ s }) {
 
 // ==================== HOME / TIENDA ====================
 export function Home() {
-  const { cfg, productos, banners, enCarrito, agregar } = useStore()
+  const { cfg, productos, banners, enCarrito, agregar, precio } = useStore()
   const nav = useNavigate()
   const [sp, setSp] = useSearchParams()
   // Los filtros viven en la URL → enlaces compartibles y botón "atrás" funcional
@@ -118,8 +118,8 @@ export function Home() {
     if (fFruto) r = r.filter(p => (p.frutos || []).includes(fFruto))
     if (q.trim()) { const nq = sinTildes(q); r = r.filter(p => sinTildes(p.nombre).includes(nq) || sinTildes(sinHtml(p.descripcion)).includes(nq)) }
     const enStock = (p) => (p.stock ?? 0) > 0 ? 1 : 0
-    if (orden === 'precio_asc') r = [...r].sort((a, b) => a.precio_detal - b.precio_detal)
-    else if (orden === 'precio_desc') r = [...r].sort((a, b) => b.precio_detal - a.precio_detal)
+    if (orden === 'precio_asc') r = [...r].sort((a, b) => precio(a) - precio(b))
+    else if (orden === 'precio_desc') r = [...r].sort((a, b) => precio(b) - precio(a))
     else if (orden === 'nombre') r = [...r].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
     else r = [...r].sort((a, b) => // relevancia: destacados → novedades → con stock → alfabético
       (b.destacado ? 1 : 0) - (a.destacado ? 1 : 0) ||
@@ -127,7 +127,7 @@ export function Home() {
       enStock(b) - enStock(a) ||
       a.nombre.localeCompare(b.nombre, 'es'))
     return r
-  }, [productos, cat, fFruto, q, orden])
+  }, [productos, cat, fFruto, q, orden, precio])
 
   if (productos === null) return <div className="spin" />
 
@@ -439,7 +439,8 @@ export function Producto() {
     await confirmarPedidoWA(itemsPedido(), '', cfg, mayorista, introWA, nombre, email, telefono)
   }
   const pedir = () => {
-    if (emailValido(getEmail()) && (getCliente() || '').trim().length >= 2 && telefonoValido(getTelefono())) {
+    // Teléfono opcional: basta correo + nombre para lanzar el pedido directo
+    if (emailValido(getEmail()) && (getCliente() || '').trim().length >= 2) {
       void lanzarPedido(getCliente(), getEmail(), getTelefono())
     } else {
       setPedirDatos(true)
