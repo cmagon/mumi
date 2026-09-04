@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, uploadFile, beginSilentWrites, endSilentWrites } from '../lib/supabase'
 import { writeOrQueue } from '../lib/offlineQueue'
 import { fFecha, fNum, fCOP, componerSurtido } from '../lib/businessLogic'
+import { fechaLocalISO, horaAhora, desdeHoyMeses, labelMeses, getVenceOpts } from '../lib/ordenesHelpers'
 import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
@@ -31,14 +32,6 @@ import {
 
 // Icono inline alineado con el texto
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
-
-// Fecha/hora locales
-const fechaLocalISO = (d = new Date()) => { const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` }
-const horaAhora = () => new Date().toTimeString().slice(0, 5)
-// Opciones rápidas de fecha de vencimiento (igual que en Órdenes)
-const desdeHoyMeses = (m) => { const d = new Date(); d.setMonth(d.getMonth() + m); return fechaLocalISO(d) }
-const labelMeses = (m) => m % 12 === 0 ? `${m / 12} año${m / 12 > 1 ? 's' : ''}` : `${m} mes${m > 1 ? 'es' : ''}`
-const getVenceOpts = () => { try { const v = JSON.parse(localStorage.getItem('mumi_vence_opts')); return Array.isArray(v) && v.length ? v : [1, 2, 3, 6, 12, 24] } catch { return [1, 2, 3, 6, 12, 24] } }
 
 const EMPTY = {
   tipo_registro: 'final', producto: '', fecha: new Date().toISOString().split('T')[0],
