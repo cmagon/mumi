@@ -1,6 +1,11 @@
-// Supabase Edge Function: genera un resumen corto de la descripción de un producto con Claude.
-// Desplegar:  supabase functions deploy catalogo-resumen
-// Secretos:   supabase secrets set ANTHROPIC_API_KEY=sk-ant-...
+// Supabase Edge Function: genera un resumen corto de la descripción de un producto con OpenAI.
+//
+// Cómo publicarla y configurarla SIN CLI (todo desde el navegador):
+//   1. Dashboard de Supabase → Edge Functions → "Deploy a new function" (o "Create function").
+//      Nombre EXACTO: catalogo-resumen. Pega este archivo como index.ts y publica.
+//   2. Edge Functions → Secrets (o Project Settings → Edge Functions → Secrets):
+//        OPENAI_API_KEY = sk-...           (tu clave de OpenAI)
+//        OPENAI_MODEL   = gpt-4o-mini      (opcional; es el más barato/rápido)
 //
 // Solo lo usa el panel de administración (un editor pulsa "Generar resumen"), así que
 // exige sesión autenticada y limita el tamaño del texto para acotar el costo por llamada.
@@ -16,9 +21,8 @@ const json = (o: unknown, status = 200) =>
   new Response(JSON.stringify(o), { status, headers: { ...cors, 'Content-Type': 'application/json' } })
 const err = (msg: string, status: number) => json({ error: msg }, status)
 
-// Modelo: por defecto Claude Opus 5. Para abaratar costo puedes cambiarlo a
-// 'claude-haiku-4-5' aquí o vía el secreto ANTHROPIC_MODEL.
-const MODEL = Deno.env.get('ANTHROPIC_MODEL') || 'claude-opus-5'
+// Modelo de OpenAI. gpt-4o-mini es el más económico y de sobra para resúmenes.
+const MODEL = Deno.env.get('OPENAI_MODEL') || 'gpt-4o-mini'
 const MAX_TEXTO = 8000        // caracteres de entrada (de sobra para una descripción)
 const MAX_RESUMEN_CHARS = 200
 
@@ -36,8 +40,8 @@ serve(async (req) => {
     const { data: { user } } = await asUser.auth.getUser()
     if (!user) return err('No autenticado', 401)
 
-    const apiKey = Deno.env.get('ANTHROPIC_API_KEY')
-    if (!apiKey) return err('Falta configurar ANTHROPIC_API_KEY en los secretos de Supabase', 500)
+    const apiKey = Deno.env.get('OPENAI_API_KEY')
+    if (!apiKey) return err('Falta configurar OPENAI_API_KEY en los secretos de Supabase', 500)
 
     const body = await req.json().catch(() => ({}))
     const texto = sinHtml(String(body?.texto || '')).slice(0, MAX_TEXTO)
@@ -45,25 +49,26 @@ serve(async (req) => {
 
     const nombre = String(body?.nombre || '').slice(0, 160)
 
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
+    const sistema =
+      'Eres redactor de e-commerce para una marca de productos amazónicos. ' +
+      'Escribe un resumen breve y atractivo de la descripción del producto, en español, ' +
+      'en 1 o 2 frases (máximo ~160 caracteres). Tono cálido y natural. ' +
+      'No inventes datos que no estén en el texto. Devuelve solo el resumen, sin comillas ni prefijos.'
+
+    const r = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
       headers: {
-        'x-api-key': apiKey,
-        'anthropic-version': '2023-06-01',
+        'authorization': `Bearer ${apiKey}`,
         'content-type': 'application/json',
       },
       body: JSON.stringify({
         model: MODEL,
         max_tokens: 300,
-        system:
-          'Eres redactor de e-commerce para una marca de productos amazónicos. ' +
-          'Escribe un resumen breve y atractivo de la descripción del producto, en español, ' +
-          'en 1 o 2 frases (máximo ~160 caracteres). Tono cálido y natural. ' +
-          'No inventes datos que no estén en el texto. Devuelve solo el resumen, sin comillas ni prefijos.',
-        messages: [{
-          role: 'user',
-          content: `Producto: ${nombre || '(sin nombre)'}\n\nDescripción:\n${texto}\n\nResumen:`,
-        }],
+        temperature: 0.5,
+        messages: [
+          { role: 'system', content: sistema },
+          { role: 'user', content: `Producto: ${nombre || '(sin nombre)'}\n\nDescripción:\n${texto}\n\nResumen:` },
+        ],
       }),
     })
 
@@ -72,12 +77,7 @@ serve(async (req) => {
       return err(`Error del generador (${r.status}): ${detail.slice(0, 300)}`, 502)
     }
     const data = await r.json()
-    const resumen = (data?.content || [])
-      .filter((b: { type?: string }) => b?.type === 'text')
-      .map((b: { text?: string }) => b?.text || '')
-      .join(' ')
-      .trim()
-      .slice(0, MAX_RESUMEN_CHARS)
+    const resumen = String(data?.choices?.[0]?.message?.content || '').trim().slice(0, MAX_RESUMEN_CHARS)
 
     if (!resumen) return err('No se pudo generar el resumen', 502)
     return json({ resumen })
