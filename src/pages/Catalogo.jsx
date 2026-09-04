@@ -272,7 +272,7 @@ function TabProductos({ toast, qc, onDirtyChange }) {
   const { data: productos = [], isLoading } = useQuery({
     queryKey: ['catalogo_admin_productos'],
     queryFn: async () => {
-      const cols = 'id, nombre, product_id, precio_detal, precio_mayor, imagen_url, imagenes, descripcion, catalogo_descripcion, categoria_alegra_nombre, catalogo_visible, catalogo_frutos, catalogo_beneficios, catalogo_destacado, catalogo_novedad, catalogo_precio_oferta, catalogo_seo_titulo, catalogo_seo_desc, catalogo_contenido, catalogo_origen, catalogo_grupo, catalogo_pack_label, catalogo_pack_orden, stock, activo'
+      const cols = 'id, nombre, product_id, precio_detal, precio_mayor, imagen_url, imagenes, descripcion, catalogo_descripcion, catalogo_resumen, categoria_alegra_nombre, catalogo_visible, catalogo_frutos, catalogo_beneficios, catalogo_destacado, catalogo_novedad, catalogo_precio_oferta, catalogo_seo_titulo, catalogo_seo_desc, catalogo_contenido, catalogo_origen, catalogo_grupo, catalogo_pack_label, catalogo_pack_orden, stock, activo'
       const { data, error } = await supabase.from('finished_products').select(cols).order('nombre')
       if (error) throw error
       const prods = (data || []).filter(p => p.activo !== false)
@@ -578,6 +578,8 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
   const [destacado, setDestacado] = useState(!!producto.catalogo_destacado)
   const [novedad, setNovedad] = useState(!!producto.catalogo_novedad)
   const [descripcion, setDescripcion] = useState(producto.catalogo_descripcion || '')   // HTML enriquecido del catálogo
+  const [resumen, setResumen] = useState(producto.catalogo_resumen || '')   // resumen corto (IA o manual)
+  const [generando, setGenerando] = useState(false)
   const [precioOferta, setPrecioOferta] = useState(producto.catalogo_precio_oferta ?? '')
   const [seoTitulo, setSeoTitulo] = useState(producto.catalogo_seo_titulo || '')
   const [seoDesc, setSeoDesc] = useState(producto.catalogo_seo_desc || '')
@@ -594,8 +596,24 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
   const [saving, setSaving] = useState(false)
   const confirmar = useConfirm()
   const formSnap = () => snapConfig({
-    nombre, frutos, beneficios, destacado, novedad, descripcion, precioOferta, seoTitulo, seoDesc, contenido, origen, grupo, packLabel, packOrden, imgs,
+    nombre, frutos, beneficios, destacado, novedad, descripcion, resumen, precioOferta, seoTitulo, seoDesc, contenido, origen, grupo, packLabel, packOrden, imgs,
   })
+  const generarResumen = async () => {
+    const texto = (descripcion || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+    if (texto.length < 20) { toast('Escribe primero la descripción del catálogo', 'error'); return }
+    setGenerando(true)
+    try {
+      const { data, error } = await supabase.functions.invoke('catalogo-resumen', {
+        body: { texto: descripcion, nombre: nombre.trim() || producto.nombre },
+      })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      if (data?.resumen) { setResumen(data.resumen); toast('Resumen generado ✓') }
+      else throw new Error('No se recibió resumen')
+    } catch (e) {
+      toast('No se pudo generar el resumen: ' + (e.message || e), 'error')
+    } finally { setGenerando(false) }
+  }
   const savedEditor = useRef(null)
   useEffect(() => { savedEditor.current = formSnap() }, [producto.id]) // eslint-disable-line react-hooks/exhaustive-deps
   const editorDirty = savedEditor.current != null && formSnap() !== savedEditor.current
@@ -644,7 +662,8 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
       const baseUpd = {
         nombre: nombreLimpio,
         catalogo_frutos: frutos, catalogo_beneficios: beneficios, catalogo_destacado: destacado, catalogo_novedad: novedad,
-        catalogo_descripcion: descripcion || null, catalogo_precio_oferta: (precioOferta === '' || Number(precioOferta) <= 0) ? null : Number(precioOferta),
+        catalogo_descripcion: descripcion || null, catalogo_resumen: resumen.trim() || null,
+        catalogo_precio_oferta: (precioOferta === '' || Number(precioOferta) <= 0) ? null : Number(precioOferta),
         catalogo_seo_titulo: seoTitulo.trim() || null, catalogo_seo_desc: seoDesc.trim() || null,
         catalogo_contenido: contenido.trim() || null, catalogo_origen: origen.trim() || null,
         imagen_url, imagenes,
@@ -797,6 +816,17 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
           onCancel={() => setCropFile(null)}
           onCropped={(blobs) => { setCropFile(null); subirBlobPar(blobs) }} />
       )}
+
+      {/* Resumen corto (IA o manual) — se genera a partir de la descripción de abajo */}
+      <div className="form-group">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <label className="form-label" style={{ marginBottom: 0 }}>Resumen <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({resumen.length}/160 · frase corta a partir de la descripción)</small></label>
+          <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} disabled={generando} onClick={generarResumen} title="Genera un resumen con IA a partir de la descripción del catálogo">
+            <Ico as={Sparkles} size={12} />{generando ? 'Generando…' : 'Generar resumen'}
+          </button>
+        </div>
+        <textarea className="form-control" rows={2} maxLength={220} value={resumen} onChange={e => setResumen(e.target.value)} placeholder="Escríbelo o pulsa «Generar resumen» para crearlo desde la descripción." style={{ marginTop: 6 }} />
+      </div>
 
       {/* Descripción del catálogo (texto enriquecido, independiente de la ficha técnica) */}
       <div className="form-group"><label className="form-label">Descripción del catálogo <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(texto enriquecido; distinta a la descripción técnica de la ficha)</small></label>
