@@ -1441,12 +1441,33 @@ export default function OrdenesProduccion() {
   }
 
   // Abre proceso con feedback visual y anti doble-clic (prepararDatos puede tardar varios segundos).
+  // Se eliminó el paso previo "Tomar": si la orden aún está PENDIENTE, aquí mismo se pone en proceso
+  // y se reserva la MP (PEPS) antes de abrir el modal. Un solo botón "Iniciar proceso".
   const openProcesoConGuard = async (o) => {
     if (abriendoProcesoId != null) return
     setAbriendoProcesoId(o.id)
     setBusy(true)
     try {
-      const conReg = await registrarDiligenciador(o)
+      let ord = o
+      if (o.estado === 'pendiente') {
+        const diligenciado_por = mergeDiligenciador(o.diligenciado_por, profile?.nombre)
+        const { error } = await supabase.from('production_orders').update({ estado: 'en_proceso', diligenciado_por }).eq('id', o.id)
+        if (error && /diligenciado_por/i.test(error.message || '')) {
+          const { error: e2 } = await supabase.from('production_orders').update({ estado: 'en_proceso' }).eq('id', o.id)
+          if (e2) throw e2
+        } else if (error) throw error
+        // Reserva PEPS al iniciar. Si falla, vuelve a pendiente (no dejar en proceso sin reserva).
+        try {
+          await reservarMP(o)
+        } catch (e) {
+          await supabase.from('production_orders').update({ estado: 'pendiente' }).eq('id', o.id)
+          throw new Error('No se pudo reservar la MP: ' + (e?.message || e))
+        }
+        qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
+        // Trae la orden FRESCA (con lotes_reservados ya escrito por reservarMP).
+        try { const { data: fresh } = await supabase.from('production_orders').select('*').eq('id', o.id).single(); if (fresh) ord = fresh } catch { ord = { ...o, estado: 'en_proceso' } }
+      }
+      const conReg = await registrarDiligenciador(ord)
       await openProceso(conReg)
     } catch (e) {
       toast(e?.message || 'No se pudo abrir el proceso', 'error')
@@ -1508,14 +1529,32 @@ export default function OrdenesProduccion() {
     ]
   }
 
-  // Guarda TODOS los campos del proceso (datos + resultado) en la orden
+  // Columnas opcionales del proceso (agregadas por migraciones tardías). Se escriben en el MISMO
+  // UPDATE que el resto; si alguna no existe en esta base, se reintenta sin ellas (ver abajo).
+  const COLS_PROC_OPCIONALES = ['prep_sino', 'saldos_reservados', 'campos_extra', 'parametros_calidad_resultado', 'ajustes_ingredientes']
+
+  // Guarda TODOS los campos del proceso (datos + resultado) en la orden.
+  // RENDIMIENTO: antes esto hacía ~6 escrituras secuenciales + un refetch de toda la lista en
+  // CADA autoguardado (cada 1.2 s al escribir), lo que hacía la orden lentísima. Ahora es UN
+  // solo UPDATE con todas las columnas y, en modo silencioso, sin refetch de la lista.
   const guardarProcesoData = async (silent = true) => {
     if (!ordenPrep) return
     const { procs, inicioGlobal, finGlobal } = tiemposGlobal()
     // El autoguardado de fondo (silent) NO muestra el overlay "Guardando…" para no interrumpir la escritura.
     if (silent) beginSilentWrites()
     try {
-      const r = await writeOrQueue({ table: 'production_orders', action: 'update', match: { id: ordenPrep.id }, payload: {
+      // Ajustes de ingredientes (mismo cálculo que guardarAjustesIngredientes, ya sin write aparte).
+      const ajustes = calcAjustes()
+      const prevAj = Array.isArray(ordenPrep.ajustes_ingredientes) ? ordenPrep.ajustes_ingredientes : []
+      const ajustesPayload = ajustes.length
+        ? ajustes.map(a => {
+          const old = prevAj.find(x => (a.mp_id != null && String(x.mp_id) === String(a.mp_id))
+            || String(x.nombre || '').trim().toLowerCase() === String(a.nombre || '').trim().toLowerCase())
+          return old?.reserva_sincronizada ? { ...a, reserva_sincronizada: true } : a
+        })
+        : null
+
+      const payload = {
         lote: prepLote, vence: prepVence || null, fecha_inicio: prepFechaInicio || null,
         modo_avanzado: prepModoAvanzado,
         inicio: inicioGlobal || null, fin: finGlobal || null,
@@ -1529,19 +1568,34 @@ export default function OrdenesProduccion() {
         surtido_cantidad: prepSurtido && prepSurtidoCantidad !== '' ? (parseFloat(prepSurtidoCantidad) || 0) : null,
         hay_sobrante: !!prepHaySobrante, sobrante_peso: prepHaySobrante && prepSobrantePeso !== '' ? (parseFloat(prepSobrantePeso) || 0) : null, sobrante_unidad: prepHaySobrante ? prepSobranteUnidad : null,
         destajo: prepDestajo.filter(d => d.nombre?.trim() || d.cantidad || d.tarifa),
-      } })
-      // Respuestas SI/NO tal cual (tri-estado true/false/null) — escritura aparte y tolerante:
-      // si la columna prep_sino aún no existe (falta migración v82), no rompe el autoguardado.
-      try { await supabase.from('production_orders').update({ prep_sino: { conforme: prepConforme, surtido: prepSurtido, hay_sobrante: prepHaySobrante } }).eq('id', ordenPrep.id) } catch { /* columna opcional */ }
-      // Reserva del saldo mientras la orden esté abierta (escritura aparte y tolerante si falta la columna v83).
-      try { await supabase.from('production_orders').update({ saldos_reservados: calcSaldosConsumidos() }).eq('id', ordenPrep.id) } catch { /* columna opcional */ }
-      // Campos adicionales personalizados (MP vendibles) — escritura aparte y tolerante (columna v85 opcional).
-      try { await supabase.from('production_orders').update({ campos_extra: prepCamposExtra.filter(c => (c.nombre || '').trim()).map(c => ({ nombre: c.nombre, valor: c.valor || '' })) }).eq('id', ordenPrep.id) } catch { /* columna opcional */ }
-      try { await supabase.from('production_orders').update({ parametros_calidad_resultado: serializarParamsCalidad(prepParamsCalidad) }).eq('id', ordenPrep.id) } catch { /* columna v161 opcional */ }
-      await guardarAjustesIngredientes(calcAjustes())
+        // Columnas antes escritas por separado (ahora en un único UPDATE):
+        prep_sino: { conforme: prepConforme, surtido: prepSurtido, hay_sobrante: prepHaySobrante },
+        saldos_reservados: calcSaldosConsumidos(),
+        campos_extra: prepCamposExtra.filter(c => (c.nombre || '').trim()).map(c => ({ nombre: c.nombre, valor: c.valor || '' })),
+        parametros_calidad_resultado: serializarParamsCalidad(prepParamsCalidad),
+        ajustes_ingredientes: ajustesPayload,
+      }
+
+      const doUpdate = (p) => writeOrQueue({ table: 'production_orders', action: 'update', match: { id: ordenPrep.id }, payload: p })
+      let r
+      try {
+        r = await doUpdate(payload)
+      } catch (e) {
+        // Si alguna columna opcional no existe en esta base, no debe tumbar el guardado esencial.
+        const msg = String(e?.message || '')
+        if (COLS_PROC_OPCIONALES.some(c => msg.includes(c))) {
+          const base = { ...payload }
+          for (const c of COLS_PROC_OPCIONALES) delete base[c]
+          r = await doUpdate(base)
+        } else { throw e }
+      }
+      // Mantener el estado local sincronizado (lo hacía setOrdenPrep en guardarAjustesIngredientes).
+      setOrdenPrep(o => o ? { ...o, ajustes_ingredientes: ajustesPayload } : o)
       setAutoSavedAt(new Date().toLocaleTimeString('es-CO'))
-      qc.invalidateQueries({ queryKey: ['production_orders'] })
-      if (!silent) toast(r.queued ? 'Progreso guardado sin conexión — se sincronizará 📴' : 'Guardado ✓')
+      if (!silent) {
+        qc.invalidateQueries({ queryKey: ['production_orders'] })
+        toast(r?.queued ? 'Progreso guardado sin conexión — se sincronizará 📴' : 'Guardado ✓')
+      }
     } catch (e) { if (!silent) toast(e.message, 'error') }
     finally { if (silent) endSilentWrites() }
   }
@@ -2688,25 +2742,8 @@ export default function OrdenesProduccion() {
     onError: (e) => toast(e.message, 'error'),
   })
 
-  const tomarOrden = useMutation({
-    mutationFn: async (o) => {
-      const diligenciado_por = mergeDiligenciador(o.diligenciado_por, profile?.nombre)
-      const { error } = await supabase.from('production_orders').update({ estado: 'en_proceso', diligenciado_por }).eq('id', o.id)
-      if (error && /diligenciado_por/i.test(error.message || '')) {
-        const { error: e2 } = await supabase.from('production_orders').update({ estado: 'en_proceso' }).eq('id', o.id)
-        if (e2) throw e2
-      } else if (error) throw error
-      // Reserva PEPS al iniciar. Si falla, vuelve a pendiente (no dejar en proceso sin reserva).
-      try {
-        await reservarMP(o)
-      } catch (e) {
-        await supabase.from('production_orders').update({ estado: 'pendiente' }).eq('id', o.id)
-        throw new Error('No se pudo reservar la MP: ' + (e?.message || e))
-      }
-    },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['production_orders'] }); qc.invalidateQueries({ queryKey: ['raw_materials'] }); qc.invalidateQueries({ queryKey: ['raw_material_lots'] }); toast('Orden en proceso — MP reservada ✓') },
-    onError: (e) => toast(e.message, 'error'),
-  })
+  // (El paso "Tomar" se eliminó: iniciar el proceso ya reserva la MP y pone la orden en proceso;
+  //  ver openProcesoConGuard.)
 
   // El operario puede anular/editar su envío dentro de 1 día hábil (no cuenta sábado/domingo)
   const dentroVentanaEdicion = (o) => {
@@ -3770,14 +3807,9 @@ export default function OrdenesProduccion() {
                             <button className="btn btn-xs btn-secondary" title="Imprimir orden" aria-label="Imprimir orden" onClick={() => imprimirOrden('print', o)}><Printer size={13} aria-hidden="true" /></button>
                             {esMovil && <button className="btn btn-xs btn-secondary" title="Compartir orden (PDF)" aria-label="Compartir orden (PDF)" onClick={() => compartirOrden(o)}><Share2 size={13} aria-hidden="true" /></button>}
                           </>}
-                          {/* Quien ejecuta la orden: el operario asignado */}
-                          {puedeResultados && esMia && o.estado === 'pendiente' && (
-                            <button className="btn btn-xs btn-primary" disabled={tomarOrden.isPending || abriendoProcesoId === o.id}
-                              onClick={() => tomarOrden.mutate(o)}>
-                              <Ico as={Play} size={13} />{tomarOrden.isPending ? 'Tomando…' : 'Tomar'}
-                            </button>
-                          )}
-                          {puedeResultados && esMia && (o.estado === 'en_proceso' || o.estado === 'rechazada') && (
+                          {/* Quien ejecuta la orden: el operario asignado. Un solo botón "Iniciar proceso"
+                              (ya no hay paso previo "Tomar": iniciar reserva la MP y pone en proceso). */}
+                          {puedeResultados && esMia && (o.estado === 'pendiente' || o.estado === 'en_proceso' || o.estado === 'rechazada') && (
                             <button className="btn btn-xs btn-primary" disabled={abriendoProcesoId === o.id}
                               onClick={() => openProcesoConGuard(o)}>
                               <Ico as={Play} size={13} />{abriendoProcesoId === o.id ? 'Abriendo…' : 'Iniciar proceso'}

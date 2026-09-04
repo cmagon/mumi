@@ -1,10 +1,7 @@
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
-import { QueryClient } from '@tanstack/react-query'
-import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client'
-import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister'
-import { get, set, del } from 'idb-keyval'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { AuthProvider } from './context/AuthContext'
 import { ConfirmProvider } from './context/ConfirmContext'
 import { asegurarBuildActual } from './lib/purgarCache'
@@ -33,43 +30,20 @@ const queryClient = new QueryClient({
       // instante lo que acaba de cambiar. El reloj solo cubre los cambios hechos por
       // OTRO usuario, y para eso 5 minutos —o volver a la pestaña— es suficiente.
       staleTime: 1000 * 60 * 5,
-      gcTime: 1000 * 60 * 60 * 24 * 7,      // conserva el caché 7 días (necesario para persistir offline)
+      gcTime: 1000 * 60 * 30,               // caché en memoria 30 min (ya no se persiste a disco)
       retry: 3,                             // reintenta si el servidor está lento/falla
       retryDelay: (a) => Math.min(1000 * 2 ** a, 8000),
       refetchOnMount: true,                 // recarga al entrar a cada módulo si los datos están viejos
       refetchOnWindowFocus: true,           // recarga al volver a la pestaña del navegador
       refetchOnReconnect: true,             // recarga al recuperar la conexión
-      // 'online': sin conexión las consultas se PAUSAN y se muestra lo último cacheado
-      // (con 'always' se ejecutaban offline y devolvían [] pisando el caché).
       networkMode: 'online',
     },
   },
 })
 
-// Consultas que NO se guardan en IndexedDB. Todo lo persistido hay que leerlo y
-// deserializarlo en CADA arranque antes de pintar la app, así que solo vale la pena
-// guardar lo que de verdad sirve sin conexión. Estas quedan fuera porque cambian cada
-// pocos segundos (notificaciones), porque son analíticas de escritorio, o porque sin red
-// no significan nada (enlaces compartidos, llamadas a Alegra, fotos de la galería).
-const SIN_PERSISTIR = new Set([
-  'notifications', 'dev_user_switch', 'password_requests',
-  'alegra_ventas_hist', 'gallery',
-  'share', 'share_live_docs', 'share_orden_paths', 'share_solicitudes',
-  'catalogo_visitas', 'catalogo_pedidos', 'catalogo_subs',
-])
-
-// Persistencia de la caché en IndexedDB → lectura offline (último estado disponible sin conexión)
-const persister = createAsyncStoragePersister({
-  storage: {
-    getItem: (key) => get(key),
-    setItem: (key, value) => set(key, value),
-    removeItem: (key) => del(key),
-  },
-  key: 'mumi-query-cache',
-  // Cada escritura serializa el caché COMPLETO a JSON. Con 1s, editar una orden de
-  // producción rehacía ese trabajo una vez por segundo en el hilo principal.
-  throttleTime: 3000,
-})
+// La app trabaja SIEMPRE en línea: se retiró la persistencia del caché en IndexedDB (que
+// serializaba todo el caché a disco cada pocos segundos, un costo notable al editar órdenes).
+// Sin conexión, App muestra la página "Sin conexión" en vez de datos viejos.
 
 // Tras un despliegue nuevo, una pestaña abierta sigue pidiendo los chunks de la versión
 // anterior; si el archivo ya no está, el import dinámico falla y el módulo no abre
@@ -92,25 +66,13 @@ window.addEventListener('vite:preloadError', (e) => {
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
     <BrowserRouter>
-      <PersistQueryClientProvider
-        client={queryClient}
-        persistOptions={{
-          persister,
-          // Al cambiar el build, React Query descarta el IndexedDB persistido.
-          buster: MUMI_BUILD,
-          maxAge: 1000 * 60 * 60 * 24 * 7,   // 7 días
-          dehydrateOptions: {
-            shouldDehydrateQuery: (q) =>
-              q.state.status === 'success' && !SIN_PERSISTIR.has(String(q.queryKey?.[0])),
-          },
-        }}
-      >
+      <QueryClientProvider client={queryClient}>
         <AuthProvider>
           <ConfirmProvider>
             <App />
           </ConfirmProvider>
         </AuthProvider>
-      </PersistQueryClientProvider>
+      </QueryClientProvider>
     </BrowserRouter>
   </React.StrictMode>
 )
