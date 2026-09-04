@@ -375,6 +375,7 @@ function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
   const [subiendo, setSubiendo] = useState(false)
   const [comp, setComp] = useState({})   // borrador de componente por combo
   const [savedSnap, setSavedSnap] = useState(null)
+  const [cropCola, setCropCola] = useState(null)   // { i, files:[], idx } — recorte en cola
   useEffect(() => {
     supabase.from('config_catalogo').select('productos_extra, categorias_extra').eq('id', 1).maybeSingle().then(({ data }) => {
       const it = Array.isArray(data?.productos_extra) ? data.productos_extra : []
@@ -394,22 +395,26 @@ function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
   const upd = (i, campo, val) => setItems(a => a.map((x, k) => k === i ? { ...x, [campo]: val } : x))
   const add = (tipo) => setItems(a => [...(a || []), EXTRA_VACIO(tipo)])
   const del = (i) => setItems(a => a.filter((_, k) => k !== i))
-  const subir = async (i, files) => {
+  // Sube web (1200) + móvil (780) del recorte; mismo pipeline que Productos Terminados
+  const subirBlobParExtra = async (i, blobs) => {
     setSubiendo(true)
     try {
       const nombre = (items[i]?.nombre || '').trim() || 'producto'
-      const nuevos = []
-      for (const f of files) {
-        const ext = (f.name?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
-        const path = pathImgProducto(nombre, { carpeta: 'productos', ext })
-        const { error } = await supabase.storage.from('product-images').upload(path, f, { upsert: true, contentType: f.type || 'image/jpeg' })
+      const subirUno = async (blob, suf) => {
+        const path = pathImgProducto(nombre, { carpeta: 'productos', sufijo: suf })
+        const { error } = await supabase.storage.from('product-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
         if (error) throw error
-        const { data } = supabase.storage.from('product-images').getPublicUrl(path)
-        nuevos.push({ url: data.publicUrl, url_mobile: data.publicUrl, alt: nombre })
+        return supabase.storage.from('product-images').getPublicUrl(path).data.publicUrl
       }
-      upd(i, 'imagenes', [...(items[i].imagenes || []), ...nuevos])
-    } catch (e) { toast('No se pudieron subir: ' + e.message, 'error') } finally { setSubiendo(false) }
+      const url = await subirUno(blobs.web || blobs.main, 'web')
+      const url_mobile = blobs.mobile ? await subirUno(blobs.mobile, 'mob') : url
+      setItems(a => a.map((x, k) => k === i ? { ...x, imagenes: [...(x.imagenes || []), { url, url_mobile, alt: nombre }] } : x))
+    } catch (e) { toast('No se pudo subir la imagen: ' + e.message, 'error') } finally { setSubiendo(false) }
   }
+  // Cola de recorte: procesa una imagen a la vez (permite selección múltiple)
+  const encolarRecorte = (i, files) => { const fs = [...files]; if (fs.length) setCropCola({ i, files: fs, idx: 0 }) }
+  const siguienteRecorte = () => setCropCola(c => (c && c.idx + 1 < c.files.length) ? { ...c, idx: c.idx + 1 } : null)
+  const onRecortado = async (blobs) => { const c = cropCola; siguienteRecorte(); if (c) await subirBlobParExtra(c.i, blobs) }
   const addComp = (i) => { const c = comp[i]; if (!c?.id) return; upd(i, 'componentes', [...(items[i].componentes || []), { id: c.id, cantidad: Number(c.cantidad) || 1 }]); setComp(s => ({ ...s, [i]: { id: '', cantidad: 1 } })) }
   const guardar = async () => {
     setSaving(true)
@@ -500,7 +505,8 @@ function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
               </div>
             )}
             <div>
-              <label className="btn btn-xs btn-secondary" style={{ cursor: 'pointer' }}><Upload size={12} /> {subiendo ? 'Subiendo…' : 'Subir imágenes'}<input type="file" accept="image/*" multiple hidden onChange={e => { const fs = [...(e.target.files || [])]; if (fs.length) subir(i, fs); e.target.value = '' }} /></label>
+              <label className="btn btn-xs btn-secondary" style={{ cursor: 'pointer' }}><Upload size={12} /> {subiendo ? 'Subiendo…' : 'Subir imágenes'}<input type="file" accept="image/*" multiple hidden onChange={e => { encolarRecorte(i, e.target.files || []); e.target.value = '' }} /></label>
+              <small style={{ display: 'block', color: 'var(--texto-suave)', fontSize: '0.68rem', marginTop: 4 }}>Cuadrada 1:1 · se generan web 1200 y móvil 780.</small>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
                 {(x.imagenes || []).map((im, k) => (
                   <div key={k} style={{ position: 'relative', width: 62, height: 62 }}>
@@ -514,6 +520,11 @@ function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
         ))}
       </div>
       <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={guardar} disabled={saving}><Ico as={Save} size={14} />{saving ? 'Guardando…' : 'Guardar productos adicionales'}</button>{savedSnap != null && items != null && snapConfig({ items, cats }) !== savedSnap && <span className="badge badge-dorado" style={{ marginLeft: 8 }}>Sin guardar</span>}
+      {cropCola && (
+        <ImageCropper file={cropCola.files[cropCola.idx]} aspect={1} variantes={[IMG_PROD_WEB, IMG_PROD_MOBILE]}
+          onCancel={siguienteRecorte}
+          onCropped={onRecortado} />
+      )}
     </div>
   )
 }
