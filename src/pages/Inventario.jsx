@@ -399,17 +399,7 @@ export default function Inventario() {
           ? (parseFloat(formMov.costo) || 0)
           : (mp?.precio || 0)
         costoMovimiento = costoLote
-        // Promedio ponderado ANTES de mover stock (para historial y para actualizar raw_materials).
-        const { data: frescoPre } = await supabase.from('raw_materials').select('stock, precio').eq('id', mpId).single()
-        const stockPrevio = Math.max(0, Number(frescoPre?.stock) || 0)
-        const precioPrevio = Number(frescoPre?.precio) || 0
-        const precioPromedio = (stockPrevio + cantidad) > 0
-          ? (stockPrevio * precioPrevio + cantidad * costoLote) / (stockPrevio + cantidad)
-          : costoLote
-        extra.precio_antes = precioPrevio
-        extra.precio_despues = precioPromedio
         extra.costo_lote = costoLote
-        if (Math.abs(precioPrevio - precioPromedio) > 0.01) extra.cambio_precio_promedio = true
         const creado = await crearLoteEntrada({
           mp_id: mpId,
           lote: formMov.lote || (esEmpaque(mp?.categoria) ? LOTE_SIN_CODIGO : ''),
@@ -419,8 +409,29 @@ export default function Inventario() {
         })
         if (creado?.id) extra.lote_id = creado.id
         extra.proveedor = prov
-        // Se aplica abajo en `upd` junto con lote/vencimiento
-        extra._precio_promedio_nuevo = precioPromedio
+        // Promedio ponderado ATÓMICO: stock + precio se recalculan y aplican con FOR UPDATE en una
+        // sola transacción (v162), evitando que dos entradas simultáneas de la misma MP se pisen.
+        const { data: prom, error: promErr } = await supabase.rpc('entrada_mp_promedio', {
+          p_mp_id: mpId, p_cantidad: cantidad, p_costo_unitario: costoLote,
+        })
+        if (!promErr && prom) {
+          extra.precio_antes = Number(prom.precio_antes) || 0
+          extra.precio_despues = Number(prom.precio_despues) || 0
+          if (Math.abs((Number(prom.precio_antes) || 0) - (Number(prom.precio_despues) || 0)) > 0.01) extra.cambio_precio_promedio = true
+          stockYaAjustado = true   // la RPC ya subió el stock y fijó el precio: no repetir abajo
+        } else {
+          // Respaldo si la migración v162 aún no está: cálculo en cliente (comportamiento anterior).
+          const { data: frescoPre } = await supabase.from('raw_materials').select('stock, precio').eq('id', mpId).single()
+          const stockPrevio = Math.max(0, Number(frescoPre?.stock) || 0)
+          const precioPrevio = Number(frescoPre?.precio) || 0
+          const precioPromedio = (stockPrevio + cantidad) > 0
+            ? (stockPrevio * precioPrevio + cantidad * costoLote) / (stockPrevio + cantidad)
+            : costoLote
+          extra.precio_antes = precioPrevio
+          extra.precio_despues = precioPromedio
+          if (Math.abs(precioPrevio - precioPromedio) > 0.01) extra.cambio_precio_promedio = true
+          extra._precio_promedio_nuevo = precioPromedio   // se aplica abajo junto con lote/vencimiento
+        }
       } else if (formMov.tipo === 'salida') {
         if (!(cantidad > 0)) throw new Error('Ingresa una cantidad')
         if (!formMov.motivo) throw new Error('Indica el motivo de la salida')
