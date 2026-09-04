@@ -551,35 +551,42 @@ export default function Inventario() {
 
   // Alinea PEPS al stock (no al revés): si hay stock sin lotes, crea "sin lote";
   // si sobran lotes, los consume. El stock de la ficha no se toca. Solo admin.
+  //
+  // Núcleo reutilizable (por ítem y para "Igualar todas"). Con estricto=true lanza si el hueco es
+  // una reserva de orden (no un descuadre); con estricto=false simplemente lo omite (return null).
+  const reconciliarUnaMP = async (mp, { estricto = true } = {}) => {
+    const d = descuadrePEPS(mp)
+    if (!d || !d.igualar) {
+      if (estricto && d && !d.igualar) throw new Error('Ese hueco es una reserva de orden, no un descuadre. Míralo en Reservas MP.')
+      return null
+    }
+    const r = await sincronizarPEPSAlStock({
+      mp_id: mp.id,
+      stock: d.stock,
+      costo_unitario: mp.precio || 0,
+      creado_por: profile?.nombre || '',
+    })
+    const movBase = {
+      mp_id: mp.id, tipo: 'ajuste', cantidad: 0,
+      fecha: new Date().toISOString().split('T')[0],
+      responsable: profile?.nombre || '',
+      obs: r.accion === 'crear_sin_lote' || r.accion === 'sumar_sin_lote'
+        ? `[PEPS] Creado/ajustado lote "${LOTE_SIN_CODIGO}" por ${fBase(Math.abs(d.diff), mp.unidad)} (stock ${fBase(d.stock, mp.unidad)})`
+        : r.accion === 'consumir_exceso'
+          ? `[PEPS] Consumidos ${fBase(Math.abs(d.diff), mp.unidad)} de lotes para igualar al stock ${fBase(d.stock, mp.unidad)}`
+          : `[PEPS] Ya cuadraba`,
+      extra: {
+        reconciliacion_peps: true, accion: r.accion,
+        stock: d.stock, lotes_antes: d.porLotes, diff: d.diff, lote_id: r.lote_id || null,
+      },
+    }
+    const { error } = await supabase.from('inventory_movements').insert(movBase)
+    if (error && !/inventory_movements/i.test(error.message || '')) throw error
+    return r
+  }
+
   const reconciliarPEPS = useMutation({
-    mutationFn: async (mp) => {
-      const d = descuadrePEPS(mp)
-      if (!d) return
-      if (!d.igualar) throw new Error('Ese hueco es una reserva de orden, no un descuadre. Míralo en Reservas MP.')
-      const r = await sincronizarPEPSAlStock({
-        mp_id: mp.id,
-        stock: d.stock,
-        costo_unitario: mp.precio || 0,
-        creado_por: profile?.nombre || '',
-      })
-      const movBase = {
-        mp_id: mp.id, tipo: 'ajuste', cantidad: 0,
-        fecha: new Date().toISOString().split('T')[0],
-        responsable: profile?.nombre || '',
-        obs: r.accion === 'crear_sin_lote' || r.accion === 'sumar_sin_lote'
-          ? `[PEPS] Creado/ajustado lote "${LOTE_SIN_CODIGO}" por ${fBase(Math.abs(d.diff), mp.unidad)} (stock ${fBase(d.stock, mp.unidad)})`
-          : r.accion === 'consumir_exceso'
-            ? `[PEPS] Consumidos ${fBase(Math.abs(d.diff), mp.unidad)} de lotes para igualar al stock ${fBase(d.stock, mp.unidad)}`
-            : `[PEPS] Ya cuadraba`,
-        extra: {
-          reconciliacion_peps: true, accion: r.accion,
-          stock: d.stock, lotes_antes: d.porLotes, diff: d.diff, lote_id: r.lote_id || null,
-        },
-      }
-      const { error } = await supabase.from('inventory_movements').insert(movBase)
-      if (error && !/inventory_movements/i.test(error.message || '')) throw error
-      return r
-    },
+    mutationFn: (mp) => reconciliarUnaMP(mp, { estricto: true }),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['raw_materials'] })
       qc.invalidateQueries({ queryKey: ['inventory_movements'] })
@@ -589,6 +596,36 @@ export default function Inventario() {
         : r?.accion === 'consumir_exceso' ? 'Exceso de lotes consumido — PEPS = stock ✓'
         : 'PEPS ya cuadraba ✓'
       toast(msg)
+    },
+    onError: (e) => toast(e.message, 'error'),
+  })
+
+  // Materias primas con un descuadre SEGURO de igualar (no reservas de orden): stock ≠ Σ lotes por
+  // una causa clara. Es lo que el botón "Igualar todas" resuelve de una sola vez.
+  const descuadresSeguros = useMemo(
+    () => mps.filter(m => { const d = descuadrePEPS(m); return d && d.igualar }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mps, lotesDB, reservasPorMp],
+  )
+
+  // "Igualar todas": aplica la reconciliación a todas las MP con descuadre seguro, una por una.
+  // Cada fallo se registra pero no detiene al resto. No toca reservas de orden (estricto=false).
+  const reconciliarTodos = useMutation({
+    mutationFn: async () => {
+      let ok = 0, fallidas = 0
+      for (const mp of descuadresSeguros) {
+        try { const r = await reconciliarUnaMP(mp, { estricto: false }); if (r) ok++ }
+        catch (e) { fallidas++; console.warn('No se pudo igualar PEPS de', mp?.nombre, e) }
+      }
+      return { ok, fallidas }
+    },
+    onSuccess: ({ ok, fallidas }) => {
+      qc.invalidateQueries({ queryKey: ['raw_materials'] })
+      qc.invalidateQueries({ queryKey: ['inventory_movements'] })
+      qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
+      toast(fallidas
+        ? `Igualadas ${ok} · ${fallidas} con error (revisa una por una)`
+        : (ok ? `${ok} materia(s) prima(s) igualadas ✓` : 'No había descuadres por igualar'))
     },
     onError: (e) => toast(e.message, 'error'),
   })
@@ -764,6 +801,27 @@ export default function Inventario() {
 
       <div className="card">
         <div className="card-title"><Ico as={Package} size={16} />Estado del Inventario</div>
+        {esAdmin && descuadresSeguros.length > 0 && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+            background: 'rgba(176,125,24,0.10)', border: '1px solid var(--dorado)',
+            borderRadius: 8, padding: '10px 14px', marginBottom: 14,
+          }}>
+            <AlertTriangle size={18} aria-hidden="true" style={{ color: 'var(--tierra)', flexShrink: 0 }} />
+            <span style={{ fontSize: '0.86rem', fontWeight: 600 }}>
+              {descuadresSeguros.length} materia(s) prima(s) con descuadre PEPS que se pueden igualar automáticamente.
+            </span>
+            <button className="btn btn-sm btn-dorado" style={{ marginLeft: 'auto' }} disabled={reconciliarTodos.isPending || reconciliarPEPS.isPending}
+              onClick={() => confirmar(
+                `¿Igualar de una vez las ${descuadresSeguros.length} materias primas con descuadre PEPS?\n\n` +
+                'Alinea los lotes PEPS al stock de cada ficha (crea "sin lote" o consume el exceso). ' +
+                'El stock de las fichas NO se modifica. No incluye lo que esté amarrado a órdenes (reservas).',
+                { title: 'Igualar todas las PEPS', confirmText: 'Igualar todas' },
+              ).then(ok => ok && reconciliarTodos.mutate())}>
+              {reconciliarTodos.isPending ? 'Igualando…' : `Igualar todas (${descuadresSeguros.length})`}
+            </button>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
           <input className="form-control" style={{ width: 200 }} placeholder="🔍 Buscar materia prima..." value={buscarMP} onChange={e => setBuscarMP(e.target.value)} />
           <label className="form-label" style={{ margin: 0 }}>Categoría:</label>
