@@ -54,6 +54,8 @@ function SiNo({ value, onChange }) {
 }
 import Modal from '../components/ui/Modal'
 import Select from '../components/ui/Select'
+import EvidenciaModal from '../components/ordenes/EvidenciaModal'
+import AuditoriaOrdenesModal from '../components/ordenes/AuditoriaOrdenesModal'
 import {
   ESTADO_LABEL, DIAS_CIERRE_SIN_EJECUTAR, diasAbierta, EMPTY_ORDEN, BASE_RECETA,
   desdeFechaMeses, desdeFechaVidaUtil, horaAhora,
@@ -4197,26 +4199,12 @@ export default function OrdenesProduccion() {
 
       {/* Modal Preparar — calcula ingredientes con la cantidad de la orden */}
       {/* Modal: evidencia firmada de la orden impresa */}
-      <Modal open={modalEvid} onClose={() => setModalEvid(false)} title="📎 Evidencia de la orden impresa"
-        footer={<>
-          <button className="btn btn-secondary" onClick={() => setModalEvid(false)}>Más tarde</button>
-          <button className="btn btn-primary" onClick={confirmarEvidencia} disabled={savingEvid}>{savingEvid ? 'Guardando...' : 'Registrar evidencia'}</button>
-        </>}>
-        <div className="alert alert-info" style={{ fontSize: '0.85rem' }}>
-          Imprimiste la <strong>Orden OP-{evidOrden?.id}</strong>. Para dejar la trazabilidad completa (BPM), adjunta el <strong>formato escaneado y firmado</strong> o registra la <strong>firma digital</strong>.
-        </div>
-        <div className="form-group">
-          <label className="form-label">📄 Archivo escaneado y firmado</label>
-          <input type="file" accept="image/*,.pdf" onChange={e => setEvidFile(e.target.files[0] || null)} />
-          {evidFile && <div style={{ fontSize: '0.8rem', color: 'var(--selva)', marginTop: 4 }}>📎 {evidFile.name}</div>}
-        </div>
-        <div style={{ textAlign: 'center', color: 'var(--texto-suave)', fontSize: '0.8rem', margin: '6px 0' }}>— o —</div>
-        <div className="form-group">
-          <label className="form-label">✍ Firma digital (nombre de quien firma)</label>
-          <input className="form-control" value={firmaDigital} onChange={e => setFirmaDigital(e.target.value)} placeholder="Ej: Juan Pérez — Operario" />
-          <small style={{ color: 'var(--texto-suave)' }}>Quedará registrado con tu usuario y la fecha/hora como firma electrónica.</small>
-        </div>
-      </Modal>
+      <EvidenciaModal
+        open={modalEvid} evidOrden={evidOrden} savingEvid={savingEvid}
+        evidFile={evidFile} setEvidFile={setEvidFile}
+        firmaDigital={firmaDigital} setFirmaDigital={setFirmaDigital}
+        onClose={() => setModalEvid(false)} onConfirm={confirmarEvidencia}
+      />
 
       {/* Modal Iniciar proceso — fecha de inicio + tiempos por subproceso (autoguardado) */}
       <Modal open={modalProceso} onClose={closeProceso} guard={false}
@@ -5329,28 +5317,7 @@ export default function OrdenesProduccion() {
       </Modal>
 
       {/* Registro de creación de órdenes — solo admin */}
-      <Modal open={modalAudit} onClose={() => setModalAudit(false)} title="📜 Registro de creación de órdenes" size="modal-lg"
-        footer={<button className="btn btn-secondary" onClick={() => setModalAudit(false)}>Cerrar</button>}
-      >
-        <div className="alert alert-info" style={{ fontSize: '0.83rem' }}>Auditoría interna: qué usuario creó cada orden y cuándo. Solo visible para administradores.</div>
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>#</th><th>Producto</th><th>Creada por</th><th>Fecha y hora</th></tr></thead>
-            <tbody>
-              {ordenes.length === 0
-                ? <tr><td colSpan={4} className="empty-table">Sin órdenes</td></tr>
-                : [...ordenes].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).map(o => (
-                  <tr key={o.id}>
-                    <td>#{opNum(o.id)}</td>
-                    <td>{o.producto}</td>
-                    <td><strong>{o.creado_por || '—'}</strong></td>
-                    <td>{o.created_at ? new Date(o.created_at).toLocaleString('es-CO') : '—'}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
-      </Modal>
+      <AuditoriaOrdenesModal open={modalAudit} onClose={() => setModalAudit(false)} ordenes={ordenes} opNum={opNum} />
 
       {/* Modal: detalle de un lote de MP consumido (trazabilidad hacia la compra) */}
       <Modal open={!!detalleLoteMp} onClose={() => setDetalleLoteMp(null)} guard={false}
