@@ -272,15 +272,9 @@ function TabProductos({ toast, qc, onDirtyChange }) {
   const { data: productos = [], isLoading } = useQuery({
     queryKey: ['catalogo_admin_productos'],
     queryFn: async () => {
-      // Packs (grupo/label/orden) solo existen tras migration_v154; si faltan, reintentamos sin ellas
-      const colsBase = 'id, nombre, product_id, precio_detal, precio_mayor, imagen_url, imagenes, descripcion, catalogo_descripcion, categoria_alegra_nombre, catalogo_visible, catalogo_frutos, catalogo_beneficios, catalogo_destacado, catalogo_novedad, catalogo_precio_oferta, catalogo_seo_titulo, catalogo_seo_desc, catalogo_contenido, catalogo_origen, stock, activo'
-      let { data, error } = await supabase.from('finished_products')
-        .select(`${colsBase}, catalogo_grupo, catalogo_pack_label, catalogo_pack_orden`)
-        .order('nombre')
-      if (error) {
-        ({ data, error } = await supabase.from('finished_products').select(colsBase).order('nombre'))
-        if (error) throw error
-      }
+      const cols = 'id, nombre, product_id, precio_detal, precio_mayor, imagen_url, imagenes, descripcion, catalogo_descripcion, categoria_alegra_nombre, catalogo_visible, catalogo_frutos, catalogo_beneficios, catalogo_destacado, catalogo_novedad, catalogo_precio_oferta, catalogo_seo_titulo, catalogo_seo_desc, catalogo_contenido, catalogo_origen, catalogo_grupo, catalogo_pack_label, catalogo_pack_orden, stock, activo'
+      const { data, error } = await supabase.from('finished_products').select(cols).order('nombre')
+      if (error) throw error
       const prods = (data || []).filter(p => p.activo !== false)
       // Categoría = la de Alegra; si no, el tipo de la ficha (products_costing)
       const ids = [...new Set(prods.map(p => p.product_id).filter(Boolean))]
@@ -649,13 +643,7 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
         catalogo_pack_label: packLabel.trim() || null,
         catalogo_pack_orden: Number(packOrden) || 0,
       }
-      let packSinMigracion = false
-      let { error } = await supabase.from('finished_products').update({ ...baseUpd, ...packUpd }).eq('id', producto.id)
-      // Sin v154 las columnas de packs no existen: guardar el resto igual
-      if (error && /catalogo_grupo|catalogo_pack/i.test(error.message || '')) {
-        ({ error } = await supabase.from('finished_products').update(baseUpd).eq('id', producto.id))
-        packSinMigracion = !!(grupo.trim() || packLabel.trim())
-      }
+      const { error } = await supabase.from('finished_products').update({ ...baseUpd, ...packUpd }).eq('id', producto.id)
       if (error) throw error
       if (producto.product_id) {
         try {
@@ -672,9 +660,7 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
       qc.invalidateQueries({ queryKey: ['fichas_costo_terminado'] })
       savedEditor.current = formSnap()
       onDirtyChange?.(false)
-      toast(packSinMigracion
-        ? 'Guardado sin packs: aplica migration_v154 en Supabase'
-        : 'Producto actualizado ✓')
+      toast('Producto actualizado ✓')
       onSyncedSheets?.()
       onClose()
     } catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
