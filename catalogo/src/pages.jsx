@@ -1362,7 +1362,12 @@ export function Contacto() {
   const enviar = async (e) => {
     e.preventDefault(); setErr('')
     if (!f.mensaje.trim()) { setErr('Escribe tu mensaje'); return }
-    try { await supabase.from('mensajes_catalogo').insert({ nombre: f.nombre || null, email: f.email || null, telefono: f.telefono || null, mensaje: f.mensaje.trim() }); setOk(true) }
+    try {
+      await supabase.from('mensajes_catalogo').insert({ nombre: f.nombre || null, email: f.email || null, telefono: f.telefono || null, mensaje: f.mensaje.trim() })
+      // Lead a la lista CRM (no bloquea el envío del mensaje si falla)
+      if (emailValido(f.email)) { try { await suscribir(f.email, f.nombre, 'contacto', f.telefono) } catch { /* noop */ } }
+      setOk(true)
+    }
     catch (ex) { setErr(ex.message) }
   }
   const wa = (cfg?.whatsapp || '+573157702180').replace(/[^0-9]/g, '')

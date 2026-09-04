@@ -504,7 +504,7 @@ function CartDrawer({ onClose }) {
               <div key={i.id} className="citem">
                 <div className="citem-media">{i.imagen_url ? <img src={i.imagen_url} alt="" /> : <FrutoIcon name={iconoDe(i.frutos)} size={22} />}</div>
                 <div className="citem-info"><div className="citem-name">{i.nombre}</div><div className="citem-price">{fCOP(precio(i) * i.cantidad)}</div></div>
-                <div className="qty"><button onClick={() => agregar(i, -1)}><Minus size={16} /></button><span>{i.cantidad}</span><button onClick={() => agregar(i, 1)}><Plus size={16} /></button></div>
+                <div className="qty"><button onClick={() => agregar(i, -1)} aria-label="Quitar una unidad"><Minus size={16} /></button><span aria-live="polite">{i.cantidad}</span><button onClick={() => agregar(i, 1)} disabled={(Number(i.stock) || 0) > 0 && i.cantidad >= (Number(i.stock) || 0)} aria-label="Agregar una unidad"><Plus size={16} /></button></div>
                 <button className="iconbtn" onClick={() => quitar(i.id)}><Trash2 size={18} color="var(--tierra)" /></button>
               </div>
             ))}

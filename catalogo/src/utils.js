@@ -617,6 +617,11 @@ export async function toggleFavoritoRemoto(email, productId, nombre) {
  * Registra pedido, abre WA con Pedido #. Sin preguntar si envió el mensaje.
  */
 export async function confirmarPedidoWA(items, nota, cfg, mayorista = false, intro = '', nombre = null, email = null, telefono = null) {
+  // iOS/Safari y navegadores in-app bloquean window.open tras un await (se pierde la
+  // activación por gesto del usuario). Abrimos la pestaña YA, sincrónicamente, y luego
+  // le fijamos la URL de WhatsApp cuando el mensaje está listo.
+  let waWin = null
+  try { waWin = window.open('', '_blank') } catch { waWin = null }
   const total = items.reduce((s, i) => s + precioItem(i, mayorista) * i.cantidad, 0)
   const cliente = (nombre == null ? getCliente() : nombre).trim()
   const correo = (email == null ? getEmail() : email).trim().toLowerCase()
@@ -670,14 +675,50 @@ export async function confirmarPedidoWA(items, nota, cfg, mayorista = false, int
   if (cliente) setCliente(cliente)
   if (tel) setTelefono(tel)
 
+  // Carrito comprado → marca el registro remoto para el seguimiento
+  if (correo) { try { await marcarCarritoRemoto(correo, 'comprado') } catch { /* noop */ } }
+
   const numero = (cfg?.whatsapp || '+573157702180').replace(/[^0-9]/g, '')
   const texto = encodeURIComponent(construirMensajeWA(items, nota, cfg, mayorista, intro, cliente, codigo, tel))
-  window.open(`https://wa.me/${numero}?text=${texto}`, '_blank')
+  const urlWA = `https://wa.me/${numero}?text=${texto}`
+  if (waWin) {
+    try { waWin.location.href = urlWA } catch { window.open(urlWA, '_blank') }
+  } else {
+    window.open(urlWA, '_blank')
+  }
 
   if (codigo) {
     try { await marcarPedidoEstado(codigo, 'enviado') } catch { /* noop */ }
   }
   return { codigo, id: pedidoId }
+}
+
+// ---- Carrito remoto (seguimiento y recuperación de abandonos) ----
+// Se guarda solo cuando el cliente ya se identificó por correo.
+export async function guardarCarritoRemoto(email, nombre, telefono, carrito, total, nItems) {
+  const e = (email || '').trim().toLowerCase()
+  if (!emailValido(e)) return
+  const items = (carrito || []).map(i => ({
+    id: i.id, nombre: i.nombre, cantidad: i.cantidad,
+    precio: precioItem(i, false),
+  }))
+  try {
+    await supabase.rpc('catalogo_guardar_carrito', {
+      p_email: e,
+      p_nombre: (nombre || '').trim() || null,
+      p_telefono: (telefono || '').trim() || null,
+      p_items: items,
+      p_total: Math.round(Number(total) || 0),
+      p_n_items: Number(nItems) || 0,
+    })
+  } catch { /* best-effort: no bloquea la compra */ }
+}
+
+export async function marcarCarritoRemoto(email, estado) {
+  const e = (email || '').trim().toLowerCase()
+  if (!emailValido(e)) return
+  try { await supabase.rpc('catalogo_marcar_carrito', { p_email: e, p_estado: estado }) }
+  catch { /* noop */ }
 }
 
 export async function sincronizarFavoritosLocales(email, ids, nombre) {
