@@ -21,6 +21,27 @@ export const endSilentWrites = () => { _silentDepth = Math.max(0, _silentDepth -
 // ("Eliminando…" en vez de "Guardando…" cuando se borra, etc.)
 const _labelDeMetodo = (m) => (m === 'delete' ? 'Eliminando…' : 'Guardando…')
 
+// ¿El fallo es por falta de conexión (no un error de datos del servidor)?
+// Los errores de PostgREST traen `code` (p. ej. '23505'); una caída de red no.
+const _esFalloConexion = (err) => {
+  if (!err) return false
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return true
+  const msg = String(err.message || err).toLowerCase()
+  if (err.code && !/^(pgrst|fetch)/i.test(String(err.code))) return false   // error real del servidor
+  return /failed to fetch|networkerror|network error|fetch failed|load failed|err_internet|err_network|err_connection|timeout|no se pudo guardar|sin conexión/.test(msg)
+}
+
+// Avisa a la app (modal global) que una escritura falló por conexión. Se dispara una sola vez
+// por ráfaga para no apilar modales cuando varias escrituras caen a la vez.
+let _avisoConexionTs = 0
+const _avisarFalloConexion = () => {
+  if (typeof window === 'undefined') return
+  const ahora = Date.now()
+  if (ahora - _avisoConexionTs < 1500) return
+  _avisoConexionTs = ahora
+  try { window.dispatchEvent(new CustomEvent('mumi-conn-error')) } catch { /* noop */ }
+}
+
 function _trackWrite(builder, silent, label) {
   if (!builder || typeof builder.then !== 'function') return builder
   const origThen = builder.then.bind(builder)
@@ -30,8 +51,8 @@ function _trackWrite(builder, silent, label) {
   builder.then = (onF, onR) => {
     start()
     return origThen(
-      (v) => { end(); return onF ? onF(v) : v },
-      (e) => { end(); if (onR) return onR(e); throw e },
+      (v) => { end(); if (v && v.error && _esFalloConexion(v.error)) _avisarFalloConexion(); return onF ? onF(v) : v },
+      (e) => { end(); if (_esFalloConexion(e)) _avisarFalloConexion(); if (onR) return onR(e); throw e },
     )
   }
   return builder

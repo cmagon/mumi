@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useLocation } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase, uploadFile } from '../lib/supabase'
+import { supabase, uploadFile, beginSilentWrites, endSilentWrites } from '../lib/supabase'
 import { writeOrQueue } from '../lib/offlineQueue'
 import { fFecha, fNum, fCOP, componerSurtido } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
@@ -356,6 +356,8 @@ export default function Produccion() {
   useEffect(() => {
     if (!modal || !editId) return
     const t = setTimeout(async () => {
+      // Autoguardado de fondo: NO debe mostrar el overlay "Guardando…" en cada tecla.
+      beginSilentWrites()
       try {
         await supabase.from('production_records').update({
           producto: form.producto, fecha: form.fecha, lote: form.lote, vence: form.vence || null, empaque: form.empaque,
@@ -370,6 +372,7 @@ export default function Produccion() {
         setAutoSavedAt(new Date().toLocaleTimeString('es-CO'))
         qc.invalidateQueries({ queryKey: ['production_records'] })
       } catch { /* silencioso */ }
+      finally { endSilentWrites() }
     }, 1200)
     return () => clearTimeout(t)
   // eslint-disable-next-line react-hooks/exhaustive-deps

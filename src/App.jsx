@@ -9,6 +9,8 @@ import Sidebar from './components/Layout/Sidebar'
 import MobileHeader from './components/Layout/MobileHeader'
 import AttendanceModal from './components/AttendanceModal'
 import ConnStatus from './components/ConnStatus'
+import ConnErrorModal from './components/ConnErrorModal'
+import SinConexion from './components/SinConexion'
 import SavingOverlay from './components/ui/SavingOverlay'
 import DownloadProgress from './components/ui/DownloadProgress'
 import DevModeBanner from './components/DevModeBanner'
@@ -144,6 +146,7 @@ function ProtectedLayout() {
       </main>
       <div id="toast-container" role="status" aria-live="polite" aria-atomic="false" />
       <ConnStatus />
+      <ConnErrorModal />
       <SavingOverlay />
       <DownloadProgress />
       {asistModo && empVinculado && (
@@ -171,7 +174,23 @@ function ModRoute({ modulo, children }) {
   return children
 }
 
+// Bloquea toda la app con la página "Sin conexión" mientras el dispositivo esté offline.
+// Al recuperar la red, se levanta el bloqueo y se recargan los datos (refetchOnReconnect).
+function useEstaEnLinea() {
+  const [online, setOnline] = useState(navigator.onLine)
+  useEffect(() => {
+    const on = () => setOnline(true)
+    const off = () => setOnline(false)
+    window.addEventListener('online', on)
+    window.addEventListener('offline', off)
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off) }
+  }, [])
+  return online
+}
+
 export default function App() {
+  const online = useEstaEnLinea()
+  if (!online) return <SinConexion onReintentar={() => (navigator.onLine ? window.location.reload() : null)} />
   return (
     <Suspense fallback={<PageFallback />}>
     <Routes>
