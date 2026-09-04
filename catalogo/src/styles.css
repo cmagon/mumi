@@ -462,7 +462,8 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 .card-media { position: relative; aspect-ratio: 1 / 1; background: var(--crema-oscuro); display: flex; align-items: center; justify-content: center; font-size: 2.8rem; cursor: pointer; touch-action: pan-y pinch-zoom; }
 .card-media img { width: 100%; height: 100%; object-fit: cover; touch-action: pan-y pinch-zoom; }
 .card-body { padding: 11px 12px 12px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
-.card-name { font-size: 0.92rem; font-weight: 600; color: var(--texto); line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.3em; cursor: pointer; }
+.card-name { font-size: 0.92rem; font-weight: 600; color: var(--texto); line-height: 1.25; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.3em; cursor: pointer; background: none; border: 0; padding: 0; margin: 0; text-align: left; width: 100%; font-family: inherit; }
+.card-name:focus-visible { outline: 2px solid var(--dorado); outline-offset: 2px; border-radius: 4px; }
 .card-price { font-weight: 800; color: var(--selva); font-size: 1rem; }
 .card-add { margin-top: auto; background: var(--selva); color: var(--on-primario, var(--crema)); border: none; border-radius: var(--radio-sm); padding: 9px; font-weight: 700; font-size: 0.82rem; display: flex; align-items: center; justify-content: center; gap: 6px; transition: background .15s ease; }
 .card-add:hover { background: var(--selva-medio); }

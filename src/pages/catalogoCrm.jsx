@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Download, Users, BarChart3, Star } from 'lucide-react'
+import { Download, Users, BarChart3, Star, ShoppingCart, MessageCircle } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fNum } from '../lib/businessLogic'
 
@@ -315,6 +315,53 @@ export function TabClientes() {
 }
 
 /** Métricas de segmentación: repetición, productos top, embudo. */
+// ---- Carritos abandonados: clientes con productos sin comprar ----
+function waRecuperacion(c) {
+  const tel = (c.telefono || '').replace(/[^0-9]/g, '')
+  if (!tel) return null
+  const nombre = (c.nombre || '').trim()
+  const items = Array.isArray(c.items) ? c.items : []
+  const detalle = items.map(i => `• ${i.cantidad}x ${i.nombre}`).join('\n')
+  const saludo = nombre ? `¡Hola ${nombre}! 🌿` : '¡Hola! 🌿'
+  const msg = `${saludo}\nVimos que dejaste algunos productos en tu carrito de Mumi Amazonia:\n\n${detalle}\n\n¿Te ayudamos a completar tu pedido? 😊`
+  return `https://wa.me/${tel}?text=${encodeURIComponent(msg)}`
+}
+function CarritosAbandonados({ carritos }) {
+  const fechaCorta = (iso) => { try { return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }) } catch { return '—' } }
+  const totalPotencial = carritos.reduce((s, c) => s + (Number(c.total) || 0), 0)
+  return (
+    <div className="card">
+      <div className="card-title"><Ico as={ShoppingCart} size={15} />Carritos abandonados
+        {carritos.length > 0 && <span className="badge badge-dorado" style={{ marginLeft: 8 }}>{carritos.length} · {fCOP(totalPotencial)} potencial</span>}
+      </div>
+      <p style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', margin: '0 0 10px' }}>
+        Clientes identificados por correo que dejaron productos sin comprar. Escríbeles por WhatsApp para recuperar la venta.
+      </p>
+      {carritos.length === 0
+        ? <p className="empty-table">No hay carritos abandonados por ahora. 🎉</p>
+        : <div className="table-wrap"><table>
+            <thead><tr><th>Cliente</th><th>Correo</th><th className="movil-hide">Productos</th><th className="td-number">Total</th><th className="movil-hide">Actualizado</th><th></th></tr></thead>
+            <tbody>{carritos.map(c => {
+              const wa = waRecuperacion(c)
+              const items = Array.isArray(c.items) ? c.items : []
+              return (
+                <tr key={c.email}>
+                  <td>{c.nombre || '—'}{c.telefono ? <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>{c.telefono}</div> : null}</td>
+                  <td>{c.email}</td>
+                  <td className="movil-hide" style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>{items.map(i => `${i.cantidad}× ${i.nombre}`).join(', ') || `${c.n_items} ítem(s)`}</td>
+                  <td className="td-number">{fCOP(c.total)}</td>
+                  <td className="movil-hide" style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>{fechaCorta(c.actualizado_at)}</td>
+                  <td>{wa
+                    ? <a className="btn btn-xs btn-success" href={wa} target="_blank" rel="noreferrer"><MessageCircle size={13} /> Recuperar</a>
+                    : <span style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>sin teléfono</span>}</td>
+                </tr>
+              )
+            })}</tbody>
+          </table></div>}
+    </div>
+  )
+}
+
 export function TabMetricasCrm() {
   const { qPed, qSub, pedidos, subs } = useCatalogoCrmData()
   const qVis = useQuery({
@@ -322,6 +369,17 @@ export function TabMetricasCrm() {
     queryFn: async () => {
       const { data, error } = await supabase.from('visitas_catalogo').select('producto, dispositivo, fecha').order('id', { ascending: false }).limit(3000)
       if (error) throw error
+      return data || []
+    },
+  })
+  const qCarritos = useQuery({
+    queryKey: ['catalogo_carritos_abandonados'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('carritos_catalogo')
+        .select('email, nombre, telefono, items, total, n_items, estado, actualizado_at')
+        .eq('estado', 'carrito').gt('n_items', 0)
+        .order('actualizado_at', { ascending: false }).limit(200)
+      if (error) return []   // tabla nueva (migration_v162); no romper métricas si aún no existe
       return data || []
     },
   })
@@ -409,6 +467,9 @@ export function TabMetricasCrm() {
       <p style={{ fontSize: '0.82rem', color: 'var(--texto-suave)', margin: '0 0 12px' }}>
         Lista completa, etiquetas y export CSV → pestaña <strong>Correos</strong>.
       </p>
+
+      <CarritosAbandonados carritos={qCarritos.data || []} />
+
 
       <div className="card">
         <div className="card-title"><Ico as={BarChart3} size={15} />Visitas · últimos 7 días</div>

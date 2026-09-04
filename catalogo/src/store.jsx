@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { supabase } from './supabase'
-import { cargarFrutos, getEmail, setEmail as saveEmail, emailValido, listarFavoritosRemotos, toggleFavoritoRemoto, setCliente, getCliente, setTelefono } from './utils'
+import { cargarFrutos, getEmail, setEmail as saveEmail, emailValido, listarFavoritosRemotos, toggleFavoritoRemoto, setCliente, getCliente, getTelefono, setTelefono, guardarCarritoRemoto } from './utils'
 
 const Ctx = createContext(null)
 export const useStore = () => useContext(Ctx)
@@ -142,6 +142,27 @@ export function StoreProvider({ children }) {
     })
   }, [base, extra])
 
+  // Re-hidrata el carrito contra los productos frescos: refresca precio/stock/oferta/nombre/imagen,
+  // topa la cantidad al stock disponible y descarta lo que ya no existe o fue ocultado.
+  // Evita pedir precios viejos, ofertas vencidas o productos agotados/borrados.
+  useEffect(() => {
+    if (productos == null) return
+    setCarrito(cart => {
+      if (!cart.length) return cart
+      let changed = false
+      const next = cart.map(it => {
+        const fresh = (productos || []).find(p => String(p.id) === String(it.id))
+        if (!fresh) { changed = true; return null }   // ya no está visible / fue borrado
+        const stock = Number(fresh.stock) || 0
+        const cantidad = stock > 0 ? Math.min(it.cantidad, stock) : it.cantidad
+        const merged = { ...fresh, cantidad }
+        if (JSON.stringify(merged) !== JSON.stringify(it)) changed = true
+        return merged
+      }).filter(Boolean)
+      return changed ? next : cart
+    })
+  }, [productos])
+
   // Preview en vivo: el panel de administración manda config / banners por postMessage
   useEffect(() => {
     const onMsg = (e) => {
@@ -241,8 +262,11 @@ export function StoreProvider({ children }) {
 
   const agregar = (p, delta = 1) => setCarrito(c => {
     const ex = c.find(i => i.id === p.id)
-    if (!ex) return delta > 0 ? [...c, { ...p, cantidad: delta }] : c
-    const cant = ex.cantidad + delta
+    const stock = Number(p.stock) || 0
+    // Con stock conocido (>0) no se puede superar lo disponible; agotado = sin tope (sobre pedido)
+    const tope = (n) => stock > 0 ? Math.min(n, stock) : n
+    if (!ex) return delta > 0 ? [...c, { ...p, cantidad: Math.max(1, tope(delta)) }] : c
+    const cant = tope(ex.cantidad + delta)
     return cant <= 0 ? c.filter(i => i.id !== p.id) : c.map(i => i.id === p.id ? { ...i, cantidad: cant } : i)
   })
   const quitar = (id) => setCarrito(c => c.filter(i => i.id !== id))
@@ -251,6 +275,17 @@ export function StoreProvider({ children }) {
   const total = carrito.reduce((s, i) => s + precio(i) * i.cantidad, 0)
   const nItems = carrito.reduce((s, i) => s + i.cantidad, 0)
   const pedidoMinimo = mayorista ? (cfg.mayorista_pedido_minimo || 0) : (cfg.pedido_minimo || 0)
+
+  // Guarda el carrito en BD para seguimiento/recuperación cuando el cliente ya tiene correo.
+  // Debounce para no escribir en cada clic. No corre en el iframe del editor (esPreview).
+  const esPreviewFlag = cfgPreview !== null || bannerDraft !== null
+  useEffect(() => {
+    if (esPreviewFlag || !emailValido(emailSesion) || nItems <= 0) return
+    const t = setTimeout(() => {
+      guardarCarritoRemoto(emailSesion, getCliente(), getTelefono(), carrito, total, nItems)
+    }, 900)
+    return () => clearTimeout(t)
+  }, [carrito, emailSesion, total, nItems, esPreviewFlag])
 
   const productoPorId = (id) => (productos || []).find(p => String(p.id) === String(id))
 

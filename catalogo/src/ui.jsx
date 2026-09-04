@@ -180,7 +180,7 @@ export function Card({ p, cfg, n: nProp = 0, onOpen, onAdd }) {
           </>
         ) : (
           <>
-            <div className="card-name" onClick={abrir}>{activo.nombre}</div>
+            <button type="button" className="card-name" onClick={abrir}>{activo.nombre}</button>
             <PackChips packs={packs} selId={selId} onSelect={setSelId} />
             {st && (st.tono === 'urgente' || st.tono === 'pocas') && <div className={`stock-tag stock-${st.tono}`}>🔥 {st.texto}</div>}
             <div className="card-price">{fCOP(precio(activo))}{oferta && <span className="precio-antes">{fCOP(activo.precio_detal)}</span>}{mayorista && activo.precio_mayor > 0 && <span className="precio-tag">mayor</span>}</div>
@@ -436,7 +436,8 @@ export function ModalSesionCliente({
   const [buscando, setBuscando] = useState(false)
   const emailOk = emailValido(email)
   const nombreOk = nombre.trim().length >= 2
-  const telOk = !pedirTelefono || telefonoValido(telefono)
+  // Teléfono opcional: válido si está vacío o si tiene formato correcto
+  const telOk = !pedirTelefono || !telefono.trim() || telefonoValido(telefono)
   const formOk = emailOk && nombreOk && telOk
 
   useEffect(() => {
@@ -480,7 +481,7 @@ export function ModalSesionCliente({
           <input className="cf" value={nombre} onChange={e => setN(e.target.value)} placeholder="¿Cómo te llamas?" />
           {pedirTelefono && (
             <>
-              <label style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--selva)' }}>Teléfono / WhatsApp *</label>
+              <label style={{ fontSize: '0.82rem', fontWeight: 700, color: 'var(--selva)' }}>Teléfono / WhatsApp <span style={{ fontWeight: 400, color: 'var(--texto-suave)' }}>(opcional)</span></label>
               <input className="cf" type="tel" inputMode="tel" value={telefono} onChange={e => setT(e.target.value)} placeholder="Ej: 300 123 4567" />
             </>
           )}
