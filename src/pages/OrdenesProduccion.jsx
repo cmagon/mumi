@@ -54,107 +54,18 @@ function SiNo({ value, onChange }) {
 }
 import Modal from '../components/ui/Modal'
 import Select from '../components/ui/Select'
+import EvidenciaModal from '../components/ordenes/EvidenciaModal'
+import AuditoriaOrdenesModal from '../components/ordenes/AuditoriaOrdenesModal'
+import DetalleLoteMpModal from '../components/ordenes/DetalleLoteMpModal'
+import {
+  ESTADO_LABEL, DIAS_CIERRE_SIN_EJECUTAR, diasAbierta, EMPTY_ORDEN, BASE_RECETA,
+  desdeFechaMeses, desdeFechaVidaUtil, horaAhora,
+  esUnidadPeso, entradaPesoAGramos, gramosAUnidadEntrada, cantidadMPAEntrada,
+  obtenidoEnUnidadMP, defaultUnidadEntradaObtenido, labelUnidadEntrada, parseJsonArr,
+  paramsCalidadDesdeFicha, mergeParamsCalidadGuardados, serializarParamsCalidad,
+  fmtCumpleCalidad, hoyISO, labelMeses, getVenceOpts,
+} from '../lib/ordenesHelpers'
 
-const ESTADO_LABEL = {
-  pendiente:  { txt: 'Pendiente',  badge: 'badge-gris' },
-  en_proceso: { txt: 'En proceso', badge: 'badge-azul' },
-  ejecutada:  { txt: 'Enviada a aprobación', badge: 'badge-dorado' },
-  aprobada:   { txt: 'Aprobada',   badge: 'badge-verde' },
-  rechazada:  { txt: 'Rechazada',  badge: 'badge-rojo' },
-  cancelada:  { txt: 'Cerrada sin ejecutar', badge: 'badge-gris' },
-}
-// Días desde la creación de la orden a partir de los cuales se puede CERRAR sin ejecutarla
-// (para órdenes atascadas: pendientes o en proceso que quedaron abiertas mucho tiempo).
-const DIAS_CIERRE_SIN_EJECUTAR = 20
-const diasAbierta = (o) => o?.created_at ? Math.floor((Date.now() - new Date(o.created_at).getTime()) / 86400000) : 0
-
-const EMPTY_ORDEN = {
-  producto: '', origen: 'producto', origen_id: '', es_subproducto: false, es_mp: false, mp_id: '',
-  cantidad_plan: '', unidad: 'unidades', operario: '', notas_orden: '', unidadesPorBache: 0, lote: '', vence: '', baches_plan: '', inicio: '', es_prueba: false, forzar_sin_lote: false,
-  orden_blanca: false,
-  lotes_elegidos: {},   // { [mpId]: loteId }  — lote de MP elegido por el usuario (vacío = PEPS automático)
-}
-
-// Mezcla de referencia para planear recetas por ingrediente (se cancela en el cálculo)
-const BASE_RECETA = 10000
-// Suma meses a la fecha de hoy y devuelve 'YYYY-MM-DD'
-// Fecha LOCAL en 'YYYY-MM-DD' (evita el desfase de un día por zona horaria que da toISOString en UTC)
-const fechaLocalISO = (d = new Date()) => { const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` }
-const desdeHoyMeses = (meses) => { const d = new Date(); d.setMonth(d.getMonth() + meses); return fechaLocalISO(d) }
-// Vencimiento = fecha base (fabricación) + N meses. Si no hay base, usa hoy.
-const desdeFechaMeses = (base, meses) => { const d = base ? new Date(base + 'T00:00:00') : new Date(); d.setMonth(d.getMonth() + meses); return fechaLocalISO(d) }
-// Vencimiento a partir de la "vida útil" configurada en la ficha del producto (días o meses)
-const desdeFechaVidaUtil = (base, valor, unidad) => {
-  const d = base ? new Date(base + 'T00:00:00') : new Date()
-  if (unidad === 'dias') d.setDate(d.getDate() + valor)
-  else d.setMonth(d.getMonth() + valor)
-  return fechaLocalISO(d)
-}
-const horaAhora = () => new Date().toTimeString().slice(0, 5)
-// ¿La unidad de inventario se mide por peso/volumen (se produce por gramaje/kilos), no por conteo?
-const esUnidadPeso = (u) => /kg|kilo|gramo|^g$|^gr$|litro|^l$|^ml$|mili|onza|lb|libra/i.test(String(u || '').trim())
-// MP en Kg/Litro guarda stock en esas unidades; los movimientos PEPS trabajan en gramos/ml.
-const mpUsaKilos = (u) => /kg|kilo|litro|^l$|lb|libra/i.test(String(u || '').trim())
-const entradaPesoAGramos = (valor, unidadEntrada) => {
-  const v = parseFloat(valor) || 0
-  return unidadEntrada === 'kg' ? v * 1000 : v
-}
-const gramosAUnidadEntrada = (gramos, unidadEntrada) => {
-  const g = parseFloat(gramos) || 0
-  return unidadEntrada === 'kg' ? g / 1000 : g
-}
-const cantidadMPAEntrada = (cantidadMP, unidadMP, unidadEntrada) =>
-  gramosAUnidadEntrada(mpUsaKilos(unidadMP) ? (parseFloat(cantidadMP) || 0) * 1000 : (parseFloat(cantidadMP) || 0), unidadEntrada)
-const obtenidoEnUnidadMP = (valorEntrada, unidadEntrada, unidadMP) => {
-  const gramos = entradaPesoAGramos(valorEntrada, unidadEntrada)
-  return mpUsaKilos(unidadMP) ? gramos / 1000 : gramos
-}
-const defaultUnidadEntradaObtenido = (unidadMP) => (mpUsaKilos(unidadMP) ? 'kg' : 'g')
-const labelUnidadEntrada = (u) => (u === 'kg' ? 'Kg' : 'Gramos')
-const parseJsonArr = (v, fb = []) => { try { return Array.isArray(v) ? v : JSON.parse(v || '[]') } catch { return fb } }
-const paramsCalidadDesdeFicha = (fuente) => {
-  if (!fuente) return []
-  const list = parseJsonArr(fuente.parametros_calidad, []).filter(pc => (pc.nombre || '').trim())
-  const params = list.map(pc => ({
-    nombre: String(pc.nombre).trim(),
-    esperado: String(pc.valor ?? ''),
-    unidad: pc.unidad || '',
-    obtenido: '',
-    cumple: null,
-  }))
-  if (fuente.brix_aplica) {
-    const hasBrix = params.some(p => /brix/i.test(p.nombre))
-    if (!hasBrix) params.unshift({ nombre: 'Brix', esperado: String(fuente.brix ?? ''), unidad: '°Bx', obtenido: '', cumple: null })
-  }
-  return params
-}
-const mergeParamsCalidadGuardados = (desdeFicha, guardados) => {
-  const saved = Array.isArray(guardados) ? guardados : parseJsonArr(guardados, [])
-  if (!saved.length) return desdeFicha
-  const byName = Object.fromEntries(saved.map(s => [String(s.nombre || '').trim().toLowerCase(), s]))
-  return desdeFicha.map(p => {
-    const g = byName[p.nombre.trim().toLowerCase()]
-    if (!g) return p
-    return {
-      ...p,
-      obtenido: g.obtenido ?? g.valor_obtenido ?? '',
-      cumple: g.cumple === true || g.cumple === false ? g.cumple : null,
-    }
-  })
-}
-const serializarParamsCalidad = (arr) =>
-  (arr || []).filter(p => (p.nombre || '').trim()).map(p => ({
-    nombre: p.nombre,
-    esperado: p.esperado ?? '',
-    unidad: p.unidad || '',
-    obtenido: p.obtenido || '',
-    cumple: p.cumple === true || p.cumple === false ? p.cumple : null,
-  }))
-const fmtCumpleCalidad = (v) => (v === true ? 'Cumple' : v === false ? 'No cumple' : '—')
-const hoyISO = () => fechaLocalISO()
-const labelMeses = (m) => m % 12 === 0 ? `${m / 12} año${m / 12 > 1 ? 's' : ''}` : `${m} mes${m > 1 ? 'es' : ''}`
-const VENCE_OPTS_DEFAULT = [1, 2, 3, 6, 12, 24]
-const getVenceOpts = () => { try { const v = JSON.parse(localStorage.getItem('mumi_vence_opts')); return Array.isArray(v) && v.length ? v : VENCE_OPTS_DEFAULT } catch { return VENCE_OPTS_DEFAULT } }
 // Botones rápidos (configurables) para fijar la fecha de vencimiento
 function QuickVence({ onPick, opts, onEdit, base, disabled }) {
   return (
@@ -4289,26 +4200,12 @@ export default function OrdenesProduccion() {
 
       {/* Modal Preparar — calcula ingredientes con la cantidad de la orden */}
       {/* Modal: evidencia firmada de la orden impresa */}
-      <Modal open={modalEvid} onClose={() => setModalEvid(false)} title="📎 Evidencia de la orden impresa"
-        footer={<>
-          <button className="btn btn-secondary" onClick={() => setModalEvid(false)}>Más tarde</button>
-          <button className="btn btn-primary" onClick={confirmarEvidencia} disabled={savingEvid}>{savingEvid ? 'Guardando...' : 'Registrar evidencia'}</button>
-        </>}>
-        <div className="alert alert-info" style={{ fontSize: '0.85rem' }}>
-          Imprimiste la <strong>Orden OP-{evidOrden?.id}</strong>. Para dejar la trazabilidad completa (BPM), adjunta el <strong>formato escaneado y firmado</strong> o registra la <strong>firma digital</strong>.
-        </div>
-        <div className="form-group">
-          <label className="form-label">📄 Archivo escaneado y firmado</label>
-          <input type="file" accept="image/*,.pdf" onChange={e => setEvidFile(e.target.files[0] || null)} />
-          {evidFile && <div style={{ fontSize: '0.8rem', color: 'var(--selva)', marginTop: 4 }}>📎 {evidFile.name}</div>}
-        </div>
-        <div style={{ textAlign: 'center', color: 'var(--texto-suave)', fontSize: '0.8rem', margin: '6px 0' }}>— o —</div>
-        <div className="form-group">
-          <label className="form-label">✍ Firma digital (nombre de quien firma)</label>
-          <input className="form-control" value={firmaDigital} onChange={e => setFirmaDigital(e.target.value)} placeholder="Ej: Juan Pérez — Operario" />
-          <small style={{ color: 'var(--texto-suave)' }}>Quedará registrado con tu usuario y la fecha/hora como firma electrónica.</small>
-        </div>
-      </Modal>
+      <EvidenciaModal
+        open={modalEvid} evidOrden={evidOrden} savingEvid={savingEvid}
+        evidFile={evidFile} setEvidFile={setEvidFile}
+        firmaDigital={firmaDigital} setFirmaDigital={setFirmaDigital}
+        onClose={() => setModalEvid(false)} onConfirm={confirmarEvidencia}
+      />
 
       {/* Modal Iniciar proceso — fecha de inicio + tiempos por subproceso (autoguardado) */}
       <Modal open={modalProceso} onClose={closeProceso} guard={false}
@@ -5421,57 +5318,13 @@ export default function OrdenesProduccion() {
       </Modal>
 
       {/* Registro de creación de órdenes — solo admin */}
-      <Modal open={modalAudit} onClose={() => setModalAudit(false)} title="📜 Registro de creación de órdenes" size="modal-lg"
-        footer={<button className="btn btn-secondary" onClick={() => setModalAudit(false)}>Cerrar</button>}
-      >
-        <div className="alert alert-info" style={{ fontSize: '0.83rem' }}>Auditoría interna: qué usuario creó cada orden y cuándo. Solo visible para administradores.</div>
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>#</th><th>Producto</th><th>Creada por</th><th>Fecha y hora</th></tr></thead>
-            <tbody>
-              {ordenes.length === 0
-                ? <tr><td colSpan={4} className="empty-table">Sin órdenes</td></tr>
-                : [...ordenes].sort((a, b) => (b.created_at || '').localeCompare(a.created_at || '')).map(o => (
-                  <tr key={o.id}>
-                    <td>#{opNum(o.id)}</td>
-                    <td>{o.producto}</td>
-                    <td><strong>{o.creado_por || '—'}</strong></td>
-                    <td>{o.created_at ? new Date(o.created_at).toLocaleString('es-CO') : '—'}</td>
-                  </tr>
-                ))}
-            </tbody>
-          </table>
-        </div>
-      </Modal>
+      <AuditoriaOrdenesModal open={modalAudit} onClose={() => setModalAudit(false)} ordenes={ordenes} opNum={opNum} />
 
       {/* Modal: detalle de un lote de MP consumido (trazabilidad hacia la compra) */}
-      <Modal open={!!detalleLoteMp} onClose={() => setDetalleLoteMp(null)} guard={false}
-        title={`🧊 Lote "${detalleLoteMp?.lote || 's/lote'}" — ${detalleLoteMp?.mpNombre || ''}`}
-        footer={<button className="btn btn-secondary" onClick={() => setDetalleLoteMp(null)}>Cerrar</button>}>
-        {detalleLoteMp?.cargando && <p style={{ fontSize: '0.88rem' }}>Cargando detalles del lote…</p>}
-        {detalleLoteMp && !detalleLoteMp.cargando && detalleLoteMp.filas.length === 0 && (
-          <p className="empty-table">No se encontró este lote en el inventario (pudo haberse eliminado o renombrado).</p>
-        )}
-        {detalleLoteMp && !detalleLoteMp.cargando && detalleLoteMp.filas.map((lf) => {
-          const u = detalleLoteMp.unidad
-          const consumido = Math.max(0, (lf.cantidad_inicial || 0) - (lf.cantidad_actual || 0) - (lf.cantidad_reservada || 0))
-          return (
-          <table key={lf.id} style={{ fontSize: '0.88rem', width: '100%', marginBottom: 10 }}>
-            <tbody>
-              <tr><td style={{ color: 'var(--texto-suave)', width: 190 }}>Fecha de compra/entrada</td><td><strong>{fFecha(lf.fecha_entrada)}</strong></td></tr>
-              <tr><td style={{ color: 'var(--texto-suave)' }}>Proveedor</td><td><strong>{String(lf.proveedor || '').trim() || NA_TRAZA}</strong></td></tr>
-              <tr><td style={{ color: 'var(--texto-suave)' }}>Costo unitario de compra</td><td>{lf.costo_unitario ? `${fCOP(lf.costo_unitario)}${u ? ` por ${u}` : ''}` : '—'}</td></tr>
-              <tr><td style={{ color: 'var(--texto-suave)' }}>Cantidad inicial</td><td>{fmtCantLote(lf.cantidad_inicial, u)}</td></tr>
-              <tr><td style={{ color: 'var(--texto-suave)' }}>Ya consumido</td><td>{fmtCantLote(consumido, u)}</td></tr>
-              <tr><td style={{ color: 'var(--texto-suave)' }}>Reservado (órdenes en proceso)</td><td>{(lf.cantidad_reservada || 0) > 0 ? <strong style={{ color: 'var(--tierra)' }}>{fmtCantLote(lf.cantidad_reservada, u)}</strong> : <span>0 <small style={{ color: 'var(--texto-suave)' }}>(si la orden ya se cerró, su reserva pasó a "consumido")</small></span>}</td></tr>
-              <tr><td style={{ color: 'var(--texto-suave)' }}>Disponible hoy</td><td><strong>{fmtCantLote(lf.cantidad_actual, u)}</strong></td></tr>
-              <tr><td style={{ color: 'var(--texto-suave)' }}>Vencimiento</td><td>{vencimientoLoteValido(lf.vencimiento) || NA_TRAZA}</td></tr>
-              <tr><td style={{ color: 'var(--texto-suave)' }}>Registrado por</td><td>{lf.creado_por || '—'}</td></tr>
-            </tbody>
-          </table>
-          )
-        })}
-      </Modal>
+      <DetalleLoteMpModal
+        data={detalleLoteMp} onClose={() => setDetalleLoteMp(null)}
+        fmtCantLote={fmtCantLote} vencimientoLoteValido={vencimientoLoteValido} naTraza={NA_TRAZA}
+      />
     </div>
   )
 }

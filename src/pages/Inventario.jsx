@@ -16,18 +16,11 @@ import {
   reponerCantidadesLotes, reducirLote, stockDesdeLotes, sincronizarPEPSAlStock, LOTE_SIN_CODIGO,
   corregirCantidadLote, fijarStockMp,
 } from '../lib/lotes'
+import {
+  fFechaHora, EMPTY_MP, EMPTY_MOV, MOTIVOS_SALIDA, motivoLabel, tituloTipoMov, UNIDADES,
+  sufijoUnidad, porUnidad, fCantMov, factorU, baseLbl, fBase, esEmpaque,
+} from '../lib/inventarioHelpers'
 
-/** Fecha + hora local (para ingresos PEPS / auditoría). Acepta date o timestamptz. */
-const fFechaHora = (s) => {
-  if (!s) return '—'
-  try {
-    const d = String(s).includes('T') || String(s).includes(' ')
-      ? new Date(s)
-      : new Date(s + 'T12:00:00')
-    if (Number.isNaN(d.getTime())) return String(s)
-    return d.toLocaleString('es-CO', { day: '2-digit', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' })
-  } catch { return String(s) }
-}
 import * as XLSX from 'xlsx'
 import { Download, Tags, Tag, Plus, Pencil, X, Package, ClipboardList, FileText, AlertTriangle, Trash2, Undo2, Lock } from 'lucide-react'
 import ReservasMPPanel from '../components/ReservasMPPanel'
@@ -37,39 +30,6 @@ import PaginacionTabla from '../components/ui/PaginacionTabla'
 import { usePaginacion } from '../hooks/usePaginacion'
 
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
-
-const EMPTY_MP = { nombre: '', categoria: '', tipo: 'comprado', unidad: 'Kg', precio: '', stock_min: 0, stock: 0, lote: '', vencimiento: '', obs: '', extra: {}, vendible: false, precio_venta: '' }
-const EMPTY_MOV = { mp_id: '', tipo: 'entrada', cantidad: '', responsable: '', obs: '', lote: '', vencimiento: '', extra: {}, costo: '', motivo: 'consumo', lote_id: '', proveedor: '' }
-// Motivos solo de salida (el "ajuste de conteo" es un tipo aparte: corrige cantidad absoluta de un PEPS)
-const MOTIVOS_SALIDA = [
-  { value: 'consumo', label: 'Consumo / uso' },
-  { value: 'perdida', label: 'Pérdida / daño' },
-  { value: 'vencimiento', label: 'Vencimiento' },
-  { value: 'no_contabilizada', label: 'Salida no contabilizada' },
-]
-const motivoLabel = (m) => (MOTIVOS_SALIDA.find(x => x.value === m)?.label || m)
-const tituloTipoMov = (t) => (t === 'entrada' ? 'Compra / recepción' : t === 'salida' ? 'Salida' : t === 'ajuste' ? 'Ajuste de conteo' : 'Movimiento')
-const UNIDADES = ['Kg','Gramo','Litro','Mililitro','Unidad']
-// Sufijo corto para mostrar el precio según la unidad
-const sufijoUnidad = (u) => u === 'Kg' ? '/Kg' : u === 'Gramo' ? '/g' : u === 'Litro' ? '/L' : u === 'Mililitro' ? '/ml' : u === 'Unidad' ? '/u' : `/${u || 'u'}`
-// Etiqueta "por X" para el precio según la unidad
-const porUnidad = (u) => u === 'Litro' ? 'por Litro' : u === 'Gramo' ? 'por Gramo' : u === 'Mililitro' ? 'por Mililitro' : u === 'Unidad' ? 'por Unidad' : 'por Kg'
-// Cantidad de un movimiento expresada en gramos/ml (Kg→g, Litro→ml); g/ml y unidades quedan igual
-const fCantMov = (cant, unidad) => {
-  const v = Number(cant) || 0
-  if (unidad === 'Kg') return `${fNum(v * 1000)} g`
-  if (unidad === 'Litro') return `${fNum(v * 1000)} ml`
-  if (unidad === 'Gramo') return `${fNum(v)} g`
-  if (unidad === 'Mililitro') return `${fNum(v)} ml`
-  return `${fNum(v)} ${unidad || ''}`.trim()
-}
-// Factor para pasar de la unidad de PRECIO (Kg/Litro) a la unidad BASE de stock (g/ml). g/ml/Unidad = 1.
-const factorU = (u) => (u === 'Kg' || u === 'Litro') ? 1000 : 1
-const baseLbl = (u) => (u === 'Kg' || u === 'Gramo') ? 'g' : (u === 'Litro' || u === 'Mililitro') ? 'ml' : (u || 'u')
-// Convierte una cantidad interna (en unidad de precio) a texto en unidad base (g/ml/u)
-const fBase = (cantInterna, unidad) => `${fNum((Number(cantInterna) || 0) * factorU(unidad))} ${baseLbl(unidad)}`
-// Los empaques no requieren lote, vencimiento ni campos adicionales
-const esEmpaque = (categoria) => /empaque|envase/i.test(categoria || '')
 
 // ---- Editor de campos personalizados (objeto JSONB clave→valor) ----
 function CamposExtra({ value = {}, onChange }) {
@@ -399,17 +359,7 @@ export default function Inventario() {
           ? (parseFloat(formMov.costo) || 0)
           : (mp?.precio || 0)
         costoMovimiento = costoLote
-        // Promedio ponderado ANTES de mover stock (para historial y para actualizar raw_materials).
-        const { data: frescoPre } = await supabase.from('raw_materials').select('stock, precio').eq('id', mpId).single()
-        const stockPrevio = Math.max(0, Number(frescoPre?.stock) || 0)
-        const precioPrevio = Number(frescoPre?.precio) || 0
-        const precioPromedio = (stockPrevio + cantidad) > 0
-          ? (stockPrevio * precioPrevio + cantidad * costoLote) / (stockPrevio + cantidad)
-          : costoLote
-        extra.precio_antes = precioPrevio
-        extra.precio_despues = precioPromedio
         extra.costo_lote = costoLote
-        if (Math.abs(precioPrevio - precioPromedio) > 0.01) extra.cambio_precio_promedio = true
         const creado = await crearLoteEntrada({
           mp_id: mpId,
           lote: formMov.lote || (esEmpaque(mp?.categoria) ? LOTE_SIN_CODIGO : ''),
@@ -419,8 +369,29 @@ export default function Inventario() {
         })
         if (creado?.id) extra.lote_id = creado.id
         extra.proveedor = prov
-        // Se aplica abajo en `upd` junto con lote/vencimiento
-        extra._precio_promedio_nuevo = precioPromedio
+        // Promedio ponderado ATÓMICO: stock + precio se recalculan y aplican con FOR UPDATE en una
+        // sola transacción (v162), evitando que dos entradas simultáneas de la misma MP se pisen.
+        const { data: prom, error: promErr } = await supabase.rpc('entrada_mp_promedio', {
+          p_mp_id: mpId, p_cantidad: cantidad, p_costo_unitario: costoLote,
+        })
+        if (!promErr && prom) {
+          extra.precio_antes = Number(prom.precio_antes) || 0
+          extra.precio_despues = Number(prom.precio_despues) || 0
+          if (Math.abs((Number(prom.precio_antes) || 0) - (Number(prom.precio_despues) || 0)) > 0.01) extra.cambio_precio_promedio = true
+          stockYaAjustado = true   // la RPC ya subió el stock y fijó el precio: no repetir abajo
+        } else {
+          // Respaldo si la migración v162 aún no está: cálculo en cliente (comportamiento anterior).
+          const { data: frescoPre } = await supabase.from('raw_materials').select('stock, precio').eq('id', mpId).single()
+          const stockPrevio = Math.max(0, Number(frescoPre?.stock) || 0)
+          const precioPrevio = Number(frescoPre?.precio) || 0
+          const precioPromedio = (stockPrevio + cantidad) > 0
+            ? (stockPrevio * precioPrevio + cantidad * costoLote) / (stockPrevio + cantidad)
+            : costoLote
+          extra.precio_antes = precioPrevio
+          extra.precio_despues = precioPromedio
+          if (Math.abs(precioPrevio - precioPromedio) > 0.01) extra.cambio_precio_promedio = true
+          extra._precio_promedio_nuevo = precioPromedio   // se aplica abajo junto con lote/vencimiento
+        }
       } else if (formMov.tipo === 'salida') {
         if (!(cantidad > 0)) throw new Error('Ingresa una cantidad')
         if (!formMov.motivo) throw new Error('Indica el motivo de la salida')
@@ -551,35 +522,42 @@ export default function Inventario() {
 
   // Alinea PEPS al stock (no al revés): si hay stock sin lotes, crea "sin lote";
   // si sobran lotes, los consume. El stock de la ficha no se toca. Solo admin.
+  //
+  // Núcleo reutilizable (por ítem y para "Igualar todas"). Con estricto=true lanza si el hueco es
+  // una reserva de orden (no un descuadre); con estricto=false simplemente lo omite (return null).
+  const reconciliarUnaMP = async (mp, { estricto = true } = {}) => {
+    const d = descuadrePEPS(mp)
+    if (!d || !d.igualar) {
+      if (estricto && d && !d.igualar) throw new Error('Ese hueco es una reserva de orden, no un descuadre. Míralo en Reservas MP.')
+      return null
+    }
+    const r = await sincronizarPEPSAlStock({
+      mp_id: mp.id,
+      stock: d.stock,
+      costo_unitario: mp.precio || 0,
+      creado_por: profile?.nombre || '',
+    })
+    const movBase = {
+      mp_id: mp.id, tipo: 'ajuste', cantidad: 0,
+      fecha: new Date().toISOString().split('T')[0],
+      responsable: profile?.nombre || '',
+      obs: r.accion === 'crear_sin_lote' || r.accion === 'sumar_sin_lote'
+        ? `[PEPS] Creado/ajustado lote "${LOTE_SIN_CODIGO}" por ${fBase(Math.abs(d.diff), mp.unidad)} (stock ${fBase(d.stock, mp.unidad)})`
+        : r.accion === 'consumir_exceso'
+          ? `[PEPS] Consumidos ${fBase(Math.abs(d.diff), mp.unidad)} de lotes para igualar al stock ${fBase(d.stock, mp.unidad)}`
+          : `[PEPS] Ya cuadraba`,
+      extra: {
+        reconciliacion_peps: true, accion: r.accion,
+        stock: d.stock, lotes_antes: d.porLotes, diff: d.diff, lote_id: r.lote_id || null,
+      },
+    }
+    const { error } = await supabase.from('inventory_movements').insert(movBase)
+    if (error && !/inventory_movements/i.test(error.message || '')) throw error
+    return r
+  }
+
   const reconciliarPEPS = useMutation({
-    mutationFn: async (mp) => {
-      const d = descuadrePEPS(mp)
-      if (!d) return
-      if (!d.igualar) throw new Error('Ese hueco es una reserva de orden, no un descuadre. Míralo en Reservas MP.')
-      const r = await sincronizarPEPSAlStock({
-        mp_id: mp.id,
-        stock: d.stock,
-        costo_unitario: mp.precio || 0,
-        creado_por: profile?.nombre || '',
-      })
-      const movBase = {
-        mp_id: mp.id, tipo: 'ajuste', cantidad: 0,
-        fecha: new Date().toISOString().split('T')[0],
-        responsable: profile?.nombre || '',
-        obs: r.accion === 'crear_sin_lote' || r.accion === 'sumar_sin_lote'
-          ? `[PEPS] Creado/ajustado lote "${LOTE_SIN_CODIGO}" por ${fBase(Math.abs(d.diff), mp.unidad)} (stock ${fBase(d.stock, mp.unidad)})`
-          : r.accion === 'consumir_exceso'
-            ? `[PEPS] Consumidos ${fBase(Math.abs(d.diff), mp.unidad)} de lotes para igualar al stock ${fBase(d.stock, mp.unidad)}`
-            : `[PEPS] Ya cuadraba`,
-        extra: {
-          reconciliacion_peps: true, accion: r.accion,
-          stock: d.stock, lotes_antes: d.porLotes, diff: d.diff, lote_id: r.lote_id || null,
-        },
-      }
-      const { error } = await supabase.from('inventory_movements').insert(movBase)
-      if (error && !/inventory_movements/i.test(error.message || '')) throw error
-      return r
-    },
+    mutationFn: (mp) => reconciliarUnaMP(mp, { estricto: true }),
     onSuccess: (r) => {
       qc.invalidateQueries({ queryKey: ['raw_materials'] })
       qc.invalidateQueries({ queryKey: ['inventory_movements'] })
@@ -589,6 +567,36 @@ export default function Inventario() {
         : r?.accion === 'consumir_exceso' ? 'Exceso de lotes consumido — PEPS = stock ✓'
         : 'PEPS ya cuadraba ✓'
       toast(msg)
+    },
+    onError: (e) => toast(e.message, 'error'),
+  })
+
+  // Materias primas con un descuadre SEGURO de igualar (no reservas de orden): stock ≠ Σ lotes por
+  // una causa clara. Es lo que el botón "Igualar todas" resuelve de una sola vez.
+  const descuadresSeguros = useMemo(
+    () => mps.filter(m => { const d = descuadrePEPS(m); return d && d.igualar }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [mps, lotesDB, reservasPorMp],
+  )
+
+  // "Igualar todas": aplica la reconciliación a todas las MP con descuadre seguro, una por una.
+  // Cada fallo se registra pero no detiene al resto. No toca reservas de orden (estricto=false).
+  const reconciliarTodos = useMutation({
+    mutationFn: async () => {
+      let ok = 0, fallidas = 0
+      for (const mp of descuadresSeguros) {
+        try { const r = await reconciliarUnaMP(mp, { estricto: false }); if (r) ok++ }
+        catch (e) { fallidas++; console.warn('No se pudo igualar PEPS de', mp?.nombre, e) }
+      }
+      return { ok, fallidas }
+    },
+    onSuccess: ({ ok, fallidas }) => {
+      qc.invalidateQueries({ queryKey: ['raw_materials'] })
+      qc.invalidateQueries({ queryKey: ['inventory_movements'] })
+      qc.invalidateQueries({ queryKey: ['raw_material_lots'] })
+      toast(fallidas
+        ? `Igualadas ${ok} · ${fallidas} con error (revisa una por una)`
+        : (ok ? `${ok} materia(s) prima(s) igualadas ✓` : 'No había descuadres por igualar'))
     },
     onError: (e) => toast(e.message, 'error'),
   })
@@ -764,6 +772,27 @@ export default function Inventario() {
 
       <div className="card">
         <div className="card-title"><Ico as={Package} size={16} />Estado del Inventario</div>
+        {esAdmin && descuadresSeguros.length > 0 && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap',
+            background: 'rgba(176,125,24,0.10)', border: '1px solid var(--dorado)',
+            borderRadius: 8, padding: '10px 14px', marginBottom: 14,
+          }}>
+            <AlertTriangle size={18} aria-hidden="true" style={{ color: 'var(--tierra)', flexShrink: 0 }} />
+            <span style={{ fontSize: '0.86rem', fontWeight: 600 }}>
+              {descuadresSeguros.length} materia(s) prima(s) con descuadre PEPS que se pueden igualar automáticamente.
+            </span>
+            <button className="btn btn-sm btn-dorado" style={{ marginLeft: 'auto' }} disabled={reconciliarTodos.isPending || reconciliarPEPS.isPending}
+              onClick={() => confirmar(
+                `¿Igualar de una vez las ${descuadresSeguros.length} materias primas con descuadre PEPS?\n\n` +
+                'Alinea los lotes PEPS al stock de cada ficha (crea "sin lote" o consume el exceso). ' +
+                'El stock de las fichas NO se modifica. No incluye lo que esté amarrado a órdenes (reservas).',
+                { title: 'Igualar todas las PEPS', confirmText: 'Igualar todas' },
+              ).then(ok => ok && reconciliarTodos.mutate())}>
+              {reconciliarTodos.isPending ? 'Igualando…' : `Igualar todas (${descuadresSeguros.length})`}
+            </button>
+          </div>
+        )}
         <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
           <input className="form-control" style={{ width: 200 }} placeholder="🔍 Buscar materia prima..." value={buscarMP} onChange={e => setBuscarMP(e.target.value)} />
           <label className="form-label" style={{ margin: 0 }}>Categoría:</label>

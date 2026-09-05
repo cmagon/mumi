@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase, uploadFile, beginSilentWrites, endSilentWrites } from '../lib/supabase'
 import { writeOrQueue } from '../lib/offlineQueue'
 import { fFecha, fNum, fCOP, componerSurtido } from '../lib/businessLogic'
+import { fechaLocalISO, horaAhora, desdeHoyMeses, labelMeses, getVenceOpts } from '../lib/ordenesHelpers'
 import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
 import { useAuth } from '../context/AuthContext'
@@ -31,14 +32,6 @@ import {
 
 // Icono inline alineado con el texto
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
-
-// Fecha/hora locales
-const fechaLocalISO = (d = new Date()) => { const p = (n) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}` }
-const horaAhora = () => new Date().toTimeString().slice(0, 5)
-// Opciones rápidas de fecha de vencimiento (igual que en Órdenes)
-const desdeHoyMeses = (m) => { const d = new Date(); d.setMonth(d.getMonth() + m); return fechaLocalISO(d) }
-const labelMeses = (m) => m % 12 === 0 ? `${m / 12} año${m / 12 > 1 ? 's' : ''}` : `${m} mes${m > 1 ? 'es' : ''}`
-const getVenceOpts = () => { try { const v = JSON.parse(localStorage.getItem('mumi_vence_opts')); return Array.isArray(v) && v.length ? v : [1, 2, 3, 6, 12, 24] } catch { return [1, 2, 3, 6, 12, 24] } }
 
 const EMPTY = {
   tipo_registro: 'final', producto: '', fecha: new Date().toISOString().split('T')[0],
@@ -87,6 +80,9 @@ export default function Produccion() {
   const [verFotoModal, setVerFotoModal] = useState(false)
   const [fotoVerUrl, setFotoVerUrl] = useState('')
   const [detalleRec, setDetalleRec] = useState(null)
+  // Envío manual a stock de producto terminado (registro diario sin orden)
+  const [modalStock, setModalStock] = useState(null)   // registro a enviar a stock (o null)
+  const [stockForm, setStockForm] = useState({ finished_id: '', cantidad: '', lote: '' })
   const [saving, setSaving] = useState(false)
   const [importando, setImportando] = useState(false)
   const ptzRef = useRef()
@@ -141,7 +137,13 @@ export default function Produccion() {
   })
   const { data: entradasTerminado = [] } = useQuery({
     queryKey: ['finished_movements_entradas'],
-    queryFn: async () => { const { data } = await supabase.from('finished_movements').select('finished_id, cantidad, fecha, tipo, origen').eq('tipo', 'entrada').eq('origen', 'produccion'); return data || [] },
+    queryFn: async () => { const { data } = await supabase.from('finished_movements').select('finished_id, cantidad, fecha, tipo, origen').eq('tipo', 'entrada').in('origen', ['produccion', 'produccion_manual']); return data || [] },
+  })
+  // Entradas a stock de terminado creadas MANUALMENTE desde un registro de producción diaria (sin
+  // orden). origen 'produccion_manual' + ref = id del registro → permite marcar "en stock" y deshacer.
+  const { data: entradasManual = [] } = useQuery({
+    queryKey: ['finished_movements', 'manual_prod'],
+    queryFn: async () => { const { data } = await supabase.from('finished_movements').select('id, ref, finished_id, cantidad, lote').eq('tipo', 'entrada').eq('origen', 'produccion_manual'); return data || [] },
   })
 
   // Documento vivo PTZ-RG-03 (sección Documentación): su archivo es la plantilla de descarga/lectura.
@@ -179,7 +181,7 @@ export default function Produccion() {
   // Catálogo de productos terminados (para elegir el nombre del surtido — no texto libre)
   const { data: terminados = [] } = useQuery({
     queryKey: ['finished_products', 'activos'],
-    queryFn: async () => { const { data } = await supabase.from('finished_products').select('id, nombre, tipo, activo').eq('activo', true).order('nombre'); return data || [] },
+    queryFn: async () => { const { data } = await supabase.from('finished_products').select('id, nombre, tipo, activo, product_id').eq('activo', true).order('nombre'); return data || [] },
   })
   // Órdenes (para trazabilidad de MP consumida en el detalle del registro) — solo admin
   const { data: ordenesMp = [] } = useQuery({
@@ -227,12 +229,80 @@ export default function Produccion() {
     },
   })
 
+  // Revierte una entrada manual a stock terminado (baja el stock y borra el movimiento).
+  const revertirEntradaManual = async (mov) => {
+    const cant = Number(mov.cantidad) || 0
+    const { error: rpcErr } = await supabase.rpc('ajustar_stock_finished', { p_finished_id: mov.finished_id, p_delta: -cant })
+    if (rpcErr) {
+      const { data: cur } = await supabase.from('finished_products').select('stock').eq('id', mov.finished_id).maybeSingle()
+      await supabase.from('finished_products').update({ stock: Math.max(0, (Number(cur?.stock) || 0) - cant) }).eq('id', mov.finished_id)
+    }
+    await supabase.from('finished_movements').delete().eq('id', mov.id)
+    try { await supabase.functions.invoke('alegra-push-stock', { body: { finished_id: mov.finished_id } }) } catch { /* no bloquea */ }
+  }
+
   const remove = useMutation({
     mutationFn: async (id) => {
+      // Si el registro había enviado producción a stock terminado, revertirlo para no dejar stock huérfano.
+      const { data: movs } = await supabase.from('finished_movements')
+        .select('id, finished_id, cantidad').eq('ref', String(id)).eq('origen', 'produccion_manual').eq('tipo', 'entrada')
+      for (const m of (movs || [])) await revertirEntradaManual(m)
       const { error } = await supabase.from('production_records').delete().eq('id', id)
       if (error) throw error
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['production_records'] }); toast('Eliminado') },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['production_records'] })
+      qc.invalidateQueries({ queryKey: ['finished_movements', 'manual_prod'] })
+      qc.invalidateQueries({ queryKey: ['finished_products'] })
+      toast('Eliminado')
+    },
+  })
+
+  // Envía un registro de producción diaria (sin orden) al stock de PRODUCTO TERMINADO.
+  const enviarStock = useMutation({
+    mutationFn: async ({ record, finished_id, cantidad, lote }) => {
+      const cant = Number(cantidad) || 0
+      if (!finished_id) throw new Error('Elige el producto terminado del catálogo')
+      if (!(cant > 0)) throw new Error('La cantidad debe ser mayor que cero')
+      // Idempotencia: no sumar dos veces el mismo registro.
+      const { data: ya } = await supabase.from('finished_movements')
+        .select('id').eq('ref', String(record.id)).eq('origen', 'produccion_manual').eq('tipo', 'entrada').maybeSingle()
+      if (ya) throw new Error('Este registro ya se había enviado a stock.')
+      const fp = terminados.find(t => String(t.id) === String(finished_id))
+      // Stock atómico (con respaldo si la función no está desplegada).
+      const { error: rpcErr } = await supabase.rpc('ajustar_stock_finished', { p_finished_id: finished_id, p_delta: cant })
+      if (rpcErr) {
+        const { data: cur } = await supabase.from('finished_products').select('stock').eq('id', finished_id).maybeSingle()
+        await supabase.from('finished_products').update({ stock: (Number(cur?.stock) || 0) + cant }).eq('id', finished_id)
+      }
+      const movBase = {
+        finished_id, tipo: 'entrada', cantidad: cant, lote: lote || record.lote || '',
+        fecha: record.fecha || new Date().toISOString().split('T')[0],
+        origen: 'produccion_manual', ref: String(record.id),
+        obs: `Producción diaria — ${record.producto || ''} (lote ${record.lote || '—'})`, creado_por: profile?.nombre || '',
+      }
+      let { error: insErr } = await supabase.from('finished_movements').insert({ ...movBase, product_id: fp?.product_id || null })
+      if (insErr && /product_id/i.test(insErr.message || '')) ({ error: insErr } = await supabase.from('finished_movements').insert(movBase))
+      if (insErr) throw insErr
+      try { await supabase.functions.invoke('alegra-push-stock', { body: { finished_id } }) } catch { /* no bloquea */ }
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['finished_movements', 'manual_prod'] })
+      qc.invalidateQueries({ queryKey: ['finished_products'] })
+      setModalStock(null)
+      toast('Enviado a stock de producto terminado ✓')
+    },
+    onError: (e) => toast(e.message, 'error'),
+  })
+
+  const deshacerStock = useMutation({
+    mutationFn: async (mov) => { await revertirEntradaManual(mov) },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['finished_movements', 'manual_prod'] })
+      qc.invalidateQueries({ queryKey: ['finished_products'] })
+      toast('Se deshizo la entrada a stock')
+    },
+    onError: (e) => toast(e.message, 'error'),
   })
 
   const aprobarRegistro = useMutation({
@@ -607,6 +677,21 @@ export default function Produccion() {
   const cantProducida = (r) => r.cant_subporciones != null ? (Number(r.cant_subporciones) || 0) : (Number(r.cantidad) || 0)
   const cantEmpacada = (r) => r.surtido ? (Number(r.surtido_cantidad) || 0) : cantProducida(r)
 
+  // ===== Envío manual a stock de producto terminado (registro diario SIN orden) =====
+  // El movimiento de terminado ya lo hace la ORDEN al enviarse; un registro creado a mano en este
+  // módulo (sin orden) no movía stock. Aquí se ofrece hacerlo de forma explícita y reversible.
+  const movStockDeRegistro = (r) => entradasManual.find(m => String(m.ref) === String(r.id)) || null
+  // Califica: producto final (no subproducto), sin orden, no importado, aprobado y con cantidad.
+  const calificaParaStock = (r) =>
+    (r.tipo_registro || 'final') !== 'subproducto' && !r.orden_id && !esImportado(r)
+    && r.aprobado !== false && cantEmpacada(r) > 0
+  const abrirEnviarStock = (r) => {
+    const nom = nombreFinal(r) || r.producto
+    const match = terminados.find(t => t.nombre === nom) || terminados.find(t => t.nombre === r.producto)
+    setStockForm({ finished_id: match ? String(match.id) : '', cantidad: String(cantEmpacada(r) || ''), lote: r.lote || '' })
+    setModalStock(r)
+  }
+
   // ===== Análisis mensual: CANTIDADES FINALES PRODUCIDAS (en unidades), por producto base, por mes.
   // No usa subporciones ni el producto surtido: cuenta las UNIDADES finales producidas (r.cantidad).
   const recsAnio = aprobados.filter(r => (r.tipo_registro || 'final') !== 'subproducto' && anioDe(r.fecha) === anioAnalisis && r.producto)
@@ -749,6 +834,12 @@ export default function Produccion() {
                     {p.orden_id
                       ? <button className="btn btn-xs btn-secondary" onClick={() => revertirAOrden(p)}><Ico as={Undo2} size={13} />Revertir a la orden</button>
                       : <button className="btn btn-xs btn-secondary" onClick={() => openEdit(p)}><Ico as={Pencil} size={13} />Editar</button>}
+                    {calificaParaStock(p) && (movStockDeRegistro(p)
+                      ? <>
+                          <span className="badge badge-verde" style={{ fontSize: '0.6rem', alignSelf: 'center' }}>En stock ✓</span>
+                          {!esOperario && <button className="btn btn-xs btn-secondary" onClick={() => confirmar('¿Deshacer la entrada a stock de producto terminado de este registro?').then(ok => ok && deshacerStock.mutate(movStockDeRegistro(p)))}><Ico as={Undo2} size={13} />Deshacer stock</button>}
+                        </>
+                      : !esOperario && <button className="btn btn-xs btn-primary" onClick={() => abrirEnviarStock(p)} title="Sumar esta producción al stock de producto terminado"><Ico as={Package} size={13} />Enviar a stock</button>)}
                     {!esOperario && <button className="btn btn-xs btn-danger" onClick={() => confirmar('¿Eliminar este registro?').then(ok => ok && remove.mutate(p.id))}><Ico as={X} size={13} />Eliminar</button>}
                   </div>
                 </AccordionItem>
@@ -795,6 +886,12 @@ export default function Produccion() {
                           {p.orden_id
                             ? <button className="btn btn-xs btn-secondary" title="Revertir a la orden para corregir" onClick={() => revertirAOrden(p)}><Undo2 size={13} aria-hidden="true" /></button>
                             : <button className="btn btn-xs btn-secondary" onClick={() => openEdit(p)} title="Editar"><Pencil size={13} aria-hidden="true" /></button>}
+                          {calificaParaStock(p) && (movStockDeRegistro(p)
+                            ? <>
+                                <span className="badge badge-verde" style={{ fontSize: '0.6rem', alignSelf: 'center' }} title="Ya sumado al stock de producto terminado">En stock ✓</span>
+                                {!esOperario && <button className="btn btn-xs btn-secondary" title="Deshacer la entrada a stock" onClick={() => confirmar('¿Deshacer la entrada a stock de producto terminado de este registro?').then(ok => ok && deshacerStock.mutate(movStockDeRegistro(p)))}><Undo2 size={13} aria-hidden="true" /></button>}
+                              </>
+                            : !esOperario && <button className="btn btn-xs btn-primary" onClick={() => abrirEnviarStock(p)} title="Sumar esta producción al stock de producto terminado"><Package size={13} aria-hidden="true" /></button>)}
                           {!esOperario && <button className="btn btn-xs btn-danger" onClick={() => confirmar('¿Eliminar?').then(ok => ok && remove.mutate(p.id))} title="Eliminar"><X size={13} aria-hidden="true" /></button>}
                         </div>
                       </td>
@@ -1055,6 +1152,39 @@ export default function Produccion() {
             ✅ Lote completado (la cantidad final ya es definitiva)
           </label>
         </div>
+      </Modal>
+
+      {/* Modal: enviar registro (sin orden) al stock de producto terminado */}
+      <Modal open={!!modalStock} onClose={() => setModalStock(null)} title="📦 Enviar a stock de producto terminado" size="modal-md">
+        {modalStock && <>
+          <p style={{ fontSize: '0.88rem', color: 'var(--texto-suave)', margin: '0 0 12px' }}>
+            Suma esta producción al inventario de <strong>producto terminado</strong>. Elige el producto del catálogo (lo normal es que la producción entre por una orden; usa esto solo para registros hechos a mano sin orden).
+          </p>
+          <div className="form-group">
+            <label className="form-label">Producto terminado</label>
+            <Select value={stockForm.finished_id} onChange={e => setStockForm(f => ({ ...f, finished_id: e.target.value }))}>
+              <option value="">— Elegir producto —</option>
+              {terminados.map(t => <option key={t.id} value={t.id}>{t.nombre}</option>)}
+            </Select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Cantidad a sumar</label>
+            <input className="form-control" type="number" min="0" step="1" value={stockForm.cantidad}
+              onChange={e => setStockForm(f => ({ ...f, cantidad: e.target.value }))} />
+          </div>
+          <div className="form-group">
+            <label className="form-label">Lote</label>
+            <input className="form-control" value={stockForm.lote}
+              onChange={e => setStockForm(f => ({ ...f, lote: e.target.value }))} placeholder="Lote del producto terminado" />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 10 }}>
+            <button className="btn btn-secondary" onClick={() => setModalStock(null)}>Cancelar</button>
+            <button className="btn btn-primary" disabled={enviarStock.isPending}
+              onClick={() => enviarStock.mutate({ record: modalStock, finished_id: stockForm.finished_id, cantidad: stockForm.cantidad, lote: stockForm.lote })}>
+              <Ico as={Package} size={14} />{enviarStock.isPending ? 'Enviando…' : 'Enviar a stock'}
+            </button>
+          </div>
+        </>}
       </Modal>
 
       {/* Modal ver foto */}
