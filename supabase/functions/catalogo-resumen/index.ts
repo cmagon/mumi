@@ -1,6 +1,6 @@
 // Supabase Edge Function: genera un resumen corto de la descripción de un producto con IA.
 // Soporta dos proveedores; usa el que tengas configurado (Gemini tiene capa GRATIS):
-//   · Google Gemini  → secreto GEMINI_API_KEY   (modelo por defecto: gemini-1.5-flash)
+//   · Google Gemini  → secreto GEMINI_API_KEY   (modelo por defecto: gemini-2.5-flash)
 //   · OpenAI         → secreto OPENAI_API_KEY    (modelo por defecto: gpt-4o-mini)
 // Si ambos están, se usa Gemini. Puedes forzar modelo con GEMINI_MODEL / OPENAI_MODEL.
 //
@@ -22,20 +22,21 @@ const json = (o: unknown, status = 200) =>
 const err = (msg: string, status: number) => json({ error: msg }, status)
 
 const MAX_TEXTO = 8000
-const MAX_RESUMEN_CHARS = 200
+const MAX_RESUMEN_CHARS = 800
 
 const sinHtml = (s: string) =>
   (s || '').replace(/<[^>]*>/g, ' ').replace(/&[a-z]+;/gi, ' ').replace(/\s+/g, ' ').trim()
 
 const SISTEMA =
   'Eres redactor de e-commerce para una marca de productos amazónicos. ' +
-  'Escribe un resumen breve y atractivo de la descripción del producto, en español, ' +
-  'en 1 o 2 frases (máximo ~160 caracteres). Tono cálido y natural. ' +
-  'No inventes datos que no estén en el texto. Devuelve solo el resumen, sin comillas ni prefijos.'
+  'Escribe un resumen en UN solo párrafo (3 a 5 frases, aproximadamente 400 a 600 caracteres) ' +
+  'de la descripción del producto, en español, con tono cálido y natural que invite a comprar. ' +
+  'Recoge lo esencial del texto: sabor, ingredientes, beneficios y origen si se mencionan. ' +
+  'No inventes datos que no estén en el texto. Devuelve solo el párrafo, sin comillas, títulos ni viñetas.'
 
 // --- Google Gemini (capa gratuita) ---
 async function resumirGemini(apiKey: string, prompt: string): Promise<string> {
-  const model = Deno.env.get('GEMINI_MODEL') || 'gemini-1.5-flash'
+  const model = Deno.env.get('GEMINI_MODEL') || 'gemini-2.5-flash'
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`
   const r = await fetch(url, {
     method: 'POST',
@@ -43,7 +44,7 @@ async function resumirGemini(apiKey: string, prompt: string): Promise<string> {
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: SISTEMA }] },
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 300, temperature: 0.5 },
+      generationConfig: { maxOutputTokens: 600, temperature: 0.5 },
     }),
   })
   if (!r.ok) throw new Error(`Gemini (${r.status}): ${(await r.text().catch(() => '')).slice(0, 300)}`)
@@ -59,7 +60,7 @@ async function resumirOpenAI(apiKey: string, prompt: string): Promise<string> {
     method: 'POST',
     headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify({
-      model, max_tokens: 300, temperature: 0.5,
+      model, max_tokens: 600, temperature: 0.5,
       messages: [{ role: 'system', content: SISTEMA }, { role: 'user', content: prompt }],
     }),
   })

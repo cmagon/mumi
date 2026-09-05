@@ -820,12 +820,12 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
       {/* Resumen corto (IA o manual) — se genera a partir de la descripción de abajo */}
       <div className="form-group">
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <label className="form-label" style={{ marginBottom: 0 }}>Resumen <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({resumen.length}/160 · frase corta a partir de la descripción)</small></label>
-          <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} disabled={generando} onClick={generarResumen} title="Genera un resumen con IA a partir de la descripción del catálogo">
-            <Ico as={Sparkles} size={12} />{generando ? 'Generando…' : 'Generar resumen'}
+          <label className="form-label" style={{ marginBottom: 0 }}>Resumen <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({resumen.length}/600 · un párrafo a partir de la descripción)</small></label>
+          <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} disabled={generando} onClick={generarResumen} title="Genera (o regenera) el resumen con IA a partir de la descripción del catálogo">
+            <Ico as={Sparkles} size={12} />{generando ? 'Generando…' : (resumen.trim() ? 'Regenerar' : 'Generar resumen')}
           </button>
         </div>
-        <textarea className="form-control" rows={2} maxLength={220} value={resumen} onChange={e => setResumen(e.target.value)} placeholder="Escríbelo o pulsa «Generar resumen» para crearlo desde la descripción." style={{ marginTop: 6 }} />
+        <textarea className="form-control" rows={4} maxLength={800} value={resumen} onChange={e => setResumen(e.target.value)} placeholder="Escríbelo o pulsa «Generar resumen» para crear un párrafo desde la descripción." style={{ marginTop: 6 }} />
       </div>
 
       {/* Descripción del catálogo (texto enriquecido, independiente de la ficha técnica) */}
