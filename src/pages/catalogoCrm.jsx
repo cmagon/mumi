@@ -13,6 +13,8 @@ const ETIQUETAS = [
   { id: 'compró', label: 'Compró', hint: 'Hizo al menos un pedido' },
   { id: 'mayorista', label: 'Mayorista', hint: 'Pedido o acceso mayorista' },
   { id: 'favoritos', label: 'Favoritos', hint: 'Guardó productos' },
+  { id: 'carrito', label: 'Carrito', hint: 'Dejó productos en el carrito' },
+  { id: 'contacto', label: 'Contacto', hint: 'Escribió por el formulario' },
   { id: 'baja', label: 'Baja correo', hint: 'Se desuscribió' },
 ]
 
@@ -40,6 +42,8 @@ function etiquetasDe(sub, pedidosEmail) {
   const o = (sub.origen || '').toLowerCase()
   if (o === 'newsletter' || o === 'popup') tags.add('suscrito')
   if (o === 'favorito') tags.add('favoritos')
+  if (o === 'contacto') tags.add('contacto')
+  if (o === 'carrito') tags.add('carrito')
   if (o === 'pedido') tags.add('compró')
   if (sub.activo === false) tags.add('baja')
   if (pedidosEmail.length) tags.add('compró')
@@ -53,6 +57,8 @@ function badgeTag(t) {
     'compró': 'badge-dorado',
     mayorista: 'badge-azul',
     favoritos: 'badge-lima',
+    carrito: 'badge-dorado',
+    contacto: 'badge-verde',
     baja: 'badge-rojo',
   }
   return map[t] || 'badge-dorado'
@@ -509,6 +515,7 @@ export function TabMetricasCrm() {
             ['Mayoristas', nMayorista],
             ['1 pedido', nUnaVez],
             ['2+ pedidos', repetidores.length],
+            ['Carritos abiertos', (qCarritos.data || []).length],
           ].map(([l, v]) => (
             <div key={l} style={{ background: 'var(--crema)', borderRadius: 10, padding: '12px 14px' }}>
               <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', fontWeight: 700 }}>{l}</div>

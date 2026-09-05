@@ -272,15 +272,9 @@ function TabProductos({ toast, qc, onDirtyChange }) {
   const { data: productos = [], isLoading } = useQuery({
     queryKey: ['catalogo_admin_productos'],
     queryFn: async () => {
-      // Packs (grupo/label/orden) solo existen tras migration_v154; si faltan, reintentamos sin ellas
-      const colsBase = 'id, nombre, product_id, precio_detal, precio_mayor, imagen_url, imagenes, descripcion, catalogo_descripcion, categoria_alegra_nombre, catalogo_visible, catalogo_frutos, catalogo_beneficios, catalogo_destacado, catalogo_novedad, catalogo_precio_oferta, catalogo_seo_titulo, catalogo_seo_desc, catalogo_contenido, catalogo_origen, stock, activo'
-      let { data, error } = await supabase.from('finished_products')
-        .select(`${colsBase}, catalogo_grupo, catalogo_pack_label, catalogo_pack_orden`)
-        .order('nombre')
-      if (error) {
-        ({ data, error } = await supabase.from('finished_products').select(colsBase).order('nombre'))
-        if (error) throw error
-      }
+      const cols = 'id, nombre, product_id, precio_detal, precio_mayor, imagen_url, imagenes, descripcion, catalogo_descripcion, catalogo_resumen, categoria_alegra_nombre, catalogo_visible, catalogo_frutos, catalogo_beneficios, catalogo_destacado, catalogo_novedad, catalogo_precio_oferta, catalogo_seo_titulo, catalogo_seo_desc, catalogo_contenido, catalogo_origen, catalogo_grupo, catalogo_pack_label, catalogo_pack_orden, stock, activo'
+      const { data, error } = await supabase.from('finished_products').select(cols).order('nombre')
+      if (error) throw error
       const prods = (data || []).filter(p => p.activo !== false)
       // Categoría = la de Alegra; si no, el tipo de la ficha (products_costing)
       const ids = [...new Set(prods.map(p => p.product_id).filter(Boolean))]
@@ -381,6 +375,7 @@ function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
   const [subiendo, setSubiendo] = useState(false)
   const [comp, setComp] = useState({})   // borrador de componente por combo
   const [savedSnap, setSavedSnap] = useState(null)
+  const [cropCola, setCropCola] = useState(null)   // { i, files:[], idx } — recorte en cola
   useEffect(() => {
     supabase.from('config_catalogo').select('productos_extra, categorias_extra').eq('id', 1).maybeSingle().then(({ data }) => {
       const it = Array.isArray(data?.productos_extra) ? data.productos_extra : []
@@ -400,22 +395,26 @@ function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
   const upd = (i, campo, val) => setItems(a => a.map((x, k) => k === i ? { ...x, [campo]: val } : x))
   const add = (tipo) => setItems(a => [...(a || []), EXTRA_VACIO(tipo)])
   const del = (i) => setItems(a => a.filter((_, k) => k !== i))
-  const subir = async (i, files) => {
+  // Sube web (1200) + móvil (780) del recorte; mismo pipeline que Productos Terminados
+  const subirBlobParExtra = async (i, blobs) => {
     setSubiendo(true)
     try {
       const nombre = (items[i]?.nombre || '').trim() || 'producto'
-      const nuevos = []
-      for (const f of files) {
-        const ext = (f.name?.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg'
-        const path = pathImgProducto(nombre, { carpeta: 'productos', ext })
-        const { error } = await supabase.storage.from('product-images').upload(path, f, { upsert: true, contentType: f.type || 'image/jpeg' })
+      const subirUno = async (blob, suf) => {
+        const path = pathImgProducto(nombre, { carpeta: 'productos', sufijo: suf })
+        const { error } = await supabase.storage.from('product-images').upload(path, blob, { upsert: true, contentType: 'image/jpeg' })
         if (error) throw error
-        const { data } = supabase.storage.from('product-images').getPublicUrl(path)
-        nuevos.push({ url: data.publicUrl, url_mobile: data.publicUrl, alt: nombre })
+        return supabase.storage.from('product-images').getPublicUrl(path).data.publicUrl
       }
-      upd(i, 'imagenes', [...(items[i].imagenes || []), ...nuevos])
-    } catch (e) { toast('No se pudieron subir: ' + e.message, 'error') } finally { setSubiendo(false) }
+      const url = await subirUno(blobs.web || blobs.main, 'web')
+      const url_mobile = blobs.mobile ? await subirUno(blobs.mobile, 'mob') : url
+      setItems(a => a.map((x, k) => k === i ? { ...x, imagenes: [...(x.imagenes || []), { url, url_mobile, alt: nombre }] } : x))
+    } catch (e) { toast('No se pudo subir la imagen: ' + e.message, 'error') } finally { setSubiendo(false) }
   }
+  // Cola de recorte: procesa una imagen a la vez (permite selección múltiple)
+  const encolarRecorte = (i, files) => { const fs = [...files]; if (fs.length) setCropCola({ i, files: fs, idx: 0 }) }
+  const siguienteRecorte = () => setCropCola(c => (c && c.idx + 1 < c.files.length) ? { ...c, idx: c.idx + 1 } : null)
+  const onRecortado = async (blobs) => { const c = cropCola; siguienteRecorte(); if (c) await subirBlobParExtra(c.i, blobs) }
   const addComp = (i) => { const c = comp[i]; if (!c?.id) return; upd(i, 'componentes', [...(items[i].componentes || []), { id: c.id, cantidad: Number(c.cantidad) || 1 }]); setComp(s => ({ ...s, [i]: { id: '', cantidad: 1 } })) }
   const guardar = async () => {
     setSaving(true)
@@ -506,7 +505,8 @@ function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
               </div>
             )}
             <div>
-              <label className="btn btn-xs btn-secondary" style={{ cursor: 'pointer' }}><Upload size={12} /> {subiendo ? 'Subiendo…' : 'Subir imágenes'}<input type="file" accept="image/*" multiple hidden onChange={e => { const fs = [...(e.target.files || [])]; if (fs.length) subir(i, fs); e.target.value = '' }} /></label>
+              <label className="btn btn-xs btn-secondary" style={{ cursor: 'pointer' }}><Upload size={12} /> {subiendo ? 'Subiendo…' : 'Subir imágenes'}<input type="file" accept="image/*" multiple hidden onChange={e => { encolarRecorte(i, e.target.files || []); e.target.value = '' }} /></label>
+              <small style={{ display: 'block', color: 'var(--texto-suave)', fontSize: '0.68rem', marginTop: 4 }}>Cuadrada 1:1 · se generan web 1200 y móvil 780.</small>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginTop: 6 }}>
                 {(x.imagenes || []).map((im, k) => (
                   <div key={k} style={{ position: 'relative', width: 62, height: 62 }}>
@@ -520,6 +520,11 @@ function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
         ))}
       </div>
       <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={guardar} disabled={saving}><Ico as={Save} size={14} />{saving ? 'Guardando…' : 'Guardar productos adicionales'}</button>{savedSnap != null && items != null && snapConfig({ items, cats }) !== savedSnap && <span className="badge badge-dorado" style={{ marginLeft: 8 }}>Sin guardar</span>}
+      {cropCola && (
+        <ImageCropper file={cropCola.files[cropCola.idx]} aspect={1} variantes={[IMG_PROD_WEB, IMG_PROD_MOBILE]}
+          onCancel={siguienteRecorte}
+          onCropped={onRecortado} />
+      )}
     </div>
   )
 }
@@ -573,6 +578,8 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
   const [destacado, setDestacado] = useState(!!producto.catalogo_destacado)
   const [novedad, setNovedad] = useState(!!producto.catalogo_novedad)
   const [descripcion, setDescripcion] = useState(producto.catalogo_descripcion || '')   // HTML enriquecido del catálogo
+  const [resumen, setResumen] = useState(producto.catalogo_resumen || '')   // resumen corto (IA o manual)
+  const [generando, setGenerando] = useState(false)
   const [precioOferta, setPrecioOferta] = useState(producto.catalogo_precio_oferta ?? '')
   const [seoTitulo, setSeoTitulo] = useState(producto.catalogo_seo_titulo || '')
   const [seoDesc, setSeoDesc] = useState(producto.catalogo_seo_desc || '')
@@ -589,8 +596,24 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
   const [saving, setSaving] = useState(false)
   const confirmar = useConfirm()
   const formSnap = () => snapConfig({
-    nombre, frutos, beneficios, destacado, novedad, descripcion, precioOferta, seoTitulo, seoDesc, contenido, origen, grupo, packLabel, packOrden, imgs,
+    nombre, frutos, beneficios, destacado, novedad, descripcion, resumen, precioOferta, seoTitulo, seoDesc, contenido, origen, grupo, packLabel, packOrden, imgs,
   })
+  const generarResumen = async () => {
+    const texto = (descripcion || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+    if (texto.length < 20) { toast('Escribe primero la descripción del catálogo', 'error'); return }
+    setGenerando(true)
+    try {
+      const { data, error } = await supabase.functions.invoke('catalogo-resumen', {
+        body: { texto: descripcion, nombre: nombre.trim() || producto.nombre },
+      })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      if (data?.resumen) { setResumen(data.resumen); toast('Resumen generado ✓') }
+      else throw new Error('No se recibió resumen')
+    } catch (e) {
+      toast('No se pudo generar el resumen: ' + (e.message || e), 'error')
+    } finally { setGenerando(false) }
+  }
   const savedEditor = useRef(null)
   useEffect(() => { savedEditor.current = formSnap() }, [producto.id]) // eslint-disable-line react-hooks/exhaustive-deps
   const editorDirty = savedEditor.current != null && formSnap() !== savedEditor.current
@@ -639,7 +662,8 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
       const baseUpd = {
         nombre: nombreLimpio,
         catalogo_frutos: frutos, catalogo_beneficios: beneficios, catalogo_destacado: destacado, catalogo_novedad: novedad,
-        catalogo_descripcion: descripcion || null, catalogo_precio_oferta: (precioOferta === '' || Number(precioOferta) <= 0) ? null : Number(precioOferta),
+        catalogo_descripcion: descripcion || null, catalogo_resumen: resumen.trim() || null,
+        catalogo_precio_oferta: (precioOferta === '' || Number(precioOferta) <= 0) ? null : Number(precioOferta),
         catalogo_seo_titulo: seoTitulo.trim() || null, catalogo_seo_desc: seoDesc.trim() || null,
         catalogo_contenido: contenido.trim() || null, catalogo_origen: origen.trim() || null,
         imagen_url, imagenes,
@@ -649,13 +673,7 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
         catalogo_pack_label: packLabel.trim() || null,
         catalogo_pack_orden: Number(packOrden) || 0,
       }
-      let packSinMigracion = false
-      let { error } = await supabase.from('finished_products').update({ ...baseUpd, ...packUpd }).eq('id', producto.id)
-      // Sin v154 las columnas de packs no existen: guardar el resto igual
-      if (error && /catalogo_grupo|catalogo_pack/i.test(error.message || '')) {
-        ({ error } = await supabase.from('finished_products').update(baseUpd).eq('id', producto.id))
-        packSinMigracion = !!(grupo.trim() || packLabel.trim())
-      }
+      const { error } = await supabase.from('finished_products').update({ ...baseUpd, ...packUpd }).eq('id', producto.id)
       if (error) throw error
       if (producto.product_id) {
         try {
@@ -672,9 +690,7 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
       qc.invalidateQueries({ queryKey: ['fichas_costo_terminado'] })
       savedEditor.current = formSnap()
       onDirtyChange?.(false)
-      toast(packSinMigracion
-        ? 'Guardado sin packs: aplica migration_v154 en Supabase'
-        : 'Producto actualizado ✓')
+      toast('Producto actualizado ✓')
       onSyncedSheets?.()
       onClose()
     } catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
@@ -800,6 +816,17 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
           onCancel={() => setCropFile(null)}
           onCropped={(blobs) => { setCropFile(null); subirBlobPar(blobs) }} />
       )}
+
+      {/* Resumen corto (IA o manual) — se genera a partir de la descripción de abajo */}
+      <div className="form-group">
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+          <label className="form-label" style={{ marginBottom: 0 }}>Resumen <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({resumen.length}/160 · frase corta a partir de la descripción)</small></label>
+          <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} disabled={generando} onClick={generarResumen} title="Genera un resumen con IA a partir de la descripción del catálogo">
+            <Ico as={Sparkles} size={12} />{generando ? 'Generando…' : 'Generar resumen'}
+          </button>
+        </div>
+        <textarea className="form-control" rows={2} maxLength={220} value={resumen} onChange={e => setResumen(e.target.value)} placeholder="Escríbelo o pulsa «Generar resumen» para crearlo desde la descripción." style={{ marginTop: 6 }} />
+      </div>
 
       {/* Descripción del catálogo (texto enriquecido, independiente de la ficha técnica) */}
       <div className="form-group"><label className="form-label">Descripción del catálogo <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(texto enriquecido; distinta a la descripción técnica de la ficha)</small></label>

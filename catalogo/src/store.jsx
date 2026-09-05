@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { supabase } from './supabase'
-import { cargarFrutos, getEmail, setEmail as saveEmail, emailValido, listarFavoritosRemotos, toggleFavoritoRemoto, setCliente, getCliente, getTelefono, setTelefono, guardarCarritoRemoto } from './utils'
+import { cargarFrutos, getEmail, setEmail as saveEmail, emailValido, listarFavoritosRemotos, toggleFavoritoRemoto, setCliente, getCliente, getTelefono, setTelefono, guardarCarritoRemoto, sinTildes } from './utils'
 
 const Ctx = createContext(null)
 export const useStore = () => useContext(Ctx)
@@ -120,6 +120,26 @@ export function StoreProvider({ children }) {
       pack_label: (p.pack_label || '').trim() || null,
       pack_orden: Number(p.pack_orden) || 0,
     })), ...extras]
+
+    // Normaliza categorías: une variantes por mayúsculas/tildes (ej. "Infusiones" de
+    // Alegra y "infusiones" escrito a mano) para que no aparezcan como secciones duplicadas.
+    // Elige como etiqueta la variante "más presentable" (con mayúscula inicial / tildes).
+    const canonCat = {}
+    all.forEach(p => {
+      const c = (p.categoria || '').trim()
+      if (!c) return
+      const k = sinTildes(c)
+      const cur = canonCat[k]
+      const mejor = (a, b) => {
+        const capA = /^[A-ZÁÉÍÓÚÑ]/.test(a), capB = /^[A-ZÁÉÍÓÚÑ]/.test(b)
+        if (capA !== capB) return capA ? a : b
+        const tildeA = /[áéíóúñ]/i.test(a), tildeB = /[áéíóúñ]/i.test(b)
+        if (tildeA !== tildeB) return tildeA ? a : b
+        return a // conserva la primera vista
+      }
+      canonCat[k] = cur ? mejor(cur, c) : c
+    })
+    all.forEach(p => { const c = (p.categoria || '').trim(); if (c) p.categoria = canonCat[sinTildes(c)] || c })
 
     // Presentaciones: mismos `grupo` → chips en la tarjeta (x6, x12…)
     const byGrupo = {}

@@ -628,6 +628,7 @@ export async function confirmarPedidoWA(items, nota, cfg, mayorista = false, int
   const tel = (telefono == null ? getTelefono() : telefono).trim()
   let codigo = ''
   let pedidoId = null
+  let registradoRPC = false   // la RPC de pedido ya hace upsert del suscriptor internamente
   const productos = items.map(i => ({
     id: i.id, nombre: i.nombre, cantidad: i.cantidad, precio: precioItem(i, mayorista), mayorista,
   }))
@@ -645,6 +646,7 @@ export async function confirmarPedidoWA(items, nota, cfg, mayorista = false, int
       const row = Array.isArray(data) ? data[0] : data
       codigo = row?.codigo || ''
       pedidoId = row?.id ?? null
+      registradoRPC = true
     } else {
       // Fallback: firma sin p_telefono o insert directo
       const retry = await supabase.rpc('catalogo_iniciar_pedido', {
@@ -655,6 +657,7 @@ export async function confirmarPedidoWA(items, nota, cfg, mayorista = false, int
         const row = Array.isArray(retry.data) ? retry.data[0] : retry.data
         codigo = row?.codigo || ''
         pedidoId = row?.id ?? null
+        registradoRPC = true
       } else {
         const { data: ins } = await supabase.from('pedidos_catalogo').insert({
           productos, total,
@@ -664,13 +667,13 @@ export async function confirmarPedidoWA(items, nota, cfg, mayorista = false, int
         pedidoId = ins?.id ?? null
         codigo = pedidoId ? `TMP-${pedidoId}` : ''
       }
-      if (correo) try { await suscribir(correo, cliente, 'pedido', tel) } catch { /* noop */ }
     }
   } catch { /* noop */ }
 
   if (correo) {
     setEmail(correo)
-    try { await suscribir(correo, cliente, 'pedido', tel) } catch { /* noop */ }
+    // Solo registrar por JS si la RPC no lo hizo ya (evita lecturas/escrituras redundantes)
+    if (!registradoRPC) { try { await suscribir(correo, cliente, 'pedido', tel) } catch { /* noop */ } }
   }
   if (cliente) setCliente(cliente)
   if (tel) setTelefono(tel)
