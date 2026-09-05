@@ -598,20 +598,26 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
   const formSnap = () => snapConfig({
     nombre, frutos, beneficios, destacado, novedad, descripcion, resumen, precioOferta, seoTitulo, seoDesc, contenido, origen, grupo, packLabel, packOrden, imgs,
   })
-  const generarResumen = async () => {
-    const texto = (descripcion || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
-    if (texto.length < 20) { toast('Escribe primero la descripción del catálogo', 'error'); return }
+  // Genera Título + Descripción SEO con IA, a partir de nombre + descripción corta + características
+  const generarSEO = async () => {
+    const carac = (descripcion || '').replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim()
+    if (!nombre.trim() && resumen.trim().length < 10 && carac.length < 10) {
+      toast('Escribe primero el nombre y la descripción del producto', 'error'); return
+    }
     setGenerando(true)
     try {
       const { data, error } = await supabase.functions.invoke('catalogo-resumen', {
-        body: { texto: descripcion, nombre: nombre.trim() || producto.nombre },
+        body: { nombre: nombre.trim() || producto.nombre, corta: resumen, caracteristicas: descripcion },
       })
       if (error) throw error
       if (data?.error) throw new Error(data.error)
-      if (data?.resumen) { setResumen(data.resumen); toast('Resumen generado ✓') }
-      else throw new Error('No se recibió resumen')
+      if (data?.titulo || data?.descripcion) {
+        if (data.titulo) setSeoTitulo(data.titulo)
+        if (data.descripcion) setSeoDesc(data.descripcion)
+        toast('SEO generado ✓')
+      } else throw new Error('No se recibió el SEO')
     } catch (e) {
-      toast('No se pudo generar el resumen: ' + (e.message || e), 'error')
+      toast('No se pudo generar el SEO: ' + (e.message || e), 'error')
     } finally { setGenerando(false) }
   }
   const savedEditor = useRef(null)
@@ -727,6 +733,39 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
         </label>
       </div>
 
+      {/* Descripción corta (subtítulo, máx 4 líneas) — se muestra en la ficha y alimenta el feed de Meta */}
+      <div className="form-group">
+        <label className="form-label">Descripción corta <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({resumen.length}/240 · subtítulo, máx 4 líneas)</small></label>
+        <textarea className="form-control" rows={3} maxLength={240} value={resumen} onChange={e => setResumen(e.target.value)} placeholder="Frase gancho breve del producto (sabor, ingrediente o beneficio principal). Es la que se envía al catálogo de Meta." />
+      </div>
+
+      {/* Características del producto (texto enriquecido) */}
+      <div className="form-group"><label className="form-label">Características del producto <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(texto enriquecido: detalles, ingredientes, modo de uso…)</small></label>
+        <RichEditor value={descripcion} onChange={setDescripcion} />
+      </div>
+
+      {/* SEO del producto — se genera con IA a partir del nombre + descripción corta + características */}
+      <div className="card-title" style={{ fontSize: '0.95rem', display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span>🔎 SEO del producto (Google / WhatsApp)</span>
+        <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} disabled={generando} onClick={generarSEO} title="Genera título y descripción SEO con IA (experto en SEO/marketing)">
+          <Ico as={Sparkles} size={12} />{generando ? 'Generando…' : ((seoTitulo.trim() || seoDesc.trim()) ? 'Regenerar SEO' : 'Generar SEO con IA')}
+        </button>
+      </div>
+      <div className="form-grid-2">
+        <div className="form-group">
+          <label className="form-label">Título SEO <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({seoTitulo.length}/60)</small></label>
+          <input className="form-control" value={seoTitulo} maxLength={70} onChange={e => setSeoTitulo(e.target.value)} placeholder={nombre.trim() || producto.nombre} />
+        </div>
+        <div className="form-group">
+          <label className="form-label">Descripción SEO <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({seoDesc.length}/155)</small></label>
+          <input className="form-control" value={seoDesc} maxLength={200} onChange={e => setSeoDesc(e.target.value)} placeholder="Se toma de la descripción corta si lo dejas vacío" />
+        </div>
+      </div>
+      <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginBottom: 12 }}>
+        URL pública: <code>/producto/{sinTildes(nombre).replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-').replace(/-+/g, '-').slice(0, 70) || '…'}</code>.
+        Incluye datos estructurados (precio y disponibilidad).
+      </small>
+
       {/* Precio de oferta */}
       <div className="card-title" style={{ fontSize: '0.95rem' }}>🏷️ Oferta</div>
       <div style={{ display: 'flex', gap: 12, alignItems: 'flex-end', flexWrap: 'wrap', marginBottom: 14 }}>
@@ -735,23 +774,6 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
           ? <span className="badge badge-rojo" style={{ marginBottom: 6 }}>-{Math.round((1 - Number(precioOferta) / producto.precio_detal) * 100)}% · antes {fCOP(producto.precio_detal)}</span>
           : <span style={{ fontSize: '0.76rem', color: 'var(--texto-suave)', marginBottom: 8 }}>Debe ser menor al precio ({fCOP(producto.precio_detal)}). Vacío = sin oferta.</span>}
       </div>
-
-      {/* SEO del producto */}
-      <div className="card-title" style={{ fontSize: '0.95rem' }}>🔎 SEO del producto (Google / WhatsApp)</div>
-      <div className="form-grid-2">
-        <div className="form-group">
-          <label className="form-label">Título SEO <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({seoTitulo.length}/60)</small></label>
-          <input className="form-control" value={seoTitulo} maxLength={70} onChange={e => setSeoTitulo(e.target.value)} placeholder={nombre.trim() || producto.nombre} />
-        </div>
-        <div className="form-group">
-          <label className="form-label">Descripción SEO <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({seoDesc.length}/155)</small></label>
-          <input className="form-control" value={seoDesc} maxLength={200} onChange={e => setSeoDesc(e.target.value)} placeholder="Se toma de la descripción del producto" />
-        </div>
-      </div>
-      <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginBottom: 12 }}>
-        URL pública: <code>/producto/{sinTildes(nombre).replace(/[^a-z0-9\s-]/g, '').trim().replace(/\s+/g, '-').replace(/-+/g, '-').slice(0, 70) || '…'}</code>.
-        Si los dejas vacíos se usan el <strong>nombre</strong> y la <strong>descripción</strong>. Incluye datos estructurados (precio y disponibilidad).
-      </small>
 
       {/* Specs ficha Atelier */}
       <div className="card-title" style={{ fontSize: '0.95rem' }}>📦 Specs de ficha <span style={{ fontWeight: 400, fontSize: '0.78rem', color: 'var(--texto-suave)' }}>(diseño Atelier)</span></div>
@@ -816,22 +838,6 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
           onCancel={() => setCropFile(null)}
           onCropped={(blobs) => { setCropFile(null); subirBlobPar(blobs) }} />
       )}
-
-      {/* Resumen corto (IA o manual) — se genera a partir de la descripción de abajo */}
-      <div className="form-group">
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <label className="form-label" style={{ marginBottom: 0 }}>Resumen <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({resumen.length}/600 · un párrafo a partir de la descripción)</small></label>
-          <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} disabled={generando} onClick={generarResumen} title="Genera (o regenera) el resumen con IA a partir de la descripción del catálogo">
-            <Ico as={Sparkles} size={12} />{generando ? 'Generando…' : (resumen.trim() ? 'Regenerar' : 'Generar resumen')}
-          </button>
-        </div>
-        <textarea className="form-control" rows={4} maxLength={800} value={resumen} onChange={e => setResumen(e.target.value)} placeholder="Escríbelo o pulsa «Generar resumen» para crear un párrafo desde la descripción." style={{ marginTop: 6 }} />
-      </div>
-
-      {/* Descripción del catálogo (texto enriquecido, independiente de la ficha técnica) */}
-      <div className="form-group"><label className="form-label">Descripción del catálogo <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(texto enriquecido; distinta a la descripción técnica de la ficha)</small></label>
-        <RichEditor value={descripcion} onChange={setDescripcion} />
-      </div>
 
       {/* Frutos (múltiples) */}
       <div className="form-group">

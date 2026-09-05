@@ -175,7 +175,8 @@ function buildMetaRow(p: any, extra: any, ctx: Ctx): Record<string, string> | nu
   // Meta title = nombre comercial del producto terminado (no SEO title)
   const nombre = String(p.nombre || extra.nombre || '').trim()
   const titulo = nombre.slice(0, 200)
-  let descripcion = sinHtml(p.descripcion || p.contenido || '')
+  // Meta/Catálogo usa la "Descripción corta" (resumen); fallback a las características / contenido
+  let descripcion = sinHtml(p.resumen || p.descripcion || p.contenido || '')
   if (p.seo_desc && !descripcion.includes(sinHtml(p.seo_desc))) {
     descripcion = descripcion ? `${descripcion} ${sinHtml(p.seo_desc)}` : sinHtml(p.seo_desc)
   }
