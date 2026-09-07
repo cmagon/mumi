@@ -592,6 +592,7 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 .det-cat { font-size: 0.74rem; color: var(--dorado-texto, var(--selva)); text-transform: uppercase; letter-spacing: 1.5px; font-weight: 700; }
 .det-name { font-size: 1.6rem; color: var(--selva); line-height: 1.15; }
 .det-price { font-size: 1.4rem; font-weight: 800; color: var(--tierra); }
+.det-lead { font-size: 1.02rem; line-height: 1.55; color: var(--texto); font-weight: 500; margin: 2px 0 2px; }
 .det-desc { font-size: 0.95rem; line-height: 1.6; color: var(--texto-suave); }
 .agotado-box { background: rgba(30,30,30,0.05); border: 1px solid var(--crema-oscuro); border-radius: var(--radio-sm); padding: 13px; color: var(--texto-suave); font-size: 0.9rem; }
 /* "Hecho con" tipo metaetiquetas (al final) */
