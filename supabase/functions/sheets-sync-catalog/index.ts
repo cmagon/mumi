@@ -175,15 +175,11 @@ function buildMetaRow(p: any, extra: any, ctx: Ctx): Record<string, string> | nu
   // Meta title = nombre comercial del producto terminado (no SEO title)
   const nombre = String(p.nombre || extra.nombre || '').trim()
   const titulo = nombre.slice(0, 200)
-  // Meta/Catálogo usa la "Descripción corta" (resumen); fallback a las características / contenido
+  // Descripción de la hoja / Meta = la "Descripción corta" (resumen) tal cual.
+  // No se anexa el título ni la descripción SEO (esos son para Google, no para Meta),
+  // ni origen/beneficios. Fallback a las características / contenido solo si está vacía.
   let descripcion = sinHtml(p.resumen || p.descripcion || p.contenido || '')
-  if (p.seo_desc && !descripcion.includes(sinHtml(p.seo_desc))) {
-    descripcion = descripcion ? `${descripcion} ${sinHtml(p.seo_desc)}` : sinHtml(p.seo_desc)
-  }
   if (!descripcion) descripcion = nombre
-  if (p.origen) descripcion = `${descripcion} Origen: ${sinHtml(p.origen)}.`.trim()
-  const beneficios = arrDe(p.beneficios)
-  if (beneficios.length) descripcion = `${descripcion} ${beneficios.join('. ')}.`.trim()
   descripcion = descripcion.slice(0, 9999)
 
   const frutos = arrDe(p.frutos)
