@@ -553,7 +553,7 @@ export function Producto() {
                   const IcoB = iconoBene(b)
                   return <span key={i} className="bene"><IcoB size={18} />{b}</span>
                 })}
-                 {p.resumen && <div className="det-lead rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.resumen) }} />}
+                {p.resumen && <div className="det-lead rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.resumen) }} />} 
               </div>
             )}
 
@@ -709,10 +709,11 @@ export function Producto() {
             {mayorista ? <span className="precio-tag">precio mayorista</span> : (cfg.mostrar_mayor && p.precio_mayor ? <span className="det-mayor"> · Mayor {fCOP(p.precio_mayor)}</span> : null)}
           </div>
           {st && st.tono !== 'ok' && st.tono !== 'agotado' && <div className={`stock-tag stock-${st.tono}`} style={{ alignSelf: 'flex-start' }}>🔥 {st.texto}</div>}
-          {p.resumen && <div className="det-lead rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.resumen) }} />}
+          
           {p.beneficios?.length > 0 && (
             <div className="benes">{p.beneficios.map((b, i) => <span key={i} className="bene">{b}</span>)}</div>
           )}
+          {p.resumen && <div className="det-lead rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.resumen) }} />}
           {p.descripcion && (
             <div className="det-desc-block">
               <div className="det-desc rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.descripcion) }} />
