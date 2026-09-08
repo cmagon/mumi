@@ -1,6 +1,11 @@
 -- v164 — Expone catalogo_resumen ("Descripción corta") en la vista pública catalogo_productos.
 -- La vista es la fuente del frontend y del feed de Meta; recrea v154 + el campo resumen.
 
+-- Asegura la columna (por si v163 no se aplicó): sin esto el create view falla y deja
+-- la vista eliminada, tumbando el catálogo público.
+alter table finished_products
+  add column if not exists catalogo_resumen text;
+
 drop view if exists catalogo_productos;
 create view catalogo_productos as
   select

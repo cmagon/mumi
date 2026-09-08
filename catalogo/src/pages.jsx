@@ -378,7 +378,7 @@ export function Producto() {
     const marca = cfg.nombre_tienda || 'Mumi Amazonia'
     setSEO({
       title: p.seo_titulo || p.nombre,
-      desc: p.seo_desc || p.resumen || sinHtml(p.descripcion).slice(0, 160),
+      desc: p.seo_desc || sinHtml(p.resumen) || sinHtml(p.descripcion).slice(0, 160),
       image: p.imagen_url || cfg.seo_imagen || cfg.logo_url,
       url: `${baseUrl(cfg)}${rutaProducto(p)}`,
       type: 'product',
@@ -545,7 +545,7 @@ export function Producto() {
             </div>
             {st && st.tono !== 'ok' && st.tono !== 'agotado' && <div className={`stock-tag stock-${st.tono}`} style={{ alignSelf: 'flex-start' }}>🔥 {st.texto}</div>}
 
-            {p.resumen && <p className="det-lead">{p.resumen}</p>}
+            {p.resumen && <div className="det-lead rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.resumen) }} />}
 
             {p.beneficios?.length > 0 && (
               <div className="benes benes-atelier">
@@ -708,7 +708,7 @@ export function Producto() {
             {mayorista ? <span className="precio-tag">precio mayorista</span> : (cfg.mostrar_mayor && p.precio_mayor ? <span className="det-mayor"> · Mayor {fCOP(p.precio_mayor)}</span> : null)}
           </div>
           {st && st.tono !== 'ok' && st.tono !== 'agotado' && <div className={`stock-tag stock-${st.tono}`} style={{ alignSelf: 'flex-start' }}>🔥 {st.texto}</div>}
-          {p.resumen && <p className="det-lead">{p.resumen}</p>}
+          {p.resumen && <div className="det-lead rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.resumen) }} />}
           {p.beneficios?.length > 0 && (
             <div className="benes">{p.beneficios.map((b, i) => <span key={i} className="bene">{b}</span>)}</div>
           )}
