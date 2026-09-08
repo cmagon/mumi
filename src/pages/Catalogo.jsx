@@ -733,10 +733,10 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
         </label>
       </div>
 
-      {/* Descripción corta (subtítulo, máx 4 líneas) — se muestra en la ficha y alimenta el feed de Meta */}
+      {/* Descripción corta (subtítulo, texto enriquecido) — se muestra en la ficha y alimenta el feed de Meta */}
       <div className="form-group">
-        <label className="form-label">Descripción corta <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({resumen.length}/240 · subtítulo, máx 4 líneas)</small></label>
-        <textarea className="form-control" rows={3} maxLength={240} value={resumen} onChange={e => setResumen(e.target.value)} placeholder="Frase gancho breve del producto (sabor, ingrediente o beneficio principal). Es la que se envía al catálogo de Meta." />
+        <label className="form-label">Descripción corta <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(subtítulo breve, texto enriquecido; es la que se envía al catálogo de Meta)</small></label>
+        <RichEditor value={resumen} onChange={setResumen} />
       </div>
 
       {/* Características del producto (texto enriquecido) */}

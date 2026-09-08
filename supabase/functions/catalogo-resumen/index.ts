@@ -67,7 +67,11 @@ async function generarGemini(apiKey: string, prompt: string): Promise<string> {
     body: JSON.stringify({
       systemInstruction: { parts: [{ text: SISTEMA }] },
       contents: [{ role: 'user', parts: [{ text: prompt }] }],
-      generationConfig: { maxOutputTokens: 400, temperature: 0.6, responseMimeType: 'application/json' },
+      generationConfig: {
+        maxOutputTokens: 1024, temperature: 0.6, responseMimeType: 'application/json',
+        // gemini-2.5-* "piensa" y consume tokens; sin esto la respuesta puede salir vacía
+        thinkingConfig: { thinkingBudget: 0 },
+      },
     }),
   })
   if (!r.ok) throw new Error(`Gemini (${r.status}): ${(await r.text().catch(() => '')).slice(0, 300)}`)
