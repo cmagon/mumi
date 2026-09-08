@@ -545,7 +545,7 @@ export function Producto() {
             </div>
             {st && st.tono !== 'ok' && st.tono !== 'agotado' && <div className={`stock-tag stock-${st.tono}`} style={{ alignSelf: 'flex-start' }}>🔥 {st.texto}</div>}
 
-            {p.resumen && <div className="det-lead rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.resumen) }} />}
+           
 
             {p.beneficios?.length > 0 && (
               <div className="benes benes-atelier">
@@ -553,6 +553,7 @@ export function Producto() {
                   const IcoB = iconoBene(b)
                   return <span key={i} className="bene"><IcoB size={18} />{b}</span>
                 })}
+                 {p.resumen && <div className="det-lead rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.resumen) }} />}
               </div>
             )}
 
