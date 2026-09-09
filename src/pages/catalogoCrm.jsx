@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Download, Users, BarChart3, Star, ShoppingCart, MessageCircle } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Download, Users, BarChart3, Star, ShoppingCart, MessageCircle, Truck, CheckCircle2, XCircle, Package, X } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fNum } from '../lib/businessLogic'
 
@@ -573,6 +573,267 @@ export function TabMetricasCrm() {
               <tbody>{topVistos.map(([n, c]) => <tr key={n}><td>{n}</td><td className="td-number">{c}</td></tr>)}</tbody>
             </table></div>}
       </div>
+    </>
+  )
+}
+
+// ================= Gestión de pedidos (fulfillment) =================
+
+const ENVIO_ESTADOS = {
+  pendiente:  { label: 'Pendiente',  badge: 'badge-dorado' },
+  despachado: { label: 'Despachado', badge: 'badge-azul' },
+  entregado:  { label: 'Entregado',  badge: 'badge-verde' },
+  cancelado:  { label: 'Cancelado',  badge: 'badge-rojo' },
+}
+
+function fechaHora(iso) {
+  if (!iso) return '—'
+  try { return new Date(iso).toLocaleString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) }
+  catch { return '—' }
+}
+
+function itemsPedido(p) {
+  const arr = Array.isArray(p.productos) ? p.productos : []
+  return arr.map(i => `${i.cantidad || 1}× ${i.nombre || 'Producto'}`).join(', ')
+}
+
+// Enlace de WhatsApp al cliente notificando el despacho.
+function waDespacho(p, cfg) {
+  const tel = (p.telefono || '').replace(/[^0-9]/g, '')
+  if (!tel) return null
+  const nombre = (p.nombre || '').trim()
+  const saludo = nombre ? `¡Hola ${nombre}! 🌿` : '¡Hola! 🌿'
+  const tienda = (cfg?.nombre_tienda || 'Mumi Amazonia').trim()
+  const guia = (p.guia || '').trim()
+  const transp = (p.transportadora || '').trim()
+  const lineas = [
+    `${saludo}`,
+    `Tu pedido *#${p.codigo || p.id}* en ${tienda} ya fue despachado. 📦`,
+    guia ? `Número de guía: *${guia}*${transp ? ` (${transp})` : ''}` : (transp ? `Transportadora: ${transp}` : ''),
+    (p.nota_envio || '').trim() ? `\n${p.nota_envio.trim()}` : '',
+    '\n¡Gracias por tu compra! 💚',
+  ].filter(Boolean)
+  return `https://wa.me/${tel}?text=${encodeURIComponent(lineas.join('\n'))}`
+}
+
+// Cuerpo HTML del correo de despacho al cliente.
+function htmlDespacho(p, cfg) {
+  const tienda = (cfg?.nombre_tienda || 'Mumi Amazonia').trim()
+  const nombre = (p.nombre || '').trim()
+  const guia = (p.guia || '').trim()
+  const transp = (p.transportadora || '').trim()
+  const nota = (p.nota_envio || '').trim()
+  const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return `
+  <div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a">
+    <h2 style="color:#2e7d32">¡Tu pedido va en camino! 📦</h2>
+    <p>${nombre ? `Hola ${esc(nombre)},` : 'Hola,'}</p>
+    <p>Tu pedido <strong>#${esc(p.codigo || p.id)}</strong> en <strong>${esc(tienda)}</strong> ya fue despachado.</p>
+    ${guia ? `<p style="font-size:16px"><strong>Número de guía:</strong> ${esc(guia)}${transp ? ` <span style="color:#555">(${esc(transp)})</span>` : ''}</p>` : (transp ? `<p><strong>Transportadora:</strong> ${esc(transp)}</p>` : '')}
+    ${nota ? `<div style="background:#f4f7f0;border-radius:8px;padding:12px 14px;margin:12px 0">${esc(nota).replace(/\n/g, '<br>')}</div>` : ''}
+    <p style="margin-top:18px">¡Gracias por confiar en nosotros! 💚</p>
+    <p style="color:#777;font-size:12px">${esc(tienda)}</p>
+  </div>`
+}
+
+// Modal para capturar guía + transportadora + nota antes de despachar.
+function ModalDespacho({ pedido, onCerrar, onConfirmar }) {
+  const [guia, setGuia] = useState(pedido.guia || '')
+  const [transp, setTransp] = useState(pedido.transportadora || '')
+  const [nota, setNota] = useState(pedido.nota_envio || '')
+  const [enviarEmail, setEnviarEmail] = useState(!!pedido.email)
+  const [guardando, setGuardando] = useState(false)
+  const submit = async (e) => {
+    e.preventDefault()
+    setGuardando(true)
+    try { await onConfirmar({ guia: guia.trim(), transportadora: transp.trim(), nota_envio: nota.trim(), enviarEmail }) }
+    finally { setGuardando(false) }
+  }
+  return (
+    <div className="overlay" style={{ alignItems: 'center' }} onClick={(e) => e.target === e.currentTarget && onCerrar()}>
+      <div className="popup" style={{ textAlign: 'left', maxWidth: 460 }}>
+        <button className="popup-x" onClick={onCerrar} aria-label="Cerrar"><X size={20} /></button>
+        <h2 className="serif" style={{ color: 'var(--selva, #2e7d32)', fontSize: '1.2rem', marginBottom: 4 }}>Marcar como enviado</h2>
+        <p style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', margin: '0 0 12px' }}>Pedido #{pedido.codigo || pedido.id}{pedido.nombre ? ` · ${pedido.nombre}` : ''}</p>
+        <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div className="form-group"><label className="form-label">Número de guía</label>
+            <input className="form-control" value={guia} onChange={e => setGuia(e.target.value)} placeholder="Ej: 240012345678" autoFocus /></div>
+          <div className="form-group"><label className="form-label">Transportadora <span style={{ color: 'var(--texto-suave)', fontWeight: 400 }}>(opcional)</span></label>
+            <input className="form-control" value={transp} onChange={e => setTransp(e.target.value)} placeholder="Ej: Servientrega, Interrapidísimo…" /></div>
+          <div className="form-group"><label className="form-label">Nota adicional <span style={{ color: 'var(--texto-suave)', fontWeight: 400 }}>(opcional)</span></label>
+            <textarea className="form-control" rows={3} value={nota} onChange={e => setNota(e.target.value)} placeholder="Instrucciones de entrega, tiempo estimado, etc." /></div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: pedido.email ? 'pointer' : 'not-allowed', opacity: pedido.email ? 1 : 0.5 }}>
+            <input type="checkbox" checked={enviarEmail} disabled={!pedido.email} onChange={e => setEnviarEmail(e.target.checked)} />
+            Enviar correo al cliente {pedido.email ? `(${pedido.email})` : '(sin correo registrado)'}
+          </label>
+          <button className="btn btn-success" type="submit" disabled={guardando}>
+            <Truck size={15} /> {guardando ? 'Guardando…' : 'Confirmar despacho'}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+export function TabPedidos() {
+  const qc = useQueryClient()
+  const [filtro, setFiltro] = useState('activos')
+  const [busca, setBusca] = useState('')
+  const [despachar, setDespachar] = useState(null)
+  const [aviso, setAviso] = useState('')
+
+  const { data: cfg } = useQuery({
+    queryKey: ['catalogo_cfg_pedidos'],
+    queryFn: async () => { const { data } = await supabase.from('config_catalogo').select('nombre_tienda, whatsapp, url_publica').eq('id', 1).maybeSingle(); return data || {} },
+  })
+
+  const qPed = useQuery({
+    queryKey: ['catalogo_gestion_pedidos'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('pedidos_catalogo')
+        .select('id, codigo, email, nombre, telefono, total, estado, estado_envio, productos, nota, guia, transportadora, nota_envio, mayorista, created_at, despachado_at, entregado_at, cancelado_at, cancel_motivo')
+        .order('created_at', { ascending: false })
+        .limit(500)
+      if (error) throw error
+      // Solo pedidos que el cliente realmente cursó (con código asignado).
+      return (data || []).filter(p => p.codigo)
+    },
+  })
+  const pedidos = qPed.data || []
+
+  const actualizar = async (p, campos) => {
+    const { error } = await supabase.from('pedidos_catalogo').update(campos).eq('id', p.id)
+    if (error) { setAviso('No se pudo actualizar el pedido: ' + error.message); return false }
+    qc.invalidateQueries({ queryKey: ['catalogo_gestion_pedidos'] })
+    return true
+  }
+
+  const confirmarDespacho = async ({ guia, transportadora, nota_envio, enviarEmail }) => {
+    const p = despachar
+    const campos = { estado_envio: 'despachado', guia, transportadora, nota_envio, despachado_at: new Date().toISOString() }
+    const ok = await actualizar(p, campos)
+    if (!ok) return
+    const actualizado = { ...p, ...campos }
+    if (enviarEmail && p.email) {
+      try {
+        const { error } = await supabase.functions.invoke('enviar-correo', {
+          body: { to: p.email, subject: `Tu pedido #${p.codigo || p.id} va en camino 📦`, html: htmlDespacho(actualizado, cfg) },
+        })
+        if (error) throw error
+        setAviso(`Pedido #${p.codigo} marcado como despachado. Correo enviado a ${p.email}.`)
+      } catch (ex) {
+        setAviso(`Pedido despachado, pero el correo falló: ${ex.message || ex}. Puedes notificar por WhatsApp.`)
+      }
+    } else {
+      setAviso(`Pedido #${p.codigo} marcado como despachado.`)
+    }
+    setDespachar(null)
+  }
+
+  const entregar = async (p) => {
+    if (await actualizar(p, { estado_envio: 'entregado', entregado_at: new Date().toISOString() }))
+      setAviso(`Pedido #${p.codigo} marcado como entregado y finalizado. ✔`)
+  }
+  const cancelar = async (p) => {
+    const motivo = window.prompt(`Cancelar el pedido #${p.codigo}.\n\nMotivo (opcional):`, '')
+    if (motivo === null) return
+    if (await actualizar(p, { estado_envio: 'cancelado', cancelado_at: new Date().toISOString(), cancel_motivo: (motivo || '').trim() || null }))
+      setAviso(`Pedido #${p.codigo} cancelado.`)
+  }
+
+  const q = busca.trim().toLowerCase()
+  const lista = pedidos.filter(p => {
+    const est = p.estado_envio || 'pendiente'
+    if (filtro === 'activos' && (est === 'entregado' || est === 'cancelado')) return false
+    if (filtro !== 'activos' && filtro !== 'todos' && est !== filtro) return false
+    if (!q) return true
+    return [p.codigo, p.nombre, p.email, p.telefono, p.guia].some(v => String(v || '').toLowerCase().includes(q))
+  })
+
+  const conteo = (est) => pedidos.filter(p => (p.estado_envio || 'pendiente') === est).length
+
+  return (
+    <>
+      {aviso && (
+        <div className="card" style={{ borderLeft: '3px solid var(--dorado, #c9a227)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: '0.85rem' }}>{aviso}</span>
+          <button className="btn btn-xs btn-secondary" onClick={() => setAviso('')}>Cerrar</button>
+        </div>
+      )}
+      <div className="card">
+        <div className="card-title"><Ico as={Package} size={16} />Gestionar pedidos
+          <span className="badge badge-dorado" style={{ marginLeft: 8 }}>{conteo('pendiente')} pendientes · {conteo('despachado')} en camino</span>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '4px 0 12px', alignItems: 'center' }}>
+          {[['activos', 'Activos'], ['pendiente', 'Pendientes'], ['despachado', 'Despachados'], ['entregado', 'Entregados'], ['cancelado', 'Cancelados'], ['todos', 'Todos']].map(([id, lbl]) => (
+            <button key={id} className={`btn btn-xs ${filtro === id ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFiltro(id)}>{lbl}</button>
+          ))}
+          <input className="form-control" style={{ maxWidth: 220, marginLeft: 'auto' }} placeholder="Buscar # / nombre / correo…" value={busca} onChange={e => setBusca(e.target.value)} />
+        </div>
+
+        {qPed.isLoading ? <p className="empty-table">Cargando pedidos…</p>
+          : qPed.error ? <p className="empty-table">Error al cargar: {String(qPed.error.message || qPed.error)}</p>
+          : lista.length === 0 ? <p className="empty-table">No hay pedidos en este filtro.</p>
+          : <div className="table-wrap"><table>
+              <thead><tr>
+                <th>Pedido</th><th>Cliente</th><th className="movil-hide">Productos</th>
+                <th className="td-number">Total</th><th>Estado</th><th>Acciones</th>
+              </tr></thead>
+              <tbody>{lista.map(p => {
+                const est = p.estado_envio || 'pendiente'
+                const meta = ENVIO_ESTADOS[est] || ENVIO_ESTADOS.pendiente
+                const wa = waDespacho(p, cfg)
+                const finalizado = est === 'entregado' || est === 'cancelado'
+                return (
+                  <tr key={p.id}>
+                    <td>
+                      <strong>#{p.codigo || p.id}</strong>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>{fechaHora(p.created_at)}</div>
+                      {p.mayorista && <span className="badge badge-azul" style={{ fontSize: '0.62rem' }}>mayorista</span>}
+                    </td>
+                    <td>
+                      {p.nombre || '—'}
+                      {p.email && <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>{p.email}</div>}
+                      {p.telefono && <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>{p.telefono}</div>}
+                    </td>
+                    <td className="movil-hide" style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', maxWidth: 220 }}>{itemsPedido(p) || '—'}</td>
+                    <td className="td-number">{fCOP(p.total)}</td>
+                    <td>
+                      <span className={`badge ${meta.badge}`}>{meta.label}</span>
+                      {p.guia && <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)', marginTop: 2 }}>Guía: {p.guia}</div>}
+                      {est === 'cancelado' && p.cancel_motivo && <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)', marginTop: 2 }}>{p.cancel_motivo}</div>}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                        {!finalizado && (
+                          <button className="btn btn-xs btn-primary" onClick={() => setDespachar(p)} title="Marcar como enviado / actualizar guía">
+                            <Truck size={13} /> {est === 'despachado' ? 'Guía' : 'Enviado'}
+                          </button>
+                        )}
+                        {p.telefono && est === 'despachado' && wa && (
+                          <a className="btn btn-xs btn-success" href={wa} target="_blank" rel="noreferrer" title="Notificar por WhatsApp">
+                            <MessageCircle size={13} /> WA
+                          </a>
+                        )}
+                        {est === 'despachado' && (
+                          <button className="btn btn-xs btn-success" onClick={() => entregar(p)} title="Entregado y finalizado">
+                            <CheckCircle2 size={13} /> Entregado
+                          </button>
+                        )}
+                        {!finalizado && (
+                          <button className="btn btn-xs btn-danger" onClick={() => cancelar(p)} title="Cancelar pedido">
+                            <XCircle size={13} /> Cancelar
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}</tbody>
+            </table></div>}
+      </div>
+
+      {despachar && <ModalDespacho pedido={despachar} onCerrar={() => setDespachar(null)} onConfirmar={confirmarDespacho} />}
     </>
   )
 }

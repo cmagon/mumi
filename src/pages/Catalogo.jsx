@@ -32,7 +32,7 @@ import { getConfig } from '../lib/appConfig'
 import Select from '../components/ui/Select'
 import { useUnsavedGuard, snapConfig } from '../hooks/useUnsavedGuard'
 import { useConfirm } from '../context/ConfirmContext'
-import { TabClientes, TabMetricasCrm } from './catalogoCrm'
+import { TabClientes, TabMetricasCrm, TabPedidos } from './catalogoCrm'
 import { sincronizarCatalogoSheets } from '../lib/syncSheetsCatalog'
 
 // Fuentes de Google disponibles para el catálogo (títulos, subtítulos, párrafos)
@@ -172,7 +172,7 @@ const detectarFrutos = (nombre, frutosCat) => {
 }
 const labelFrutoCat = (id, frutosCat) => (frutosCat || []).find(f => f.id === id)?.nombre || id
 
-const CATALOGO_TABS = ['productos', 'personalizar', 'config', 'correos', 'clientes', 'mensajes', 'metricas']
+const CATALOGO_TABS = ['productos', 'personalizar', 'config', 'correos', 'clientes', 'pedidos', 'mensajes', 'metricas']
 
 export default function Catalogo() {
   const toast = useToast()
@@ -192,6 +192,7 @@ export default function Catalogo() {
     mensajes: puedeConfig,
     correos: puedeMetricas || puedeConfig,
     clientes: puedeMetricas || puedeConfig, // alias → redirige a correos
+    pedidos: puedeMetricas || puedeConfig,
     metricas: puedeMetricas,
   }
   const tabRaw = CATALOGO_TABS.includes(tabParam) && okTab[tabParam] ? tabParam : null
@@ -242,6 +243,7 @@ export default function Catalogo() {
         {puedeConfig && <NavLink to="/catalogo/personalizar" className={tabCls} end><Ico as={Palette} size={14} />Personalizar</NavLink>}
         {puedeConfig && <NavLink to="/catalogo/config" className={tabCls} end><Ico as={Settings} size={14} />Configuración</NavLink>}
         {(puedeMetricas || puedeConfig) && <NavLink to="/catalogo/correos" className={tabCls} end><Ico as={Mail} size={14} />Correos</NavLink>}
+        {(puedeMetricas || puedeConfig) && <NavLink to="/catalogo/pedidos" className={tabCls} end><Ico as={Package} size={14} />Pedidos</NavLink>}
         {puedeConfig && <NavLink to="/catalogo/mensajes" className={tabCls} end title="Formularios del catálogo (página Contacto)">✉️ Mensajes</NavLink>}
         {puedeMetricas && <NavLink to="/catalogo/metricas" className={tabCls} end><Ico as={BarChart3} size={14} />Métricas</NavLink>}
       </div>
@@ -250,6 +252,7 @@ export default function Catalogo() {
       {tab === 'personalizar' && puedeConfig && <TabPersonalizar toast={toast} qc={qc} cfgUrl={cfgUrl} onDirtyChange={v => reportDirty('personalizar', v)} />}
       {tab === 'config' && puedeConfig && <TabConfig toast={toast} onDirtyChange={v => reportDirty('config', v)} />}
       {tab === 'correos' && (puedeMetricas || puedeConfig) && <TabClientes />}
+      {tab === 'pedidos' && (puedeMetricas || puedeConfig) && <TabPedidos />}
       {tab === 'mensajes' && puedeConfig && <TabMensajes />}
       {tab === 'metricas' && puedeMetricas && <TabMetricasCrm />}
     </div>
