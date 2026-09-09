@@ -14,6 +14,7 @@ import { notificarVencimientosRegistros, notificarLotesMPPorVencer } from '../li
 import { useAuth } from '../context/AuthContext'
 import { useReorder } from '../hooks/useReorder'
 import { getDevRole, subscribeDevRole, setDevRole } from '../lib/devMode'
+import { puedeVerSeccion } from '../lib/permisos'
 import Select from '../components/ui/Select'
 
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
@@ -116,6 +117,33 @@ export default function Dashboard() {
   const { data: capacitaciones = [] } = useQuery({
     queryKey: ['capacitaciones', 'dash'],
     queryFn: async () => { const { data } = await supabase.from('capacitaciones').select('id, fecha, duracion_horas, asistentes'); return data || [] },
+  })
+
+  // ----- Alertas del catálogo (pedidos pendientes de despacho + mensajes sin leer) -----
+  // Solo para quienes gestionan el catálogo; el conteo alimenta la lista de pendientes.
+  const puedeCatalogo = puedeVerSeccion(rolEfectivoDash, 'catalogo', 'metricas') || puedeVerSeccion(rolEfectivoDash, 'catalogo', 'config')
+  const { data: pedidosPend = 0 } = useQuery({
+    queryKey: ['dash_pedidos_pendientes'],
+    enabled: puedeCatalogo,
+    refetchInterval: 60_000,
+    queryFn: async () => {
+      const { count } = await supabase.from('pedidos_catalogo')
+        .select('id', { count: 'exact', head: true })
+        .not('codigo', 'is', null)
+        .or('estado_envio.eq.pendiente,estado_envio.is.null')
+      return count || 0
+    },
+  })
+  const { data: msgsSinLeer = 0 } = useQuery({
+    queryKey: ['dash_mensajes_sin_leer'],
+    enabled: puedeCatalogo,
+    refetchInterval: 60_000,
+    queryFn: async () => {
+      const { count } = await supabase.from('mensajes_catalogo')
+        .select('id', { count: 'exact', head: true })
+        .eq('leido', false)
+      return count || 0
+    },
   })
 
   // Producción aprobada: base tanto de las gráficas como del cálculo de absorción del CIF.
@@ -355,6 +383,8 @@ export default function Dashboard() {
     lotesVencidos.length > 0 && { txt: `${lotesVencidos.length} lote(s) de MP VENCIDO(s) — dar de baja`, tono: 'rojo', to: '/inventario' },
     lotesPorVencer.length > 0 && { txt: `${lotesPorVencer.length} lote(s) de MP por vencer (15 días)`, tono: 'dorado', to: '/inventario' },
     pendientesAprob > 0 && { txt: `${pendientesAprob} registro(s) de producción por aprobar`, tono: 'dorado', to: '/produccion' },
+    puedeCatalogo && pedidosPend > 0 && { txt: `${pedidosPend} pedido(s) del catálogo por despachar`, tono: 'rojo', to: '/catalogo/pedidos' },
+    puedeCatalogo && msgsSinLeer > 0 && { txt: `${msgsSinLeer} mensaje(s) del catálogo sin leer`, tono: 'dorado', to: '/catalogo/mensajes' },
   ].filter(Boolean)
 
   const tono = (t) => t === 'rojo' ? 'var(--rojo, #c0392b)' : t === 'dorado' ? 'var(--dorado, #C8A94A)' : 'var(--selva)'

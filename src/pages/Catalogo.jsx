@@ -3728,10 +3728,24 @@ function EditorBanner({ banner, toast, qc, onClose, modoAtelier = false }) {
 
 // ==================== CONTACTO (formulario del catálogo) ====================
 function TabMensajes() {
+  const qc = useQueryClient()
   const { data: msgs = [], isLoading } = useQuery({
     queryKey: ['mensajes_catalogo'],
     queryFn: async () => { const { data } = await supabase.from('mensajes_catalogo').select('*').order('id', { ascending: false }).limit(500); return data || [] },
   })
+  // Al abrir la bandeja, marcar como leídos los mensajes nuevos: así se apaga la
+  // alerta del tablero principal («N mensaje(s) del catálogo sin leer»).
+  useEffect(() => {
+    const sinLeer = msgs.filter(m => m.leido === false).map(m => m.id)
+    if (sinLeer.length === 0) return
+    let vivo = true
+    ;(async () => {
+      const { error } = await supabase.from('mensajes_catalogo').update({ leido: true }).in('id', sinLeer)
+      if (!vivo || error) return
+      qc.invalidateQueries({ queryKey: ['dash_mensajes_sin_leer'] })
+    })()
+    return () => { vivo = false }
+  }, [msgs, qc])
   if (isLoading) return <div className="card"><p className="empty-table">Cargando…</p></div>
   return (
     <div className="card">
