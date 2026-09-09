@@ -69,26 +69,55 @@ function Mosaico({ s }) {
 // Las flechas se ocultan según el borde alcanzado; en móvil se desplaza con el dedo.
 function RowConFlechas({ children }) {
   const ref = useRef(null)
-  const [estado, setEstado] = useState({ ini: true, fin: false })
+  const drag = useRef(null)          // arrastre con mouse
+  const arrastro = useRef(false)     // ¿hubo arrastre? → cancela el click en la tarjeta
+  const [estado, setEstado] = useState({ ini: true, fin: false, hay: false })
   const actualizar = () => {
     const el = ref.current; if (!el) return
+    const hay = el.scrollWidth - el.clientWidth > 4
     const ini = el.scrollLeft <= 2
     const fin = el.scrollLeft + el.clientWidth >= el.scrollWidth - 2
-    setEstado(e => (e.ini === ini && e.fin === fin) ? e : { ini, fin })
+    setEstado(e => (e.ini === ini && e.fin === fin && e.hay === hay) ? e : { ini, fin, hay })
   }
   useEffect(() => {
     const el = ref.current; if (!el) return
     actualizar()
     el.addEventListener('scroll', actualizar, { passive: true })
     window.addEventListener('resize', actualizar)
-    return () => { el.removeEventListener('scroll', actualizar); window.removeEventListener('resize', actualizar) }
+    const t = setTimeout(actualizar, 300)   // tras cargar imágenes
+    return () => { el.removeEventListener('scroll', actualizar); window.removeEventListener('resize', actualizar); clearTimeout(t) }
   }, [children])
   const mover = (dir) => { const el = ref.current; if (el) el.scrollBy({ left: dir * el.clientWidth * 0.85, behavior: 'smooth' }) }
+
+  // Arrastrar con el mouse (el táctil usa el scroll nativo del navegador)
+  const onDown = (e) => {
+    if (e.pointerType === 'touch') return
+    const el = ref.current; if (!el) return
+    drag.current = { x: e.clientX, left: el.scrollLeft }
+    arrastro.current = false
+  }
+  const onMove = (e) => {
+    if (!drag.current) return
+    const el = ref.current; if (!el) return
+    const dx = e.clientX - drag.current.x
+    if (Math.abs(dx) > 4) arrastro.current = true
+    el.scrollLeft = drag.current.left - dx
+  }
+  const onUp = () => { drag.current = null }
+
   return (
     <div className="fila-scroll">
-      <button type="button" className={`fila-arrow fila-arrow-l ${estado.ini ? 'off' : ''}`} onClick={() => mover(-1)} aria-label="Ver anteriores"><ChevronLeft size={22} /></button>
-      <div className="row" ref={ref}>{children}</div>
-      <button type="button" className={`fila-arrow fila-arrow-r ${estado.fin ? 'off' : ''}`} onClick={() => mover(1)} aria-label="Ver más"><ChevronRight size={22} /></button>
+      <button type="button" className={`fila-arrow fila-arrow-l ${(estado.ini || !estado.hay) ? 'off' : ''}`} onClick={() => mover(-1)} aria-label="Ver anteriores"><ChevronLeft size={22} /></button>
+      <div
+        className={`row ${estado.hay ? 'row-drag' : ''}`}
+        ref={ref}
+        onPointerDown={onDown}
+        onPointerMove={onMove}
+        onPointerUp={onUp}
+        onPointerLeave={onUp}
+        onClickCapture={(e) => { if (arrastro.current) { e.preventDefault(); e.stopPropagation(); arrastro.current = false } }}
+      >{children}</div>
+      <button type="button" className={`fila-arrow fila-arrow-r ${(estado.fin || !estado.hay) ? 'off' : ''}`} onClick={() => mover(1)} aria-label="Ver más"><ChevronRight size={22} /></button>
     </div>
   )
 }
