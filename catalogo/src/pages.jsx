@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, useRef, createContext, useContext } from 'react'
 import { useNavigate, useParams, useSearchParams, Link } from 'react-router-dom'
-import { Search, X, ArrowLeft, ShoppingCart, MessageCircle, Plus, Minus, Send, Share2, Heart, ZoomIn, ChevronRight, Home as HomeIcon, Play, Truck, Leaf, Droplets, BadgeCheck, Star } from 'lucide-react'
+import { Search, X, ArrowLeft, ShoppingCart, MessageCircle, Plus, Minus, Send, Share2, Heart, ZoomIn, ChevronLeft, ChevronRight, Home as HomeIcon, Play, Truck, Leaf, Droplets, BadgeCheck, Star } from 'lucide-react'
 import DOMPurify from 'dompurify'
 import { useSwipeable } from 'react-swipeable'
 import Lightbox from 'yet-another-react-lightbox'
@@ -62,6 +62,34 @@ function Mosaico({ s }) {
         ))}
       </div>
     </section>
+  )
+}
+
+// Fila horizontal de productos con flechas (escritorio) y scroll táctil (móvil).
+// Las flechas se ocultan según el borde alcanzado; en móvil se desplaza con el dedo.
+function RowConFlechas({ children }) {
+  const ref = useRef(null)
+  const [estado, setEstado] = useState({ ini: true, fin: false })
+  const actualizar = () => {
+    const el = ref.current; if (!el) return
+    const ini = el.scrollLeft <= 2
+    const fin = el.scrollLeft + el.clientWidth >= el.scrollWidth - 2
+    setEstado(e => (e.ini === ini && e.fin === fin) ? e : { ini, fin })
+  }
+  useEffect(() => {
+    const el = ref.current; if (!el) return
+    actualizar()
+    el.addEventListener('scroll', actualizar, { passive: true })
+    window.addEventListener('resize', actualizar)
+    return () => { el.removeEventListener('scroll', actualizar); window.removeEventListener('resize', actualizar) }
+  }, [children])
+  const mover = (dir) => { const el = ref.current; if (el) el.scrollBy({ left: dir * el.clientWidth * 0.85, behavior: 'smooth' }) }
+  return (
+    <div className="fila-scroll">
+      <button type="button" className={`fila-arrow fila-arrow-l ${estado.ini ? 'off' : ''}`} onClick={() => mover(-1)} aria-label="Ver anteriores"><ChevronLeft size={22} /></button>
+      <div className="row" ref={ref}>{children}</div>
+      <button type="button" className={`fila-arrow fila-arrow-r ${estado.fin ? 'off' : ''}`} onClick={() => mover(1)} aria-label="Ver más"><ChevronRight size={22} /></button>
+    </div>
   )
 }
 
@@ -147,6 +175,11 @@ export function Home() {
   // Clásico: scroll (fila) o cuadrícula; Atelier siempre grid
   const vistaProductos = (cfg.productos_vista || 'scroll') === 'grid' ? 'grid' : 'row'
   const listaCls = atelier ? 'grid' : vistaProductos
+  // Fila con flechas si es scroll horizontal; cuadrícula normal si es grid.
+  // Función (no componente) para no remontar la fila en cada render (conserva el scroll).
+  const filaLista = (children) => listaCls === 'row'
+    ? <RowConFlechas>{children}</RowConFlechas>
+    : <div className={listaCls}>{children}</div>
   const frutosLista = getFrutos()
   // Ambos diseños respetan el switch de Personalizar
   const mostrarFiltroFrutos = !!cfg.mostrar_filtro_frutos && frutosLista.length > 0
@@ -258,7 +291,7 @@ export function Home() {
               return lista.length ? (
                 <section key={c}>
                   {secHead(null, labelCategoria(c), atelier ? `/tienda?cat=${encodeURIComponent(c)}` : null, 'Ver todo')}
-                  <div className={listaCls}>{lista.map(p => <Card key={p.id} {...cardProps(p)} />)}</div>
+                  {filaLista(lista.map(p => <Card key={p.id} {...cardProps(p)} />))}
                 </section>
               ) : null
             }
@@ -279,7 +312,7 @@ export function Home() {
                 return (
                   <section key={key}>
                     {secHead(atelier ? 'Lo nuevo' : null, s.titulo || (atelier ? 'Novedades' : '✨ Novedades'), null)}
-                    <div className={listaCls}>{novedadesUnicas.map(p => <Card key={p.id} {...cardProps(p)} />)}</div>
+                    {filaLista(novedadesUnicas.map(p => <Card key={p.id} {...cardProps(p)} />))}
                   </section>
                 )
               case 'combos': {
@@ -287,7 +320,7 @@ export function Home() {
                 return combos.length > 0 ? (
                   <section key={key}>
                     {secHead(null, s.titulo || (atelier ? 'Kits y combos' : '🎁 Combos'), null)}
-                    <div className={listaCls}>{combos.map(p => <Card key={p.id} {...cardProps(p)} />)}</div>
+                    {filaLista(combos.map(p => <Card key={p.id} {...cardProps(p)} />))}
                   </section>
                 ) : null
               }

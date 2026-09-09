@@ -437,7 +437,15 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 .sec-link:hover { color: var(--selva); }
 
 /* ==================== TARJETAS (fila + grid) ==================== */
-.row { display: flex; gap: 12px; overflow-x: auto; padding: 4px 16px 10px; scroll-snap-type: x proximity; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.row { display: flex; gap: 12px; overflow-x: auto; padding: 4px 16px 10px; scroll-snap-type: x proximity; scrollbar-width: none; -webkit-overflow-scrolling: touch; touch-action: pan-x pan-y; overscroll-behavior-x: contain; }
+/* Fila con flechas de navegación (escritorio) */
+.fila-scroll { position: relative; }
+.fila-arrow { position: absolute; top: 42%; transform: translateY(-50%); z-index: 4; width: 40px; height: 40px; border-radius: 999px; background: #fff; border: 1px solid var(--crema-oscuro); box-shadow: 0 3px 12px rgba(0,0,0,0.16); display: none; align-items: center; justify-content: center; cursor: pointer; color: var(--selva); transition: opacity .2s, background .15s; }
+.fila-arrow:hover { background: var(--crema); }
+.fila-arrow-l { left: 6px; }
+.fila-arrow-r { right: 6px; }
+.fila-arrow.off { opacity: 0; pointer-events: none; }
+@media (min-width: 820px) and (hover: hover) { .fila-arrow { display: flex; } }
 .row::-webkit-scrollbar { display: none; }
 .row .card { flex: 0 0 44%; max-width: 210px; scroll-snap-align: start; }
 .grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 12px; padding: 8px 16px 16px; }
