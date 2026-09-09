@@ -566,6 +566,8 @@ function WelcomePopup({ cfg }) {
   const [visible, setVisible] = useState(false)
   const [correo, setCorreo] = useState('')
   const [ok, setOk] = useState(false)
+  const [err, setErr] = useState('')
+  const emailOk = emailValido(correo)
   useEffect(() => {
     if (!cfg?.popup_activo) return
     if (localStorage.getItem('mumi_welcome') === '1') return
@@ -575,12 +577,14 @@ function WelcomePopup({ cfg }) {
   const cerrar = () => { localStorage.setItem('mumi_welcome', '1'); setVisible(false) }
   const enviar = async (e) => {
     e.preventDefault()
+    setErr('')
+    if (!emailOk) { setErr('Ingresa un correo válido.'); return }
     try {
       await suscribir(correo, '', 'popup')
       setEmail(correo.trim().toLowerCase())
       setOk(true)
       localStorage.setItem('mumi_welcome', '1')
-    } catch { setOk(true) }
+    } catch (ex) { setErr(ex.message || 'No se pudo suscribir.') }
   }
   useBodyLock(visible)
   if (!visible) return null
@@ -595,7 +599,8 @@ function WelcomePopup({ cfg }) {
           ? <div className="news-ok" style={{ background: 'rgba(124,179,66,0.15)', color: 'var(--selva)' }}>¡Listo! Revisa tu correo 💚</div>
           : <form onSubmit={enviar} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <input className="cf" type="email" placeholder="Tu correo" value={correo} onChange={e => setCorreo(e.target.value)} required />
-              <button className="btn btn-selva" type="submit"><Send size={16} /> Quiero mi descuento</button>
+              <button className="btn btn-selva" type="submit" disabled={!emailOk} style={!emailOk ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}><Send size={16} /> Quiero mi descuento</button>
+              {err && <div className="news-err">{err}</div>}
             </form>}
         <button className="popup-skip" onClick={cerrar}>No, gracias</button>
       </div>

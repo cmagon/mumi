@@ -502,9 +502,11 @@ export function Newsletter() {
   const [nombre, setNombre] = useState('')
   const [ok, setOk] = useState(false)
   const [err, setErr] = useState('')
+  const emailOk = emailValido(email)
   const enviar = async (e) => {
     e.preventDefault()
     setErr('')
+    if (!emailOk) { setErr('Ingresa un correo válido.'); return }
     try {
       await suscribir(email, nombre, 'newsletter')
       establecerEmail?.(email, nombre)
@@ -522,7 +524,7 @@ export function Newsletter() {
         : <form className="news-form" onSubmit={enviar}>
             {!atelier && <input type="text" placeholder="Tu nombre (opcional)" value={nombre} onChange={e => setNombre(e.target.value)} />}
             <input type="email" placeholder={atelier ? 'Tu correo electrónico' : 'Tu correo'} value={email} onChange={e => setEmailForm(e.target.value)} required />
-            <button type="submit"><Send size={16} /> Suscribirme</button>
+            <button type="submit" disabled={!emailOk} style={!emailOk ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}><Send size={16} /> Suscribirme</button>
           </form>}
       {err && <div className="news-err">{err}</div>}
     </section>
