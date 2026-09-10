@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, Users, BarChart3, Star, ShoppingCart, MessageCircle, Truck, CheckCircle2, XCircle, Package, X } from 'lucide-react'
+import { Download, Users, BarChart3, Star, ShoppingCart, MessageCircle, Truck, CheckCircle2, XCircle, Package, X, Trash2 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fNum } from '../lib/businessLogic'
 
@@ -169,19 +169,32 @@ function enriquecerClientes(subs, pedidos) {
 }
 
 /** Módulo CRM: lista de correos, etiquetas, filtros y export CSV. */
+const ORDENES = [
+  { id: 'reciente', label: 'Registro reciente' },
+  { id: 'antiguo', label: 'Registro antiguo' },
+  { id: 'nombre', label: 'Nombre A–Z' },
+  { id: 'nombre_desc', label: 'Nombre Z–A' },
+  { id: 'gastado', label: 'Más gastado' },
+  { id: 'gastado_asc', label: 'Menos gastado' },
+]
+
 export function TabClientes() {
+  const qc = useQueryClient()
   const { qPed, qSub, pedidos, subs } = useCatalogoCrmData()
   const [desde, setDesde] = useState('')
   const [hasta, setHasta] = useState('')
   const [tagsOn, setTagsOn] = useState([])
   const [q, setQ] = useState('')
+  const [orden, setOrden] = useState('reciente')
   const [exportOpen, setExportOpen] = useState(false)
   const [cols, setCols] = useState(() => EXPORT_COLS.map(c => c.id))
+  const [borrando, setBorrando] = useState('')
+  const [aviso, setAviso] = useState('')
 
   const clientes = useMemo(() => enriquecerClientes(subs, pedidos), [subs, pedidos])
 
   const filtrados = useMemo(() => {
-    return clientes.filter(c => {
+    const arr = clientes.filter(c => {
       const alta = dayKey(c.created_at)
       if (desde && alta && alta < desde) return false
       if (hasta && alta && alta > hasta) return false
@@ -193,7 +206,37 @@ export function TabClientes() {
       }
       return true
     })
-  }, [clientes, desde, hasta, tagsOn, q])
+    const nom = (c) => (c.nombre || c.email || '').toLowerCase()
+    const fecha = (c) => c.created_at ? new Date(c.created_at).getTime() : 0
+    const gasto = (c) => Number(c.total_gastado) || 0
+    const cmp = {
+      reciente: (a, b) => fecha(b) - fecha(a),
+      antiguo: (a, b) => fecha(a) - fecha(b),
+      nombre: (a, b) => nom(a).localeCompare(nom(b), 'es'),
+      nombre_desc: (a, b) => nom(b).localeCompare(nom(a), 'es'),
+      gastado: (a, b) => gasto(b) - gasto(a),
+      gastado_asc: (a, b) => gasto(a) - gasto(b),
+    }[orden]
+    return cmp ? [...arr].sort(cmp) : arr
+  }, [clientes, desde, hasta, tagsOn, q, orden])
+
+  // Elimina un correo del listado: borra su fila de suscriptores y sus favoritos/carritos.
+  // Los pedidos se conservan como registro comercial.
+  const eliminarCorreo = async (c) => {
+    const email = (c.email || '').toLowerCase()
+    if (!email) return
+    if (!window.confirm(`¿Eliminar el correo ${email} del listado?\n\nSe borra de la lista de suscriptores y sus favoritos/carritos. Los pedidos se conservan.`)) return
+    setBorrando(email); setAviso('')
+    try {
+      await supabase.from('suscriptores_catalogo').delete().eq('email', email)
+      try { await supabase.from('favoritos_catalogo').delete().eq('email', email) } catch { /* noop */ }
+      try { await supabase.from('carritos_catalogo').delete().eq('email', email) } catch { /* noop */ }
+      qc.invalidateQueries({ queryKey: ['catalogo_subs_crm'] })
+      setAviso(`Correo ${email} eliminado del listado.`)
+    } catch (ex) {
+      setAviso('No se pudo eliminar: ' + (ex.message || ex))
+    } finally { setBorrando('') }
+  }
 
   const toggleTag = (id) => setTagsOn(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   const toggleCol = (id) => setCols(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
@@ -221,6 +264,12 @@ export function TabClientes() {
 
   return (
     <>
+      {aviso && (
+        <div className="card" style={{ borderLeft: '3px solid var(--dorado, #c9a227)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: '0.85rem' }}>{aviso}</span>
+          <button className="btn btn-xs btn-secondary" onClick={() => setAviso('')}>Cerrar</button>
+        </div>
+      )}
       <div className="card">
         <div className="card-title" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Ico as={Users} size={15} />Correos registrados ({fNum(filtrados.length)} / {fNum(clientes.length)})</span>
@@ -244,6 +293,12 @@ export function TabClientes() {
           <div className="form-group" style={{ margin: 0, flex: 1, minWidth: 180 }}>
             <label className="form-label">Buscar</label>
             <input className="form-control" value={q} onChange={e => setQ(e.target.value)} placeholder="correo, nombre, teléfono…" />
+          </div>
+          <div className="form-group" style={{ margin: 0, minWidth: 160 }}>
+            <label className="form-label">Ordenar por</label>
+            <select className="form-control" value={orden} onChange={e => setOrden(e.target.value)}>
+              {ORDENES.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
           </div>
           {(desde || hasta || tagsOn.length || q) && (
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setDesde(''); setHasta(''); setTagsOn([]); setQ('') }}>Limpiar filtros</button>
@@ -291,7 +346,7 @@ export function TabClientes() {
               <thead>
                 <tr>
                   <th>Correo</th><th>Nombre</th><th>Teléfono</th><th>Etiquetas</th>
-                  <th>Registro</th><th>Pedidos #</th><th className="td-number">Nº</th><th className="td-number">Gastado</th>
+                  <th>Registro</th><th>Pedidos #</th><th className="td-number">Nº</th><th className="td-number">Gastado</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -311,6 +366,12 @@ export function TabClientes() {
                     <td style={{ whiteSpace: 'pre-line', fontSize: '0.78rem', maxWidth: 220 }}>{c.pedidos_codigos || '—'}</td>
                     <td className="td-number">{c.n_pedidos}</td>
                     <td className="td-number">{c.total_gastado ? fCOP(c.total_gastado) : '—'}</td>
+                    <td>
+                      <button type="button" className="btn btn-xs btn-danger" title="Eliminar correo del listado"
+                        disabled={borrando === (c.email || '').toLowerCase()} onClick={() => eliminarCorreo(c)}>
+                        <Trash2 size={13} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
