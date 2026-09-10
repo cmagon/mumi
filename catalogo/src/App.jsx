@@ -4,7 +4,7 @@ import { Leaf, Truck, ShieldCheck, MessageCircle, ShoppingCart, ArrowLeft, Plus,
 import { useStore } from './store'
 import { Home, Producto, Nosotros, Contacto, Favoritos, Mayorista, Pagina, Galeria, NoEncontrado, Desuscribir } from './pages'
 import { IngresarPage, CuentaPage, MisPedidosPage } from './cuenta'
-import { fCOP, iconoDe, confirmarPedidoWA, suscribir, abrirWA, FAVORITOS, cargarGoogleFonts, getCliente, setCliente, getEmail, setEmail, getTelefono, setTelefono, emailValido, telefonoValido, buscarClientePorEmail, mensajeSolicitudMayorista, textoEnvio, barraPedidoMinimoEstado, barraEnvioGratisEstado, setFavicon } from './utils'
+import { fCOP, iconoDe, confirmarPedidoWA, suscribir, abrirWA, FAVORITOS, cargarGoogleFonts, getCliente, setCliente, getEmail, setEmail, getTelefono, setTelefono, emailValido, telefonoValido, buscarClientePorEmail, mensajeSolicitudMayorista, textoEnvio, barraPedidoMinimoEstado, barraEnvioGratisEstado, setFavicon, guardarCarritoParaDespues } from './utils'
 import { ModalNombre, ModalSesionCliente } from './ui'
 import DOMPurify from 'dompurify'
 import FrutoIcon from './FrutoIcon'
@@ -452,8 +452,9 @@ function InvitacionMayorista({ cfg, onSolicitar }) {
 
 // ---- Carrito (drawer) ----
 function CartDrawer({ onClose }) {
-  const { cfg, carrito, agregar, quitar, vaciar, total, precio, mayorista, pedidoMinimo, establecerEmail } = useStore()
+  const { cfg, carrito, agregar, quitar, vaciar, total, precio, mayorista, pedidoMinimo, establecerEmail, usuario } = useStore()
   const [nota, setNota] = useState('')
+  const [guardado, setGuardado] = useState(false)
   const [email, setEmailForm] = useState(() => getEmail())
   const [nombre, setNombre] = useState(() => getCliente())
   const [telefono, setTelefonoForm] = useState(() => getTelefono())
@@ -482,6 +483,13 @@ function CartDrawer({ onClose }) {
     }, 350)
     return () => { cancel = true; clearTimeout(t) }
   }, [email, emailOk]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const guardarDespues = async () => {
+    if (!usuario?.email) return
+    const ok = await guardarCarritoParaDespues(usuario.email, usuario.id, nombre || getCliente(), telefono || getTelefono(), carrito, total, carrito.reduce((s, i) => s + i.cantidad, 0))
+    setGuardado(true)
+    if (ok) setTimeout(() => setGuardado(false), 4000)
+  }
 
   const confirmar = async () => {
     if (!puedePedir) return
@@ -541,6 +549,13 @@ function CartDrawer({ onClose }) {
                   Pedido mínimo{mayorista ? ' mayorista' : ''} sugerido: {fCOP(pedidoMinimo)}. Puedes confirmar igual.
                 </p>
               ))}
+            {usuario && (
+              <div style={{ padding: '0 16px 4px' }}>
+                <button type="button" className="btn btn-ghost" style={{ width: '100%' }} onClick={guardarDespues} disabled={carrito.length === 0}>
+                  {guardado ? '✓ Guardado en tu cuenta' : '💾 Guardar para después'}
+                </button>
+              </div>
+            )}
             <div className="cart-acciones">
               <button type="button" className="btn btn-ghost btn-seguir-compra" onClick={onClose}>
                 Seguir comprando

@@ -442,12 +442,23 @@ export function TabMetricasCrm() {
   const qCarritos = useQuery({
     queryKey: ['catalogo_carritos_abandonados'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('carritos_catalogo')
+      // Abandonado (v169) = cliente identificado que GUARDÓ el carrito para después y
+      // lleva 3 días sin comprarlo. Se pide guardado=true + antigüedad ≥ 3 días.
+      const hace3dias = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
+      const q = supabase.from('carritos_catalogo')
+        .select('email, nombre, telefono, items, total, n_items, estado, guardado, actualizado_at')
+        .eq('estado', 'carrito').gt('n_items', 0)
+        .eq('guardado', true).lte('actualizado_at', hace3dias)
+        .order('actualizado_at', { ascending: false }).limit(200)
+      const { data, error } = await q
+      if (!error) return data || []
+      // Compatibilidad: si la columna `guardado` aún no existe (migración v169 sin aplicar),
+      // se cae al criterio anterior para no romper la métrica.
+      const alt = await supabase.from('carritos_catalogo')
         .select('email, nombre, telefono, items, total, n_items, estado, actualizado_at')
         .eq('estado', 'carrito').gt('n_items', 0)
         .order('actualizado_at', { ascending: false }).limit(200)
-      if (error) return []   // tabla nueva (migration_v162); no romper métricas si aún no existe
-      return data || []
+      return alt.error ? [] : (alt.data || [])
     },
   })
 
