@@ -11,7 +11,8 @@ import 'yet-another-react-lightbox/plugins/thumbnails.css'
 import { supabase } from './supabase'
 import { useStore } from './store'
 import { Card, HeroSlider, BrandHero, Impacto, BannerGrupo, Newsletter, ModalNombre, ModalSesionCliente } from './ui'
-import { fCOP, labelCategoria, getFrutos, iconoDe, iconoFruto, labelFruto, stockLabel, imgsDe, imgSrc, altImg, textoEnvio, sinTildes, sinHtml, registrarVisita, confirmarPedidoWA, setSEO, compartir, rutaProducto, buscarPorSlug, abrirWA, mensajeSolicitudMayorista, getCliente, setCliente, getEmail, getTelefono, emailValido, telefonoValido, desuscribirPorToken, sincronizarFavoritosLocales, FAVORITOS, BUSCADOR, videoEmbed, videoThumb, detectRed, formatoRed, paginaPorSlug, postCanvas, baseUrl, jsonLdSitio, jsonLdProducto } from './utils'
+import { fCOP, labelCategoria, getFrutos, iconoDe, iconoFruto, labelFruto, stockLabel, imgsDe, imgSrc, altImg, textoEnvio, sinTildes, sinHtml, registrarVisita, confirmarPedidoWA, setSEO, compartir, rutaProducto, buscarPorSlug, abrirWA, mensajeSolicitudMayorista, getCliente, setCliente, getEmail, getTelefono, emailValido, telefonoValido, desuscribirPorToken, sincronizarFavoritosLocales, FAVORITOS, BUSCADOR, videoEmbed, videoThumb, detectRed, formatoRed, paginaPorSlug, postCanvas, baseUrl, jsonLdSitio, jsonLdProducto, suscribir, enviarFormProtegido } from './utils'
+import { Turnstile } from './turnstile'
 import FrutoIcon from './FrutoIcon'
 
 // ==================== MIGAS DE PAN ====================
@@ -1424,14 +1425,21 @@ export function Contacto() {
   const [f, setF] = useState({ nombre: '', email: '', telefono: '', mensaje: '' })
   const [ok, setOk] = useState(false)
   const [err, setErr] = useState('')
+  const [token, setToken] = useState('')
+  const siteKey = (cfg?.turnstile_site_key || '').trim()
   const set = (k, v) => setF(x => ({ ...x, [k]: v }))
   const enviar = async (e) => {
     e.preventDefault(); setErr('')
     if (!f.mensaje.trim()) { setErr('Escribe tu mensaje'); return }
+    if (siteKey && !token) { setErr('Completa la verificación de seguridad.'); return }
     try {
-      await supabase.from('mensajes_catalogo').insert({ nombre: f.nombre || null, email: f.email || null, telefono: f.telefono || null, mensaje: f.mensaje.trim() })
-      // Lead a la lista CRM (no bloquea el envío del mensaje si falla)
-      if (emailValido(f.email)) { try { await suscribir(f.email, f.nombre, 'contacto', f.telefono) } catch { /* noop */ } }
+      if (siteKey) {
+        await enviarFormProtegido('mensaje', { nombre: f.nombre, email: f.email, telefono: f.telefono, mensaje: f.mensaje.trim() }, token)
+      } else {
+        await supabase.from('mensajes_catalogo').insert({ nombre: f.nombre || null, email: f.email || null, telefono: f.telefono || null, mensaje: f.mensaje.trim() })
+        // Lead a la lista CRM (no bloquea el envío del mensaje si falla)
+        if (emailValido(f.email)) { try { await suscribir(f.email, f.nombre, 'contacto', f.telefono) } catch { /* noop */ } }
+      }
       setOk(true)
     }
     catch (ex) { setErr(ex.message) }
@@ -1451,7 +1459,8 @@ export function Contacto() {
             <input className="cf" type="email" placeholder="Correo" value={f.email} onChange={e => set('email', e.target.value)} />
             <input className="cf" placeholder="Teléfono" value={f.telefono} onChange={e => set('telefono', e.target.value)} />
             <textarea className="cf" rows={4} placeholder="Tu mensaje" value={f.mensaje} onChange={e => set('mensaje', e.target.value)} />
-            <button className="btn btn-selva" type="submit"><Send size={17} /> Enviar mensaje</button>
+            <Turnstile siteKey={siteKey} onToken={setToken} />
+            <button className="btn btn-selva" type="submit" disabled={siteKey && !token} style={(siteKey && !token) ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}><Send size={17} /> Enviar mensaje</button>
             {err && <div className="news-err" style={{ color: 'var(--rojo)' }}>{err}</div>}
           </form>}
       {cfg.contacto_mapa && <div className="nos-mapa" style={{ marginTop: 18 }}><iframe src={cfg.contacto_mapa} title="Ubicación" loading="lazy" allowFullScreen referrerPolicy="no-referrer-when-downgrade" /></div>}

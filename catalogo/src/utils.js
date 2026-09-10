@@ -717,6 +717,44 @@ export async function guardarCarritoRemoto(email, nombre, telefono, carrito, tot
   } catch { /* best-effort: no bloquea la compra */ }
 }
 
+// «Guardar para después»: marca el carrito como guardado (para recuperación de abandonos).
+// Solo tiene sentido con cliente identificado. Devuelve true si se registró.
+export async function guardarCarritoParaDespues(email, userId, nombre, telefono, carrito, total, nItems) {
+  const e = (email || '').trim().toLowerCase()
+  if (!emailValido(e)) return false
+  const items = (carrito || []).map(i => ({
+    id: i.id, nombre: i.nombre, cantidad: i.cantidad, precio: precioItem(i, false),
+  }))
+  try {
+    const { error } = await supabase.rpc('catalogo_guardar_para_despues', {
+      p_email: e,
+      p_user_id: userId || null,
+      p_nombre: (nombre || '').trim() || null,
+      p_telefono: (telefono || '').trim() || null,
+      p_items: items,
+      p_total: Math.round(Number(total) || 0),
+      p_n_items: Number(nItems) || 0,
+    })
+    if (error) {
+      // Compatibilidad si la migración v169 no está aplicada: al menos guarda el carrito.
+      await guardarCarritoRemoto(e, nombre, telefono, carrito, total, nItems)
+      return false
+    }
+    return true
+  } catch { return false }
+}
+
+// Envía un formulario público protegido por Turnstile a la Edge Function catalogo-form,
+// que verifica el token del lado servidor antes de escribir. Lanza si falla.
+export async function enviarFormProtegido(accion, payload, token) {
+  const { data, error } = await supabase.functions.invoke('catalogo-form', {
+    body: { accion, token, ...payload },
+  })
+  if (error) throw new Error(error.message || 'No se pudo enviar el formulario.')
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+
 export async function marcarCarritoRemoto(email, estado) {
   const e = (email || '').trim().toLowerCase()
   if (!emailValido(e)) return

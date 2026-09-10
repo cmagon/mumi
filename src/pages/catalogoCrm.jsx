@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
-import { Download, Users, BarChart3, Star, ShoppingCart, MessageCircle } from 'lucide-react'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { Download, Users, BarChart3, Star, ShoppingCart, MessageCircle, Truck, CheckCircle2, XCircle, Package, X, Trash2, Send } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fNum } from '../lib/businessLogic'
 
@@ -169,19 +169,32 @@ function enriquecerClientes(subs, pedidos) {
 }
 
 /** Módulo CRM: lista de correos, etiquetas, filtros y export CSV. */
+const ORDENES = [
+  { id: 'reciente', label: 'Registro reciente' },
+  { id: 'antiguo', label: 'Registro antiguo' },
+  { id: 'nombre', label: 'Nombre A–Z' },
+  { id: 'nombre_desc', label: 'Nombre Z–A' },
+  { id: 'gastado', label: 'Más gastado' },
+  { id: 'gastado_asc', label: 'Menos gastado' },
+]
+
 export function TabClientes() {
+  const qc = useQueryClient()
   const { qPed, qSub, pedidos, subs } = useCatalogoCrmData()
   const [desde, setDesde] = useState('')
   const [hasta, setHasta] = useState('')
   const [tagsOn, setTagsOn] = useState([])
   const [q, setQ] = useState('')
+  const [orden, setOrden] = useState('reciente')
   const [exportOpen, setExportOpen] = useState(false)
   const [cols, setCols] = useState(() => EXPORT_COLS.map(c => c.id))
+  const [borrando, setBorrando] = useState('')
+  const [aviso, setAviso] = useState('')
 
   const clientes = useMemo(() => enriquecerClientes(subs, pedidos), [subs, pedidos])
 
   const filtrados = useMemo(() => {
-    return clientes.filter(c => {
+    const arr = clientes.filter(c => {
       const alta = dayKey(c.created_at)
       if (desde && alta && alta < desde) return false
       if (hasta && alta && alta > hasta) return false
@@ -193,7 +206,37 @@ export function TabClientes() {
       }
       return true
     })
-  }, [clientes, desde, hasta, tagsOn, q])
+    const nom = (c) => (c.nombre || c.email || '').toLowerCase()
+    const fecha = (c) => c.created_at ? new Date(c.created_at).getTime() : 0
+    const gasto = (c) => Number(c.total_gastado) || 0
+    const cmp = {
+      reciente: (a, b) => fecha(b) - fecha(a),
+      antiguo: (a, b) => fecha(a) - fecha(b),
+      nombre: (a, b) => nom(a).localeCompare(nom(b), 'es'),
+      nombre_desc: (a, b) => nom(b).localeCompare(nom(a), 'es'),
+      gastado: (a, b) => gasto(b) - gasto(a),
+      gastado_asc: (a, b) => gasto(a) - gasto(b),
+    }[orden]
+    return cmp ? [...arr].sort(cmp) : arr
+  }, [clientes, desde, hasta, tagsOn, q, orden])
+
+  // Elimina un correo del listado: borra su fila de suscriptores y sus favoritos/carritos.
+  // Los pedidos se conservan como registro comercial.
+  const eliminarCorreo = async (c) => {
+    const email = (c.email || '').toLowerCase()
+    if (!email) return
+    if (!window.confirm(`¿Eliminar el correo ${email} del listado?\n\nSe borra de la lista de suscriptores y sus favoritos/carritos. Los pedidos se conservan.`)) return
+    setBorrando(email); setAviso('')
+    try {
+      await supabase.from('suscriptores_catalogo').delete().eq('email', email)
+      try { await supabase.from('favoritos_catalogo').delete().eq('email', email) } catch { /* noop */ }
+      try { await supabase.from('carritos_catalogo').delete().eq('email', email) } catch { /* noop */ }
+      qc.invalidateQueries({ queryKey: ['catalogo_subs_crm'] })
+      setAviso(`Correo ${email} eliminado del listado.`)
+    } catch (ex) {
+      setAviso('No se pudo eliminar: ' + (ex.message || ex))
+    } finally { setBorrando('') }
+  }
 
   const toggleTag = (id) => setTagsOn(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   const toggleCol = (id) => setCols(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
@@ -221,6 +264,12 @@ export function TabClientes() {
 
   return (
     <>
+      {aviso && (
+        <div className="card" style={{ borderLeft: '3px solid var(--dorado, #c9a227)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: '0.85rem' }}>{aviso}</span>
+          <button className="btn btn-xs btn-secondary" onClick={() => setAviso('')}>Cerrar</button>
+        </div>
+      )}
       <div className="card">
         <div className="card-title" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Ico as={Users} size={15} />Correos registrados ({fNum(filtrados.length)} / {fNum(clientes.length)})</span>
@@ -244,6 +293,12 @@ export function TabClientes() {
           <div className="form-group" style={{ margin: 0, flex: 1, minWidth: 180 }}>
             <label className="form-label">Buscar</label>
             <input className="form-control" value={q} onChange={e => setQ(e.target.value)} placeholder="correo, nombre, teléfono…" />
+          </div>
+          <div className="form-group" style={{ margin: 0, minWidth: 160 }}>
+            <label className="form-label">Ordenar por</label>
+            <select className="form-control" value={orden} onChange={e => setOrden(e.target.value)}>
+              {ORDENES.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+            </select>
           </div>
           {(desde || hasta || tagsOn.length || q) && (
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setDesde(''); setHasta(''); setTagsOn([]); setQ('') }}>Limpiar filtros</button>
@@ -291,7 +346,7 @@ export function TabClientes() {
               <thead>
                 <tr>
                   <th>Correo</th><th>Nombre</th><th>Teléfono</th><th>Etiquetas</th>
-                  <th>Registro</th><th>Pedidos #</th><th className="td-number">Nº</th><th className="td-number">Gastado</th>
+                  <th>Registro</th><th>Pedidos #</th><th className="td-number">Nº</th><th className="td-number">Gastado</th><th></th>
                 </tr>
               </thead>
               <tbody>
@@ -311,6 +366,12 @@ export function TabClientes() {
                     <td style={{ whiteSpace: 'pre-line', fontSize: '0.78rem', maxWidth: 220 }}>{c.pedidos_codigos || '—'}</td>
                     <td className="td-number">{c.n_pedidos}</td>
                     <td className="td-number">{c.total_gastado ? fCOP(c.total_gastado) : '—'}</td>
+                    <td>
+                      <button type="button" className="btn btn-xs btn-danger" title="Eliminar correo del listado"
+                        disabled={borrando === (c.email || '').toLowerCase()} onClick={() => eliminarCorreo(c)}>
+                        <Trash2 size={13} />
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -332,24 +393,86 @@ function waRecuperacion(c) {
   const msg = `${saludo}\nVimos que dejaste algunos productos en tu carrito de Mumi Amazonia:\n\n${detalle}\n\n¿Te ayudamos a completar tu pedido? 😊`
   return `https://wa.me/${tel}?text=${encodeURIComponent(msg)}`
 }
+// Plantilla del correo de recuperación de carrito.
+function htmlRecuperacion(c, cfg) {
+  const tienda = (cfg?.nombre_tienda || 'Mumi Amazonia').trim()
+  const url = (cfg?.url_publica || '').trim()
+  const nombre = (c.nombre || '').trim()
+  const items = Array.isArray(c.items) ? c.items : []
+  const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const filas = items.map(i => `<tr>
+    <td style="padding:6px 0;color:#1a1a1a">${esc(i.cantidad || 1)}× ${esc(i.nombre || 'Producto')}</td>
+    <td style="padding:6px 0;text-align:right;color:#555">${fCOP((Number(i.precio) || 0) * (Number(i.cantidad) || 1))}</td>
+  </tr>`).join('')
+  return `
+  <div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a">
+    <h2 style="color:#2e7d32">¿Se te quedó algo en el carrito? 🛒</h2>
+    <p>${nombre ? `Hola ${esc(nombre)},` : 'Hola,'}</p>
+    <p>Guardaste estos productos en <strong>${esc(tienda)}</strong> y aún están disponibles:</p>
+    <table style="width:100%;border-collapse:collapse;margin:10px 0;border-top:1px solid #eee;border-bottom:1px solid #eee">
+      ${filas}
+      <tr><td style="padding:8px 0;font-weight:bold">Total</td><td style="padding:8px 0;text-align:right;font-weight:bold;color:#2e7d32">${fCOP(c.total)}</td></tr>
+    </table>
+    ${url ? `<p style="text-align:center;margin:22px 0">
+      <a href="${esc(url)}" style="background:#2e7d32;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:bold">Completar mi pedido</a>
+    </p>` : ''}
+    <p style="color:#777;font-size:12px">Si ya lo compraste, ignora este mensaje. 💚<br>${esc(tienda)}</p>
+  </div>`
+}
+
 function CarritosAbandonados({ carritos }) {
+  const [busca, setBusca] = useState('')
+  const [enviando, setEnviando] = useState('')
+  const [aviso, setAviso] = useState('')
+  const { data: cfg } = useQuery({
+    queryKey: ['catalogo_cfg_pedidos'],
+    queryFn: async () => { const { data } = await supabase.from('config_catalogo').select('nombre_tienda, whatsapp, url_publica').eq('id', 1).maybeSingle(); return data || {} },
+  })
   const fechaCorta = (iso) => { try { return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }) } catch { return '—' } }
-  const totalPotencial = carritos.reduce((s, c) => s + (Number(c.total) || 0), 0)
+
+  const enviarRecuperacion = async (c) => {
+    const email = (c.email || '').trim().toLowerCase()
+    if (!email) return
+    setEnviando(email); setAviso('')
+    try {
+      const { error } = await supabase.functions.invoke('enviar-correo', {
+        body: { to: email, subject: `¿Se te quedó algo en el carrito? · ${cfg?.nombre_tienda || 'Mumi Amazonia'}`, html: htmlRecuperacion(c, cfg) },
+      })
+      if (error) throw error
+      setAviso(`Correo de recuperación enviado a ${email}.`)
+    } catch (ex) {
+      setAviso(`No se pudo enviar el correo: ${ex.message || ex}. Puedes intentar por WhatsApp.`)
+    } finally { setEnviando('') }
+  }
+
+  const q = busca.trim().toLowerCase()
+  const lista = q
+    ? carritos.filter(c => [c.email, c.nombre, c.telefono].some(v => String(v || '').toLowerCase().includes(q)))
+    : carritos
+  const totalPotencial = lista.reduce((s, c) => s + (Number(c.total) || 0), 0)
+
   return (
     <div className="card">
       <div className="card-title"><Ico as={ShoppingCart} size={15} />Carritos abandonados
-        {carritos.length > 0 && <span className="badge badge-dorado" style={{ marginLeft: 8 }}>{carritos.length} · {fCOP(totalPotencial)} potencial</span>}
+        {lista.length > 0 && <span className="badge badge-dorado" style={{ marginLeft: 8 }}>{lista.length} · {fCOP(totalPotencial)} potencial</span>}
       </div>
       <p style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', margin: '0 0 10px' }}>
-        Clientes identificados por correo que dejaron productos sin comprar. Escríbeles por WhatsApp para recuperar la venta.
+        Clientes que guardaron su carrito y no compraron en 3 días. Recupéralos por WhatsApp (número) o por correo.
       </p>
-      {carritos.length === 0
+      {aviso && (
+        <div style={{ fontSize: '0.82rem', background: 'var(--crema, #f5f0e8)', borderLeft: '3px solid var(--dorado, #c9a227)', padding: '8px 10px', borderRadius: 6, marginBottom: 10, display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+          <span>{aviso}</span><button className="btn btn-xs btn-secondary" onClick={() => setAviso('')}>Cerrar</button>
+        </div>
+      )}
+      <input className="form-control" style={{ maxWidth: 260, marginBottom: 10 }} placeholder="Buscar por número o correo…" value={busca} onChange={e => setBusca(e.target.value)} />
+      {lista.length === 0
         ? <p className="empty-table">No hay carritos abandonados por ahora. 🎉</p>
         : <div className="table-wrap"><table>
-            <thead><tr><th>Cliente</th><th>Correo</th><th className="movil-hide">Productos</th><th className="td-number">Total</th><th className="movil-hide">Actualizado</th><th></th></tr></thead>
-            <tbody>{carritos.map(c => {
+            <thead><tr><th>Cliente</th><th>Correo</th><th className="movil-hide">Productos</th><th className="td-number">Total</th><th className="movil-hide">Actualizado</th><th>Recuperar</th></tr></thead>
+            <tbody>{lista.map(c => {
               const wa = waRecuperacion(c)
               const items = Array.isArray(c.items) ? c.items : []
+              const email = (c.email || '').trim().toLowerCase()
               return (
                 <tr key={c.email}>
                   <td>{c.nombre || '—'}{c.telefono ? <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>{c.telefono}</div> : null}</td>
@@ -357,9 +480,13 @@ function CarritosAbandonados({ carritos }) {
                   <td className="movil-hide" style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>{items.map(i => `${i.cantidad}× ${i.nombre}`).join(', ') || `${c.n_items} ítem(s)`}</td>
                   <td className="td-number">{fCOP(c.total)}</td>
                   <td className="movil-hide" style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>{fechaCorta(c.actualizado_at)}</td>
-                  <td>{wa
-                    ? <a className="btn btn-xs btn-success" href={wa} target="_blank" rel="noreferrer"><MessageCircle size={13} /> Recuperar</a>
-                    : <span style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>sin teléfono</span>}</td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      {wa && <a className="btn btn-xs btn-success" href={wa} target="_blank" rel="noreferrer" title="Recuperar por WhatsApp"><MessageCircle size={13} /> WA</a>}
+                      {email && <button className="btn btn-xs btn-primary" disabled={enviando === email} onClick={() => enviarRecuperacion(c)} title="Enviar correo de recuperación"><Ico as={Send} size={13} /> {enviando === email ? '…' : 'Email'}</button>}
+                      {!wa && !email && <span style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>sin contacto</span>}
+                    </div>
+                  </td>
                 </tr>
               )
             })}</tbody>
@@ -381,12 +508,23 @@ export function TabMetricasCrm() {
   const qCarritos = useQuery({
     queryKey: ['catalogo_carritos_abandonados'],
     queryFn: async () => {
-      const { data, error } = await supabase.from('carritos_catalogo')
+      // Abandonado (v169) = cliente identificado que GUARDÓ el carrito para después y
+      // lleva 3 días sin comprarlo. Se pide guardado=true + antigüedad ≥ 3 días.
+      const hace3dias = new Date(Date.now() - 3 * 24 * 60 * 60 * 1000).toISOString()
+      const q = supabase.from('carritos_catalogo')
+        .select('email, nombre, telefono, items, total, n_items, estado, guardado, actualizado_at')
+        .eq('estado', 'carrito').gt('n_items', 0)
+        .eq('guardado', true).lte('actualizado_at', hace3dias)
+        .order('actualizado_at', { ascending: false }).limit(200)
+      const { data, error } = await q
+      if (!error) return data || []
+      // Compatibilidad: si la columna `guardado` aún no existe (migración v169 sin aplicar),
+      // se cae al criterio anterior para no romper la métrica.
+      const alt = await supabase.from('carritos_catalogo')
         .select('email, nombre, telefono, items, total, n_items, estado, actualizado_at')
         .eq('estado', 'carrito').gt('n_items', 0)
         .order('actualizado_at', { ascending: false }).limit(200)
-      if (error) return []   // tabla nueva (migration_v162); no romper métricas si aún no existe
-      return data || []
+      return alt.error ? [] : (alt.data || [])
     },
   })
 
@@ -573,6 +711,267 @@ export function TabMetricasCrm() {
               <tbody>{topVistos.map(([n, c]) => <tr key={n}><td>{n}</td><td className="td-number">{c}</td></tr>)}</tbody>
             </table></div>}
       </div>
+    </>
+  )
+}
+
+// ================= Gestión de pedidos (fulfillment) =================
+
+const ENVIO_ESTADOS = {
+  pendiente:  { label: 'Pendiente',  badge: 'badge-dorado' },
+  despachado: { label: 'Despachado', badge: 'badge-azul' },
+  entregado:  { label: 'Entregado',  badge: 'badge-verde' },
+  cancelado:  { label: 'Cancelado',  badge: 'badge-rojo' },
+}
+
+function fechaHora(iso) {
+  if (!iso) return '—'
+  try { return new Date(iso).toLocaleString('es-CO', { day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' }) }
+  catch { return '—' }
+}
+
+function itemsPedido(p) {
+  const arr = Array.isArray(p.productos) ? p.productos : []
+  return arr.map(i => `${i.cantidad || 1}× ${i.nombre || 'Producto'}`).join(', ')
+}
+
+// Enlace de WhatsApp al cliente notificando el despacho.
+function waDespacho(p, cfg) {
+  const tel = (p.telefono || '').replace(/[^0-9]/g, '')
+  if (!tel) return null
+  const nombre = (p.nombre || '').trim()
+  const saludo = nombre ? `¡Hola ${nombre}! 🌿` : '¡Hola! 🌿'
+  const tienda = (cfg?.nombre_tienda || 'Mumi Amazonia').trim()
+  const guia = (p.guia || '').trim()
+  const transp = (p.transportadora || '').trim()
+  const lineas = [
+    `${saludo}`,
+    `Tu pedido *#${p.codigo || p.id}* en ${tienda} ya fue despachado. 📦`,
+    guia ? `Número de guía: *${guia}*${transp ? ` (${transp})` : ''}` : (transp ? `Transportadora: ${transp}` : ''),
+    (p.nota_envio || '').trim() ? `\n${p.nota_envio.trim()}` : '',
+    '\n¡Gracias por tu compra! 💚',
+  ].filter(Boolean)
+  return `https://wa.me/${tel}?text=${encodeURIComponent(lineas.join('\n'))}`
+}
+
+// Cuerpo HTML del correo de despacho al cliente.
+function htmlDespacho(p, cfg) {
+  const tienda = (cfg?.nombre_tienda || 'Mumi Amazonia').trim()
+  const nombre = (p.nombre || '').trim()
+  const guia = (p.guia || '').trim()
+  const transp = (p.transportadora || '').trim()
+  const nota = (p.nota_envio || '').trim()
+  const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  return `
+  <div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a">
+    <h2 style="color:#2e7d32">¡Tu pedido va en camino! 📦</h2>
+    <p>${nombre ? `Hola ${esc(nombre)},` : 'Hola,'}</p>
+    <p>Tu pedido <strong>#${esc(p.codigo || p.id)}</strong> en <strong>${esc(tienda)}</strong> ya fue despachado.</p>
+    ${guia ? `<p style="font-size:16px"><strong>Número de guía:</strong> ${esc(guia)}${transp ? ` <span style="color:#555">(${esc(transp)})</span>` : ''}</p>` : (transp ? `<p><strong>Transportadora:</strong> ${esc(transp)}</p>` : '')}
+    ${nota ? `<div style="background:#f4f7f0;border-radius:8px;padding:12px 14px;margin:12px 0">${esc(nota).replace(/\n/g, '<br>')}</div>` : ''}
+    <p style="margin-top:18px">¡Gracias por confiar en nosotros! 💚</p>
+    <p style="color:#777;font-size:12px">${esc(tienda)}</p>
+  </div>`
+}
+
+// Modal para capturar guía + transportadora + nota antes de despachar.
+function ModalDespacho({ pedido, onCerrar, onConfirmar }) {
+  const [guia, setGuia] = useState(pedido.guia || '')
+  const [transp, setTransp] = useState(pedido.transportadora || '')
+  const [nota, setNota] = useState(pedido.nota_envio || '')
+  const [enviarEmail, setEnviarEmail] = useState(!!pedido.email)
+  const [guardando, setGuardando] = useState(false)
+  const submit = async (e) => {
+    e.preventDefault()
+    setGuardando(true)
+    try { await onConfirmar({ guia: guia.trim(), transportadora: transp.trim(), nota_envio: nota.trim(), enviarEmail }) }
+    finally { setGuardando(false) }
+  }
+  return (
+    <div className="overlay" style={{ alignItems: 'center' }} onClick={(e) => e.target === e.currentTarget && onCerrar()}>
+      <div className="popup" style={{ textAlign: 'left', maxWidth: 460 }}>
+        <button className="popup-x" onClick={onCerrar} aria-label="Cerrar"><X size={20} /></button>
+        <h2 className="serif" style={{ color: 'var(--selva, #2e7d32)', fontSize: '1.2rem', marginBottom: 4 }}>Marcar como enviado</h2>
+        <p style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', margin: '0 0 12px' }}>Pedido #{pedido.codigo || pedido.id}{pedido.nombre ? ` · ${pedido.nombre}` : ''}</p>
+        <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div className="form-group"><label className="form-label">Número de guía</label>
+            <input className="form-control" value={guia} onChange={e => setGuia(e.target.value)} placeholder="Ej: 240012345678" autoFocus /></div>
+          <div className="form-group"><label className="form-label">Transportadora <span style={{ color: 'var(--texto-suave)', fontWeight: 400 }}>(opcional)</span></label>
+            <input className="form-control" value={transp} onChange={e => setTransp(e.target.value)} placeholder="Ej: Servientrega, Interrapidísimo…" /></div>
+          <div className="form-group"><label className="form-label">Nota adicional <span style={{ color: 'var(--texto-suave)', fontWeight: 400 }}>(opcional)</span></label>
+            <textarea className="form-control" rows={3} value={nota} onChange={e => setNota(e.target.value)} placeholder="Instrucciones de entrega, tiempo estimado, etc." /></div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: pedido.email ? 'pointer' : 'not-allowed', opacity: pedido.email ? 1 : 0.5 }}>
+            <input type="checkbox" checked={enviarEmail} disabled={!pedido.email} onChange={e => setEnviarEmail(e.target.checked)} />
+            Enviar correo al cliente {pedido.email ? `(${pedido.email})` : '(sin correo registrado)'}
+          </label>
+          <button className="btn btn-success" type="submit" disabled={guardando}>
+            <Truck size={15} /> {guardando ? 'Guardando…' : 'Confirmar despacho'}
+          </button>
+        </form>
+      </div>
+    </div>
+  )
+}
+
+export function TabPedidos() {
+  const qc = useQueryClient()
+  const [filtro, setFiltro] = useState('activos')
+  const [busca, setBusca] = useState('')
+  const [despachar, setDespachar] = useState(null)
+  const [aviso, setAviso] = useState('')
+
+  const { data: cfg } = useQuery({
+    queryKey: ['catalogo_cfg_pedidos'],
+    queryFn: async () => { const { data } = await supabase.from('config_catalogo').select('nombre_tienda, whatsapp, url_publica').eq('id', 1).maybeSingle(); return data || {} },
+  })
+
+  const qPed = useQuery({
+    queryKey: ['catalogo_gestion_pedidos'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('pedidos_catalogo')
+        .select('id, codigo, email, nombre, telefono, total, estado, estado_envio, productos, nota, guia, transportadora, nota_envio, mayorista, created_at, despachado_at, entregado_at, cancelado_at, cancel_motivo')
+        .order('created_at', { ascending: false })
+        .limit(500)
+      if (error) throw error
+      // Solo pedidos que el cliente realmente cursó (con código asignado).
+      return (data || []).filter(p => p.codigo)
+    },
+  })
+  const pedidos = qPed.data || []
+
+  const actualizar = async (p, campos) => {
+    const { error } = await supabase.from('pedidos_catalogo').update(campos).eq('id', p.id)
+    if (error) { setAviso('No se pudo actualizar el pedido: ' + error.message); return false }
+    qc.invalidateQueries({ queryKey: ['catalogo_gestion_pedidos'] })
+    return true
+  }
+
+  const confirmarDespacho = async ({ guia, transportadora, nota_envio, enviarEmail }) => {
+    const p = despachar
+    const campos = { estado_envio: 'despachado', guia, transportadora, nota_envio, despachado_at: new Date().toISOString() }
+    const ok = await actualizar(p, campos)
+    if (!ok) return
+    const actualizado = { ...p, ...campos }
+    if (enviarEmail && p.email) {
+      try {
+        const { error } = await supabase.functions.invoke('enviar-correo', {
+          body: { to: p.email, subject: `Tu pedido #${p.codigo || p.id} va en camino 📦`, html: htmlDespacho(actualizado, cfg) },
+        })
+        if (error) throw error
+        setAviso(`Pedido #${p.codigo} marcado como despachado. Correo enviado a ${p.email}.`)
+      } catch (ex) {
+        setAviso(`Pedido despachado, pero el correo falló: ${ex.message || ex}. Puedes notificar por WhatsApp.`)
+      }
+    } else {
+      setAviso(`Pedido #${p.codigo} marcado como despachado.`)
+    }
+    setDespachar(null)
+  }
+
+  const entregar = async (p) => {
+    if (await actualizar(p, { estado_envio: 'entregado', entregado_at: new Date().toISOString() }))
+      setAviso(`Pedido #${p.codigo} marcado como entregado y finalizado. ✔`)
+  }
+  const cancelar = async (p) => {
+    const motivo = window.prompt(`Cancelar el pedido #${p.codigo}.\n\nMotivo (opcional):`, '')
+    if (motivo === null) return
+    if (await actualizar(p, { estado_envio: 'cancelado', cancelado_at: new Date().toISOString(), cancel_motivo: (motivo || '').trim() || null }))
+      setAviso(`Pedido #${p.codigo} cancelado.`)
+  }
+
+  const q = busca.trim().toLowerCase()
+  const lista = pedidos.filter(p => {
+    const est = p.estado_envio || 'pendiente'
+    if (filtro === 'activos' && (est === 'entregado' || est === 'cancelado')) return false
+    if (filtro !== 'activos' && filtro !== 'todos' && est !== filtro) return false
+    if (!q) return true
+    return [p.codigo, p.nombre, p.email, p.telefono, p.guia].some(v => String(v || '').toLowerCase().includes(q))
+  })
+
+  const conteo = (est) => pedidos.filter(p => (p.estado_envio || 'pendiente') === est).length
+
+  return (
+    <>
+      {aviso && (
+        <div className="card" style={{ borderLeft: '3px solid var(--dorado, #c9a227)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10 }}>
+          <span style={{ fontSize: '0.85rem' }}>{aviso}</span>
+          <button className="btn btn-xs btn-secondary" onClick={() => setAviso('')}>Cerrar</button>
+        </div>
+      )}
+      <div className="card">
+        <div className="card-title"><Ico as={Package} size={16} />Gestionar pedidos
+          <span className="badge badge-dorado" style={{ marginLeft: 8 }}>{conteo('pendiente')} pendientes · {conteo('despachado')} en camino</span>
+        </div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, margin: '4px 0 12px', alignItems: 'center' }}>
+          {[['activos', 'Activos'], ['pendiente', 'Pendientes'], ['despachado', 'Despachados'], ['entregado', 'Entregados'], ['cancelado', 'Cancelados'], ['todos', 'Todos']].map(([id, lbl]) => (
+            <button key={id} className={`btn btn-xs ${filtro === id ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFiltro(id)}>{lbl}</button>
+          ))}
+          <input className="form-control" style={{ maxWidth: 220, marginLeft: 'auto' }} placeholder="Buscar # / nombre / correo…" value={busca} onChange={e => setBusca(e.target.value)} />
+        </div>
+
+        {qPed.isLoading ? <p className="empty-table">Cargando pedidos…</p>
+          : qPed.error ? <p className="empty-table">Error al cargar: {String(qPed.error.message || qPed.error)}</p>
+          : lista.length === 0 ? <p className="empty-table">No hay pedidos en este filtro.</p>
+          : <div className="table-wrap"><table>
+              <thead><tr>
+                <th>Pedido</th><th>Cliente</th><th className="movil-hide">Productos</th>
+                <th className="td-number">Total</th><th>Estado</th><th>Acciones</th>
+              </tr></thead>
+              <tbody>{lista.map(p => {
+                const est = p.estado_envio || 'pendiente'
+                const meta = ENVIO_ESTADOS[est] || ENVIO_ESTADOS.pendiente
+                const wa = waDespacho(p, cfg)
+                const finalizado = est === 'entregado' || est === 'cancelado'
+                return (
+                  <tr key={p.id}>
+                    <td>
+                      <strong>#{p.codigo || p.id}</strong>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>{fechaHora(p.created_at)}</div>
+                      {p.mayorista && <span className="badge badge-azul" style={{ fontSize: '0.62rem' }}>mayorista</span>}
+                    </td>
+                    <td>
+                      {p.nombre || '—'}
+                      {p.email && <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>{p.email}</div>}
+                      {p.telefono && <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>{p.telefono}</div>}
+                    </td>
+                    <td className="movil-hide" style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', maxWidth: 220 }}>{itemsPedido(p) || '—'}</td>
+                    <td className="td-number">{fCOP(p.total)}</td>
+                    <td>
+                      <span className={`badge ${meta.badge}`}>{meta.label}</span>
+                      {p.guia && <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)', marginTop: 2 }}>Guía: {p.guia}</div>}
+                      {est === 'cancelado' && p.cancel_motivo && <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)', marginTop: 2 }}>{p.cancel_motivo}</div>}
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                        {!finalizado && (
+                          <button className="btn btn-xs btn-primary" onClick={() => setDespachar(p)} title="Marcar como enviado / actualizar guía">
+                            <Truck size={13} /> {est === 'despachado' ? 'Guía' : 'Enviado'}
+                          </button>
+                        )}
+                        {p.telefono && est === 'despachado' && wa && (
+                          <a className="btn btn-xs btn-success" href={wa} target="_blank" rel="noreferrer" title="Notificar por WhatsApp">
+                            <MessageCircle size={13} /> WA
+                          </a>
+                        )}
+                        {est === 'despachado' && (
+                          <button className="btn btn-xs btn-success" onClick={() => entregar(p)} title="Entregado y finalizado">
+                            <CheckCircle2 size={13} /> Entregado
+                          </button>
+                        )}
+                        {!finalizado && (
+                          <button className="btn btn-xs btn-danger" onClick={() => cancelar(p)} title="Cancelar pedido">
+                            <XCircle size={13} /> Cancelar
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                )
+              })}</tbody>
+            </table></div>}
+      </div>
+
+      {despachar && <ModalDespacho pedido={despachar} onCerrar={() => setDespachar(null)} onConfirmar={confirmarDespacho} />}
     </>
   )
 }

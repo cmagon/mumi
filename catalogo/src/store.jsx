@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
 import { supabase } from './supabase'
 import { cargarFrutos, getEmail, setEmail as saveEmail, emailValido, listarFavoritosRemotos, toggleFavoritoRemoto, setCliente, getCliente, getTelefono, setTelefono, guardarCarritoRemoto, sinTildes } from './utils'
+import { onCambioSesion, cargarPerfil, cerrarSesion } from './auth'
 
 const Ctx = createContext(null)
 export const useStore = () => useContext(Ctx)
@@ -50,6 +51,9 @@ export function StoreProvider({ children }) {
   const [carrito, setCarrito] = useState(() => { try { return JSON.parse(localStorage.getItem('mumi_carrito') || '[]') } catch { return [] } })
   const [favs, setFavs] = useState(() => { try { return JSON.parse(localStorage.getItem('mumi_favs') || '[]') } catch { return [] } })
   const [emailSesion, setEmailSesion] = useState(() => getEmail())
+  const [usuario, setUsuario] = useState(null)     // usuario de Supabase Auth (cliente)
+  const [perfil, setPerfil] = useState(null)       // fila clientes_catalogo
+  const [sesionLista, setSesionLista] = useState(false) // ya se resolvió la sesión inicial
   const [pendienteFav, setPendienteFav] = useState(null) // productId esperando correo
   const [mayorista, setMayoristaState] = useState(() => { try { return localStorage.getItem('mumi_mayorista') === '1' } catch { return false } })
   const [edicion, setEdicion] = useState({ on: false, target: null })   // edición en el lienzo (desde el panel)
@@ -220,6 +224,39 @@ export function StoreProvider({ children }) {
     return () => { cancel = true }
   }, [emailSesion])
 
+  // Sesión de cliente (Supabase Auth). Al autenticarse, se puentea con la sesión "soft"
+  // por correo para que favoritos, carrito e historial sigan operando por correo.
+  useEffect(() => {
+    let vivo = true
+    const off = onCambioSesion(async (u) => {
+      if (!vivo) return
+      setUsuario(u)
+      setSesionLista(true)
+      if (u?.email) {
+        establecerEmail(u.email, getCliente() || u.user_metadata?.nombre || '')
+        const p = await cargarPerfil(u.id)
+        if (!vivo) return
+        setPerfil(p)
+        if (p?.nombre_completo) setCliente(p.nombre_completo)
+        if (p?.telefono) setTelefono(p.telefono)
+      } else {
+        setPerfil(null)
+      }
+    })
+    return () => { vivo = false; off?.() }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const recargarPerfil = async () => {
+    if (!usuario?.id) return null
+    const p = await cargarPerfil(usuario.id)
+    setPerfil(p)
+    return p
+  }
+  const salir = async () => {
+    await cerrarSesion()
+    setUsuario(null); setPerfil(null)
+  }
+
   const setMayorista = (v) => { setMayoristaState(v); try { v ? localStorage.setItem('mumi_mayorista', '1') : localStorage.removeItem('mumi_mayorista') } catch { /* noop */ } }
 
   const establecerEmail = (email, nombre, telefono) => {
@@ -314,6 +351,7 @@ export function StoreProvider({ children }) {
     productoPorId, favs, toggleFav, esFav, mayorista, setMayorista, precio, pedidoMinimo,
     enOferta, descuentoPct, edicion, esPreview: cfgPreview !== null || bannerDraft !== null,
     emailSesion, establecerEmail, pendienteFav, cancelarPendienteFav, confirmarEmailFav,
-  }), [cfg, productos, bannersEnVivo, carrito, favs, mayorista, cfgPreview, bannerDraft, edicion, emailSesion, pendienteFav])
+    usuario, perfil, recargarPerfil, salir, sesionLista,
+  }), [cfg, productos, bannersEnVivo, carrito, favs, mayorista, cfgPreview, bannerDraft, edicion, emailSesion, pendienteFav, usuario, perfil, sesionLista])
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>
 }

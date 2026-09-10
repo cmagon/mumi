@@ -32,7 +32,7 @@ import { getConfig } from '../lib/appConfig'
 import Select from '../components/ui/Select'
 import { useUnsavedGuard, snapConfig } from '../hooks/useUnsavedGuard'
 import { useConfirm } from '../context/ConfirmContext'
-import { TabClientes, TabMetricasCrm } from './catalogoCrm'
+import { TabClientes, TabMetricasCrm, TabPedidos } from './catalogoCrm'
 import { sincronizarCatalogoSheets } from '../lib/syncSheetsCatalog'
 
 // Fuentes de Google disponibles para el catálogo (títulos, subtítulos, párrafos)
@@ -172,7 +172,7 @@ const detectarFrutos = (nombre, frutosCat) => {
 }
 const labelFrutoCat = (id, frutosCat) => (frutosCat || []).find(f => f.id === id)?.nombre || id
 
-const CATALOGO_TABS = ['productos', 'personalizar', 'config', 'correos', 'clientes', 'mensajes', 'metricas']
+const CATALOGO_TABS = ['productos', 'personalizar', 'config', 'correos', 'clientes', 'pedidos', 'mensajes', 'metricas']
 
 export default function Catalogo() {
   const toast = useToast()
@@ -192,6 +192,7 @@ export default function Catalogo() {
     mensajes: puedeConfig,
     correos: puedeMetricas || puedeConfig,
     clientes: puedeMetricas || puedeConfig, // alias → redirige a correos
+    pedidos: puedeMetricas || puedeConfig,
     metricas: puedeMetricas,
   }
   const tabRaw = CATALOGO_TABS.includes(tabParam) && okTab[tabParam] ? tabParam : null
@@ -242,6 +243,7 @@ export default function Catalogo() {
         {puedeConfig && <NavLink to="/catalogo/personalizar" className={tabCls} end><Ico as={Palette} size={14} />Personalizar</NavLink>}
         {puedeConfig && <NavLink to="/catalogo/config" className={tabCls} end><Ico as={Settings} size={14} />Configuración</NavLink>}
         {(puedeMetricas || puedeConfig) && <NavLink to="/catalogo/correos" className={tabCls} end><Ico as={Mail} size={14} />Correos</NavLink>}
+        {(puedeMetricas || puedeConfig) && <NavLink to="/catalogo/pedidos" className={tabCls} end><Ico as={Package} size={14} />Pedidos</NavLink>}
         {puedeConfig && <NavLink to="/catalogo/mensajes" className={tabCls} end title="Formularios del catálogo (página Contacto)">✉️ Mensajes</NavLink>}
         {puedeMetricas && <NavLink to="/catalogo/metricas" className={tabCls} end><Ico as={BarChart3} size={14} />Métricas</NavLink>}
       </div>
@@ -250,6 +252,7 @@ export default function Catalogo() {
       {tab === 'personalizar' && puedeConfig && <TabPersonalizar toast={toast} qc={qc} cfgUrl={cfgUrl} onDirtyChange={v => reportDirty('personalizar', v)} />}
       {tab === 'config' && puedeConfig && <TabConfig toast={toast} onDirtyChange={v => reportDirty('config', v)} />}
       {tab === 'correos' && (puedeMetricas || puedeConfig) && <TabClientes />}
+      {tab === 'pedidos' && (puedeMetricas || puedeConfig) && <TabPedidos />}
       {tab === 'mensajes' && puedeConfig && <TabMensajes />}
       {tab === 'metricas' && puedeMetricas && <TabMetricasCrm />}
     </div>
@@ -1365,6 +1368,11 @@ function TabConfig({ toast, onDirtyChange }) {
           <div className="form-grid-2">
             <div className="form-group"><label className="form-label">WhatsApp (con indicativo)</label><input className="form-control" value={cfg.whatsapp || ''} onChange={e => set('whatsapp', e.target.value)} placeholder="+573157702180" /></div>
             <div className="form-group"><label className="form-label">País <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(para el copyright)</small></label><input className="form-control" value={cfg.pais || ''} onChange={e => set('pais', e.target.value)} placeholder="Colombia" /></div>
+          </div>
+          <div className="form-group">
+            <label className="form-label">🛡️ Turnstile Site Key <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(captcha en formularios públicos)</small></label>
+            <input className="form-control" value={cfg.turnstile_site_key || ''} onChange={e => set('turnstile_site_key', e.target.value)} placeholder="0x4AAAAAAA…" />
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Clave pública de Cloudflare Turnstile. Al ponerla, el captcha aparece en Contacto, Suscripción y el popup. La secret key va como secreto <code>TURNSTILE_SECRET_KEY</code> de la función <code>catalogo-form</code>. Déjalo vacío para desactivar el captcha.</small>
           </div>
         </PzSec>
 
@@ -3725,10 +3733,24 @@ function EditorBanner({ banner, toast, qc, onClose, modoAtelier = false }) {
 
 // ==================== CONTACTO (formulario del catálogo) ====================
 function TabMensajes() {
+  const qc = useQueryClient()
   const { data: msgs = [], isLoading } = useQuery({
     queryKey: ['mensajes_catalogo'],
     queryFn: async () => { const { data } = await supabase.from('mensajes_catalogo').select('*').order('id', { ascending: false }).limit(500); return data || [] },
   })
+  // Al abrir la bandeja, marcar como leídos los mensajes nuevos: así se apaga la
+  // alerta del tablero principal («N mensaje(s) del catálogo sin leer»).
+  useEffect(() => {
+    const sinLeer = msgs.filter(m => m.leido === false).map(m => m.id)
+    if (sinLeer.length === 0) return
+    let vivo = true
+    ;(async () => {
+      const { error } = await supabase.from('mensajes_catalogo').update({ leido: true }).in('id', sinLeer)
+      if (!vivo || error) return
+      qc.invalidateQueries({ queryKey: ['dash_mensajes_sin_leer'] })
+    })()
+    return () => { vivo = false }
+  }, [msgs, qc])
   if (isLoading) return <div className="card"><p className="empty-table">Cargando…</p></div>
   return (
     <div className="card">

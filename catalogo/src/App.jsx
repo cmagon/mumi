@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, Link, NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { Leaf, Truck, ShieldCheck, MessageCircle, ShoppingCart, ArrowLeft, Plus, Minus, Trash2, Instagram, Facebook, Youtube, Twitter, Music2, Heart, Send, X, Menu } from 'lucide-react'
+import { Leaf, Truck, ShieldCheck, MessageCircle, ShoppingCart, ArrowLeft, Plus, Minus, Trash2, Instagram, Facebook, Youtube, Twitter, Music2, Heart, Send, X, Menu, User } from 'lucide-react'
 import { useStore } from './store'
 import { Home, Producto, Nosotros, Contacto, Favoritos, Mayorista, Pagina, Galeria, NoEncontrado, Desuscribir } from './pages'
-import { fCOP, iconoDe, confirmarPedidoWA, suscribir, abrirWA, FAVORITOS, cargarGoogleFonts, getCliente, setCliente, getEmail, setEmail, getTelefono, setTelefono, emailValido, telefonoValido, buscarClientePorEmail, mensajeSolicitudMayorista, textoEnvio, barraPedidoMinimoEstado, barraEnvioGratisEstado, setFavicon } from './utils'
+import { IngresarPage, CuentaPage, MisPedidosPage } from './cuenta'
+import { fCOP, iconoDe, confirmarPedidoWA, suscribir, abrirWA, FAVORITOS, cargarGoogleFonts, getCliente, setCliente, getEmail, setEmail, getTelefono, setTelefono, emailValido, telefonoValido, buscarClientePorEmail, mensajeSolicitudMayorista, textoEnvio, barraPedidoMinimoEstado, barraEnvioGratisEstado, setFavicon, guardarCarritoParaDespues } from './utils'
 import { ModalNombre, ModalSesionCliente } from './ui'
 import DOMPurify from 'dompurify'
 import FrutoIcon from './FrutoIcon'
@@ -241,7 +242,7 @@ function ModalTerminos({ cfg, onClose }) {
 }
 
 export default function App() {
-  const { cfg, nItems, total, favs, mayorista, setMayorista, pendienteFav, cancelarPendienteFav, confirmarEmailFav, establecerEmail } = useStore()
+  const { cfg, nItems, total, favs, mayorista, setMayorista, pendienteFav, cancelarPendienteFav, confirmarEmailFav, establecerEmail, usuario } = useStore()
   const loc = useLocation()
   const [verCarrito, setVerCarrito] = useState(false)
   const [menu, setMenu] = useState(false)
@@ -298,6 +299,7 @@ export default function App() {
               {paginasVisibles(cfg).map(p => <NavLink key={p.slug} to={`/p/${p.slug}`} className={({ isActive }) => isActive ? 'on' : ''}>{p.titulo}</NavLink>)}
               <NavLink to="/contacto" className={({ isActive }) => isActive ? 'on' : ''}>Contacto</NavLink>
               {FAVORITOS && <NavLink to="/favoritos" className={({ isActive }) => `hdr-fav ${isActive ? 'on' : ''}`} aria-label="Favoritos"><Heart size={17} fill={favs.length ? 'currentColor' : 'none'} />{favs.length > 0 && <span className="hdr-fav-n">{favs.length}</span>}</NavLink>}
+              <NavLink to={usuario ? '/cuenta' : '/ingresar'} className={({ isActive }) => `hdr-fav ${isActive ? 'on' : ''}`} aria-label="Mi cuenta" title={usuario ? 'Mi cuenta' : 'Ingresar'}><User size={17} /></NavLink>
               {esAtelier && (
                 <button type="button" className="hdr-cart" onClick={() => setVerCarrito(true)} aria-label="Pedido">
                   <ShoppingCart size={18} />{nItems > 0 && <span className="hdr-fav-n">{nItems}</span>}
@@ -336,6 +338,7 @@ export default function App() {
             {paginasVisibles(cfg).map(p => <NavLink key={p.slug} to={`/p/${p.slug}`} onClick={() => setMenu(false)} className={({ isActive }) => isActive ? 'on' : ''}>{p.titulo}</NavLink>)}
             <NavLink to="/contacto" onClick={() => setMenu(false)} className={({ isActive }) => isActive ? 'on' : ''}>Contacto</NavLink>
             {FAVORITOS && <NavLink to="/favoritos" onClick={() => setMenu(false)} className={({ isActive }) => isActive ? 'on' : ''}>Favoritos</NavLink>}
+            <NavLink to={usuario ? '/cuenta' : '/ingresar'} onClick={() => setMenu(false)} className={({ isActive }) => isActive ? 'on' : ''}>{usuario ? 'Mi cuenta' : 'Ingresar'}</NavLink>
             {cfg.mayorista_activo && <button className="menu-mayo" onClick={() => { setMenu(false); setPedirNombre(true) }}><MessageCircle size={17} /> Ser mayorista</button>}
           </nav>
         </div>
@@ -362,6 +365,9 @@ export default function App() {
         <Route path="/nosotros" element={<Nosotros />} />
         <Route path="/contacto" element={<Contacto />} />
         <Route path="/favoritos" element={<Favoritos />} />
+        <Route path="/ingresar" element={<IngresarPage />} />
+        <Route path="/cuenta" element={<CuentaPage />} />
+        <Route path="/cuenta/pedidos" element={<MisPedidosPage />} />
         <Route path="/mayorista" element={<Mayorista />} />
         <Route path="/desuscribir" element={<Desuscribir />} />
         <Route path="/p/:slug" element={<Pagina />} />
@@ -446,8 +452,9 @@ function InvitacionMayorista({ cfg, onSolicitar }) {
 
 // ---- Carrito (drawer) ----
 function CartDrawer({ onClose }) {
-  const { cfg, carrito, agregar, quitar, vaciar, total, precio, mayorista, pedidoMinimo, establecerEmail } = useStore()
+  const { cfg, carrito, agregar, quitar, vaciar, total, precio, mayorista, pedidoMinimo, establecerEmail, usuario } = useStore()
   const [nota, setNota] = useState('')
+  const [guardado, setGuardado] = useState(false)
   const [email, setEmailForm] = useState(() => getEmail())
   const [nombre, setNombre] = useState(() => getCliente())
   const [telefono, setTelefonoForm] = useState(() => getTelefono())
@@ -476,6 +483,13 @@ function CartDrawer({ onClose }) {
     }, 350)
     return () => { cancel = true; clearTimeout(t) }
   }, [email, emailOk]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const guardarDespues = async () => {
+    if (!usuario?.email) return
+    const ok = await guardarCarritoParaDespues(usuario.email, usuario.id, nombre || getCliente(), telefono || getTelefono(), carrito, total, carrito.reduce((s, i) => s + i.cantidad, 0))
+    setGuardado(true)
+    if (ok) setTimeout(() => setGuardado(false), 4000)
+  }
 
   const confirmar = async () => {
     if (!puedePedir) return
@@ -535,6 +549,13 @@ function CartDrawer({ onClose }) {
                   Pedido mínimo{mayorista ? ' mayorista' : ''} sugerido: {fCOP(pedidoMinimo)}. Puedes confirmar igual.
                 </p>
               ))}
+            {usuario && (
+              <div style={{ padding: '0 16px 4px' }}>
+                <button type="button" className="btn btn-ghost" style={{ width: '100%' }} onClick={guardarDespues} disabled={carrito.length === 0}>
+                  {guardado ? '✓ Guardado en tu cuenta' : '💾 Guardar para después'}
+                </button>
+              </div>
+            )}
             <div className="cart-acciones">
               <button type="button" className="btn btn-ghost btn-seguir-compra" onClick={onClose}>
                 Seguir comprando
@@ -566,6 +587,8 @@ function WelcomePopup({ cfg }) {
   const [visible, setVisible] = useState(false)
   const [correo, setCorreo] = useState('')
   const [ok, setOk] = useState(false)
+  const [err, setErr] = useState('')
+  const emailOk = emailValido(correo)
   useEffect(() => {
     if (!cfg?.popup_activo) return
     if (localStorage.getItem('mumi_welcome') === '1') return
@@ -575,12 +598,14 @@ function WelcomePopup({ cfg }) {
   const cerrar = () => { localStorage.setItem('mumi_welcome', '1'); setVisible(false) }
   const enviar = async (e) => {
     e.preventDefault()
+    setErr('')
+    if (!emailOk) { setErr('Ingresa un correo válido.'); return }
     try {
       await suscribir(correo, '', 'popup')
       setEmail(correo.trim().toLowerCase())
       setOk(true)
       localStorage.setItem('mumi_welcome', '1')
-    } catch { setOk(true) }
+    } catch (ex) { setErr(ex.message || 'No se pudo suscribir.') }
   }
   useBodyLock(visible)
   if (!visible) return null
@@ -595,7 +620,8 @@ function WelcomePopup({ cfg }) {
           ? <div className="news-ok" style={{ background: 'rgba(124,179,66,0.15)', color: 'var(--selva)' }}>¡Listo! Revisa tu correo 💚</div>
           : <form onSubmit={enviar} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <input className="cf" type="email" placeholder="Tu correo" value={correo} onChange={e => setCorreo(e.target.value)} required />
-              <button className="btn btn-selva" type="submit"><Send size={16} /> Quiero mi descuento</button>
+              <button className="btn btn-selva" type="submit" disabled={!emailOk} style={!emailOk ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}><Send size={16} /> Quiero mi descuento</button>
+              {err && <div className="news-err">{err}</div>}
             </form>}
         <button className="popup-skip" onClick={cerrar}>No, gracias</button>
       </div>
