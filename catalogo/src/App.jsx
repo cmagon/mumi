@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react'
 import { Routes, Route, Link, NavLink, useNavigate, useLocation } from 'react-router-dom'
-import { Leaf, Truck, ShieldCheck, MessageCircle, ShoppingCart, ArrowLeft, Plus, Minus, Trash2, Instagram, Facebook, Youtube, Twitter, Music2, Heart, Send, X, Menu } from 'lucide-react'
+import { Leaf, Truck, ShieldCheck, MessageCircle, ShoppingCart, ArrowLeft, Plus, Minus, Trash2, Instagram, Facebook, Youtube, Twitter, Music2, Heart, Send, X, Menu, User } from 'lucide-react'
 import { useStore } from './store'
 import { Home, Producto, Nosotros, Contacto, Favoritos, Mayorista, Pagina, Galeria, NoEncontrado, Desuscribir } from './pages'
+import { IngresarPage, CuentaPage, MisPedidosPage } from './cuenta'
 import { fCOP, iconoDe, confirmarPedidoWA, suscribir, abrirWA, FAVORITOS, cargarGoogleFonts, getCliente, setCliente, getEmail, setEmail, getTelefono, setTelefono, emailValido, telefonoValido, buscarClientePorEmail, mensajeSolicitudMayorista, textoEnvio, barraPedidoMinimoEstado, barraEnvioGratisEstado, setFavicon } from './utils'
 import { ModalNombre, ModalSesionCliente } from './ui'
 import DOMPurify from 'dompurify'
@@ -241,7 +242,7 @@ function ModalTerminos({ cfg, onClose }) {
 }
 
 export default function App() {
-  const { cfg, nItems, total, favs, mayorista, setMayorista, pendienteFav, cancelarPendienteFav, confirmarEmailFav, establecerEmail } = useStore()
+  const { cfg, nItems, total, favs, mayorista, setMayorista, pendienteFav, cancelarPendienteFav, confirmarEmailFav, establecerEmail, usuario } = useStore()
   const loc = useLocation()
   const [verCarrito, setVerCarrito] = useState(false)
   const [menu, setMenu] = useState(false)
@@ -298,6 +299,7 @@ export default function App() {
               {paginasVisibles(cfg).map(p => <NavLink key={p.slug} to={`/p/${p.slug}`} className={({ isActive }) => isActive ? 'on' : ''}>{p.titulo}</NavLink>)}
               <NavLink to="/contacto" className={({ isActive }) => isActive ? 'on' : ''}>Contacto</NavLink>
               {FAVORITOS && <NavLink to="/favoritos" className={({ isActive }) => `hdr-fav ${isActive ? 'on' : ''}`} aria-label="Favoritos"><Heart size={17} fill={favs.length ? 'currentColor' : 'none'} />{favs.length > 0 && <span className="hdr-fav-n">{favs.length}</span>}</NavLink>}
+              <NavLink to={usuario ? '/cuenta' : '/ingresar'} className={({ isActive }) => `hdr-fav ${isActive ? 'on' : ''}`} aria-label="Mi cuenta" title={usuario ? 'Mi cuenta' : 'Ingresar'}><User size={17} /></NavLink>
               {esAtelier && (
                 <button type="button" className="hdr-cart" onClick={() => setVerCarrito(true)} aria-label="Pedido">
                   <ShoppingCart size={18} />{nItems > 0 && <span className="hdr-fav-n">{nItems}</span>}
@@ -336,6 +338,7 @@ export default function App() {
             {paginasVisibles(cfg).map(p => <NavLink key={p.slug} to={`/p/${p.slug}`} onClick={() => setMenu(false)} className={({ isActive }) => isActive ? 'on' : ''}>{p.titulo}</NavLink>)}
             <NavLink to="/contacto" onClick={() => setMenu(false)} className={({ isActive }) => isActive ? 'on' : ''}>Contacto</NavLink>
             {FAVORITOS && <NavLink to="/favoritos" onClick={() => setMenu(false)} className={({ isActive }) => isActive ? 'on' : ''}>Favoritos</NavLink>}
+            <NavLink to={usuario ? '/cuenta' : '/ingresar'} onClick={() => setMenu(false)} className={({ isActive }) => isActive ? 'on' : ''}>{usuario ? 'Mi cuenta' : 'Ingresar'}</NavLink>
             {cfg.mayorista_activo && <button className="menu-mayo" onClick={() => { setMenu(false); setPedirNombre(true) }}><MessageCircle size={17} /> Ser mayorista</button>}
           </nav>
         </div>
@@ -362,6 +365,9 @@ export default function App() {
         <Route path="/nosotros" element={<Nosotros />} />
         <Route path="/contacto" element={<Contacto />} />
         <Route path="/favoritos" element={<Favoritos />} />
+        <Route path="/ingresar" element={<IngresarPage />} />
+        <Route path="/cuenta" element={<CuentaPage />} />
+        <Route path="/cuenta/pedidos" element={<MisPedidosPage />} />
         <Route path="/mayorista" element={<Mayorista />} />
         <Route path="/desuscribir" element={<Desuscribir />} />
         <Route path="/p/:slug" element={<Pagina />} />
