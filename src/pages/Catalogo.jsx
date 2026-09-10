@@ -1369,6 +1369,11 @@ function TabConfig({ toast, onDirtyChange }) {
             <div className="form-group"><label className="form-label">WhatsApp (con indicativo)</label><input className="form-control" value={cfg.whatsapp || ''} onChange={e => set('whatsapp', e.target.value)} placeholder="+573157702180" /></div>
             <div className="form-group"><label className="form-label">País <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(para el copyright)</small></label><input className="form-control" value={cfg.pais || ''} onChange={e => set('pais', e.target.value)} placeholder="Colombia" /></div>
           </div>
+          <div className="form-group">
+            <label className="form-label">🛡️ Turnstile Site Key <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(captcha en formularios públicos)</small></label>
+            <input className="form-control" value={cfg.turnstile_site_key || ''} onChange={e => set('turnstile_site_key', e.target.value)} placeholder="0x4AAAAAAA…" />
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Clave pública de Cloudflare Turnstile. Al ponerla, el captcha aparece en Contacto, Suscripción y el popup. La secret key va como secreto <code>TURNSTILE_SECRET_KEY</code> de la función <code>catalogo-form</code>. Déjalo vacío para desactivar el captcha.</small>
+          </div>
         </PzSec>
 
         <PzSec abierto={sec} setAbierto={setSec} id="envio" titulo={<>🚚 Envío</>}>

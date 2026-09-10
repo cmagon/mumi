@@ -744,6 +744,17 @@ export async function guardarCarritoParaDespues(email, userId, nombre, telefono,
   } catch { return false }
 }
 
+// Envía un formulario público protegido por Turnstile a la Edge Function catalogo-form,
+// que verifica el token del lado servidor antes de escribir. Lanza si falla.
+export async function enviarFormProtegido(accion, payload, token) {
+  const { data, error } = await supabase.functions.invoke('catalogo-form', {
+    body: { accion, token, ...payload },
+  })
+  if (error) throw new Error(error.message || 'No se pudo enviar el formulario.')
+  if (data?.error) throw new Error(data.error)
+  return data
+}
+
 export async function marcarCarritoRemoto(email, estado) {
   const e = (email || '').trim().toLowerCase()
   if (!emailValido(e)) return
