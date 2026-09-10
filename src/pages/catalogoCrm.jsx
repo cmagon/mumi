@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, Users, BarChart3, Star, ShoppingCart, MessageCircle, Truck, CheckCircle2, XCircle, Package, X, Trash2 } from 'lucide-react'
+import { Download, Users, BarChart3, Star, ShoppingCart, MessageCircle, Truck, CheckCircle2, XCircle, Package, X, Trash2, Send } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fNum } from '../lib/businessLogic'
 
@@ -393,24 +393,86 @@ function waRecuperacion(c) {
   const msg = `${saludo}\nVimos que dejaste algunos productos en tu carrito de Mumi Amazonia:\n\n${detalle}\n\n¿Te ayudamos a completar tu pedido? 😊`
   return `https://wa.me/${tel}?text=${encodeURIComponent(msg)}`
 }
+// Plantilla del correo de recuperación de carrito.
+function htmlRecuperacion(c, cfg) {
+  const tienda = (cfg?.nombre_tienda || 'Mumi Amazonia').trim()
+  const url = (cfg?.url_publica || '').trim()
+  const nombre = (c.nombre || '').trim()
+  const items = Array.isArray(c.items) ? c.items : []
+  const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+  const filas = items.map(i => `<tr>
+    <td style="padding:6px 0;color:#1a1a1a">${esc(i.cantidad || 1)}× ${esc(i.nombre || 'Producto')}</td>
+    <td style="padding:6px 0;text-align:right;color:#555">${fCOP((Number(i.precio) || 0) * (Number(i.cantidad) || 1))}</td>
+  </tr>`).join('')
+  return `
+  <div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a">
+    <h2 style="color:#2e7d32">¿Se te quedó algo en el carrito? 🛒</h2>
+    <p>${nombre ? `Hola ${esc(nombre)},` : 'Hola,'}</p>
+    <p>Guardaste estos productos en <strong>${esc(tienda)}</strong> y aún están disponibles:</p>
+    <table style="width:100%;border-collapse:collapse;margin:10px 0;border-top:1px solid #eee;border-bottom:1px solid #eee">
+      ${filas}
+      <tr><td style="padding:8px 0;font-weight:bold">Total</td><td style="padding:8px 0;text-align:right;font-weight:bold;color:#2e7d32">${fCOP(c.total)}</td></tr>
+    </table>
+    ${url ? `<p style="text-align:center;margin:22px 0">
+      <a href="${esc(url)}" style="background:#2e7d32;color:#fff;text-decoration:none;padding:12px 22px;border-radius:8px;font-weight:bold">Completar mi pedido</a>
+    </p>` : ''}
+    <p style="color:#777;font-size:12px">Si ya lo compraste, ignora este mensaje. 💚<br>${esc(tienda)}</p>
+  </div>`
+}
+
 function CarritosAbandonados({ carritos }) {
+  const [busca, setBusca] = useState('')
+  const [enviando, setEnviando] = useState('')
+  const [aviso, setAviso] = useState('')
+  const { data: cfg } = useQuery({
+    queryKey: ['catalogo_cfg_pedidos'],
+    queryFn: async () => { const { data } = await supabase.from('config_catalogo').select('nombre_tienda, whatsapp, url_publica').eq('id', 1).maybeSingle(); return data || {} },
+  })
   const fechaCorta = (iso) => { try { return new Date(iso).toLocaleDateString('es-CO', { day: '2-digit', month: 'short' }) } catch { return '—' } }
-  const totalPotencial = carritos.reduce((s, c) => s + (Number(c.total) || 0), 0)
+
+  const enviarRecuperacion = async (c) => {
+    const email = (c.email || '').trim().toLowerCase()
+    if (!email) return
+    setEnviando(email); setAviso('')
+    try {
+      const { error } = await supabase.functions.invoke('enviar-correo', {
+        body: { to: email, subject: `¿Se te quedó algo en el carrito? · ${cfg?.nombre_tienda || 'Mumi Amazonia'}`, html: htmlRecuperacion(c, cfg) },
+      })
+      if (error) throw error
+      setAviso(`Correo de recuperación enviado a ${email}.`)
+    } catch (ex) {
+      setAviso(`No se pudo enviar el correo: ${ex.message || ex}. Puedes intentar por WhatsApp.`)
+    } finally { setEnviando('') }
+  }
+
+  const q = busca.trim().toLowerCase()
+  const lista = q
+    ? carritos.filter(c => [c.email, c.nombre, c.telefono].some(v => String(v || '').toLowerCase().includes(q)))
+    : carritos
+  const totalPotencial = lista.reduce((s, c) => s + (Number(c.total) || 0), 0)
+
   return (
     <div className="card">
       <div className="card-title"><Ico as={ShoppingCart} size={15} />Carritos abandonados
-        {carritos.length > 0 && <span className="badge badge-dorado" style={{ marginLeft: 8 }}>{carritos.length} · {fCOP(totalPotencial)} potencial</span>}
+        {lista.length > 0 && <span className="badge badge-dorado" style={{ marginLeft: 8 }}>{lista.length} · {fCOP(totalPotencial)} potencial</span>}
       </div>
       <p style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', margin: '0 0 10px' }}>
-        Clientes identificados por correo que dejaron productos sin comprar. Escríbeles por WhatsApp para recuperar la venta.
+        Clientes que guardaron su carrito y no compraron en 3 días. Recupéralos por WhatsApp (número) o por correo.
       </p>
-      {carritos.length === 0
+      {aviso && (
+        <div style={{ fontSize: '0.82rem', background: 'var(--crema, #f5f0e8)', borderLeft: '3px solid var(--dorado, #c9a227)', padding: '8px 10px', borderRadius: 6, marginBottom: 10, display: 'flex', justifyContent: 'space-between', gap: 10 }}>
+          <span>{aviso}</span><button className="btn btn-xs btn-secondary" onClick={() => setAviso('')}>Cerrar</button>
+        </div>
+      )}
+      <input className="form-control" style={{ maxWidth: 260, marginBottom: 10 }} placeholder="Buscar por número o correo…" value={busca} onChange={e => setBusca(e.target.value)} />
+      {lista.length === 0
         ? <p className="empty-table">No hay carritos abandonados por ahora. 🎉</p>
         : <div className="table-wrap"><table>
-            <thead><tr><th>Cliente</th><th>Correo</th><th className="movil-hide">Productos</th><th className="td-number">Total</th><th className="movil-hide">Actualizado</th><th></th></tr></thead>
-            <tbody>{carritos.map(c => {
+            <thead><tr><th>Cliente</th><th>Correo</th><th className="movil-hide">Productos</th><th className="td-number">Total</th><th className="movil-hide">Actualizado</th><th>Recuperar</th></tr></thead>
+            <tbody>{lista.map(c => {
               const wa = waRecuperacion(c)
               const items = Array.isArray(c.items) ? c.items : []
+              const email = (c.email || '').trim().toLowerCase()
               return (
                 <tr key={c.email}>
                   <td>{c.nombre || '—'}{c.telefono ? <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>{c.telefono}</div> : null}</td>
@@ -418,9 +480,13 @@ function CarritosAbandonados({ carritos }) {
                   <td className="movil-hide" style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>{items.map(i => `${i.cantidad}× ${i.nombre}`).join(', ') || `${c.n_items} ítem(s)`}</td>
                   <td className="td-number">{fCOP(c.total)}</td>
                   <td className="movil-hide" style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>{fechaCorta(c.actualizado_at)}</td>
-                  <td>{wa
-                    ? <a className="btn btn-xs btn-success" href={wa} target="_blank" rel="noreferrer"><MessageCircle size={13} /> Recuperar</a>
-                    : <span style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>sin teléfono</span>}</td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                      {wa && <a className="btn btn-xs btn-success" href={wa} target="_blank" rel="noreferrer" title="Recuperar por WhatsApp"><MessageCircle size={13} /> WA</a>}
+                      {email && <button className="btn btn-xs btn-primary" disabled={enviando === email} onClick={() => enviarRecuperacion(c)} title="Enviar correo de recuperación"><Ico as={Send} size={13} /> {enviando === email ? '…' : 'Email'}</button>}
+                      {!wa && !email && <span style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>sin contacto</span>}
+                    </div>
+                  </td>
                 </tr>
               )
             })}</tbody>
