@@ -2,8 +2,7 @@ import { useEffect, useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import { useSwipeable } from 'react-swipeable'
 import { Plus, ChevronLeft, ChevronRight, Send, Heart, X, MessageCircle } from 'lucide-react'
-import { fCOP, labelCategoria, iconoDe, stockLabel, suscribir, FAVORITOS, imgsDe, imgSrc, altImg, emailValido, telefonoValido, getEmail, getCliente, getTelefono, buscarClientePorEmail, setCliente, setEmail, setTelefono, enviarFormProtegido } from './utils'
-import { Turnstile } from './turnstile'
+import { fCOP, labelCategoria, iconoDe, stockLabel, suscribir, FAVORITOS, imgsDe, imgSrc, altImg, emailValido, telefonoValido, getEmail, getCliente, getTelefono, buscarClientePorEmail, setCliente, setEmail, setTelefono } from './utils'
 import FrutoIcon from './FrutoIcon'
 import { useStore } from './store'
 
@@ -503,17 +502,13 @@ export function Newsletter() {
   const [nombre, setNombre] = useState('')
   const [ok, setOk] = useState(false)
   const [err, setErr] = useState('')
-  const [token, setToken] = useState('')
   const emailOk = emailValido(email)
-  const siteKey = (cfg?.turnstile_site_key || '').trim()
   const enviar = async (e) => {
     e.preventDefault()
     setErr('')
     if (!emailOk) { setErr('Ingresa un correo válido.'); return }
-    if (siteKey && !token) { setErr('Completa la verificación de seguridad.'); return }
     try {
-      if (siteKey) await enviarFormProtegido('suscribir', { email, nombre, origen: 'newsletter' }, token)
-      else await suscribir(email, nombre, 'newsletter')
+      await suscribir(email, nombre, 'newsletter')
       establecerEmail?.(email, nombre)
       setOk(true)
     } catch (ex) { setErr(ex.message) }
@@ -529,8 +524,7 @@ export function Newsletter() {
         : <form className="news-form" onSubmit={enviar}>
             {!atelier && <input type="text" placeholder="Tu nombre (opcional)" value={nombre} onChange={e => setNombre(e.target.value)} />}
             <input type="email" placeholder={atelier ? 'Tu correo electrónico' : 'Tu correo'} value={email} onChange={e => setEmailForm(e.target.value)} required />
-            <Turnstile siteKey={siteKey} onToken={setToken} />
-            <button type="submit" disabled={!emailOk || (siteKey && !token)} style={(!emailOk || (siteKey && !token)) ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}><Send size={16} /> Suscribirme</button>
+            <button type="submit" disabled={!emailOk} style={!emailOk ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}><Send size={16} /> Suscribirme</button>
           </form>}
       {err && <div className="news-err">{err}</div>}
     </section>

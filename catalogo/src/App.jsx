@@ -4,8 +4,7 @@ import { Leaf, Truck, ShieldCheck, MessageCircle, ShoppingCart, ArrowLeft, Plus,
 import { useStore } from './store'
 import { Home, Producto, Nosotros, Contacto, Favoritos, Mayorista, Pagina, Galeria, NoEncontrado, Desuscribir } from './pages'
 import { IngresarPage, CuentaPage, MisPedidosPage } from './cuenta'
-import { Turnstile } from './turnstile'
-import { fCOP, iconoDe, confirmarPedidoWA, suscribir, abrirWA, FAVORITOS, cargarGoogleFonts, getCliente, setCliente, getEmail, setEmail, getTelefono, setTelefono, emailValido, telefonoValido, buscarClientePorEmail, mensajeSolicitudMayorista, textoEnvio, barraPedidoMinimoEstado, barraEnvioGratisEstado, setFavicon, guardarCarritoParaDespues, enviarFormProtegido } from './utils'
+import { fCOP, iconoDe, confirmarPedidoWA, suscribir, abrirWA, FAVORITOS, cargarGoogleFonts, getCliente, setCliente, getEmail, setEmail, getTelefono, setTelefono, emailValido, telefonoValido, buscarClientePorEmail, mensajeSolicitudMayorista, textoEnvio, barraPedidoMinimoEstado, barraEnvioGratisEstado, setFavicon, guardarCarritoParaDespues } from './utils'
 import { ModalNombre, ModalSesionCliente } from './ui'
 import DOMPurify from 'dompurify'
 import FrutoIcon from './FrutoIcon'
@@ -589,9 +588,7 @@ function WelcomePopup({ cfg }) {
   const [correo, setCorreo] = useState('')
   const [ok, setOk] = useState(false)
   const [err, setErr] = useState('')
-  const [token, setToken] = useState('')
   const emailOk = emailValido(correo)
-  const siteKey = (cfg?.turnstile_site_key || '').trim()
   useEffect(() => {
     if (!cfg?.popup_activo) return
     if (localStorage.getItem('mumi_welcome') === '1') return
@@ -603,10 +600,8 @@ function WelcomePopup({ cfg }) {
     e.preventDefault()
     setErr('')
     if (!emailOk) { setErr('Ingresa un correo válido.'); return }
-    if (siteKey && !token) { setErr('Completa la verificación de seguridad.'); return }
     try {
-      if (siteKey) await enviarFormProtegido('suscribir', { email: correo, origen: 'popup' }, token)
-      else await suscribir(correo, '', 'popup')
+      await suscribir(correo, '', 'popup')
       setEmail(correo.trim().toLowerCase())
       setOk(true)
       localStorage.setItem('mumi_welcome', '1')
@@ -625,8 +620,7 @@ function WelcomePopup({ cfg }) {
           ? <div className="news-ok" style={{ background: 'rgba(124,179,66,0.15)', color: 'var(--selva)' }}>¡Listo! Revisa tu correo 💚</div>
           : <form onSubmit={enviar} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               <input className="cf" type="email" placeholder="Tu correo" value={correo} onChange={e => setCorreo(e.target.value)} required />
-              <Turnstile siteKey={siteKey} onToken={setToken} />
-              <button className="btn btn-selva" type="submit" disabled={!emailOk || (siteKey && !token)} style={(!emailOk || (siteKey && !token)) ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}><Send size={16} /> Quiero mi descuento</button>
+              <button className="btn btn-selva" type="submit" disabled={!emailOk} style={!emailOk ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}><Send size={16} /> Quiero mi descuento</button>
               {err && <div className="news-err">{err}</div>}
             </form>}
         <button className="popup-skip" onClick={cerrar}>No, gracias</button>
