@@ -254,6 +254,9 @@ export function StoreProvider({ children }) {
   }
   const salir = async () => {
     await cerrarSesion()
+    // Limpia también la sesión "soft" (correo/nombre/teléfono) para que favoritos y
+    // checkout no sigan identificando al cliente tras salir.
+    saveEmail(''); setEmailSesion(''); setCliente(''); setTelefono('')
     setUsuario(null); setPerfil(null)
   }
 

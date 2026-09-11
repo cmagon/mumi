@@ -29,7 +29,10 @@ export async function verificarCodigo(email, codigo) {
 }
 
 export async function cerrarSesion() {
-  await supabase.auth.signOut()
+  // scope 'local' limpia la sesión del navegador sin depender de la red (más fiable);
+  // se ignora cualquier error para que "Salir" siempre limpie el estado local.
+  try { await supabase.auth.signOut({ scope: 'local' }) } catch { /* noop */ }
+  try { localStorage.removeItem('mumi-catalogo-auth') } catch { /* noop */ }
 }
 
 export async function sesionActual() {
