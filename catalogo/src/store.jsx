@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo, useState } from 'react'
-import { supabase } from './supabase'
+import { supabase, supabasePublic } from './supabase'
 import { cargarFrutos, getEmail, setEmail as saveEmail, emailValido, listarFavoritosRemotos, toggleFavoritoRemoto, setCliente, getCliente, getTelefono, setTelefono, guardarCarritoRemoto, sinTildes } from './utils'
 import { onCambioSesion, cargarPerfil, cerrarSesion } from './auth'
 
@@ -81,15 +81,15 @@ export function StoreProvider({ children }) {
   const [base, setBase] = useState(null)   // productos de la vista (Productos Terminados)
 
   useEffect(() => {
-    supabase.from('config_catalogo').select('*').eq('id', 1).maybeSingle().then(({ data }) => {
+    supabasePublic.from('config_catalogo').select('*').eq('id', 1).maybeSingle().then(({ data }) => {
       if (!data) return
       const secciones = Array.isArray(data.secciones) && data.secciones.length ? data.secciones : SECCIONES_DEFAULT
       setCfgBase({ ...CFG_DEFAULT, ...data, secciones })
       setExtra(Array.isArray(data.productos_extra) ? data.productos_extra : [])
     }, () => {})
-    supabase.from('frutos_catalogo').select('*').order('orden').then(({ data }) => cargarFrutos(data || []), () => {})
-    supabase.from('banners_catalogo').select('*').order('orden').then(({ data }) => setBanners(data || []), () => {})
-    supabase.from('catalogo_productos').select('*').order('nombre').then(({ data, error }) => { if (error) console.error('catalogo_productos:', error.message); setBase(data || []) })
+    supabasePublic.from('frutos_catalogo').select('*').order('orden').then(({ data }) => cargarFrutos(data || []), () => {})
+    supabasePublic.from('banners_catalogo').select('*').order('orden').then(({ data }) => setBanners(data || []), () => {})
+    supabasePublic.from('catalogo_productos').select('*').order('nombre').then(({ data, error }) => { if (error) console.error('catalogo_productos:', error.message); setBase(data || []) })
   }, [])
 
   // Fusiona vista + extras, calcula stock de combos y agrupa presentaciones (packs) por `grupo`
