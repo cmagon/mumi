@@ -348,7 +348,7 @@ const EMOJI_CAT = [
   ['galleta', '🍪'], ['infusion', '🍵'], ['te', '🍵'], ['aromatica', '🍵'],
   ['dulce', '🍬'], ['confite', '🍬'], ['bombon', '🍬'], ['mermelada', '🍯'], ['miel', '🍯'],
   ['bocadillo', '🍫'], ['chocolate', '🍫'], ['cacao', '🍫'], ['granel', '🌾'], ['harina', '🌾'],
-  ['bebida', '🥤'], ['jugo', '🥤'], ['snack', '🥜'], ['nuez', '🥜'], ['fruto', '🥭'], ['pulpa', '🥭'],
+  ['bebida', '🍹'], ['jugo', '🍹'], ['snack', '🌰'], ['nuez', '🌰'], ['fruto', '🍑'], ['pulpa', '🍑'],
 ]
 export const emojiCategoria = (cat) => {
   const c = sinTildes(cat)
