@@ -20,3 +20,11 @@ export const supabase = createClient(url, anon, {
     storageKey: 'mumi-catalogo-auth',
   },
 })
+
+// Cliente SIEMPRE anónimo, sin sesión, para las lecturas PÚBLICAS del catálogo
+// (productos, config, banners, frutos). Aísla esas lecturas de la sesión del cliente:
+// si un visitante tiene un token de sesión viejo/expirado en su navegador, ese token NO
+// se adjunta aquí, así que el catálogo carga igual (evita "se ve el diseño pero sin datos").
+export const supabasePublic = createClient(url, anon, {
+  auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+})
