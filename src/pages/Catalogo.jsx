@@ -3738,40 +3738,58 @@ function TabMensajes() {
     queryKey: ['mensajes_catalogo'],
     queryFn: async () => { const { data } = await supabase.from('mensajes_catalogo').select('*').order('id', { ascending: false }).limit(500); return data || [] },
   })
-  // Al abrir la bandeja, marcar como leídos los mensajes nuevos: así se apaga la
-  // alerta del tablero principal («N mensaje(s) del catálogo sin leer»).
-  useEffect(() => {
-    const sinLeer = msgs.filter(m => m.leido === false).map(m => m.id)
-    if (sinLeer.length === 0) return
-    let vivo = true
-    ;(async () => {
-      const { error } = await supabase.from('mensajes_catalogo').update({ leido: true }).in('id', sinLeer)
-      if (!vivo || error) return
-      qc.invalidateQueries({ queryKey: ['dash_mensajes_sin_leer'] })
-    })()
-    return () => { vivo = false }
-  }, [msgs, qc])
+  const refrescar = () => {
+    qc.invalidateQueries({ queryKey: ['mensajes_catalogo'] })
+    qc.invalidateQueries({ queryKey: ['dash_mensajes_sin_leer'] })
+  }
+  const marcarLeido = async (m, leido = true) => {
+    const { error } = await supabase.from('mensajes_catalogo').update({ leido }).eq('id', m.id)
+    if (!error) refrescar()
+  }
+  const marcarTodos = async () => {
+    const ids = msgs.filter(m => m.leido === false).map(m => m.id)
+    if (!ids.length) return
+    const { error } = await supabase.from('mensajes_catalogo').update({ leido: true }).in('id', ids)
+    if (!error) refrescar()
+  }
+  const eliminar = async (m) => {
+    if (!window.confirm('¿Eliminar este mensaje de forma permanente?')) return
+    const { error } = await supabase.from('mensajes_catalogo').delete().eq('id', m.id)
+    if (!error) refrescar()
+  }
   if (isLoading) return <div className="card"><p className="empty-table">Cargando…</p></div>
+  const sinLeer = msgs.filter(m => m.leido === false).length
   return (
     <div className="card">
-      <div className="card-title">✉️ Mensajes ({msgs.length})</div>
+      <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <span>✉️ Mensajes ({msgs.length}){sinLeer > 0 && <span className="badge badge-rojo" style={{ marginLeft: 8 }}>{sinLeer} sin leer</span>}</span>
+        {sinLeer > 0 && <button className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={marcarTodos}>Marcar todos como leídos</button>}
+      </div>
       <p style={{ fontSize: '0.84rem', color: 'var(--texto-suave)', marginTop: 0 }}>
         Aquí llegan los mensajes del formulario de la página <strong>Contacto</strong> del catálogo público.
         No son plantillas de WhatsApp (esas están en Configuración) ni la lista de correos (esa está en <strong>Correos</strong>).
       </p>
       {msgs.length === 0 ? <p className="empty-table">Aún no hay mensajes.</p>
         : <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {msgs.map(m => (
-              <div key={m.id} style={{ border: '1px solid var(--crema-oscuro)', borderRadius: 8, padding: 12 }}>
+            {msgs.map(m => {
+              const noLeido = m.leido === false
+              return (
+              <div key={m.id} style={{ border: `1px solid ${noLeido ? 'var(--dorado, #c9a227)' : 'var(--crema-oscuro)'}`, borderLeft: noLeido ? '4px solid var(--dorado, #c9a227)' : undefined, borderRadius: 8, padding: 12, background: noLeido ? 'color-mix(in srgb, var(--dorado, #c9a227) 6%, #fff)' : undefined }}>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center', marginBottom: 6 }}>
+                  {noLeido && <span className="badge badge-dorado" style={{ fontSize: '0.62rem' }}>Nuevo</span>}
                   <strong style={{ color: 'var(--selva)' }}>{m.nombre || 'Anónimo'}</strong>
                   {m.email && <a href={`mailto:${m.email}`} style={{ fontSize: '0.82rem', color: 'var(--tierra)' }}>{m.email}</a>}
                   {m.telefono && <span style={{ fontSize: '0.82rem', color: 'var(--texto-suave)' }}>· {m.telefono}</span>}
                   <span style={{ marginLeft: 'auto', fontSize: '0.75rem', color: 'var(--texto-suave)' }}>{m.created_at ? new Date(m.created_at).toLocaleString('es-CO') : ''}</span>
                 </div>
                 <p style={{ fontSize: '0.9rem', whiteSpace: 'pre-wrap' }}>{m.mensaje}</p>
+                <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                  <button className="btn btn-xs btn-secondary" onClick={() => marcarLeido(m, noLeido)}>{noLeido ? 'Marcar como leído' : 'Marcar como no leído'}</button>
+                  <button className="btn btn-xs btn-danger" onClick={() => eliminar(m)}><Ico as={Trash2} size={13} /> Eliminar</button>
+                </div>
               </div>
-            ))}
+              )
+            })}
           </div>}
     </div>
   )
