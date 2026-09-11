@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, Users, BarChart3, Star, ShoppingCart, MessageCircle, Truck, CheckCircle2, XCircle, Package, X, Trash2, Send } from 'lucide-react'
+import { Download, Users, BarChart3, Star, ShoppingCart, MessageCircle, Truck, CheckCircle2, XCircle, Package, X, Trash2, Send, Pencil } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fNum } from '../lib/businessLogic'
 
@@ -776,10 +776,12 @@ function htmlDespacho(p, cfg) {
 
 // Modal para capturar guía + transportadora + nota antes de despachar.
 function ModalDespacho({ pedido, onCerrar, onConfirmar }) {
+  const editando = (pedido.estado_envio === 'despachado')
   const [guia, setGuia] = useState(pedido.guia || '')
   const [transp, setTransp] = useState(pedido.transportadora || '')
   const [nota, setNota] = useState(pedido.nota_envio || '')
-  const [enviarEmail, setEnviarEmail] = useState(!!pedido.email)
+  // Al editar una guía ya enviada, el correo NO se reenvía por defecto (evita el «bucle»).
+  const [enviarEmail, setEnviarEmail] = useState(!!pedido.email && !editando)
   const [guardando, setGuardando] = useState(false)
   const submit = async (e) => {
     e.preventDefault()
@@ -791,7 +793,7 @@ function ModalDespacho({ pedido, onCerrar, onConfirmar }) {
     <div className="overlay" style={{ alignItems: 'center' }} onClick={(e) => e.target === e.currentTarget && onCerrar()}>
       <div className="popup" style={{ textAlign: 'left', maxWidth: 460 }}>
         <button className="popup-x" onClick={onCerrar} aria-label="Cerrar"><X size={20} /></button>
-        <h2 className="serif" style={{ color: 'var(--selva, #2e7d32)', fontSize: '1.2rem', marginBottom: 4 }}>Marcar como enviado</h2>
+        <h2 className="serif" style={{ color: 'var(--selva, #2e7d32)', fontSize: '1.2rem', marginBottom: 4 }}>{editando ? 'Editar guía / envío' : 'Marcar como enviado'}</h2>
         <p style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', margin: '0 0 12px' }}>Pedido #{pedido.codigo || pedido.id}{pedido.nombre ? ` · ${pedido.nombre}` : ''}</p>
         <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           <div className="form-group"><label className="form-label">Número de guía</label>
@@ -802,10 +804,10 @@ function ModalDespacho({ pedido, onCerrar, onConfirmar }) {
             <textarea className="form-control" rows={3} value={nota} onChange={e => setNota(e.target.value)} placeholder="Instrucciones de entrega, tiempo estimado, etc." /></div>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: pedido.email ? 'pointer' : 'not-allowed', opacity: pedido.email ? 1 : 0.5 }}>
             <input type="checkbox" checked={enviarEmail} disabled={!pedido.email} onChange={e => setEnviarEmail(e.target.checked)} />
-            Enviar correo al cliente {pedido.email ? `(${pedido.email})` : '(sin correo registrado)'}
+            {editando ? 'Reenviar' : 'Enviar'} correo al cliente {pedido.email ? `(${pedido.email})` : '(sin correo registrado)'}
           </label>
           <button className="btn btn-success" type="submit" disabled={guardando}>
-            <Truck size={15} /> {guardando ? 'Guardando…' : 'Confirmar despacho'}
+            <Truck size={15} /> {guardando ? 'Guardando…' : (editando ? 'Guardar cambios' : 'Confirmar despacho')}
           </button>
         </form>
       </div>
@@ -863,7 +865,7 @@ export function TabPedidos() {
         setAviso(`Pedido despachado, pero el correo falló: ${ex.message || ex}. Puedes notificar por WhatsApp.`)
       }
     } else {
-      setAviso(`Pedido #${p.codigo} marcado como despachado.`)
+      setAviso(p.estado_envio === 'despachado' ? `Guía del pedido #${p.codigo} actualizada.` : `Pedido #${p.codigo} marcado como despachado.`)
     }
     setDespachar(null)
   }
@@ -877,6 +879,13 @@ export function TabPedidos() {
     if (motivo === null) return
     if (await actualizar(p, { estado_envio: 'cancelado', cancelado_at: new Date().toISOString(), cancel_motivo: (motivo || '').trim() || null }))
       setAviso(`Pedido #${p.codigo} cancelado.`)
+  }
+  const eliminarPedido = async (p) => {
+    if (!window.confirm(`¿Eliminar el pedido #${p.codigo} de forma permanente?\n\nSe borra del sistema (no se puede deshacer).`)) return
+    const { error } = await supabase.from('pedidos_catalogo').delete().eq('id', p.id)
+    if (error) { setAviso('No se pudo eliminar: ' + error.message); return }
+    qc.invalidateQueries({ queryKey: ['catalogo_gestion_pedidos'] })
+    setAviso(`Pedido #${p.codigo} eliminado.`)
   }
 
   const q = busca.trim().toLowerCase()
@@ -943,9 +952,14 @@ export function TabPedidos() {
                     </td>
                     <td>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                        {!finalizado && (
-                          <button className="btn btn-xs btn-primary" onClick={() => setDespachar(p)} title="Marcar como enviado / actualizar guía">
-                            <Truck size={13} /> {est === 'despachado' ? 'Guía' : 'Enviado'}
+                        {!finalizado && est === 'despachado' && (
+                          <button className="btn btn-xs btn-secondary" onClick={() => setDespachar(p)} title="Editar guía / envío">
+                            <Pencil size={13} /> Editar guía
+                          </button>
+                        )}
+                        {!finalizado && est !== 'despachado' && (
+                          <button className="btn btn-xs btn-primary" onClick={() => setDespachar(p)} title="Marcar como enviado">
+                            <Truck size={13} /> Enviado
                           </button>
                         )}
                         {p.telefono && est === 'despachado' && wa && (
@@ -963,6 +977,9 @@ export function TabPedidos() {
                             <XCircle size={13} /> Cancelar
                           </button>
                         )}
+                        <button className="btn btn-xs btn-danger" onClick={() => eliminarPedido(p)} title="Eliminar pedido">
+                          <Trash2 size={13} />
+                        </button>
                       </div>
                     </td>
                   </tr>
