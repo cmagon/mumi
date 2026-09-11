@@ -105,23 +105,26 @@ function ModalDatosEnvio({ usuario, perfil, onClose, onSaved }) {
   const [f, setF] = useState({ ...VACIO, ...(perfil ? Object.fromEntries(Object.keys(VACIO).map(k => [k, perfil[k] ?? VACIO[k]])) : {}) })
   const [guardando, setGuardando] = useState(false)
   const [err, setErr] = useState('')
+  const [intentado, setIntentado] = useState(false)   // ¿ya intentó guardar? → resalta faltantes
   const set = (k, v) => { setF(x => ({ ...x, [k]: v })); setErr('') }
   const ciudades = useMemo(() => ciudadesDe(f.departamento), [f.departamento])
 
-  const faltan = []
-  if (!f.nombre_completo.trim()) faltan.push('nombre completo')
-  if (!telefonoValido(f.telefono)) faltan.push('teléfono válido')
-  if (!f.departamento) faltan.push('departamento')
-  if (!f.ciudad) faltan.push('ciudad')
-  if (!f.direccion.trim()) faltan.push('dirección')
-  if (f.factura_electronica) {
-    if (!f.doc_numero.trim()) faltan.push('número de documento')
-    if (!emailValido(f.email_factura)) faltan.push('correo de facturación')
+  // Invalidez por campo (para resaltar en rojo).
+  const inv = {
+    nombre_completo: !f.nombre_completo.trim(),
+    telefono: !telefonoValido(f.telefono),
+    departamento: !f.departamento,
+    ciudad: !f.ciudad,
+    direccion: !f.direccion.trim(),
+    doc_numero: f.factura_electronica && !f.doc_numero.trim(),
+    email_factura: f.factura_electronica && !emailValido(f.email_factura),
   }
+  const hayFaltantes = Object.values(inv).some(Boolean)
 
   const guardar = async (e) => {
-    e.preventDefault(); setErr('')
-    if (faltan.length) { setErr('Completa: ' + faltan.join(', ') + '.'); return }
+    e.preventDefault()
+    setErr(''); setIntentado(true)
+    if (hayFaltantes) { setErr('Faltan campos obligatorios (resaltados en rojo).'); return }
     setGuardando(true)
     try {
       await guardarPerfil(usuario, {
@@ -132,34 +135,48 @@ function ModalDatosEnvio({ usuario, perfil, onClose, onSaved }) {
       })
       await onSaved()
       onClose()
-    } catch (ex) { setErr(ex.message) }
+    } catch (ex) {
+      const m = (ex?.message || '').toLowerCase()
+      if (m.includes('jwt') || m.includes('sesi') || m.includes('token') || m.includes('401') || m.includes('row-level') || m.includes('permission')) {
+        setErr('No se pudo guardar: tu sesión pudo expirar. Cierra sesión e ingresa de nuevo.')
+      } else {
+        setErr('No se pudo guardar: ' + (ex?.message || 'inténtalo de nuevo.'))
+      }
+    }
     finally { setGuardando(false) }
   }
 
   const lbl = { fontSize: '0.8rem', fontWeight: 700, color: 'var(--selva)', marginTop: 4 }
+  // Borde rojo + fondo tenue cuando el campo es obligatorio y está vacío (tras intentar guardar).
+  const bord = (bad) => (intentado && bad) ? { borderColor: 'var(--rojo, #c0392b)', boxShadow: '0 0 0 2px rgba(192,57,43,0.15)' } : undefined
   return (
     <div className="overlay" style={{ alignItems: 'center' }} onClick={(e) => e.target === e.currentTarget && onClose()}>
       <div className="popup" style={{ textAlign: 'left', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto' }}>
         <button className="popup-x" onClick={onClose} aria-label="Cerrar"><X size={20} /></button>
         <h2 className="serif" style={{ color: 'var(--selva)', fontSize: '1.2rem', marginBottom: 10 }}>Datos de envío y facturación</h2>
-        <form onSubmit={guardar} style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {intentado && hayFaltantes && (
+          <div className="news-err" style={{ color: 'var(--rojo)', background: 'rgba(192,57,43,0.10)', border: '1px solid var(--rojo, #c0392b)', borderRadius: 8, padding: '8px 10px', marginBottom: 8, fontSize: '0.85rem' }}>
+            Completa los campos obligatorios resaltados en rojo.
+          </div>
+        )}
+        <form onSubmit={guardar} noValidate style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           <div style={{ fontWeight: 700, color: 'var(--tierra)', display: 'flex', alignItems: 'center', gap: 6 }}><MapPin size={16} /> Datos de envío</div>
           <label style={lbl}>Nombre completo *</label>
-          <input className="cf" value={f.nombre_completo} onChange={e => set('nombre_completo', e.target.value)} placeholder="Nombre y apellidos" />
+          <input className="cf" style={bord(inv.nombre_completo)} value={f.nombre_completo} onChange={e => set('nombre_completo', e.target.value)} placeholder="Nombre y apellidos" />
           <label style={lbl}>Teléfono / WhatsApp *</label>
-          <input className="cf" type="tel" inputMode="tel" value={f.telefono} onChange={e => set('telefono', e.target.value)} placeholder="Ej: 300 123 4567" />
+          <input className="cf" style={bord(inv.telefono)} type="tel" inputMode="tel" value={f.telefono} onChange={e => set('telefono', e.target.value)} placeholder="Ej: 300 123 4567" />
           <label style={lbl}>Departamento *</label>
-          <select className="cf" value={f.departamento} onChange={e => { set('departamento', e.target.value); set('ciudad', '') }}>
+          <select className="cf" style={bord(inv.departamento)} value={f.departamento} onChange={e => { set('departamento', e.target.value); set('ciudad', '') }}>
             <option value="">Selecciona…</option>
             {DEPARTAMENTOS.map(d => <option key={d} value={d}>{d}</option>)}
           </select>
           <label style={lbl}>Ciudad / Municipio *</label>
-          <select className="cf" value={f.ciudad} onChange={e => set('ciudad', e.target.value)} disabled={!f.departamento}>
+          <select className="cf" style={bord(inv.ciudad)} value={f.ciudad} onChange={e => set('ciudad', e.target.value)} disabled={!f.departamento}>
             <option value="">{f.departamento ? 'Selecciona…' : 'Elige un departamento primero'}</option>
             {ciudades.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
           <label style={lbl}>Dirección *</label>
-          <input className="cf" value={f.direccion} onChange={e => set('direccion', e.target.value)} placeholder="Calle 00 # 00-00" />
+          <input className="cf" style={bord(inv.direccion)} value={f.direccion} onChange={e => set('direccion', e.target.value)} placeholder="Calle 00 # 00-00" />
           <label style={lbl}>Barrio</label>
           <input className="cf" value={f.barrio} onChange={e => set('barrio', e.target.value)} placeholder="Opcional" />
           <label style={lbl}>Otra referencia</label>
@@ -178,9 +195,9 @@ function ModalDatosEnvio({ usuario, perfil, onClose, onSaved }) {
                 <option value="NIT">NIT</option>
               </select>
               <label style={lbl}>Número de documento *</label>
-              <input className="cf" value={f.doc_numero} onChange={e => set('doc_numero', e.target.value)} placeholder={f.doc_tipo === 'NIT' ? 'NIT' : 'Número de cédula'} />
+              <input className="cf" style={bord(inv.doc_numero)} value={f.doc_numero} onChange={e => set('doc_numero', e.target.value)} placeholder={f.doc_tipo === 'NIT' ? 'NIT' : 'Número de cédula'} />
               <label style={lbl}>Correo de facturación *</label>
-              <input className="cf" type="email" value={f.email_factura} onChange={e => set('email_factura', e.target.value)} placeholder="factura@correo.com" />
+              <input className="cf" style={bord(inv.email_factura)} type="email" value={f.email_factura} onChange={e => set('email_factura', e.target.value)} placeholder="factura@correo.com" />
             </>
           )}
           <button className="btn btn-selva" type="submit" disabled={guardando} style={{ marginTop: 12 }}>
