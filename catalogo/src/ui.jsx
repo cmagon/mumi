@@ -154,7 +154,7 @@ export function Card({ p, cfg, n: nProp = 0, onOpen, onAdd }) {
         {srcWeb
           ? <picture>
               {srcMob && srcMob !== srcWeb ? <source media="(max-width: 700px)" srcSet={srcMob} /> : null}
-              <img src={srcWeb} alt={altImg(activo, portada)} />
+              <img src={srcWeb} alt={altImg(activo, portada)} draggable={false} />
             </picture>
           : <span className="ph-fruto"><FrutoIcon name={iconoDe(activo.frutos)} size={44} /></span>}
         {oferta && <span className="ribbon ribbon-oferta">{atelier ? 'Oferta' : `-${descuentoPct(activo)}%`}</span>}

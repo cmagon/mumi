@@ -444,6 +444,10 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 .fila-scroll { position: relative; }
 .row-drag { cursor: grab; }
 .row-drag:active { cursor: grabbing; }
+/* Evita que el arrastre nativo de la imagen secuestre el gesto de scroll de la fila:
+   así el usuario puede empujar la lista horizontalmente también desde la imagen. */
+.row img, .row .card-media { -webkit-user-drag: none; user-drag: none; -webkit-touch-callout: none; }
+.row .card-media { touch-action: pan-x pan-y; }
 .fila-arrow { position: absolute; top: 38%; transform: translateY(-50%); z-index: 4; width: 38px; height: 38px; border-radius: 999px; background: rgba(255,255,255,0.94); border: 1px solid var(--crema-oscuro); box-shadow: 0 3px 12px rgba(0,0,0,0.18); display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--selva); transition: opacity .2s ease; }
 .fila-arrow:hover { background: #fff; }
 .fila-arrow-l { left: 4px; }
