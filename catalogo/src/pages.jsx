@@ -52,7 +52,7 @@ function Mosaico({ s }) {
     <section>
       <div className="sec-head"><h2 className="sec-title serif">{titulo}</h2></div>
       {s.subtitulo && <p style={{ padding: '0 16px', color: 'var(--texto-suave)', marginTop: -4 }}>{s.subtitulo}</p>}
-      <div className="frutos">
+      <RowConFlechas>
         {items.map((it, k) => (
           <TileLink key={k} to={it.link} title={it.subtitulo}>
             {it.foto
@@ -61,7 +61,7 @@ function Mosaico({ s }) {
             <div className="fruto-name">{it.titulo}</div>{it.subtitulo && <div className="fruto-sci">{it.subtitulo}</div>}
           </TileLink>
         ))}
-      </div>
+      </RowConFlechas>
     </section>
   )
 }
