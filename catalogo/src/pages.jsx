@@ -56,7 +56,7 @@ function Mosaico({ s }) {
         {items.map((it, k) => (
           <TileLink key={k} to={it.link} title={it.subtitulo}>
             {it.foto
-              ? <div className="fruto-foto"><img src={it.foto} alt={it.titulo} /></div>
+              ? <div className="fruto-foto"><img src={it.foto} alt={it.titulo} draggable={false} /></div>
               : <div className="fruto-emoji" style={{ color: it.color || 'var(--selva)' }}><FrutoIcon name={it.icono} size={36} /></div>}
             <div className="fruto-name">{it.titulo}</div>{it.subtitulo && <div className="fruto-sci">{it.subtitulo}</div>}
           </TileLink>
@@ -1430,7 +1430,10 @@ export function Contacto() {
   const set = (k, v) => setF(x => ({ ...x, [k]: v }))
   const enviar = async (e) => {
     e.preventDefault(); setErr('')
-    if (!f.mensaje.trim()) { setErr('Escribe tu mensaje'); return }
+    if (f.nombre.trim().length < 2) { setErr('Escribe tu nombre.'); return }
+    if (!emailValido(f.email)) { setErr('Ingresa un correo válido.'); return }
+    if (!telefonoValido(f.telefono)) { setErr('Ingresa un teléfono válido.'); return }
+    if (!f.mensaje.trim()) { setErr('Escribe tu mensaje.'); return }
     if (siteKey && !token) { setErr('Completa la verificación de seguridad.'); return }
     try {
       if (siteKey) {
@@ -1455,11 +1458,11 @@ export function Contacto() {
       {ok
         ? <div className="news-ok" style={{ color: 'var(--selva)', background: 'rgba(124,179,66,0.15)' }}>¡Gracias! Recibimos tu mensaje. 💚</div>
         : <form onSubmit={enviar} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <input className="cf" placeholder="Nombre" value={f.nombre} onChange={e => set('nombre', e.target.value)} />
-            <input className="cf" type="email" placeholder="Correo" value={f.email} onChange={e => set('email', e.target.value)} />
-            <input className="cf" placeholder="Teléfono" value={f.telefono} onChange={e => set('telefono', e.target.value)} />
-            <textarea className="cf" rows={4} placeholder="Tu mensaje" value={f.mensaje} onChange={e => set('mensaje', e.target.value)} />
-            <Turnstile siteKey={siteKey} onToken={setToken} />
+            <input className="cf" placeholder="Nombre *" value={f.nombre} onChange={e => set('nombre', e.target.value)} required />
+            <input className="cf" type="email" placeholder="Correo *" value={f.email} onChange={e => set('email', e.target.value)} required />
+            <input className="cf" type="tel" inputMode="tel" placeholder="Teléfono *" value={f.telefono} onChange={e => set('telefono', e.target.value)} required />
+            <textarea className="cf" rows={4} placeholder="Tu mensaje *" value={f.mensaje} onChange={e => set('mensaje', e.target.value)} required />
+            <div style={{ display: 'flex', justifyContent: 'center' }}><Turnstile siteKey={siteKey} onToken={setToken} /></div>
             <button className="btn btn-selva" type="submit" disabled={siteKey && !token} style={(siteKey && !token) ? { opacity: 0.55, cursor: 'not-allowed' } : undefined}><Send size={17} /> Enviar mensaje</button>
             {err && <div className="news-err" style={{ color: 'var(--rojo)' }}>{err}</div>}
           </form>}

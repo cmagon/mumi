@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, Users, BarChart3, Star, ShoppingCart, MessageCircle, Truck, CheckCircle2, XCircle, Package, X, Trash2, Send, Pencil } from 'lucide-react'
+import { Download, Users, BarChart3, Star, ShoppingCart, MessageCircle, Truck, CheckCircle2, XCircle, Package, X, Trash2, Send, Pencil, Eye } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fNum } from '../lib/businessLogic'
 
@@ -15,6 +15,7 @@ const ETIQUETAS = [
   { id: 'favoritos', label: 'Favoritos', hint: 'Guardó productos' },
   { id: 'carrito', label: 'Carrito', hint: 'Dejó productos en el carrito' },
   { id: 'contacto', label: 'Contacto', hint: 'Escribió por el formulario' },
+  { id: 'registrado', label: 'Registrado', hint: 'Creó cuenta / inició sesión' },
   { id: 'baja', label: 'Baja correo', hint: 'Se desuscribió' },
 ]
 
@@ -59,6 +60,7 @@ function badgeTag(t) {
     favoritos: 'badge-lima',
     carrito: 'badge-dorado',
     contacto: 'badge-verde',
+    registrado: 'badge-azul',
     baja: 'badge-rojo',
   }
   return map[t] || 'badge-dorado'
@@ -111,16 +113,32 @@ function useCatalogoCrmData() {
       return data || []
     },
   })
-  return { qPed, qSub, pedidos: qPed.data || [], subs: qSub.data || [] }
+  const qCli = useQuery({
+    queryKey: ['catalogo_clientes_perfiles'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('clientes_catalogo')
+        .select('id, email, nombre_completo, telefono, departamento, ciudad, barrio, direccion, referencia, factura_electronica, doc_tipo, doc_numero, email_factura, created_at')
+        .limit(5000)
+      if (error) return []   // tabla nueva (v168); no romper el CRM si aún no existe
+      return data || []
+    },
+  })
+  return { qPed, qSub, qCli, pedidos: qPed.data || [], subs: qSub.data || [], perfiles: qCli.data || [] }
 }
 
-function enriquecerClientes(subs, pedidos) {
+function enriquecerClientes(subs, pedidos, perfiles = []) {
   const porEmail = new Map()
   for (const p of pedidos) {
     const e = (p.email || '').trim().toLowerCase()
     if (!e) continue
     if (!porEmail.has(e)) porEmail.set(e, [])
     porEmail.get(e).push(p)
+  }
+  // Perfiles de cuenta (clientes_catalogo) por correo → etiqueta "registrado" + datos.
+  const perfilPorEmail = new Map()
+  for (const pf of perfiles || []) {
+    const e = (pf.email || '').trim().toLowerCase()
+    if (e) perfilPorEmail.set(e, pf)
   }
   const byEmail = new Map()
   for (const s of subs || []) {
@@ -130,10 +148,12 @@ function enriquecerClientes(subs, pedidos) {
     const enviados = ped.filter(p => p.estado === 'enviado' || !p.estado)
     const codigos = ped.map(p => p.codigo ? `Pedido #${p.codigo}` : `(sin código · ${dayKey(p.created_at)})`).join('\n')
     const totalGastado = enviados.reduce((sum, p) => sum + (Number(p.total) || 0), 0)
+    const perfil = perfilPorEmail.get(email) || null
     byEmail.set(email, {
       ...s,
       email,
-      etiquetas: etiquetasDe(s, ped),
+      perfil,
+      etiquetas: [...etiquetasDe(s, ped), ...(perfil ? ['registrado'] : [])],
       pedidos_codigos: codigos,
       n_pedidos: ped.length,
       n_enviados: enviados.length,
@@ -155,14 +175,37 @@ function enriquecerClientes(subs, pedidos) {
       created_at: ped[ped.length - 1]?.created_at || null,
       pedido_at: ped[0]?.created_at || null,
     }
+    const perfil = perfilPorEmail.get(email) || null
     byEmail.set(email, {
       ...fake,
-      etiquetas: etiquetasDe(fake, ped),
+      perfil,
+      etiquetas: [...etiquetasDe(fake, ped), ...(perfil ? ['registrado'] : [])],
       pedidos_codigos: ped.map(p => p.codigo ? `Pedido #${p.codigo}` : `(sin código · ${dayKey(p.created_at)})`).join('\n'),
       n_pedidos: ped.length,
       n_enviados: enviados.length,
       total_gastado: enviados.reduce((sum, p) => sum + (Number(p.total) || 0), 0),
       _pedidos: ped,
+    })
+  }
+  // Clientes registrados (cuenta) que aún no aparecen por suscripción ni pedido.
+  for (const pf of perfiles || []) {
+    const email = (pf.email || '').trim().toLowerCase()
+    if (!email || byEmail.has(email)) continue
+    byEmail.set(email, {
+      email,
+      nombre: pf.nombre_completo || '',
+      telefono: pf.telefono || '',
+      origen: 'registrado',
+      activo: true,
+      created_at: pf.created_at || null,
+      pedido_at: null,
+      perfil: pf,
+      etiquetas: ['registrado'],
+      pedidos_codigos: '',
+      n_pedidos: 0,
+      n_enviados: 0,
+      total_gastado: 0,
+      _pedidos: [],
     })
   }
   return [...byEmail.values()].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
@@ -180,7 +223,8 @@ const ORDENES = [
 
 export function TabClientes() {
   const qc = useQueryClient()
-  const { qPed, qSub, pedidos, subs } = useCatalogoCrmData()
+  const { qPed, qSub, pedidos, subs, perfiles } = useCatalogoCrmData()
+  const [verPerfil, setVerPerfil] = useState(null)
   const [desde, setDesde] = useState('')
   const [hasta, setHasta] = useState('')
   const [tagsOn, setTagsOn] = useState([])
@@ -191,7 +235,7 @@ export function TabClientes() {
   const [borrando, setBorrando] = useState('')
   const [aviso, setAviso] = useState('')
 
-  const clientes = useMemo(() => enriquecerClientes(subs, pedidos), [subs, pedidos])
+  const clientes = useMemo(() => enriquecerClientes(subs, pedidos, perfiles), [subs, pedidos, perfiles])
 
   const filtrados = useMemo(() => {
     const arr = clientes.filter(c => {
@@ -367,17 +411,60 @@ export function TabClientes() {
                     <td className="td-number">{c.n_pedidos}</td>
                     <td className="td-number">{c.total_gastado ? fCOP(c.total_gastado) : '—'}</td>
                     <td>
-                      <button type="button" className="btn btn-xs btn-danger" title="Eliminar correo del listado"
-                        disabled={borrando === (c.email || '').toLowerCase()} onClick={() => eliminarCorreo(c)}>
-                        <Trash2 size={13} />
-                      </button>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        {c.perfil && (
+                          <button type="button" className="btn btn-xs btn-secondary" title="Ver datos guardados de la cuenta" onClick={() => setVerPerfil(c)}>
+                            <Ico as={Eye} size={13} /> Datos
+                          </button>
+                        )}
+                        <button type="button" className="btn btn-xs btn-danger" title="Eliminar correo del listado"
+                          disabled={borrando === (c.email || '').toLowerCase()} onClick={() => eliminarCorreo(c)}>
+                          <Trash2 size={13} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table></div>}
       </div>
+      {verPerfil && <ModalPerfilCliente cliente={verPerfil} onCerrar={() => setVerPerfil(null)} />}
     </>
+  )
+}
+
+// Modal: datos guardados de la cuenta del cliente (envío + facturación).
+function ModalPerfilCliente({ cliente, onCerrar }) {
+  const p = cliente.perfil || {}
+  const fila = (etq, val) => (
+    <div style={{ display: 'flex', gap: 10, padding: '4px 0', fontSize: '0.85rem', borderBottom: '1px solid var(--crema, #f1eae0)' }}>
+      <span style={{ color: 'var(--texto-suave)', minWidth: 150, fontWeight: 600 }}>{etq}</span>
+      <span>{val || '—'}</span>
+    </div>
+  )
+  return (
+    <div className="overlay" style={{ alignItems: 'center' }} onClick={(e) => e.target === e.currentTarget && onCerrar()}>
+      <div className="popup" style={{ textAlign: 'left', maxWidth: 480, maxHeight: '90vh', overflowY: 'auto' }}>
+        <button className="popup-x" onClick={onCerrar} aria-label="Cerrar"><X size={20} /></button>
+        <h2 className="serif" style={{ color: 'var(--selva)', fontSize: '1.2rem', marginBottom: 4 }}>Datos de la cuenta</h2>
+        <p style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', margin: '0 0 12px' }}>{cliente.email}</p>
+        <div style={{ fontWeight: 700, color: 'var(--tierra)', marginBottom: 4 }}>Envío</div>
+        {fila('Nombre completo', p.nombre_completo)}
+        {fila('Teléfono', p.telefono)}
+        {fila('Departamento', p.departamento)}
+        {fila('Ciudad', p.ciudad)}
+        {fila('Dirección', p.direccion)}
+        {fila('Barrio', p.barrio)}
+        {fila('Referencia', p.referencia)}
+        <div style={{ fontWeight: 700, color: 'var(--tierra)', margin: '12px 0 4px' }}>Facturación electrónica</div>
+        {fila('¿Requiere factura?', p.factura_electronica ? 'Sí' : 'No')}
+        {p.factura_electronica && <>
+          {fila('Tipo de documento', p.doc_tipo)}
+          {fila('Número de documento', p.doc_numero)}
+          {fila('Correo de facturación', p.email_factura)}
+        </>}
+      </div>
+    </div>
   )
 }
 
