@@ -232,7 +232,7 @@ function CuentaInner() {
       <div style={{ padding: '16px' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
           <h1 className="serif" style={{ fontSize: '1.6rem', color: 'var(--selva)', margin: 0 }}><User size={22} style={{ verticalAlign: '-4px' }} /> Mi cuenta</h1>
-          <button className="btn btn-ghost btn-sm" onClick={salir}><LogOut size={15} /> Salir</button>
+          <button className="btn btn-ghost btn-sm" onClick={async () => { await salir(); nav('/', { replace: true }) }}><LogOut size={15} /> Salir</button>
         </div>
         <p style={{ color: 'var(--texto-suave)', margin: '4px 0 14px', fontSize: '0.9rem' }}>{usuario?.email}</p>
 
