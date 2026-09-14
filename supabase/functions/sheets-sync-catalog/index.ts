@@ -79,17 +79,15 @@ function urlsDeProducto(p: { imagen_url?: unknown; imagenes?: unknown } | null |
     const s = String(u || '').trim()
     if (esUrlImagen(s) && !out.includes(s)) out.push(s)
   }
+  // Una sola URL por foto: la de escritorio (url/src) y, solo si no hay, la móvil.
+  // NO se agregan las variantes de tamaño de la MISMA foto (antes url_mobile se sumaba
+  // aparte y un producto con una sola imagen enviaba esa foto repetida en otro tamaño
+  // como "imagen adicional").
   for (const x of parseImagenes(p.imagenes)) {
     if (typeof x === 'string') add(x)
-    else if (x && typeof x === 'object') {
-      add((x as any).url)
-      add((x as any).src)
-    }
+    else if (x && typeof x === 'object') add((x as any).url || (x as any).src || (x as any).url_mobile)
   }
   add(p.imagen_url)
-  for (const x of parseImagenes(p.imagenes)) {
-    if (x && typeof x === 'object') add((x as any).url_mobile)
-  }
   return out
 }
 
