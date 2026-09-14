@@ -210,11 +210,14 @@ export function StoreProvider({ children }) {
   useEffect(() => { try { localStorage.setItem('mumi_carrito', JSON.stringify(carrito)) } catch { /* noop */ } }, [carrito])
   useEffect(() => { try { localStorage.setItem('mumi_favs', JSON.stringify(favs)) } catch { /* noop */ } }, [favs])
 
-  // Sincroniza favoritos remotos cuando hay sesión por correo
+  // Carga los favoritos guardados SOLO cuando hay sesión iniciada (login).
+  // No se cargan por la sesión "suave" del correo (p. ej. al hacer un pedido),
+  // para no mostrar los favoritos sin haber iniciado sesión.
   useEffect(() => {
-    if (!emailValido(emailSesion)) return
+    const email = usuario?.email
+    if (!emailValido(email)) return
     let cancel = false
-    listarFavoritosRemotos(emailSesion).then((ids) => {
+    listarFavoritosRemotos(email).then((ids) => {
       if (cancel || !ids?.length) return
       setFavs((prev) => {
         const set = new Set([...prev.map(String), ...ids.map(String)])
@@ -222,7 +225,7 @@ export function StoreProvider({ children }) {
       })
     })
     return () => { cancel = true }
-  }, [emailSesion])
+  }, [usuario]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Sesión de cliente (Supabase Auth). Al autenticarse, se puentea con la sesión "soft"
   // por correo para que favoritos, carrito e historial sigan operando por correo.
