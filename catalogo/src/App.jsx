@@ -527,7 +527,7 @@ function CartDrawer({ onClose }) {
               <label style={{ fontSize: '0.82rem', color: 'var(--selva)', fontWeight: 700 }}>Correo *</label>
               <input type="email" value={email} onChange={e => { setEmailForm(e.target.value); setEmail(e.target.value.trim().toLowerCase()) }} placeholder="tu@correo.com"
                 style={{ width: '100%', marginTop: 6, padding: 11, borderRadius: 10, border: `1.5px solid ${emailOk ? 'var(--crema-oscuro)' : 'var(--dorado)'}`, font: 'inherit' }} />
-              {!emailOk && <div style={{ fontSize: '0.76rem', color: 'var(--tierra)', marginTop: 4 }}>Necesitamos tu correo para el pedido y novedades.</div>}
+              {!emailOk && <div style={{ fontSize: '0.76rem', color: 'var(--tierra)', marginTop: 4 }}>Necesitamos tu correo para el pedido.</div>}
               <label style={{ fontSize: '0.82rem', color: 'var(--selva)', fontWeight: 700, display: 'block', marginTop: 12 }}>Tu nombre *</label>
               <input value={nombre} onChange={e => { setNombre(e.target.value); setCliente(e.target.value.trim()) }} placeholder="¿Con quién tenemos el gusto?"
                 style={{ width: '100%', marginTop: 6, padding: 11, borderRadius: 10, border: `1.5px solid ${nombreOk ? 'var(--crema-oscuro)' : 'var(--dorado)'}`, font: 'inherit' }} />
@@ -540,7 +540,7 @@ function CartDrawer({ onClose }) {
               <textarea rows={2} value={nota} onChange={e => setNota(e.target.value)} placeholder="Indicaciones adicionales para tu pedido" style={{ width: '100%', marginTop: 6, padding: 10, borderRadius: 10, border: '1.5px solid var(--crema-oscuro)', font: 'inherit', resize: 'vertical' }} />
             </div>
             {mayorista && <div style={{ padding: '0 16px', color: 'var(--selva)', fontSize: '0.8rem', fontWeight: 700 }}>Precios de mayorista aplicados 🏷️</div>}
-            <div style={{ padding: '4px 16px 8px', display: 'flex', justifyContent: 'space-between', fontWeight: 700, fontSize: '1.1rem', color: 'var(--selva)' }}><span>Total</span><span>{fCOP(total)}</span></div>
+            <div style={{ padding: '4px 16px 8px', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2, color: 'var(--selva)' }}><span style={{ fontWeight: 700, fontSize: '1.1rem' }}>Total</span><span style={{ fontWeight: 800, fontSize: '1.7rem' }}>{fCOP(total)}</span></div>
             {textoEnvio(cfg) && <p style={{ padding: '0 16px 6px', color: 'var(--texto-suave)', fontSize: '0.82rem' }}>{textoEnvio(cfg)}</p>}
             {(cfg.envio_umbral_activo || cfg.envio_gratis_barra_activo)
               ? <div style={{ padding: '0 16px 10px' }}><BarrasUmbralEnvio /></div>
