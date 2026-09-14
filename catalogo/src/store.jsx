@@ -254,9 +254,12 @@ export function StoreProvider({ children }) {
   }
   const salir = async () => {
     await cerrarSesion()
-    // Limpia también la sesión "soft" (correo/nombre/teléfono) para que favoritos y
-    // checkout no sigan identificando al cliente tras salir.
+    // Limpia también la sesión "soft" (correo/nombre/teléfono) y los favoritos locales
+    // para que no queden visibles tras salir. (Los favoritos siguen guardados en la BD
+    // por correo y se recargan al volver a iniciar sesión o al identificarse con ese correo.)
     saveEmail(''); setEmailSesion(''); setCliente(''); setTelefono('')
+    setFavs([])
+    try { localStorage.removeItem('mumi_favs') } catch { /* noop */ }
     setUsuario(null); setPerfil(null)
   }
 
