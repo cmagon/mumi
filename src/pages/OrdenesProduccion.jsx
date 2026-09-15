@@ -778,7 +778,7 @@ export default function OrdenesProduccion() {
     }
     if (st.nuevaOrden) {
       const n = st.nuevaOrden
-      setForm({ ...EMPTY_ORDEN, producto: n.producto || '', origen: n.origen || 'producto', origen_id: n.origen_id || '', cantidad_plan: n.cantidad_plan || '', vence: n.vence || '', operario: esOperario ? (profile?.nombre || '') : '',
+      setForm({ ...EMPTY_ORDEN, producto: n.producto || '', origen: n.origen || 'producto', origen_id: n.origen_id || '', cantidad_plan: n.cantidad_plan || '', vence: n.vence || '', lote: n.lote || '', operario: esOperario ? (profile?.nombre || '') : '',
         // Empaque mezclado (surtido) prellenado desde "Productos por Empacar"
         surtido_prefill: !!n.surtido, surtido_lote_mezcla: n.lote_mezcla || '', surtido_producto: n.producto_surtido || '', surtido_cantidad: n.surtido_cantidad != null ? String(n.surtido_cantidad) : '' })
       setProdReceta(null); setIngIdx(''); setIngDisp('')
@@ -1841,7 +1841,7 @@ export default function OrdenesProduccion() {
       <table class="campos">
         ${esSurtido ? `
           <tr><td class="lbl">Lote producto</td><td><b>${rotLote || '(lote original)'}</b> — mantiene el formato del lote original</td></tr>
-          <tr><td class="lbl">Lote de la caja</td><td><b>${loteCaja(loteMezcla, rotLote) || rotLote || '(sin especificar)'}</b> (lote más reciente del surtido)</td></tr>
+          <tr><td class="lbl">Lote de la caja</td><td><b>${rotLote || loteCaja(loteMezcla, rotLote) || '(sin especificar)'}</b> (lote elegido para las cajas)</td></tr>
           <tr><td class="lbl">Empacado surtido con lote(s)</td><td><b>${loteMezcla || '(sin especificar)'}</b></td></tr>
           <tr><td class="lbl">Vence (Exp.)</td><td>${rotVence ? `<b>${ddmmaa(rotVence)}</b> (ddmmaa)` : ''}</td></tr>
         ` : `
@@ -2155,11 +2155,12 @@ export default function OrdenesProduccion() {
     }
 
     // 5) Si el admin auto-aprueba un producto terminado, súmalo al inventario de terminados.
-    //    En surtido: el stock es la cantidad empacada surtida y el lote de la caja = último lote combinado.
+    //    En surtido: el stock es la cantidad empacada surtida y el lote de la caja = el LOTE que
+    //    eligió el operario (d.lote); si no puso ninguno, se usa el más reciente del surtido.
     if (d.autoAprob) {
       const esSurt = d.surtido && d.productoSurtido
       let cantStock, nombreStock, loteStock
-      if (esSurt) { cantStock = parseFloat(d.surtidoCantidad) || 0; nombreStock = d.productoSurtido; loteStock = loteCaja(d.loteMezcla, d.lote) || d.lote }
+      if (esSurt) { cantStock = parseFloat(d.surtidoCantidad) || 0; nombreStock = d.productoSurtido; loteStock = d.lote || loteCaja(d.loteMezcla, d.lote) }
       // Producto base/porcionado: se suma la CANTIDAD FINAL (unidades/cajas), igual que el
       // registro diario (cantidad_result). Para porcionados, prepUnidades ya viene convertido a
       // cajas/unidades de venta; el sobrante de mezcla va a saldo aparte (no descuenta cajas).
@@ -3409,7 +3410,7 @@ export default function OrdenesProduccion() {
           const unpackedSub = (o.hay_sobrante && o.sobrante_unidad === 'subporciones') ? (Number(o.sobrante_peso) || 0) : 0
           const porciona = o.cant_subporciones != null
           let cantStock, nombreStock, loteStock
-          if (esSurt) { cantStock = Number(o.surtido_cantidad) || 0; nombreStock = o.producto_surtido; loteStock = loteCaja(o.lote_mezcla, o.lote) || o.lote }
+          if (esSurt) { cantStock = Number(o.surtido_cantidad) || 0; nombreStock = o.producto_surtido; loteStock = o.lote || loteCaja(o.lote_mezcla, o.lote) }
           else if (porciona) { cantStock = Math.max(0, (Number(o.cant_subporciones) || 0) - unpackedSub); nombreStock = o.producto; loteStock = o.lote }
           else { cantStock = o.cantidad_result || 0; nombreStock = o.producto; loteStock = o.lote }
           await sumarProductoTerminado(o, cantStock, nombreStock, loteStock)

@@ -27,7 +27,7 @@ export default function ProductosPorEmpacar() {
   // Empaque MEZCLADO (surtido): selección de 2+ saldos que se combinan en un solo producto terminado.
   const [mezclaSel, setMezclaSel] = useState({})   // { [saldoId]: true }
   const [modalMezcla, setModalMezcla] = useState(false)
-  const [mForm, setMForm] = useState({ producto: '', cantidad: '' })
+  const [mForm, setMForm] = useState({ producto: '', cantidad: '', lote: '' })
 
   const { data: saldos = [] } = useQuery({
     queryKey: ['mezcla_saldos'],
@@ -101,7 +101,8 @@ export default function ProductosPorEmpacar() {
   const abrirMezcla = () => {
     if (saldosMezcla.length < 2) { toast('Selecciona al menos 2 productos por empacar para mezclar', 'warning'); return }
     if (saldosMezcla.some(s => !String(s.lote || '').trim())) { toast('Todos los productos a mezclar deben tener lote. Edita el que no lo tenga.', 'warning'); return }
-    setMForm({ producto: '', cantidad: maxCajas > 0 ? String(maxCajas) : '' })
+    // Lote de las cajas por defecto = el del primer lote seleccionado (editable).
+    setMForm({ producto: '', cantidad: maxCajas > 0 ? String(maxCajas) : '', lote: String(saldosMezcla[0]?.lote || '').trim() })
     setModalMezcla(true)
   }
   const confirmarMezcla = () => {
@@ -121,6 +122,8 @@ export default function ProductosPorEmpacar() {
         saldo_ids: [base.id],
         saldo_cantidades: { [base.id]: String(cajas) },
         vence: base.vencimiento || '',
+        // Lote que llevarán las cajas del producto surtido (elegido por el usuario, editable luego).
+        lote: String(mForm.lote || '').trim(),
         // Prellenado de surtido: el resto de lotes se combinan y el resultado va al producto elegido.
         surtido: true,
         lote_mezcla: loteMezcla,
@@ -299,6 +302,12 @@ export default function ProductosPorEmpacar() {
               {terminados.map(t => <option key={t.id} value={t.nombre}>{t.tipo === 'surtido' ? '🔀 ' : ''}{t.nombre}</option>)}
             </select>
             <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Elige del catálogo de Producto Terminado. Si no existe, créalo primero para que sume al stock correcto.</small>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Lote de las cajas</label>
+            <input className="form-control" list="dl-lote-cajas" value={mForm.lote} onChange={e => setMForm(f => ({ ...f, lote: e.target.value }))} placeholder="Lote que llevará el producto surtido" />
+            <datalist id="dl-lote-cajas">{saldosMezcla.map(s => <option key={s.id} value={s.lote}>{s.lote} — {s.producto}</option>)}</datalist>
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Es el lote que se imprimirá en la caja y con el que entra al stock. Puedes usar el de un sabor o escribir otro. También podrás cambiarlo al empacar.</small>
           </div>
           <div className="form-group">
             <label className="form-label">Cantidad de cajas a empacar {maxCajas > 0 && <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>— máximo {fCant(maxCajas)}</small>}</label>

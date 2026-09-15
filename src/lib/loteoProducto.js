@@ -340,20 +340,41 @@ export function describirPlantilla(config) {
   return c.partes.map(etiquetaParte).join(' + ')
 }
 
-/** ¿Hay lotes tipo nAA del año actual? (ej. 10026, 10326). */
-export function hayLotesSerieNaa(lotesPrevios = [], fecha = new Date()) {
+/**
+ * Mínimo de lotes de una serie nAA para considerar que existe una SECUENCIA establecida.
+ * Con menos que esto NO se fuerza el modo secuencial (evita que uno o dos lotes numéricos
+ * sueltos "secuestren" a un producto que en realidad se lotea por fecha).
+ */
+export const MIN_SERIE_NAA = 5
+
+/** Cuenta cuántos lotes DISTINTOS tipo nAA del año actual hay (ej. 10026, 10326). */
+export function contarLotesSerieNaa(lotesPrevios = [], fecha = new Date()) {
   const cfg = normalizarMetodoLoteo(CONFIG_LOTEO_NAA)
+  const vistos = new Set()
   for (const l of expandirLotes(lotesPrevios)) {
-    if (parseSeqDeLote(l, cfg, fecha) != null) return true
+    const key = String(l).trim()
+    if (vistos.has(key)) continue
+    if (parseSeqDeLote(l, cfg, fecha) != null) vistos.add(key)
   }
-  return false
+  return vistos.size
+}
+
+/**
+ * ¿Hay una SERIE nAA establecida? (al menos `min` lotes distintos del año actual).
+ * Antes bastaba 1 lote para darla por buena, lo que hacía que casi todo se sugiriera
+ * secuencial. Ahora exige un mínimo para reconocer la secuencia.
+ */
+export function hayLotesSerieNaa(lotesPrevios = [], fecha = new Date(), min = MIN_SERIE_NAA) {
+  return contarLotesSerieNaa(lotesPrevios, fecha) >= Math.max(1, min)
 }
 
 /**
  * Elige la config efectiva para sugerir:
- * - Si la ficha trae Numeración → se respeta.
- * - Si la ficha está vacía, es solo-fecha, o no se pudo leer SQL, pero ya existen lotes nAA
- *   (10026…), se usa serie nAA. Así no se sugiere 260826 por una ficha mal armada.
+ * - Si la ficha trae Numeración → se respeta (secuencial de la ficha).
+ * - Si la ficha está configurada por FECHA → se respeta la fecha (NO se fuerza secuencial).
+ * - Solo si la ficha está VACÍA / no se pudo leer de SQL, y además ya existe una SERIE nAA
+ *   establecida (al menos MIN_SERIE_NAA lotes), se usa serie nAA como respaldo. Así uno o dos
+ *   lotes numéricos sueltos no convierten en secuencial a un producto que va por fecha.
  */
 export function resolverConfigSugerenciaLote(configFicha, lotesPrevios = [], { fecha = new Date() } = {}) {
   const ficha = normalizarMetodoLoteo(configFicha)
@@ -361,19 +382,16 @@ export function resolverConfigSugerenciaLote(configFicha, lotesPrevios = [], { f
   if (tieneSeq) {
     return { config: ficha, origen: 'ficha', aviso: null }
   }
+  // La ficha está configurada explícitamente por fecha/texto → se respeta tal cual.
+  if (ficha) {
+    return { config: ficha, origen: 'ficha_fecha', aviso: null }
+  }
+  // Sin config legible en la ficha: solo se asume secuencial si HAY una serie nAA de verdad.
   if (hayLotesSerieNaa(lotesPrevios, fecha)) {
-    const leido = ficha ? describirPlantilla(ficha) : 'vacío / no leído de SQL'
     return {
       config: normalizarMetodoLoteo(CONFIG_LOTEO_NAA),
       origen: 'naa_fallback',
-      aviso: `La ficha en SQL no trae Numeración (leído: ${leido}). Sugiriendo serie nAA según lotes existentes (ej. 10326 → 10426). Corrige la ficha con el atajo «Serie nAA» y vuelve a guardar.`,
-    }
-  }
-  if (ficha) {
-    return {
-      config: ficha,
-      origen: 'ficha_fecha',
-      aviso: 'La ficha no tiene Numeración: se usará la fecha del día. Para 10426 usa el atajo «Serie nAA».',
+      aviso: `La ficha en SQL no trae método de loteo. Como ya existe una serie nAA (${contarLotesSerieNaa(lotesPrevios, fecha)} lotes), se sugiere continuarla (ej. 10326 → 10426). Configura el método en la ficha para fijarlo.`,
     }
   }
   return { config: null, origen: 'ninguno', aviso: null }
