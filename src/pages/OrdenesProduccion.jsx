@@ -778,7 +778,9 @@ export default function OrdenesProduccion() {
     }
     if (st.nuevaOrden) {
       const n = st.nuevaOrden
-      setForm({ ...EMPTY_ORDEN, producto: n.producto || '', origen: n.origen || 'producto', origen_id: n.origen_id || '', cantidad_plan: n.cantidad_plan || '', vence: n.vence || '', operario: esOperario ? (profile?.nombre || '') : '' })
+      setForm({ ...EMPTY_ORDEN, producto: n.producto || '', origen: n.origen || 'producto', origen_id: n.origen_id || '', cantidad_plan: n.cantidad_plan || '', vence: n.vence || '', lote: n.lote || '', operario: esOperario ? (profile?.nombre || '') : '',
+        // Empaque mezclado (surtido) prellenado desde "Productos por Empacar"
+        surtido_prefill: !!n.surtido, surtido_lote_mezcla: n.lote_mezcla || '', surtido_producto: n.producto_surtido || '', surtido_cantidad: n.surtido_cantidad != null ? String(n.surtido_cantidad) : '' })
       setProdReceta(null); setIngIdx(''); setIngDisp('')
       setModalNueva(true)
       const afterProd = async () => {
@@ -1310,7 +1312,9 @@ export default function OrdenesProduccion() {
     setPrepUnidades(ord.empaque_saldo ? String(ord.cantidad_result || ord.cantidad_plan || '') : (ord.cantidad_result || '')); setPrepPesoFinal(ord.peso_final || ''); setPrepPesoDesp(ord.peso_desperdicio || '')
     setPrepObs(ord.obs_result || ''); setPrepResp(ord.operario || profile?.nombre || ''); setPrepConforme(triState(ps.conforme))
     // Surtido y sobrante SIEMPRE arrancan sin marcar (el usuario debe elegir); solo se restauran si ya se respondieron en el borrador.
-    setPrepSurtido(triState(ps.surtido)); setPrepLoteMezcla(ord.lote_mezcla || ''); setPrepProductoSurtido(ord.producto_surtido || '')
+    // Si la orden nació como empaque mezclado (surtido prellenado) y aún no se ha respondido el SI/NO,
+    // se arranca en "SÍ" a partir de la columna surtido persistida. Las órdenes normales siguen en null.
+    setPrepSurtido((ps.surtido === true || ps.surtido === false) ? ps.surtido : (ord.surtido ? true : null)); setPrepLoteMezcla(ord.lote_mezcla || ''); setPrepProductoSurtido(ord.producto_surtido || '')
     setPrepPorciona(false); setPrepCantSubp(ord.cant_subporciones || '')
     setPrepFotoFile(null); setPrepFotoPrev(ord.foto_url || '')
     if (packs.length) {
@@ -1338,6 +1342,9 @@ export default function OrdenesProduccion() {
     setPrepSurtidoConsumos({})
     setPrepCamposExtra(Array.isArray(ord.campos_extra) ? ord.campos_extra.map(c => ({ ...c, _id: Date.now() + Math.random() })) : [])
     await prepararDatos(ord)
+    // Si la orden nació como empaque MEZCLADO (surtido prellenado), habilita la sección de surtido
+    // aunque el producto base no tenga marcado "empaca_surtido": ya viene decidido desde el origen.
+    if (ord.surtido) setPrepPermiteSurtido(true)
     const mpInt = (ord.es_mp || ord.es_subproducto) && ord.mp_id ? mps.find(m => String(m.id) === String(ord.mp_id)) : null
     if (mpInt && esUnidadPeso(mpInt.unidad) && !ord.empaque_saldo) {
       const ue = defaultUnidadEntradaObtenido(mpInt.unidad)
@@ -1816,7 +1823,9 @@ export default function OrdenesProduccion() {
       const pct = f.gramos != null && totalG > 0 ? (f.gramos / totalG * 100).toFixed(2) : ''
       const cant = f.gramos != null ? g(f.gramos) : '—'
       const nom = escHtml(f.nombre) + (f.esEmpaque ? ' <small>(empaque)</small>' : '')
-      return `<tr><td>${nom}${trHtml ? `<div style="font-size:9px;color:#444;margin-top:3px;line-height:1.35">${trHtml}</div>` : ''}</td><td class="r">${pct !== '' ? pct + '%' : '—'}</td><td class="r">${cant}</td></tr>`
+      // Trazabilidad de MP en COLUMNA APARTE (lote/vence/proveedor). Si aún no hay lote asignado
+      // (orden en blanco/pendiente), la celda queda vacía para diligenciarla a mano.
+      return `<tr><td>${nom}</td><td class="traza">${trHtml || ''}</td><td class="r">${pct !== '' ? pct + '%' : '—'}</td><td class="r">${cant}</td></tr>`
     }
     const fecha = new Date().toLocaleDateString('es-CO')
     const emision = o.created_at ? new Date(o.created_at).toLocaleDateString('es-CO') : fecha
@@ -1834,7 +1843,7 @@ export default function OrdenesProduccion() {
       <table class="campos">
         ${esSurtido ? `
           <tr><td class="lbl">Lote producto</td><td><b>${rotLote || '(lote original)'}</b> — mantiene el formato del lote original</td></tr>
-          <tr><td class="lbl">Lote de la caja</td><td><b>${loteCaja(loteMezcla, rotLote) || rotLote || '(sin especificar)'}</b> (lote más reciente del surtido)</td></tr>
+          <tr><td class="lbl">Lote de la caja</td><td><b>${rotLote || loteCaja(loteMezcla, rotLote) || '(sin especificar)'}</b> (lote elegido para las cajas)</td></tr>
           <tr><td class="lbl">Empacado surtido con lote(s)</td><td><b>${loteMezcla || '(sin especificar)'}</b></td></tr>
           <tr><td class="lbl">Vence (Exp.)</td><td>${rotVence ? `<b>${ddmmaa(rotVence)}</b> (ddmmaa)` : ''}</td></tr>
         ` : `
@@ -1909,6 +1918,8 @@ export default function OrdenesProduccion() {
       .firmas .linea { border-top:1px solid #555; padding-top:0.3em; }
       tbody tr:nth-child(even) td { background:#fafafa; }
       .ingr tbody tr:nth-child(even) td { background:#fafafa; }
+      /* Columna de trazabilidad de MP (lote/vence/proveedor) — texto compacto */
+      .ingr td.traza { font-size:9px; color:#444; line-height:1.35; }
     </style></head><body><div id="content">
       ${o.estado === 'cancelada' ? '<div class="marca-agua">NO EJECUTADA</div>' : ''}
 
@@ -1938,8 +1949,8 @@ export default function OrdenesProduccion() {
       </table>
 
       <div class="seccion">LISTA DE INGREDIENTES Y TRAZABILIDAD</div>
-      <table class="ingr"><thead><tr><th>Ingrediente / trazabilidad</th><th class="r">Porcentaje</th><th class="r">Cantidad (gr)</th></tr></thead>
-        <tbody>${filasIngPrint.length ? filasIngPrint.map(filaIngPrintHtml).join('') + `<tr><td><b>TOTAL mezcla</b></td><td class="r"><b>100%</b></td><td class="r"><b>${g(totalG)}</b></td></tr>` : '<tr><td colspan="3">Sin receta vinculada</td></tr>'}</tbody>
+      <table class="ingr"><thead><tr><th>Ingrediente</th><th style="width:38%">Lote / Trazabilidad MP</th><th class="r">Porcentaje</th><th class="r">Cantidad (gr)</th></tr></thead>
+        <tbody>${filasIngPrint.length ? filasIngPrint.map(filaIngPrintHtml).join('') + `<tr><td><b>TOTAL mezcla</b></td><td></td><td class="r"><b>100%</b></td><td class="r"><b>${g(totalG)}</b></td></tr>` : '<tr><td colspan="4">Sin receta vinculada</td></tr>'}</tbody>
       </table>
 
       ${d ? `<div class="seccion">DATOS PREVISTOS</div>${filasPrev}` : ''}
@@ -2148,11 +2159,12 @@ export default function OrdenesProduccion() {
     }
 
     // 5) Si el admin auto-aprueba un producto terminado, súmalo al inventario de terminados.
-    //    En surtido: el stock es la cantidad empacada surtida y el lote de la caja = último lote combinado.
+    //    En surtido: el stock es la cantidad empacada surtida y el lote de la caja = el LOTE que
+    //    eligió el operario (d.lote); si no puso ninguno, se usa el más reciente del surtido.
     if (d.autoAprob) {
       const esSurt = d.surtido && d.productoSurtido
       let cantStock, nombreStock, loteStock
-      if (esSurt) { cantStock = parseFloat(d.surtidoCantidad) || 0; nombreStock = d.productoSurtido; loteStock = loteCaja(d.loteMezcla, d.lote) || d.lote }
+      if (esSurt) { cantStock = parseFloat(d.surtidoCantidad) || 0; nombreStock = d.productoSurtido; loteStock = d.lote || loteCaja(d.loteMezcla, d.lote) }
       // Producto base/porcionado: se suma la CANTIDAD FINAL (unidades/cajas), igual que el
       // registro diario (cantidad_result). Para porcionados, prepUnidades ya viene convertido a
       // cajas/unidades de venta; el sobrante de mezcla va a saldo aparte (no descuenta cajas).
@@ -2630,6 +2642,15 @@ export default function OrdenesProduccion() {
         lotes_preferidos: form.lotes_elegidos && Object.keys(form.lotes_elegidos).length ? form.lotes_elegidos : null,
         empaque_saldo: esEmp,
         saldo_pack: esEmp ? packsElegidos : null,
+        // Empaque MEZCLADO (surtido) prellenado: la orden nace ya marcada como surtido, con el/los
+        // lote(s) combinado(s), el producto terminado resultante y la cantidad de cajas. Al abrir el
+        // empaque, estos valores se restauran (ver openProceso) y el motor de surtido hace el resto.
+        ...(form.surtido_prefill ? {
+          surtido: true,
+          lote_mezcla: form.surtido_lote_mezcla || null,
+          producto_surtido: form.surtido_producto || null,
+          surtido_cantidad: form.surtido_cantidad !== '' ? (parseFloat(form.surtido_cantidad) || 0) : null,
+        } : {}),
       }
       if (editOrdenId) {
         // Editar una orden aún PENDIENTE (no tomada)
@@ -3393,7 +3414,7 @@ export default function OrdenesProduccion() {
           const unpackedSub = (o.hay_sobrante && o.sobrante_unidad === 'subporciones') ? (Number(o.sobrante_peso) || 0) : 0
           const porciona = o.cant_subporciones != null
           let cantStock, nombreStock, loteStock
-          if (esSurt) { cantStock = Number(o.surtido_cantidad) || 0; nombreStock = o.producto_surtido; loteStock = loteCaja(o.lote_mezcla, o.lote) || o.lote }
+          if (esSurt) { cantStock = Number(o.surtido_cantidad) || 0; nombreStock = o.producto_surtido; loteStock = o.lote || loteCaja(o.lote_mezcla, o.lote) }
           else if (porciona) { cantStock = Math.max(0, (Number(o.cant_subporciones) || 0) - unpackedSub); nombreStock = o.producto; loteStock = o.lote }
           else { cantStock = o.cantidad_result || 0; nombreStock = o.producto; loteStock = o.lote }
           await sumarProductoTerminado(o, cantStock, nombreStock, loteStock)
@@ -3782,6 +3803,12 @@ export default function OrdenesProduccion() {
           <button className="btn btn-primary" onClick={intentarCrearOrden} disabled={crearOrden.isPending || (empacarSaldo === true && Object.keys(saldoPackSel).some(id => !!ordenEnProcesoDeSaldo(id, editOrdenId)))}>{editOrdenId ? 'Guardar cambios' : 'Crear y asignar'}</button>
         </>}
       >
+        {form.surtido_prefill && (
+          <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>
+            🔀 <strong>Empaque mezclado (surtido).</strong> Esta orden empaca <strong>{form.producto}</strong> combinado con el/los lote(s) <strong>{form.surtido_lote_mezcla || '—'}</strong> para producir <strong>{form.surtido_producto || '(producto surtido)'}</strong>{form.surtido_cantidad ? <> · <strong>{form.surtido_cantidad}</strong> cajas</> : null}.
+            {' '}Al iniciar el proceso, la mezcla ya vendrá cargada; solo confirma cantidades y ciérrala.
+          </div>
+        )}
         <div className="form-group">
           <label className="form-label">Receta / Producto</label>
           {(() => {
