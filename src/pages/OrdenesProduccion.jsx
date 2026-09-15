@@ -4262,7 +4262,16 @@ export default function OrdenesProduccion() {
 
       {/* Modal Iniciar proceso — fecha de inicio + tiempos por subproceso (autoguardado) */}
       <Modal open={modalProceso} onClose={closeProceso} guard={false}
-        title={<span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', width: '100%' }}><Play size={18} aria-hidden="true" /> #{ordenPrep ? opNum(ordenPrep.id) : ''} Proceso — {ordenPrep?.producto || ''}
+        title={<span style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap', width: '100%' }}>
+          <span style={{ display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Play size={18} aria-hidden="true" /> #{ordenPrep ? opNum(ordenPrep.id) : ''} Proceso — {ordenPrep?.producto || ''}</span>
+            {/* Desde el paso Producción, muestra lote y vence bajo el nombre (letra pequeña) una vez ingresados */}
+            {procStep >= 1 && (prepLote.trim() || prepVence) && (
+              <span style={{ fontSize: '0.72rem', fontWeight: 400, color: 'var(--texto-suave)', marginTop: 2 }}>
+                {prepLote.trim() ? `Lote ${prepLote.trim()}` : ''}{prepLote.trim() && prepVence ? ' · ' : ''}{prepVence ? `Vence ${fFecha(prepVence)}` : ''}
+              </span>
+            )}
+          </span>
           {puedeCompartirArchivos && (
             <button type="button" className="btn btn-secondary btn-sm" style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }} title="Compartir orden (PDF)" onClick={() => compartirOrden()}><Share2 size={16} aria-hidden="true" /> Compartir</button>
           )}
@@ -4322,54 +4331,6 @@ export default function OrdenesProduccion() {
                 </div>
               </details>
             )}
-            {/* Documentos de la ficha: instrucciones de elaboración + etiquetas/rótulos.
-                El operario los abre o imprime aquí mismo, sin salir de la orden ni buscarlos. */}
-            {(() => {
-              const docs = [
-                ...(prepFicha?.url ? [{ bucket: 'technical-sheets', path: prepFicha.url, nombre: prepFicha.nombre || 'Ficha técnica', esFicha: true }] : []),
-                ...prepImprimibles.map(i => ({ bucket: 'ficha-imprimibles', path: i.path, nombre: i.nombre })),
-              ]
-              if (!docs.length) return null
-              return (
-                <details className="acordeon-item" style={{ marginBottom: 12, borderLeft: '4px solid var(--dorado)' }} open>
-                  <summary>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-                      <Printer size={16} aria-hidden="true" /> Documentos e imprimibles
-                      <span className="badge badge-dorado">{docs.length}</span>
-                    </span>
-                  </summary>
-                  <div className="acordeon-body">
-                    <div style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', marginBottom: 8 }}>
-                      Instrucciones de elaboración y etiquetas de este producto. {puedeCompartirArchivos
-                        ? 'Toca “Compartir” para enviarlo a la impresora o a otra app del dispositivo.'
-                        : 'Se abre en una pestaña nueva; imprime desde el visor (Ctrl+P).'}
-                    </div>
-                    <div style={{ display: 'grid', gap: 8 }}>
-                      {docs.map((d, i) => {
-                        const cargando = impBusy === d.path
-                        return (
-                          <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: d.esFicha ? 'rgba(124,179,66,0.10)' : 'var(--crema)', borderRadius: 'var(--radio)', flexWrap: 'wrap' }}>
-                            {d.esFicha ? <ScrollText size={16} aria-hidden="true" /> : <FileText size={16} aria-hidden="true" />}
-                            <span style={{ flex: 1, minWidth: 120, fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                              {d.nombre}
-                              {d.esFicha && <small style={{ color: 'var(--texto-suave)', marginLeft: 6 }}>· cómo se elabora</small>}
-                            </span>
-                            {puedeCompartirArchivos && (
-                              <button type="button" className="btn btn-sm btn-dorado" disabled={cargando} onClick={() => compartirInsumo(d)}>
-                                {cargando ? 'Abriendo…' : '📤 Compartir / Imprimir'}
-                              </button>
-                            )}
-                            <button type="button" className="btn btn-sm btn-secondary" disabled={cargando} onClick={() => imprimirInsumo(d)}>
-                              <Ico as={Printer} size={14} />{cargando ? 'Abriendo…' : 'Abrir'}
-                            </button>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                </details>
-              )
-            })()}
 
             {/* Alistar ingredientes: acordeón con checklist LOCAL (no se guarda; solo ayuda al operario).
                 No aplica a MP vendibles (no llevan receta de ingredientes que alistar). */}
@@ -4634,6 +4595,53 @@ export default function OrdenesProduccion() {
             {procStep === 2 && (
             <div style={{ background: 'rgba(200,169,74,0.08)', padding: 10, borderRadius: 'var(--radio)' }}>
               <strong style={{ fontSize: '0.9rem' }}><Ico as={Package} size={15} />Resultado de producción</strong>
+              {/* Documentos de la ficha (instrucciones) + etiquetas/rótulos imprimibles del producto. */}
+              {(() => {
+                const docs = [
+                  ...(prepFicha?.url ? [{ bucket: 'technical-sheets', path: prepFicha.url, nombre: prepFicha.nombre || 'Ficha técnica', esFicha: true }] : []),
+                  ...prepImprimibles.map(i => ({ bucket: 'ficha-imprimibles', path: i.path, nombre: i.nombre })),
+                ]
+                if (!docs.length) return null
+                return (
+                  <details className="acordeon-item" style={{ margin: '8px 0 12px', borderLeft: '4px solid var(--dorado)' }} open>
+                    <summary>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                        <Printer size={16} aria-hidden="true" /> Documentos e imprimibles
+                        <span className="badge badge-dorado">{docs.length}</span>
+                      </span>
+                    </summary>
+                    <div className="acordeon-body">
+                      <div style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', marginBottom: 8 }}>
+                        Instrucciones de elaboración y etiquetas de este producto. {puedeCompartirArchivos
+                          ? 'Toca “Compartir” para enviarlo a la impresora o a otra app del dispositivo.'
+                          : 'Se abre en una pestaña nueva; imprime desde el visor (Ctrl+P).'}
+                      </div>
+                      <div style={{ display: 'grid', gap: 8 }}>
+                        {docs.map((d, i) => {
+                          const cargando = impBusy === d.path
+                          return (
+                            <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 12px', background: d.esFicha ? 'rgba(124,179,66,0.10)' : 'var(--crema)', borderRadius: 'var(--radio)', flexWrap: 'wrap' }}>
+                              {d.esFicha ? <ScrollText size={16} aria-hidden="true" /> : <FileText size={16} aria-hidden="true" />}
+                              <span style={{ flex: 1, minWidth: 120, fontSize: '0.88rem', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                {d.nombre}
+                                {d.esFicha && <small style={{ color: 'var(--texto-suave)', marginLeft: 6 }}>· cómo se elabora</small>}
+                              </span>
+                              {puedeCompartirArchivos && (
+                                <button type="button" className="btn btn-sm btn-dorado" disabled={cargando} onClick={() => compartirInsumo(d)}>
+                                  {cargando ? 'Abriendo…' : '📤 Compartir / Imprimir'}
+                                </button>
+                              )}
+                              <button type="button" className="btn btn-sm btn-secondary" disabled={cargando} onClick={() => imprimirInsumo(d)}>
+                                <Ico as={Printer} size={14} />{cargando ? 'Abriendo…' : 'Abrir'}
+                              </button>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  </details>
+                )
+              })()}
               <div className="form-grid-2" style={{ marginTop: 8 }}>
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label">
