@@ -368,9 +368,9 @@ export const urlProducto = (cfg, p) => `${baseUrl(cfg)}${rutaProducto(p)}`
 function notaStock(i, cfg) {
   const st = stockLabel(i.stock, cfg)
   if (!st) return ''
-  if (st.tono === 'agotado') return '  ⚠️ (agotado — sobre pedido)'
-  if (st.tono === 'urgente') return `  🔥 (${st.texto.toLowerCase()})`
-  if (st.tono === 'pocas') return '  ⏳ (pocas unidades)'
+  if (st.tono === 'agotado') return '  (agotado — sobre pedido)'
+  if (st.tono === 'urgente') return `  (${st.texto.toLowerCase()})`
+  if (st.tono === 'pocas') return '  (pocas unidades)'
   return ''
 }
 
@@ -459,7 +459,7 @@ export function aplicarPlantilla(tpl, vars) {
 // Mensaje para solicitar acceso mayorista (usa su propia plantilla y el nombre del cliente)
 export function mensajeSolicitudMayorista(cfg, nombre = null) {
   const cliente = (nombre == null ? getCliente() : nombre).trim()
-  const vars = { saludo: '¡Hola! 🌿', cliente, pedido: '', total: '', nota: '', cierre: '¡Quedo atento(a) a su respuesta! 😊', tienda: cfg?.nombre_tienda || 'Mumi Amazonia' }
+  const vars = { saludo: '¡Hola!', cliente, pedido: '', total: '', nota: '', cierre: '¡Quedo atento(a) a su respuesta!', tienda: cfg?.nombre_tienda || 'Mumi Amazonia' }
   const tpl = (cfg?.mayorista_wa_texto || '').trim()
   if (tienePlantilla(tpl)) return aplicarPlantilla(tpl, vars)
   const soy = cliente ? `Soy *${cliente}* y ` : ''
@@ -475,24 +475,23 @@ export function construirMensajeWA(items, nota, cfg, mayorista = false, intro = 
   const codigoTxt = (codigo || '').trim()
   const codigoLinea = codigoTxt ? `Pedido #${codigoTxt}` : ''
   const lineas = items.map(i => {
-    const em = emojiCategoria(i.categoria)
     const pu = precioItem(i, mayorista)
     const ago = agotadoDe(i)
     return ago
-      ? `${em} *${i.nombre}*\n   ${fCOP(pu)} c/u  (agotado — sobre pedido)`
-      : `${em} *${i.cantidad}x ${i.nombre}*\n   ${fCOP(pu)} c/u → ${fCOP(pu * i.cantidad)}${notaStock(i, cfg)}`
+      ? `• *${i.nombre}*\n   ${fCOP(pu)} c/u  (agotado — sobre pedido)`
+      : `• *${i.cantidad}x ${i.nombre}*\n   ${fCOP(pu)} c/u = ${fCOP(pu * i.cantidad)}${notaStock(i, cfg)}`
   }).join('\n\n')
   const clienteVar = todosAgotados ? '' : cliente
   const vars = {
-    saludo: '¡Hola! 🌿',
+    saludo: '¡Hola!',
     cliente: clienteVar,
     telefono: '',
     pedido: lineas,
     codigo: codigoLinea,
     total: fCOP(total),
     envio: todosAgotados ? '' : textoEnvio(cfg),
-    nota: nota?.trim() ? `📝 *Nota:* ${nota.trim()}` : '',
-    cierre: '¡Quedo atento(a) a la confirmación! 😊',
+    nota: nota?.trim() ? `*Nota:* ${nota.trim()}` : '',
+    cierre: '¡Quedo atento(a) a la confirmación!',
     tienda: cfg?.nombre_tienda || 'Mumi Amazonia',
   }
   const tpl = (intro || '').trim()
@@ -500,21 +499,21 @@ export function construirMensajeWA(items, nota, cfg, mayorista = false, intro = 
     let msg = aplicarPlantilla(tpl, vars)
     // Si la plantilla no trae el Nº, lo añadimos igual (siempre visible)
     if (codigoTxt && !msg.includes(codigoTxt)) {
-      msg = `${msg}\n\n🔖 *Pedido #${codigoTxt}*`
+      msg = `${msg}\n\n*Pedido #${codigoTxt}*`
     }
     return msg
   }
 
   const saludo = tpl || (todosAgotados
-    ? '¡Hola! 🌿 Quisiera consultar la disponibilidad de:'
-    : mayorista ? '¡Hola! 🌿 Soy mayorista y quiero hacer este pedido:' : '¡Hola! 🌿 Me gustaría hacer este pedido:')
+    ? '¡Hola! Quisiera consultar la disponibilidad de:'
+    : mayorista ? '¡Hola! Soy mayorista y quiero hacer este pedido:' : '¡Hola! Me gustaría hacer este pedido:')
   const titulo = todosAgotados
-    ? '📋 *CONSULTA DE DISPONIBILIDAD*'
-    : `🛒 *MI PEDIDO${mayorista ? ' (MAYORISTA)' : ''}*${codigoTxt ? `\n🔖 *Pedido #${codigoTxt}*` : ''}`
+    ? '*CONSULTA DE DISPONIBILIDAD*'
+    : `*MI PEDIDO${mayorista ? ' (MAYORISTA)' : ''}*${codigoTxt ? `\n*Pedido #${codigoTxt}*` : ''}`
   let msg = saludo
   if (clienteVar) msg += `\nSoy *${clienteVar}*`
-  msg += `\n\n${titulo}\n\n${lineas}\n\n━━━━━━━━━━━━━━\n`
-  msg += todosAgotados ? '💬 *¿Cuándo estará disponible?*' : `💰 *Total: ${vars.total}*`
+  msg += `\n\n${titulo}\n\n${lineas}\n\n--------------\n`
+  msg += todosAgotados ? '*¿Cuándo estará disponible?*' : `*Total: ${vars.total}*`
   if (vars.nota) msg += `\n\n${vars.nota}`
   msg += `\n\n${vars.cierre}`
   return msg
