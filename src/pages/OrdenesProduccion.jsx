@@ -1823,7 +1823,9 @@ export default function OrdenesProduccion() {
       const pct = f.gramos != null && totalG > 0 ? (f.gramos / totalG * 100).toFixed(2) : ''
       const cant = f.gramos != null ? g(f.gramos) : '—'
       const nom = escHtml(f.nombre) + (f.esEmpaque ? ' <small>(empaque)</small>' : '')
-      return `<tr><td>${nom}${trHtml ? `<div style="font-size:9px;color:#444;margin-top:3px;line-height:1.35">${trHtml}</div>` : ''}</td><td class="r">${pct !== '' ? pct + '%' : '—'}</td><td class="r">${cant}</td></tr>`
+      // Trazabilidad de MP en COLUMNA APARTE (lote/vence/proveedor). Si aún no hay lote asignado
+      // (orden en blanco/pendiente), la celda queda vacía para diligenciarla a mano.
+      return `<tr><td>${nom}</td><td class="traza">${trHtml || ''}</td><td class="r">${pct !== '' ? pct + '%' : '—'}</td><td class="r">${cant}</td></tr>`
     }
     const fecha = new Date().toLocaleDateString('es-CO')
     const emision = o.created_at ? new Date(o.created_at).toLocaleDateString('es-CO') : fecha
@@ -1916,6 +1918,8 @@ export default function OrdenesProduccion() {
       .firmas .linea { border-top:1px solid #555; padding-top:0.3em; }
       tbody tr:nth-child(even) td { background:#fafafa; }
       .ingr tbody tr:nth-child(even) td { background:#fafafa; }
+      /* Columna de trazabilidad de MP (lote/vence/proveedor) — texto compacto */
+      .ingr td.traza { font-size:9px; color:#444; line-height:1.35; }
     </style></head><body><div id="content">
       ${o.estado === 'cancelada' ? '<div class="marca-agua">NO EJECUTADA</div>' : ''}
 
@@ -1945,8 +1949,8 @@ export default function OrdenesProduccion() {
       </table>
 
       <div class="seccion">LISTA DE INGREDIENTES Y TRAZABILIDAD</div>
-      <table class="ingr"><thead><tr><th>Ingrediente / trazabilidad</th><th class="r">Porcentaje</th><th class="r">Cantidad (gr)</th></tr></thead>
-        <tbody>${filasIngPrint.length ? filasIngPrint.map(filaIngPrintHtml).join('') + `<tr><td><b>TOTAL mezcla</b></td><td class="r"><b>100%</b></td><td class="r"><b>${g(totalG)}</b></td></tr>` : '<tr><td colspan="3">Sin receta vinculada</td></tr>'}</tbody>
+      <table class="ingr"><thead><tr><th>Ingrediente</th><th style="width:38%">Lote / Trazabilidad MP</th><th class="r">Porcentaje</th><th class="r">Cantidad (gr)</th></tr></thead>
+        <tbody>${filasIngPrint.length ? filasIngPrint.map(filaIngPrintHtml).join('') + `<tr><td><b>TOTAL mezcla</b></td><td></td><td class="r"><b>100%</b></td><td class="r"><b>${g(totalG)}</b></td></tr>` : '<tr><td colspan="4">Sin receta vinculada</td></tr>'}</tbody>
       </table>
 
       ${d ? `<div class="seccion">DATOS PREVISTOS</div>${filasPrev}` : ''}
