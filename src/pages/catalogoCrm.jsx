@@ -926,7 +926,33 @@ export function TabPedidos() {
       return (data || []).filter(p => p.codigo)
     },
   })
-  const pedidos = qPed.data || []
+  // Clientes registrados: para notificar por correo/WhatsApp usando el teléfono guardado
+  // en su cuenta aunque el pedido no lo traiga.
+  const qCli = useQuery({
+    queryKey: ['catalogo_clientes_perfiles'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('clientes_catalogo').select('email, telefono').limit(5000)
+      if (error) return []
+      return data || []
+    },
+  })
+  const telByEmail = useMemo(() => {
+    const m = new Map()
+    for (const c of qCli.data || []) {
+      const e = (c.email || '').trim().toLowerCase()
+      if (e && (c.telefono || '').trim()) m.set(e, c.telefono.trim())
+    }
+    return m
+  }, [qCli.data])
+
+  // Enriquecer cada pedido: si no trae teléfono pero el cliente está registrado con uno,
+  // se usa el de su cuenta para las notificaciones. `_registrado` marca esa condición.
+  const pedidos = useMemo(() => (qPed.data || []).map(p => {
+    const email = (p.email || '').trim().toLowerCase()
+    const telCuenta = email ? telByEmail.get(email) : null
+    const registrado = email ? telByEmail.has(email) || (qCli.data || []).some(c => (c.email || '').trim().toLowerCase() === email) : false
+    return { ...p, telefono: (p.telefono || '').trim() || telCuenta || '', _registrado: registrado, _telCuenta: telCuenta || '' }
+  }), [qPed.data, telByEmail, qCli.data])
 
   const actualizar = async (p, campos) => {
     const { error } = await supabase.from('pedidos_catalogo').update(campos).eq('id', p.id)
@@ -1027,6 +1053,7 @@ export function TabPedidos() {
                     </td>
                     <td>
                       {p.nombre || '—'}
+                      {p._registrado && <span className="badge badge-verde" style={{ fontSize: '0.6rem', marginLeft: 6 }}>registrado</span>}
                       {p.email && <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>{p.email}</div>}
                       {p.telefono && <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>{p.telefono}</div>}
                     </td>
