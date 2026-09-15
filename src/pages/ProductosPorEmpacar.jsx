@@ -7,7 +7,7 @@ import { useToast } from '../hooks/useToast'
 import { useAuth } from '../context/AuthContext'
 import { useNavTrail } from '../hooks/useNavTrail'
 import Modal from '../components/ui/Modal'
-import { Recycle, Trash2, Pencil } from 'lucide-react'
+import { Recycle, Trash2, Pencil, Shuffle } from 'lucide-react'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const fCant = (n) => Number(n || 0).toLocaleString('es-CO', { maximumFractionDigits: 3 })
@@ -24,6 +24,10 @@ export default function ProductosPorEmpacar() {
   const [bForm, setBForm] = useState({ cantidad: '', motivo: '' })
   const [modalEditar, setModalEditar] = useState(null)   // saldo a editar cantidad
   const [eForm, setEForm] = useState({ cantidad: '', motivo: '' })
+  // Empaque MEZCLADO (surtido): selección de 2+ saldos que se combinan en un solo producto terminado.
+  const [mezclaSel, setMezclaSel] = useState({})   // { [saldoId]: true }
+  const [modalMezcla, setModalMezcla] = useState(false)
+  const [mForm, setMForm] = useState({ producto: '', cantidad: '' })
 
   const { data: saldos = [] } = useQuery({
     queryKey: ['mezcla_saldos'],
@@ -35,6 +39,11 @@ export default function ProductosPorEmpacar() {
   const { data: bajas = [] } = useQuery({
     queryKey: ['saldo_bajas'],
     queryFn: async () => { const { data } = await supabase.from('saldo_bajas').select('*').order('created_at', { ascending: false }).limit(300); return data || [] },
+  })
+  // Catálogo de productos terminados (para elegir el producto surtido resultante — no texto libre).
+  const { data: terminados = [] } = useQuery({
+    queryKey: ['finished_products', 'activos'],
+    queryFn: async () => { const { data } = await supabase.from('finished_products').select('id, nombre, tipo, activo').eq('activo', true).order('nombre'); return data || [] },
   })
 
   const filtrados = useMemo(() => {
@@ -84,6 +93,43 @@ export default function ProductosPorEmpacar() {
     onError: (e) => toast(e.message, 'error'),
   })
 
+  // ---- Empaque MEZCLADO (surtido) ----
+  const toggleMezcla = (id) => setMezclaSel(m => { const n = { ...m }; if (n[id]) delete n[id]; else n[id] = true; return n })
+  const saldosMezcla = useMemo(() => saldos.filter(s => mezclaSel[s.id]), [saldos, mezclaSel])
+  // Cantidad de cajas por defecto = lo máximo que rinde el saldo más chico (relación 1 porción : 1 caja).
+  const maxCajas = saldosMezcla.length ? Math.floor(Math.min(...saldosMezcla.map(s => Number(s.peso) || 0))) : 0
+  const abrirMezcla = () => {
+    if (saldosMezcla.length < 2) { toast('Selecciona al menos 2 productos por empacar para mezclar', 'warning'); return }
+    if (saldosMezcla.some(s => !String(s.lote || '').trim())) { toast('Todos los productos a mezclar deben tener lote. Edita el que no lo tenga.', 'warning'); return }
+    setMForm({ producto: '', cantidad: maxCajas > 0 ? String(maxCajas) : '' })
+    setModalMezcla(true)
+  }
+  const confirmarMezcla = () => {
+    const cajas = parseFloat(mForm.cantidad)
+    if (!mForm.producto) { toast('Elige el producto surtido resultante', 'warning'); return }
+    if (!(cajas > 0)) { toast('Indica cuántas cajas se empacan', 'warning'); return }
+    if (maxCajas > 0 && cajas > maxCajas) { toast(`No puedes empacar más de ${fCant(maxCajas)} cajas — es lo que rinde el saldo más pequeño.`, 'warning'); return }
+    const base = saldosMezcla[0]
+    const combinados = saldosMezcla.slice(1)
+    const loteMezcla = combinados.map(s => String(s.lote || '').trim()).filter(Boolean).join(', ')
+    pushTo('/ordenes', {
+      nuevaOrden: {
+        producto: base.producto || '',
+        origen: 'producto',
+        origen_id: base.origen_id ? String(base.origen_id) : '',
+        empacar_saldo: true,
+        saldo_ids: [base.id],
+        saldo_cantidades: { [base.id]: String(cajas) },
+        vence: base.vencimiento || '',
+        // Prellenado de surtido: el resto de lotes se combinan y el resultado va al producto elegido.
+        surtido: true,
+        lote_mezcla: loteMezcla,
+        producto_surtido: mForm.producto,
+        surtido_cantidad: cajas,
+      },
+    })
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -114,19 +160,27 @@ export default function ProductosPorEmpacar() {
 
       {tab === 'saldos' && (
         <div className="card">
-          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}><Ico as={Recycle} size={14} />Pendientes de empacar ({filtrados.length})
-            <input className="form-control" style={{ marginLeft: 'auto', maxWidth: 240 }} placeholder="Buscar producto o lote..." value={buscar} onChange={e => setBuscar(e.target.value)} />
+          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}><Ico as={Recycle} size={14} />Pendientes de empacar ({filtrados.length})
+            <button className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} title="Marca 2 o más lotes en la lista y combínalos en un solo producto (ej. Bocadillo asai + araza)"
+              onClick={abrirMezcla} disabled={saldosMezcla.length < 2}>
+              <Ico as={Shuffle} size={14} />Empacar mezclado{saldosMezcla.length >= 2 ? ` (${saldosMezcla.length})` : ''}
+            </button>
+            <input className="form-control" style={{ maxWidth: 240 }} placeholder="Buscar producto o lote..." value={buscar} onChange={e => setBuscar(e.target.value)} />
+          </div>
+          <div className="alert alert-info" style={{ fontSize: '0.78rem', marginBottom: 8 }}>
+            💡 ¿Empacas <strong>dos sabores en una sola caja</strong>? Marca los lotes con la casilla ◻ y usa <strong>Empacar mezclado</strong>: se crea <strong>una</strong> orden que los combina y suma las cajas correctas (no los cuenta dos veces).
           </div>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Producto</th><th>Lote</th><th className="td-number">Disponible</th><th className="td-number">Valor</th><th className="col-opcional">Vence</th><th className="col-opcional-2">Origen</th><th></th></tr></thead>
+              <thead><tr><th style={{ width: 28 }} title="Marcar para empacar mezclado"><Shuffle size={13} aria-hidden="true" /></th><th>Producto</th><th>Lote</th><th className="td-number">Disponible</th><th className="td-number">Valor</th><th className="col-opcional">Vence</th><th className="col-opcional-2">Origen</th><th></th></tr></thead>
               <tbody>
                 {filtrados.length === 0
-                  ? <tr><td colSpan={7} className="empty-table">No hay productos por empacar.</td></tr>
+                  ? <tr><td colSpan={8} className="empty-table">No hay productos por empacar.</td></tr>
                   : filtrados.map(s => {
                       const est = estadoLote(s.vencimiento)
                       return (
-                        <tr key={s.id}>
+                        <tr key={s.id} style={mezclaSel[s.id] ? { background: 'rgba(200,169,74,0.12)' } : undefined}>
+                          <td style={{ textAlign: 'center' }}><input type="checkbox" checked={!!mezclaSel[s.id]} onChange={() => toggleMezcla(s.id)} title="Incluir en empaque mezclado" /></td>
                           <td><strong>{s.producto}</strong></td>
                           <td>{s.lote || '(s/n)'}</td>
                           <td className="td-number">{fCant(s.peso)} {s.unidad}</td>
@@ -223,6 +277,38 @@ export default function ProductosPorEmpacar() {
             <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>La baja descuenta del saldo y queda en el historial.</small>
           </div>
         )}
+      </Modal>
+
+      {/* Modal empacar mezclado (surtido) */}
+      <Modal open={modalMezcla} onClose={() => setModalMezcla(false)} title="🔀 Empacar mezclado (surtido)"
+        footer={<>
+          <button className="btn btn-secondary" onClick={() => setModalMezcla(false)}>Cancelar</button>
+          <button className="btn btn-primary" onClick={confirmarMezcla}>Crear orden de empaque</button>
+        </>}>
+        <div>
+          <p style={{ fontSize: '0.85rem', marginTop: 0 }}>Se combinan estos {saldosMezcla.length} lotes en <strong>una sola caja</strong>:</p>
+          <ul style={{ fontSize: '0.85rem', margin: '0 0 10px', paddingLeft: 18 }}>
+            {saldosMezcla.map(s => (
+              <li key={s.id}><strong>{s.producto}</strong> · lote {s.lote || '(s/n)'} — disponible {fCant(s.peso)} {s.unidad}</li>
+            ))}
+          </ul>
+          <div className="form-group">
+            <label className="form-label">Producto surtido resultante</label>
+            <select className="form-control" value={mForm.producto} onChange={e => setMForm(f => ({ ...f, producto: e.target.value }))}>
+              <option value="">Seleccionar producto terminado...</option>
+              {terminados.map(t => <option key={t.id} value={t.nombre}>{t.tipo === 'surtido' ? '🔀 ' : ''}{t.nombre}</option>)}
+            </select>
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Elige del catálogo de Producto Terminado. Si no existe, créalo primero para que sume al stock correcto.</small>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Cantidad de cajas a empacar {maxCajas > 0 && <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>— máximo {fCant(maxCajas)}</small>}</label>
+            <input type="number" className="form-control" value={mForm.cantidad} onChange={e => setMForm(f => ({ ...f, cantidad: e.target.value }))} min={0} max={maxCajas || undefined} step="any" />
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Cada caja consume 1 porción de cada sabor. Al cerrar la orden se descuentan los saldos y se suma este producto al stock. Podrás ajustar el consumo de cada lote en el paso de empaque.</small>
+          </div>
+          <div className="alert alert-info" style={{ fontSize: '0.8rem' }}>
+            Se creará <strong>una orden de empaque</strong> (base: {saldosMezcla[0]?.producto || '—'}) con la mezcla ya cargada. Solo tendrás que <strong>iniciar el proceso</strong> y confirmar.
+          </div>
+        </div>
       </Modal>
     </div>
   )

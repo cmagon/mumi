@@ -21,6 +21,10 @@ export const EMPTY_ORDEN = {
   cantidad_plan: '', unidad: 'unidades', operario: '', notas_orden: '', unidadesPorBache: 0, lote: '', vence: '', baches_plan: '', inicio: '', es_prueba: false, forzar_sin_lote: false,
   orden_blanca: false,
   lotes_elegidos: {},   // { [mpId]: loteId }  — lote de MP elegido por el usuario (vacío = PEPS automático)
+  // Prellenado de EMPAQUE MEZCLADO (surtido) desde "Productos por Empacar": la orden nace como
+  // empaque de saldo de un producto base + surtido con el/los otro(s) lote(s). Al abrir el empaque
+  // estos valores quedan ya cargados (surtido, lote combinado, producto final y cantidad de cajas).
+  surtido_prefill: false, surtido_lote_mezcla: '', surtido_producto: '', surtido_cantidad: '',
 }
 
 // Mezcla de referencia para planear recetas por ingrediente (se cancela en el cálculo)
