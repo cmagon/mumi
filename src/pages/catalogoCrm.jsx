@@ -282,6 +282,24 @@ export function TabClientes() {
     } finally { setBorrando('') }
   }
 
+  // Excepción: eliminar los PEDIDOS de un correo (pedidos de prueba, o si finalmente no
+  // compró). Quita la etiqueta «compró»/«mayorista» y su gasto. Requiere rol admin (RLS).
+  const eliminarPedidosCliente = async (c) => {
+    const email = (c.email || '').toLowerCase()
+    if (!email || !c.n_pedidos) return
+    if (!window.confirm(`¿Eliminar TODOS los pedidos de ${email}? (${c.n_pedidos} pedido[s])\n\nÚsalo para pedidos de prueba o si el cliente finalmente NO compró: se quita la etiqueta «compró» y su gasto. No se puede deshacer.`)) return
+    setBorrando(email); setAviso('')
+    try {
+      const { error } = await supabase.from('pedidos_catalogo').delete().eq('email', email)
+      if (error) throw error
+      qc.invalidateQueries({ queryKey: ['catalogo_pedidos_crm'] })
+      qc.invalidateQueries({ queryKey: ['catalogo_gestion_pedidos'] })
+      setAviso(`Pedidos de ${email} eliminados (se actualizan etiquetas y gasto).`)
+    } catch (ex) {
+      setAviso('No se pudieron eliminar los pedidos: ' + (ex.message || ex))
+    } finally { setBorrando('') }
+  }
+
   const toggleTag = (id) => setTagsOn(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   const toggleCol = (id) => setCols(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
 
@@ -415,6 +433,12 @@ export function TabClientes() {
                         {c.perfil && (
                           <button type="button" className="btn btn-xs btn-secondary" title="Ver datos guardados de la cuenta" onClick={() => setVerPerfil(c)}>
                             <Ico as={Eye} size={13} /> Datos
+                          </button>
+                        )}
+                        {c.n_pedidos > 0 && (
+                          <button type="button" className="btn btn-xs btn-secondary" title="Eliminar sus pedidos (prueba / no compró) — quita la etiqueta «compró»"
+                            style={{ color: 'var(--rojo, #c0392b)' }} disabled={borrando === (c.email || '').toLowerCase()} onClick={() => eliminarPedidosCliente(c)}>
+                            <Ico as={ShoppingCart} size={13} /> Pedidos
                           </button>
                         )}
                         <button type="button" className="btn btn-xs btn-danger" title="Eliminar correo del listado"
