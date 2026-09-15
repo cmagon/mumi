@@ -17,6 +17,8 @@ import { getConfig } from '../lib/appConfig'
 import { useReorder } from '../hooks/useReorder'
 import TimeField from '../components/ui/TimeField'
 import BuscadorSelect from '../components/ui/BuscadorSelect'
+import Mdi from '../components/ui/Mdi'
+import { mdiClipboardListOutline, mdiChefHat, mdiScaleBalance, mdiPackageVariantClosed, mdiFlagCheckered, mdiCheck } from '@mdi/js'
 import { fFecha, fNum, fCOP, componerSurtido, minutosProcesoOrden, calcularCostoProduccionOrden } from '../lib/businessLogic'
 import { useNavTrail } from '../hooks/useNavTrail'
 import { useHistoryLayer } from '../hooks/useHistoryLayer'
@@ -135,7 +137,13 @@ export default function OrdenesProduccion() {
   const [modalProceso, setModalProceso] = useState(false)
   // Asistente por pasos del modal de proceso. 0=Preparar 1=Producción 2=Resultado 3=Empaque 4=Cierre.
   // El paso se guarda en la orden (prep_sino.step) para retomarlo desde cualquier dispositivo.
-  const PASOS_PROCESO = ['Preparar', 'Producción', 'Resultado', 'Empaque', 'Cierre']
+  const PASOS_PROCESO = [
+    { label: 'Preparar', icon: mdiClipboardListOutline },
+    { label: 'Producción', icon: mdiChefHat },
+    { label: 'Resultado', icon: mdiScaleBalance },
+    { label: 'Empaque', icon: mdiPackageVariantClosed },
+    { label: 'Cierre', icon: mdiFlagCheckered },
+  ]
   const [procStep, setProcStep] = useState(0)
   // Resultado de producción capturado en el modal de proceso
   const [prepUnidades, setPrepUnidades] = useState('')
@@ -4271,17 +4279,17 @@ export default function OrdenesProduccion() {
           <>
             {/* Barra de pasos (asistente). Clic en cualquiera para saltar; el paso se guarda en la orden. */}
             <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
-              {PASOS_PROCESO.map((label, i) => {
+              {PASOS_PROCESO.map(({ label, icon }, i) => {
                 const activo = i === procStep, hecho = i < procStep
                 return (
-                  <button key={i} type="button" onClick={() => goStep(i)}
+                  <button key={i} type="button" onClick={() => goStep(i)} title={label}
                     style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 999, cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600,
                       border: `1px solid ${activo ? 'var(--selva)' : 'var(--crema-oscuro)'}`,
                       background: activo ? 'var(--selva)' : hecho ? 'rgba(124,179,66,0.15)' : 'transparent',
                       color: activo ? 'var(--crema)' : 'var(--texto-suave)' }}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 18, height: 18, borderRadius: '50%', fontSize: '0.7rem',
+                    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: '50%',
                       background: activo ? 'var(--crema)' : hecho ? 'var(--lima)' : 'var(--crema-oscuro)', color: activo ? 'var(--selva)' : hecho ? 'white' : 'var(--texto-suave)' }}>
-                      {hecho ? '✓' : i + 1}
+                      <Mdi path={hecho ? mdiCheck : icon} size={15} />
                     </span>
                     {label}
                   </button>
