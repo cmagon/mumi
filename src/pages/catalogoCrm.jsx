@@ -827,16 +827,17 @@ function waDespacho(p, cfg) {
   const tel = (p.telefono || '').replace(/[^0-9]/g, '')
   if (!tel) return null
   const nombre = (p.nombre || '').trim()
-  const saludo = nombre ? `¡Hola ${nombre}! 🌿` : '¡Hola! 🌿'
+  const saludo = nombre ? `¡Hola ${nombre}!` : '¡Hola!'
   const tienda = (cfg?.nombre_tienda || 'Mumi Amazonia').trim()
   const guia = (p.guia || '').trim()
   const transp = (p.transportadora || '').trim()
+  const nota = (p.nota_envio || '').trim()
   const lineas = [
     `${saludo}`,
-    `Tu pedido *#${p.codigo || p.id}* en ${tienda} ya fue despachado. 📦`,
+    `Tu pedido *#${p.codigo || p.id}* en ${tienda} ya fue despachado.`,
     guia ? `Número de guía: *${guia}*${transp ? ` (${transp})` : ''}` : (transp ? `Transportadora: ${transp}` : ''),
-    (p.nota_envio || '').trim() ? `\n${p.nota_envio.trim()}` : '',
-    '\n¡Gracias por tu compra! 💚',
+    nota ? `\n${nota}` : '',
+    '\n¡Gracias por tu compra!',
   ].filter(Boolean)
   return `https://wa.me/${tel}?text=${encodeURIComponent(lineas.join('\n'))}`
 }
@@ -851,12 +852,12 @@ function htmlDespacho(p, cfg) {
   const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
   return `
   <div style="font-family:Arial,Helvetica,sans-serif;max-width:520px;margin:0 auto;color:#1a1a1a">
-    <h2 style="color:#2e7d32">¡Tu pedido va en camino! 📦</h2>
+    <h2 style="color:#2e7d32">¡Tu pedido va en camino!</h2>
     <p>${nombre ? `Hola ${esc(nombre)},` : 'Hola,'}</p>
     <p>Tu pedido <strong>#${esc(p.codigo || p.id)}</strong> en <strong>${esc(tienda)}</strong> ya fue despachado.</p>
     ${guia ? `<p style="font-size:16px"><strong>Número de guía:</strong> ${esc(guia)}${transp ? ` <span style="color:#555">(${esc(transp)})</span>` : ''}</p>` : (transp ? `<p><strong>Transportadora:</strong> ${esc(transp)}</p>` : '')}
     ${nota ? `<div style="background:#f4f7f0;border-radius:8px;padding:12px 14px;margin:12px 0">${esc(nota).replace(/\n/g, '<br>')}</div>` : ''}
-    <p style="margin-top:18px">¡Gracias por confiar en nosotros! 💚</p>
+    <p style="margin-top:18px">¡Gracias por confiar en nosotros!</p>
     <p style="color:#777;font-size:12px">${esc(tienda)}</p>
   </div>`
 }
@@ -970,7 +971,7 @@ export function TabPedidos() {
     if (enviarEmail && p.email) {
       try {
         const { error } = await supabase.functions.invoke('enviar-correo', {
-          body: { to: p.email, subject: `Tu pedido #${p.codigo || p.id} va en camino 📦`, html: htmlDespacho(actualizado, cfg) },
+          body: { to: p.email, subject: `Tu pedido #${p.codigo || p.id} va en camino`, html: htmlDespacho(actualizado, cfg) },
         })
         if (error) throw error
         setAviso(`Pedido #${p.codigo} marcado como despachado. Correo enviado a ${p.email}.`)
