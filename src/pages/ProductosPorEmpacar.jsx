@@ -6,6 +6,7 @@ import { estadoLote } from '../lib/lotes'
 import { useToast } from '../hooks/useToast'
 import { useAuth } from '../context/AuthContext'
 import { useNavTrail } from '../hooks/useNavTrail'
+import { registrarEmpaqueSurtido } from '../lib/empaqueSurtido'
 import Modal from '../components/ui/Modal'
 import { Recycle, Trash2, Pencil, Shuffle } from 'lucide-react'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
@@ -25,9 +26,13 @@ export default function ProductosPorEmpacar() {
   const [modalEditar, setModalEditar] = useState(null)   // saldo a editar cantidad
   const [eForm, setEForm] = useState({ cantidad: '', motivo: '' })
   // Empaque MEZCLADO (surtido): selección de 2+ saldos que se combinan en un solo producto terminado.
+  const esAdmin = (profile?.rol || 'admin') === 'admin'
+  const hoyStr = new Date().toISOString().split('T')[0]
   const [mezclaSel, setMezclaSel] = useState({})   // { [saldoId]: true }
   const [modalMezcla, setModalMezcla] = useState(false)
-  const [mForm, setMForm] = useState({ producto: '', cantidad: '', lote: '' })
+  const [mezStep, setMezStep] = useState('form')   // 'form' | 'confirm'
+  // Formulario del empaque surtido. consumos = { [saldoId]: 'cantidad consumida' }
+  const [mForm, setMForm] = useState({ producto: '', lote: '', fecha: hoyStr, horaInicio: '', horaFin: '', cajas: '', conforme: true, obs: '', consumos: {} })
 
   const { data: saldos = [] } = useQuery({
     queryKey: ['mezcla_saldos'],
@@ -93,45 +98,69 @@ export default function ProductosPorEmpacar() {
     onError: (e) => toast(e.message, 'error'),
   })
 
-  // ---- Empaque MEZCLADO (surtido) ----
+  // ---- Empaque MEZCLADO (surtido) — modal propio, autocontenido ----
   const toggleMezcla = (id) => setMezclaSel(m => { const n = { ...m }; if (n[id]) delete n[id]; else n[id] = true; return n })
   const saldosMezcla = useMemo(() => saldos.filter(s => mezclaSel[s.id]), [saldos, mezclaSel])
   // Cantidad de cajas por defecto = lo máximo que rinde el saldo más chico (relación 1 porción : 1 caja).
   const maxCajas = saldosMezcla.length ? Math.floor(Math.min(...saldosMezcla.map(s => Number(s.peso) || 0))) : 0
+  const cajasNum = parseFloat(mForm.cajas) || 0
   const abrirMezcla = () => {
     if (saldosMezcla.length < 2) { toast('Selecciona al menos 2 productos por empacar para mezclar', 'warning'); return }
     if (saldosMezcla.some(s => !String(s.lote || '').trim())) { toast('Todos los productos a mezclar deben tener lote. Edita el que no lo tenga.', 'warning'); return }
-    // Lote de las cajas por defecto = el del primer lote seleccionado (editable).
-    setMForm({ producto: '', cantidad: maxCajas > 0 ? String(maxCajas) : '', lote: String(saldosMezcla[0]?.lote || '').trim() })
+    const def = maxCajas > 0 ? maxCajas : ''
+    // Consumo por defecto de cada lote = las cajas (relación 1:1); editable por lote.
+    const consumos = {}
+    saldosMezcla.forEach(s => { consumos[s.id] = def === '' ? '' : String(def) })
+    setMForm({ producto: '', lote: String(saldosMezcla[0]?.lote || '').trim(), fecha: hoyStr, horaInicio: '', horaFin: '', cajas: def === '' ? '' : String(def), conforme: true, obs: '', consumos })
+    setMezStep('form')
     setModalMezcla(true)
   }
-  const confirmarMezcla = () => {
-    const cajas = parseFloat(mForm.cantidad)
-    if (!mForm.producto) { toast('Elige el producto surtido resultante', 'warning'); return }
-    if (!(cajas > 0)) { toast('Indica cuántas cajas se empacan', 'warning'); return }
-    if (maxCajas > 0 && cajas > maxCajas) { toast(`No puedes empacar más de ${fCant(maxCajas)} cajas — es lo que rinde el saldo más pequeño.`, 'warning'); return }
-    const base = saldosMezcla[0]
-    const combinados = saldosMezcla.slice(1)
-    const loteMezcla = combinados.map(s => String(s.lote || '').trim()).filter(Boolean).join(', ')
-    pushTo('/ordenes', {
-      nuevaOrden: {
-        producto: base.producto || '',
-        origen: 'producto',
-        origen_id: base.origen_id ? String(base.origen_id) : '',
-        empacar_saldo: true,
-        saldo_ids: [base.id],
-        saldo_cantidades: { [base.id]: String(cajas) },
-        vence: base.vencimiento || '',
-        // Lote que llevarán las cajas del producto surtido (elegido por el usuario, editable luego).
-        lote: String(mForm.lote || '').trim(),
-        // Prellenado de surtido: el resto de lotes se combinan y el resultado va al producto elegido.
-        surtido: true,
-        lote_mezcla: loteMezcla,
-        producto_surtido: mForm.producto,
-        surtido_cantidad: cajas,
-      },
-    })
+  // Al cambiar las cajas, si un consumo aún seguía el valor por defecto, se reajusta a las cajas (1:1).
+  const setCajas = (val) => setMForm(f => {
+    const nuevo = { ...f, cajas: val }
+    const consumos = { ...f.consumos }
+    saldosMezcla.forEach(s => { if (consumos[s.id] === undefined || consumos[s.id] === '' || consumos[s.id] === f.cajas) consumos[s.id] = val })
+    nuevo.consumos = consumos
+    return nuevo
+  })
+  const validarMezcla = () => {
+    if (!mForm.producto) { toast('Elige el producto surtido resultante', 'warning'); return false }
+    if (!(cajasNum > 0)) { toast('Indica cuántas cajas se empacaron', 'warning'); return false }
+    if (!String(mForm.lote || '').trim()) { toast('Indica el lote de las cajas', 'warning'); return false }
+    for (const s of saldosMezcla) {
+      const c = parseFloat(mForm.consumos[s.id]) || 0
+      if (!(c > 0)) { toast(`Indica cuánto se consume del lote ${s.lote}`, 'warning'); return false }
+      if (c > (Number(s.peso) || 0)) { toast(`Del lote ${s.lote} solo hay ${fCant(s.peso)} ${s.unidad || ''} disponibles`, 'warning'); return false }
+    }
+    return true
   }
+  const irAConfirmar = () => { if (validarMezcla()) setMezStep('confirm') }
+  const ejecutarMezcla = useMutation({
+    mutationFn: async () => {
+      const base = saldosMezcla[0]
+      const consumos = saldosMezcla.map(s => ({ saldo_id: s.id, lote: s.lote, producto: s.producto, unidad: s.unidad || '', cantidad: parseFloat(mForm.consumos[s.id]) || 0 }))
+      return registrarEmpaqueSurtido({
+        base: { id: base.id, producto: base.producto, origen_id: base.origen_id, unidad: base.unidad },
+        consumos,
+        productoSurtido: mForm.producto,
+        loteCaja: String(mForm.lote || '').trim(),
+        vence: base.vencimiento || null,
+        fecha: mForm.fecha || hoyStr,
+        horaInicio: mForm.horaInicio || '', horaFin: mForm.horaFin || '',
+        cajas: cajasNum, conforme: !!mForm.conforme,
+        responsable: profile?.nombre || '', obs: mForm.obs || '', creadoPor: profile?.nombre || '',
+        esAdmin,
+      })
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['mezcla_saldos'] })
+      qc.invalidateQueries({ queryKey: ['production_orders'] })
+      qc.invalidateQueries({ queryKey: ['finished_products'] })
+      setModalMezcla(false); setMezclaSel({}); setMezStep('form')
+      toast(esAdmin ? '✓ Empaque surtido registrado y sumado al stock' : '✓ Empaque surtido enviado — queda pendiente de aprobación')
+    },
+    onError: (e) => toast(e.message, 'error'),
+  })
 
   return (
     <div>
@@ -282,42 +311,120 @@ export default function ProductosPorEmpacar() {
         )}
       </Modal>
 
-      {/* Modal empacar mezclado (surtido) */}
-      <Modal open={modalMezcla} onClose={() => setModalMezcla(false)} title="🔀 Empacar mezclado (surtido)"
-        footer={<>
-          <button className="btn btn-secondary" onClick={() => setModalMezcla(false)}>Cancelar</button>
-          <button className="btn btn-primary" onClick={confirmarMezcla}>Crear orden de empaque</button>
-        </>}>
-        <div>
-          <p style={{ fontSize: '0.85rem', marginTop: 0 }}>Se combinan estos {saldosMezcla.length} lotes en <strong>una sola caja</strong>:</p>
-          <ul style={{ fontSize: '0.85rem', margin: '0 0 10px', paddingLeft: 18 }}>
-            {saldosMezcla.map(s => (
-              <li key={s.id}><strong>{s.producto}</strong> · lote {s.lote || '(s/n)'} — disponible {fCant(s.peso)} {s.unidad}</li>
-            ))}
-          </ul>
-          <div className="form-group">
-            <label className="form-label">Producto surtido resultante</label>
-            <select className="form-control" value={mForm.producto} onChange={e => setMForm(f => ({ ...f, producto: e.target.value }))}>
-              <option value="">Seleccionar producto terminado...</option>
-              {terminados.map(t => <option key={t.id} value={t.nombre}>{t.tipo === 'surtido' ? '🔀 ' : ''}{t.nombre}</option>)}
-            </select>
-            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Elige del catálogo de Producto Terminado. Si no existe, créalo primero para que sume al stock correcto.</small>
+      {/* Modal empacar SURTIDO — autocontenido: formulario → confirmación → registrar */}
+      <Modal open={modalMezcla} onClose={() => setModalMezcla(false)}
+        title={mezStep === 'confirm' ? '🔀 Confirmar empaque surtido' : '🔀 Empacar surtido (mezclado)'}
+        footer={mezStep === 'confirm'
+          ? <>
+              <button className="btn btn-secondary" onClick={() => setMezStep('form')} disabled={ejecutarMezcla.isPending}>← Volver</button>
+              <button className="btn btn-success" onClick={() => ejecutarMezcla.mutate()} disabled={ejecutarMezcla.isPending}>{ejecutarMezcla.isPending ? 'Enviando...' : '✓ Enviar'}</button>
+            </>
+          : <>
+              <button className="btn btn-secondary" onClick={() => setModalMezcla(false)}>Cancelar</button>
+              <button className="btn btn-primary" onClick={irAConfirmar}>Revisar y enviar →</button>
+            </>}>
+        {mezStep === 'form' ? (
+          <div>
+            <p style={{ fontSize: '0.85rem', marginTop: 0 }}>Combinas <strong>{saldosMezcla.length} sabores</strong> en un solo producto surtido. Indica el resultado y cuánto se usó de cada lote; lo que sobre <strong>sigue en “por empacar”</strong>.</p>
+
+            {/* Consumo por lote */}
+            <div className="form-group">
+              <label className="form-label">Lotes y consumo</label>
+              <div className="table-wrap">
+                <table style={{ fontSize: '0.82rem' }}>
+                  <thead><tr><th>Producto / lote</th><th className="td-number">Disponible</th><th className="td-number">Se usa</th><th className="td-number">Queda</th></tr></thead>
+                  <tbody>
+                    {saldosMezcla.map(s => {
+                      const usa = parseFloat(mForm.consumos[s.id]) || 0
+                      const queda = Math.max(0, (Number(s.peso) || 0) - usa)
+                      return (
+                        <tr key={s.id}>
+                          <td><strong>{s.producto}</strong><br /><span style={{ color: 'var(--texto-suave)' }}>lote {s.lote || '(s/n)'}</span></td>
+                          <td className="td-number">{fCant(s.peso)} {s.unidad}</td>
+                          <td className="td-number"><input type="number" className="form-control" style={{ width: 90, textAlign: 'right', display: 'inline-block' }} value={mForm.consumos[s.id] ?? ''} min={0} max={s.peso} step="any" onChange={e => setMForm(f => ({ ...f, consumos: { ...f.consumos, [s.id]: e.target.value } }))} /></td>
+                          <td className="td-number" style={{ color: queda > 0 ? 'var(--tierra)' : 'var(--texto-suave)' }}>{fCant(queda)} {s.unidad}</td>
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+              <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Por defecto se usa 1 porción de cada sabor por caja. Ajusta si la proporción es distinta.</small>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Producto surtido resultante</label>
+              <select className="form-control" value={mForm.producto} onChange={e => setMForm(f => ({ ...f, producto: e.target.value }))}>
+                <option value="">Seleccionar producto terminado...</option>
+                {terminados.map(t => <option key={t.id} value={t.nombre}>{t.tipo === 'surtido' ? '🔀 ' : ''}{t.nombre}</option>)}
+              </select>
+              <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Del catálogo de Producto Terminado. Si no existe, créalo primero para que sume al stock correcto.</small>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="form-group">
+                <label className="form-label">Cantidad de cajas {maxCajas > 0 && <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>— máx. {fCant(maxCajas)}</small>}</label>
+                <input type="number" className="form-control" value={mForm.cajas} onChange={e => setCajas(e.target.value)} min={0} step="any" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Lote de las cajas</label>
+                <input className="form-control" list="dl-lote-cajas" value={mForm.lote} onChange={e => setMForm(f => ({ ...f, lote: e.target.value }))} placeholder="Lote de la caja" />
+                <datalist id="dl-lote-cajas">{saldosMezcla.map(s => <option key={s.id} value={s.lote}>{s.lote} — {s.producto}</option>)}</datalist>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Fecha</label>
+                <input type="date" className="form-control" value={mForm.fecha} onChange={e => setMForm(f => ({ ...f, fecha: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Vence</label>
+                <input className="form-control" value={saldosMezcla[0]?.vencimiento ? fmtV(saldosMezcla[0].vencimiento) : '—'} disabled />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Hora inicio</label>
+                <input type="time" className="form-control" value={mForm.horaInicio} onChange={e => setMForm(f => ({ ...f, horaInicio: e.target.value }))} />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Hora fin</label>
+                <input type="time" className="form-control" value={mForm.horaFin} onChange={e => setMForm(f => ({ ...f, horaFin: e.target.value }))} />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">¿Producto conforme?</label>
+              <div style={{ display: 'flex', gap: 8 }}>
+                {[['SÍ', true], ['NO', false]].map(([lbl, val]) => (
+                  <button key={lbl} type="button" className={`btn btn-sm ${mForm.conforme === val ? (val ? 'btn-success' : 'btn-danger') : 'btn-secondary'}`} onClick={() => setMForm(f => ({ ...f, conforme: val }))}>{lbl}</button>
+                ))}
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label">Observaciones (opcional)</label>
+              <textarea className="form-control" rows={2} value={mForm.obs} onChange={e => setMForm(f => ({ ...f, obs: e.target.value }))} />
+            </div>
           </div>
-          <div className="form-group">
-            <label className="form-label">Lote de las cajas</label>
-            <input className="form-control" list="dl-lote-cajas" value={mForm.lote} onChange={e => setMForm(f => ({ ...f, lote: e.target.value }))} placeholder="Lote que llevará el producto surtido" />
-            <datalist id="dl-lote-cajas">{saldosMezcla.map(s => <option key={s.id} value={s.lote}>{s.lote} — {s.producto}</option>)}</datalist>
-            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Es el lote que se imprimirá en la caja y con el que entra al stock. Puedes usar el de un sabor o escribir otro. También podrás cambiarlo al empacar.</small>
+        ) : (
+          /* Paso de confirmación con el resumen */
+          <div style={{ fontSize: '0.88rem' }}>
+            <div className="alert alert-info" style={{ fontSize: '0.82rem' }}>Revisa los datos. Al enviar se crea la orden de empaque, se descuentan los saldos y {esAdmin ? 'se suma el stock del surtido' : 'queda pendiente de aprobación del administrador'}.</div>
+            <table className="campos" style={{ width: '100%' }}>
+              <tbody>
+                <tr><td style={{ fontWeight: 600, width: '42%' }}>Producto surtido</td><td><strong>{mForm.producto}</strong></td></tr>
+                <tr><td style={{ fontWeight: 600 }}>Cajas empacadas</td><td><strong>{fCant(cajasNum)}</strong></td></tr>
+                <tr><td style={{ fontWeight: 600 }}>Lote de la caja</td><td>{mForm.lote}</td></tr>
+                <tr><td style={{ fontWeight: 600 }}>Fecha</td><td>{fmtV(mForm.fecha)}{(mForm.horaInicio || mForm.horaFin) ? ` · ${mForm.horaInicio || '—'} a ${mForm.horaFin || '—'}` : ''}</td></tr>
+                <tr><td style={{ fontWeight: 600 }}>Conforme</td><td>{mForm.conforme ? 'Sí ✓' : 'No ✗'}</td></tr>
+              </tbody>
+            </table>
+            <div style={{ fontWeight: 600, margin: '10px 0 4px' }}>Consumo de saldos</div>
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {saldosMezcla.map(s => {
+                const usa = parseFloat(mForm.consumos[s.id]) || 0
+                const queda = Math.max(0, (Number(s.peso) || 0) - usa)
+                return <li key={s.id}><strong>{s.producto}</strong> (lote {s.lote}): usa <strong>{fCant(usa)}</strong>, {queda > 0 ? <>quedan <strong>{fCant(queda)}</strong> en por empacar</> : 'se agota'}</li>
+              })}
+            </ul>
           </div>
-          <div className="form-group">
-            <label className="form-label">Cantidad de cajas a empacar {maxCajas > 0 && <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>— máximo {fCant(maxCajas)}</small>}</label>
-            <input type="number" className="form-control" value={mForm.cantidad} onChange={e => setMForm(f => ({ ...f, cantidad: e.target.value }))} min={0} max={maxCajas || undefined} step="any" />
-            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Cada caja consume 1 porción de cada sabor. Al cerrar la orden se descuentan los saldos y se suma este producto al stock. Podrás ajustar el consumo de cada lote en el paso de empaque.</small>
-          </div>
-          <div className="alert alert-info" style={{ fontSize: '0.8rem' }}>
-            Se creará <strong>una orden de empaque</strong> (base: {saldosMezcla[0]?.producto || '—'}) con la mezcla ya cargada. Solo tendrás que <strong>iniciar el proceso</strong> y confirmar.
-          </div>
-        </div>
+        )}
       </Modal>
     </div>
   )

@@ -17,6 +17,8 @@ import { getConfig } from '../lib/appConfig'
 import { useReorder } from '../hooks/useReorder'
 import TimeField from '../components/ui/TimeField'
 import BuscadorSelect from '../components/ui/BuscadorSelect'
+import Mdi from '../components/ui/Mdi'
+import { mdiClipboardListOutline, mdiChefHat, mdiScaleBalance, mdiPackageVariantClosed, mdiFlagCheckered, mdiCheck } from '@mdi/js'
 import { fFecha, fNum, fCOP, componerSurtido, minutosProcesoOrden, calcularCostoProduccionOrden } from '../lib/businessLogic'
 import { useNavTrail } from '../hooks/useNavTrail'
 import { useHistoryLayer } from '../hooks/useHistoryLayer'
@@ -133,6 +135,16 @@ export default function OrdenesProduccion() {
   const [autoguardar, setAutoguardar] = useState(true)
   const [autoSavedAt, setAutoSavedAt] = useState('')
   const [modalProceso, setModalProceso] = useState(false)
+  // Asistente por pasos del modal de proceso. 0=Preparar 1=Producción 2=Resultado 3=Empaque 4=Cierre.
+  // El paso se guarda en la orden (prep_sino.step) para retomarlo desde cualquier dispositivo.
+  const PASOS_PROCESO = [
+    { label: 'Preparar', icon: mdiClipboardListOutline },
+    { label: 'Producción', icon: mdiChefHat },
+    { label: 'Resultado', icon: mdiScaleBalance },
+    { label: 'Empaque', icon: mdiPackageVariantClosed },
+    { label: 'Cierre', icon: mdiFlagCheckered },
+  ]
+  const [procStep, setProcStep] = useState(0)
   // Resultado de producción capturado en el modal de proceso
   const [prepUnidades, setPrepUnidades] = useState('')
   const [prepPesoFinal, setPrepPesoFinal] = useState('')
@@ -1295,6 +1307,18 @@ export default function OrdenesProduccion() {
     } catch { return { ...o, diligenciado_por: next } }
   }
 
+  // Cambia de paso en el asistente y persiste el paso en la orden (prep_sino.step) para poder
+  // retomarlo desde otro dispositivo. Solo escribe prep_sino (no pisa otros campos); si la columna
+  // no existe en la base, el error se ignora y el paso simplemente no persiste.
+  const goStep = (n) => {
+    const step = Math.min(PASOS_PROCESO.length - 1, Math.max(0, n))
+    setProcStep(step)
+    if (ordenPrep?.id) {
+      const ps = { conforme: prepConforme, surtido: prepSurtido, hay_sobrante: prepHaySobrante, step }
+      supabase.from('production_orders').update({ prep_sino: ps }).eq('id', ordenPrep.id).then(() => {}, () => {})
+    }
+  }
+
   // Abre el modal de Iniciar proceso (fecha de inicio + tiempos por subproceso, con autoguardado)
   const openProceso = async (o) => {
     let ord = o
@@ -1307,6 +1331,8 @@ export default function OrdenesProduccion() {
     const packs = (ord.empaque_saldo && Array.isArray(ord.saldo_pack)) ? ord.saldo_pack : []
     // Respuestas SI/NO guardadas tal cual (si existe el borrador); si no, sin marcar
     const ps = (ord.prep_sino && typeof ord.prep_sino === 'object') ? ord.prep_sino : {}
+    // Retoma el paso del asistente donde se dejó (guardado en la orden, sirve entre dispositivos).
+    setProcStep(Number.isInteger(ps.step) ? Math.min(4, Math.max(0, ps.step)) : 0)
     const triState = (v) => (v === true || v === false) ? v : null
     // Empaque de saldo: las unidades obtenidas = suma de lo empacado de cada saldo.
     setPrepUnidades(ord.empaque_saldo ? String(ord.cantidad_result || ord.cantidad_plan || '') : (ord.cantidad_result || '')); setPrepPesoFinal(ord.peso_final || ''); setPrepPesoDesp(ord.peso_desperdicio || '')
@@ -1487,7 +1513,7 @@ export default function OrdenesProduccion() {
         hay_sobrante: !!prepHaySobrante, sobrante_peso: prepHaySobrante && prepSobrantePeso !== '' ? (parseFloat(prepSobrantePeso) || 0) : null, sobrante_unidad: prepHaySobrante ? prepSobranteUnidad : null,
         destajo: prepDestajo.filter(d => d.nombre?.trim() || d.cantidad || d.tarifa),
         // Columnas antes escritas por separado (ahora en un único UPDATE):
-        prep_sino: { conforme: prepConforme, surtido: prepSurtido, hay_sobrante: prepHaySobrante },
+        prep_sino: { conforme: prepConforme, surtido: prepSurtido, hay_sobrante: prepHaySobrante, step: procStep },
         saldos_reservados: calcSaldosConsumidos(),
         campos_extra: prepCamposExtra.filter(c => (c.nombre || '').trim()).map(c => ({ nombre: c.nombre, valor: c.valor || '' })),
         parametros_calidad_resultado: serializarParamsCalidad(prepParamsCalidad),
@@ -3744,7 +3770,7 @@ export default function OrdenesProduccion() {
                           {puedeResultados && esMia && (o.estado === 'pendiente' || o.estado === 'en_proceso' || o.estado === 'rechazada') && (
                             <button className="btn btn-xs btn-primary" disabled={abriendoProcesoId === o.id}
                               onClick={() => openProcesoConGuard(o)}>
-                              <Ico as={Play} size={13} />{abriendoProcesoId === o.id ? 'Abriendo…' : 'Iniciar proceso'}
+                              <Ico as={Play} size={13} />{abriendoProcesoId === o.id ? 'Abriendo…' : (o.estado === 'en_proceso' ? 'Continuar proceso' : 'Iniciar proceso')}
                             </button>
                           )}
                           {/* Admin o rol con permiso "diligenciar_todas": proceso de órdenes de OTROS */}
@@ -3754,7 +3780,7 @@ export default function OrdenesProduccion() {
                                 ? 'Diligenciar proceso de esta orden (al enviar se aprueba automáticamente)'
                                 : 'Diligenciar proceso aunque la orden no esté asignada a ti'}
                               onClick={() => diligenciarOtra(o)}>
-                              <Ico as={Play} size={13} />{abriendoProcesoId === o.id ? 'Abriendo…' : 'Diligenciar proceso'}
+                              <Ico as={Play} size={13} />{abriendoProcesoId === o.id ? 'Abriendo…' : (o.estado === 'en_proceso' ? 'Continuar proceso' : 'Diligenciar proceso')}
                             </button>
                           )}
                           {/* Editar la orden mientras esté pendiente (no tomada) */}
@@ -4243,12 +4269,36 @@ export default function OrdenesProduccion() {
           <button type="button" className="btn btn-dorado btn-sm" style={{ marginLeft: puedeCompartirArchivos ? 0 : 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }} title="Imprimir orden" onClick={() => imprimirOrden()}><Printer size={16} aria-hidden="true" /> Imprimir</button></span>}
         size="modal-lg"
         footer={<>
-          <button className="btn btn-secondary" onClick={async () => { await guardarProcesoData(false); closeProceso() }}><Ico as={Save} size={14} />Guardar</button>
-          <button className="btn btn-secondary" onClick={() => imprimirOrden('pdf')}><Ico as={Download} size={14} />Descargar PDF</button>
-          <button className="btn btn-success" onClick={abrirConfirmEnvio}><Ico as={Send} size={14} />Enviar</button>
+          <button className="btn btn-secondary" onClick={() => goStep(procStep - 1)} disabled={procStep === 0}>← Anterior</button>
+          <button className="btn btn-secondary" onClick={async () => { await guardarProcesoData(false) }}><Ico as={Save} size={14} />Guardar</button>
+          {procStep < PASOS_PROCESO.length - 1
+            ? <button className="btn btn-primary" onClick={() => goStep(procStep + 1)}>Siguiente →</button>
+            : <button className="btn btn-success" onClick={abrirConfirmEnvio}><Ico as={Send} size={14} />Enviar</button>}
         </>}>
         {ordenPrep && (
           <>
+            {/* Barra de pasos (asistente). Clic en cualquiera para saltar; el paso se guarda en la orden. */}
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+              {PASOS_PROCESO.map(({ label, icon }, i) => {
+                const activo = i === procStep, hecho = i < procStep
+                return (
+                  <button key={i} type="button" onClick={() => goStep(i)} title={label}
+                    style={{ display: 'inline-flex', alignItems: 'center', gap: 6, padding: '5px 10px', borderRadius: 999, cursor: 'pointer', fontSize: '0.78rem', fontWeight: 600,
+                      border: `1px solid ${activo ? 'var(--selva)' : 'var(--crema-oscuro)'}`,
+                      background: activo ? 'var(--selva)' : hecho ? 'rgba(124,179,66,0.15)' : 'transparent',
+                      color: activo ? 'var(--crema)' : 'var(--texto-suave)' }}>
+                    <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: '50%',
+                      background: activo ? 'var(--crema)' : hecho ? 'var(--lima)' : 'var(--crema-oscuro)', color: activo ? 'var(--selva)' : hecho ? 'white' : 'var(--texto-suave)' }}>
+                      <Mdi path={hecho ? mdiCheck : icon} size={15} />
+                    </span>
+                    {label}
+                  </button>
+                )
+              })}
+            </div>
+
+            {/* ═══ PASO 1: PREPARAR ═══ */}
+            {procStep === 0 && (<>
             {/* Campos adicionales (MP vendibles): acordeón arriba, oculto por defecto. Salen en la impresión. */}
             {prepEsMpVend && (
               <details className="acordeon-item" open={prepCamposOpen} onToggle={e => setPrepCamposOpen(e.target.open)} style={{ marginBottom: 12, borderLeft: '4px solid var(--dorado)' }}>
@@ -4488,8 +4538,14 @@ export default function OrdenesProduccion() {
                 </div>
               </details>
             )}
+            {!prepEsMpVend && !ordenPrep?.es_subproducto && prepIngs.length === 0 && (
+              <p className="empty-table" style={{ margin: 0 }}>Sin documentos ni ingredientes que alistar para esta orden. Pasa a “Producción”.</p>
+            )}
+            </>)}
 
-            <div className="form-grid-2" style={{ background: 'rgba(124,179,66,0.06)', padding: 10, borderRadius: 'var(--radio)', marginBottom: 12 }}>
+            {/* ═══ PASO 2: PRODUCCIÓN ═══ */}
+            {procStep === 1 && (<>
+            <div className="form-grid-3" style={{ background: 'rgba(124,179,66,0.06)', padding: 10, borderRadius: 'var(--radio)', marginBottom: 12 }}>
               <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de inicio de fabricación *</label>
                 <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
                   <input type="date" className="form-control" value={prepFechaInicio} onChange={e => setPrepFechaInicio(e.target.value)} />
@@ -4572,8 +4628,10 @@ export default function OrdenesProduccion() {
               })}
               <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Usa ⏱ para fijar la hora actual. {prepModoAvanzado ? 'Avanzado: registra fecha y horas de cada proceso.' : 'Básico: solo hora de inicio y fin.'} Se guarda automáticamente.</small>
             </div>
+            </>)}
 
-            {/* Resultado de producción */}
+            {/* ═══ PASO 3: RESULTADO ═══ */}
+            {procStep === 2 && (
             <div style={{ background: 'rgba(200,169,74,0.08)', padding: 10, borderRadius: 'var(--radio)' }}>
               <strong style={{ fontSize: '0.9rem' }}><Ico as={Package} size={15} />Resultado de producción</strong>
               <div className="form-grid-2" style={{ marginTop: 8 }}>
@@ -4598,7 +4656,6 @@ export default function OrdenesProduccion() {
                     ) : null}
                   </div>
                 </div>
-                <div className="form-group" style={{ margin: 0 }}><label className="form-label">Responsable</label><input className="form-control" value={prepResp} onChange={e => setPrepResp(e.target.value)} /></div>
                 <div className="form-group" style={{ margin: 0 }}><label className="form-label">Peso final (g/Kg)</label><input type="number" className="form-control" value={prepPesoFinal} onChange={e => setPrepPesoFinal(e.target.value)} min={0} placeholder="Peso conforme obtenido" /></div>
                 <div className="form-group" style={{ margin: 0 }}><label className="form-label">Peso desperdicio</label><input type="number" className="form-control" value={prepPesoDesp} onChange={e => setPrepPesoDesp(e.target.value)} min={0} placeholder="Dañado / quemado" /></div>
                 {prepPorciona && <>
@@ -4689,11 +4746,18 @@ export default function OrdenesProduccion() {
                     if (val === false) { setPrepUnidades('0'); setPrepCantSubp('0') }
                   }} />
                 </div>
-                {prepPermiteSurtido && <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem' }}>
-                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Shuffle size={14} aria-hidden="true" /> ¿Empacó surtido? *</span>
-                  <SiNo value={prepSurtido} onChange={setPrepSurtido} />
-                </div>}
               </div>
+            </div>
+            )}
+
+            {/* ═══ PASO 4: EMPAQUE ═══ */}
+            {procStep === 3 && (
+            <div style={{ background: 'rgba(200,169,74,0.08)', padding: 10, borderRadius: 'var(--radio)' }}>
+              <strong style={{ fontSize: '0.9rem' }}><Ico as={Package} size={15} />Empaque</strong>
+              {prepPermiteSurtido && <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.9rem', margin: '10px 0' }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}><Shuffle size={14} aria-hidden="true" /> ¿Empacó surtido? *</span>
+                <SiNo value={prepSurtido} onChange={setPrepSurtido} />
+              </div>}
               {prepSurtido && (
                 <div className="form-group" style={{ background: 'rgba(200,169,74,0.10)', borderRadius: 'var(--radio)', padding: 10 }}>
                   <label className="form-label">¿Con qué lote(s) se mezcló? <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(agrega uno o varios)</small></label>
@@ -4886,7 +4950,7 @@ export default function OrdenesProduccion() {
               {/* 📦 ¿Quedó producción sin empacar? → acordeón para registrar lo que va a saldo */}
               <div className="form-group" style={{ background: 'rgba(200,169,74,0.06)', borderRadius: 'var(--radio)', padding: 10 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontWeight: 600, flexWrap: 'wrap' }}>
-                  <span>¿Sobró producción / quedó sin empacar? *</span>
+                  <span>¿Quedó producto sin empacar? * <small style={{ fontWeight: 400, color: 'var(--texto-suave)' }}>(se guarda como saldo para empacar después)</small></span>
                   <SiNo value={prepHaySobrante} onChange={v => { setPrepSobranteManual(true); setPrepHaySobrante(v) }} />
                   {!prepSobranteManual && prepHaySobrante && <span style={{ fontWeight: 400, fontSize: '0.72rem', color: 'var(--texto-suave)' }}>(sugerido automáticamente — ajústalo si sobró más o menos)</span>}
                 </div>
@@ -4911,6 +4975,14 @@ export default function OrdenesProduccion() {
                   </div>
                 )}
               </div>
+            </div>
+            )}
+
+            {/* ═══ PASO 5: CIERRE ═══ */}
+            {procStep === 4 && (
+            <div style={{ background: 'rgba(200,169,74,0.08)', padding: 10, borderRadius: 'var(--radio)' }}>
+              <strong style={{ fontSize: '0.9rem' }}><Ico as={Package} size={15} />Cierre</strong>
+              <div className="form-group" style={{ marginTop: 8 }}><label className="form-label">Responsable</label><input className="form-control" value={prepResp} onChange={e => setPrepResp(e.target.value)} /></div>
               {/* Mano de obra por destajo (operarios extra de un día puntual) */}
               <div className="form-group" style={{ background: 'rgba(124,179,66,0.07)', borderRadius: 'var(--radio)', padding: 10 }}>
                 <label className="form-label" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -4974,6 +5046,7 @@ export default function OrdenesProduccion() {
                 </div>
               </div>
             </div>
+            )}
           </>
         )}
       </Modal>

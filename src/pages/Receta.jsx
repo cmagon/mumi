@@ -71,6 +71,22 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
     },
   })
 
+  // Productos base (recetas base). Cuando el componente va embebido en Costos, los recibe por prop;
+  // en la página suelta (/utilidades → "Recetas rápidas"), los carga él mismo para poder cargar y
+  // calcular también las RECETAS BASE, no solo las rápidas.
+  const { data: productosFetched = [] } = useQuery({
+    queryKey: ['products_costing', 'receta-utilidades'],
+    enabled: !embedded,
+    queryFn: async () => {
+      const { data } = await supabase.from('products_costing')
+        .select('id, nombre, tipo, ingredientes, rendimiento, desperdicio, peso_unidad, porciona, peso_subporcion, brix, brix_aplica, parametros_calidad, imagen_url, ficha_nombre, ficha_url, costo_final, fecha_creado, activo')
+        .order('nombre')
+      return (data || []).filter(p => p.activo !== false && p.tipo !== 'mp' && p.tipo !== 'subproducto')
+    },
+  })
+  // Fuente efectiva de productos base: la prop si viene embebido, o la consulta propia si es standalone.
+  const productosBase = embedded ? productos : productosFetched
+
   // Sub-clave: aquí solo hacen falta 4 columnas, mientras ['raw_materials'] guarda la
   // tabla completa que usan Costos e Inventario. Con la clave compartida, abrir esta
   // pantalla dejaba a Inventario sin stock ni categorías hasta la siguiente recarga.
@@ -133,7 +149,7 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
 
     const [tipo, idStr] = value.split('-')
     const fuente = tipo === 'prod'
-      ? productos.find(x => String(x.id) === idStr)
+      ? productosBase.find(x => String(x.id) === idStr)
       : recetas.find(x => String(x.id) === idStr)
     if (!fuente) { limpiar(); return }
 
@@ -190,10 +206,14 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
   // Enviar la receta a una nueva orden de producción (precarga producto/cantidad/origen)
   const enviarAOrden = () => {
     if (!nombre.trim()) { toast('Ponle nombre a la receta antes de enviarla a una orden', 'warning'); return }
+    // Receta rápida cargada → origen 'receta'. Receta base (producto) cargada → origen 'producto'
+    // con su id, para que la orden quede enlazada a la ficha (antes se enviaba sin id).
+    const esBaseCargada = !recetaSelId && selValue.startsWith('prod-')
+    const idBase = esBaseCargada ? selValue.split('-')[1] : ''
     pushTo('/ordenes', { nuevaOrden: {
       producto: nombre,
       origen: recetaSelId ? 'receta' : 'producto',
-      origen_id: recetaSelId ? String(recetaSelId) : '',
+      origen_id: recetaSelId ? String(recetaSelId) : (idBase || ''),
       cantidad_plan: resultado?.unidades ? String(Math.round(resultado.unidades)) : '',
       ancla: ancla || '', cantidad_ancla: cantidadAncla || '',
     } })
@@ -327,15 +347,18 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
   }
 
   // ---- Guardar SIEMPRE como receta rápida (nunca toca productos) ----
-  const guardarReceta = async () => {
+  // modo: 'reemplazo' actualiza la receta rápida cargada; 'nueva' crea una COPIA.
+  // Al cargar una receta BASE (producto) solo se puede crear copia (los productos se editan en Ficha).
+  const guardarReceta = async (modo) => {
     if (!nombre.trim()) { toast('Ingresa el nombre de la receta', 'warning'); return }
     if (!ingredientes.length) { toast('Agrega ingredientes', 'warning'); return }
+    const esReemplazo = modo === 'reemplazo' && !!recetaSelId
     // Evitar nombres duplicados (con productos/recetas base o con otras recetas rápidas).
-    // Si choca, se le agrega la fecha al final para hacerlo único.
+    // Al reemplazar se excluye la propia receta; al copiar cuenta como choque para renombrar la copia.
     let nombreFinal = nombre.trim()
     const norm = (s) => (s || '').trim().toLowerCase()
-    const choca = productos.some(p => norm(p.nombre) === norm(nombreFinal))
-      || recetas.some(r => norm(r.nombre) === norm(nombreFinal) && String(r.id) !== String(recetaSelId))
+    const choca = productosBase.some(p => norm(p.nombre) === norm(nombreFinal))
+      || recetas.some(r => norm(r.nombre) === norm(nombreFinal) && !(esReemplazo && String(r.id) === String(recetaSelId)))
     if (choca) {
       nombreFinal = `${nombreFinal} (${new Date().toLocaleDateString('es-CO')})`
       setNombre(nombreFinal)
@@ -367,13 +390,16 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
         creado_por: profile?.nombre || '',
         fecha: new Date().toISOString().split('T')[0],
       }
-      // recetaSelId solo existe si se cargó una receta rápida → update; cualquier otro caso → insert
-      if (recetaSelId) {
+      // Reemplazo → update de la receta rápida cargada. Copia/nueva → insert (y queda cargada la copia).
+      if (esReemplazo) {
         await supabase.from('recipes').update(datos).eq('id', recetaSelId)
-        toast('💾 Receta rápida actualizada ✓')
+        toast('♻ Receta rápida reemplazada ✓')
       } else {
-        await supabase.from('recipes').insert(datos)
-        toast('💾 Receta rápida guardada ✓')
+        const { data: nueva } = await supabase.from('recipes').insert(datos).select('id').single()
+        // Deja cargada la copia recién creada para que los siguientes cambios editen la copia,
+        // no la receta base/original de la que se partió.
+        if (nueva?.id) { setRecetaSelId(nueva.id); setSelValue(`recipe-${nueva.id}`) }
+        toast(recetaSelId ? '💾 Guardada como copia nueva ✓' : '💾 Receta rápida guardada ✓')
       }
       refetchRecetas()
     } catch (err) {
@@ -432,7 +458,7 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
 
   // Lista combinada para "Recetas Guardadas": productos (base) + recetas rápidas
   const filasGuardadas = [
-    ...productos.map(p => ({ ...p, _origen: 'prod' })),
+    ...productosBase.map(p => ({ ...p, _origen: 'prod' })),
     ...recetas.map(r => ({ ...r, _origen: 'recipe' })),
   ]
 
@@ -456,7 +482,7 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
             <label className="form-label">Cargar receta existente</label>
             <Select className="form-control" value={selValue} onChange={e => cargarReceta(e.target.value)}>
               <option value="">— nueva receta —</option>
-              {productos.length > 0 && <optgroup label="⭐ Recetas Base (productos)">{productos.map(p => <option key={p.id} value={`prod-${p.id}`}>⭐ {p.nombre}</option>)}</optgroup>}
+              {productosBase.length > 0 && <optgroup label="⭐ Recetas Base (productos)">{productosBase.map(p => <option key={p.id} value={`prod-${p.id}`}>⭐ {p.nombre}</option>)}</optgroup>}
               {!esAuxiliar && recetas.length > 0 && <optgroup label="💾 Recetas Rápidas">{recetas.map(r => <option key={r.id} value={`recipe-${r.id}`}>💾 {r.nombre}</option>)}</optgroup>}
             </Select>
           </div>
@@ -807,10 +833,15 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
             {/* Botones acción */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               {puedeLimpiar && <button className="btn btn-secondary btn-sm" onClick={limpiar}>🗑 Limpiar</button>}
-              {puedeGuardar && (
-                <button className="btn btn-success btn-sm" onClick={guardarReceta} disabled={saving}>
-                  {recetaSelId ? '💾 Actualizar receta rápida' : '💾 Guardar receta rápida'}
-                </button>
+              {puedeGuardar && (recetaSelId
+                ? <>
+                    {/* Receta rápida cargada: se puede reemplazar o guardar como copia nueva */}
+                    <button className="btn btn-success btn-sm" onClick={() => guardarReceta('reemplazo')} disabled={saving}>♻ Reemplazar receta</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => guardarReceta('nueva')} disabled={saving}>📄 Guardar como copia</button>
+                  </>
+                : <button className="btn btn-success btn-sm" onClick={() => guardarReceta('nueva')} disabled={saving}>
+                    💾 Guardar {esBase ? 'como receta rápida (copia)' : 'receta rápida'}
+                  </button>
               )}
               <button className="btn btn-primary btn-sm" onClick={enviarAOrden}>📤 Enviar a orden de producción</button>
               {onConvertir && recetaSelId && (
