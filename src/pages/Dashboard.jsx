@@ -25,10 +25,9 @@ const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov'
 const COLORS = ['#2d5a3d','#7CB342','#C8A94A','#8B5E3C','#3d7a52','#a87450']
 
 // Orden por defecto de los módulos del tablero (pendientes y alertas primero)
-const ORDEN_DEFAULT = ['frase', 'pendientes', 'kpis', 'financiero', 'inventario', 'produccion_mensual', 'distribucion', 'ultimas', 'sgc_cumplimiento', 'vencimientos', 'calidad_kpis', 'nc_severidad', 'resumen_calidad']
+const ORDEN_DEFAULT = ['frase', 'pendientes', 'kpis', 'inventario', 'produccion_mensual', 'distribucion', 'ultimas', 'sgc_cumplimiento', 'vencimientos', 'calidad_kpis', 'nc_severidad', 'resumen_calidad']
 const TITULOS = {
   frase: 'Frase del día', pendientes: 'Pendientes y alertas', kpis: 'Indicadores generales',
-  financiero: 'Análisis financiero del mes',
   inventario: 'Inventario de materias primas', produccion_mensual: 'Producción mensual por categoría',
   distribucion: 'Distribución por producto', ultimas: 'Últimas producciones',
   sgc_cumplimiento: 'Cumplimiento de registros SGC', vencimientos: 'Vencimientos de programas',
