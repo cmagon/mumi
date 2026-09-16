@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { Download, Users, BarChart3, Star, ShoppingCart, MessageCircle, Truck, CheckCircle2, XCircle, Package, X, Trash2, Send, Pencil, Eye } from 'lucide-react'
+import { Download, Users, BarChart3, Star, ShoppingCart, MessageCircle, Truck, CheckCircle2, XCircle, Package, X, Trash2, Send, Pencil, Eye, Tag } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fNum } from '../lib/businessLogic'
 
@@ -123,16 +123,30 @@ function useCatalogoCrmData() {
       return data || []
     },
   })
-  return { qPed, qSub, qCli, pedidos: qPed.data || [], subs: qSub.data || [], perfiles: qCli.data || [] }
+  const qEtiq = useQuery({
+    queryKey: ['catalogo_crm_etiquetas'],
+    queryFn: async () => {
+      const { data, error } = await supabase.from('catalogo_crm_etiquetas').select('email, etiquetas').limit(5000)
+      if (error) return []   // tabla nueva (v174); no romper el CRM si aún no existe
+      return data || []
+    },
+  })
+  return { qPed, qSub, qCli, qEtiq, pedidos: qPed.data || [], subs: qSub.data || [], perfiles: qCli.data || [], etiquetasManuales: qEtiq.data || [] }
 }
 
-function enriquecerClientes(subs, pedidos, perfiles = []) {
+function enriquecerClientes(subs, pedidos, perfiles = [], etiquetasManuales = []) {
   const porEmail = new Map()
   for (const p of pedidos) {
     const e = (p.email || '').trim().toLowerCase()
     if (!e) continue
     if (!porEmail.has(e)) porEmail.set(e, [])
     porEmail.get(e).push(p)
+  }
+  // Etiquetas manuales por correo (CRM, v174).
+  const manualPorEmail = new Map()
+  for (const r of etiquetasManuales || []) {
+    const e = (r.email || '').trim().toLowerCase()
+    if (e) manualPorEmail.set(e, Array.isArray(r.etiquetas) ? r.etiquetas : [])
   }
   // Perfiles de cuenta (clientes_catalogo) por correo → etiqueta "registrado" + datos.
   const perfilPorEmail = new Map()
@@ -208,6 +222,10 @@ function enriquecerClientes(subs, pedidos, perfiles = []) {
       _pedidos: [],
     })
   }
+  // Adjunta etiquetas manuales a cada cliente.
+  for (const c of byEmail.values()) {
+    c.etiquetas_manuales = manualPorEmail.get(c.email) || []
+  }
   return [...byEmail.values()].sort((a, b) => String(b.created_at || '').localeCompare(String(a.created_at || '')))
 }
 
@@ -223,8 +241,9 @@ const ORDENES = [
 
 export function TabClientes() {
   const qc = useQueryClient()
-  const { qPed, qSub, pedidos, subs, perfiles } = useCatalogoCrmData()
+  const { qPed, qSub, pedidos, subs, perfiles, etiquetasManuales } = useCatalogoCrmData()
   const [verPerfil, setVerPerfil] = useState(null)
+  const [editarTags, setEditarTags] = useState(null)
   const [desde, setDesde] = useState('')
   const [hasta, setHasta] = useState('')
   const [tagsOn, setTagsOn] = useState([])
@@ -235,17 +254,18 @@ export function TabClientes() {
   const [borrando, setBorrando] = useState('')
   const [aviso, setAviso] = useState('')
 
-  const clientes = useMemo(() => enriquecerClientes(subs, pedidos, perfiles), [subs, pedidos, perfiles])
+  const clientes = useMemo(() => enriquecerClientes(subs, pedidos, perfiles, etiquetasManuales), [subs, pedidos, perfiles, etiquetasManuales])
 
   const filtrados = useMemo(() => {
     const arr = clientes.filter(c => {
       const alta = dayKey(c.created_at)
       if (desde && alta && alta < desde) return false
       if (hasta && alta && alta > hasta) return false
-      if (tagsOn.length && !tagsOn.every(t => c.etiquetas.includes(t))) return false
+      const todasTags = [...(c.etiquetas || []), ...(c.etiquetas_manuales || [])]
+      if (tagsOn.length && !tagsOn.every(t => todasTags.includes(t))) return false
       if (q.trim()) {
         const s = q.trim().toLowerCase()
-        const blob = `${c.email} ${c.nombre || ''} ${c.telefono || ''} ${c.etiquetas.join(' ')}`.toLowerCase()
+        const blob = `${c.email} ${c.nombre || ''} ${c.telefono || ''} ${todasTags.join(' ')}`.toLowerCase()
         if (!blob.includes(s)) return false
       }
       return true
@@ -300,6 +320,28 @@ export function TabClientes() {
     } finally { setBorrando('') }
   }
 
+  // Guarda las etiquetas manuales de un correo (upsert). Lista vacía → borra la fila.
+  const guardarEtiquetas = async (email, tags) => {
+    const e = (email || '').trim().toLowerCase()
+    if (!e) return
+    try {
+      if (!tags.length) {
+        await supabase.from('catalogo_crm_etiquetas').delete().eq('email', e)
+      } else {
+        await supabase.from('catalogo_crm_etiquetas').upsert({ email: e, etiquetas: tags, updated_at: new Date().toISOString() })
+      }
+      qc.invalidateQueries({ queryKey: ['catalogo_crm_etiquetas'] })
+      setEditarTags(null)
+    } catch (ex) { setAviso('No se pudieron guardar las etiquetas: ' + (ex.message || ex)) }
+  }
+
+  // Etiquetas manuales en uso (para ofrecerlas como filtro).
+  const manualesEnUso = useMemo(() => {
+    const s = new Set()
+    for (const c of clientes) for (const t of (c.etiquetas_manuales || [])) s.add(t)
+    return [...s]
+  }, [clientes])
+
   const toggleTag = (id) => setTagsOn(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
   const toggleCol = (id) => setCols(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
 
@@ -308,7 +350,7 @@ export function TabClientes() {
     if (!chosen.length) return
     const header = chosen.map(c => c.label)
     const rows = filtrados.map(c => chosen.map(col => {
-      if (col.id === 'etiquetas') return (c.etiquetas || []).join(' | ')
+      if (col.id === 'etiquetas') return [...(c.etiquetas || []), ...(c.etiquetas_manuales || [])].join(' | ')
       if (col.id === 'activo') return c.activo === false ? 'Baja' : 'Activo'
       if (col.id === 'created_at') return c.created_at ? new Date(c.created_at).toLocaleString('es-CO') : ''
       if (col.id === 'pedido_at') return c.pedido_at ? new Date(c.pedido_at).toLocaleString('es-CO') : ''
@@ -385,6 +427,15 @@ export function TabClientes() {
               {t.label}
             </button>
           ))}
+          {manualesEnUso.map(t => (
+            <button key={'mf'+t} type="button" onClick={() => toggleTag(t)}
+              className="badge"
+              style={{ cursor: 'pointer', border: tagsOn.includes(t) ? 'none' : '1px solid #6d4c9f',
+                background: tagsOn.includes(t) ? '#6d4c9f' : 'transparent', color: tagsOn.includes(t) ? '#fff' : '#6d4c9f',
+                fontWeight: 700, padding: '4px 10px' }}>
+              {t}
+            </button>
+          ))}
         </div>
 
         {exportOpen && (
@@ -418,10 +469,13 @@ export function TabClientes() {
                     <td>{c.nombre || '—'}</td>
                     <td>{c.telefono || '—'}</td>
                     <td style={{ whiteSpace: 'normal' }}>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                        {c.etiquetas.length
-                          ? c.etiquetas.map(t => <span key={t} className={`badge ${badgeTag(t)}`} style={{ fontSize: '0.65rem' }}>{t}</span>)
-                          : '—'}
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                        {c.etiquetas.map(t => <span key={t} className={`badge ${badgeTag(t)}`} style={{ fontSize: '0.65rem' }}>{t}</span>)}
+                        {(c.etiquetas_manuales || []).map(t => <span key={'m'+t} className="badge" style={{ fontSize: '0.65rem', background: '#6d4c9f', color: '#fff' }}>{t}</span>)}
+                        {!c.etiquetas.length && !(c.etiquetas_manuales || []).length && '—'}
+                        <button type="button" className="btn btn-xs btn-secondary" title="Editar etiquetas manuales" style={{ padding: '1px 6px' }} onClick={() => setEditarTags(c)}>
+                          <Ico as={Tag} size={12} />
+                        </button>
                       </div>
                     </td>
                     <td>{c.created_at ? new Date(c.created_at).toLocaleDateString('es-CO') : '—'}</td>
@@ -453,11 +507,57 @@ export function TabClientes() {
             </table></div>}
       </div>
       {verPerfil && <ModalPerfilCliente cliente={verPerfil} onCerrar={() => setVerPerfil(null)} />}
+      {editarTags && <ModalEtiquetas cliente={editarTags} onCerrar={() => setEditarTags(null)} onGuardar={guardarEtiquetas} />}
     </>
   )
 }
 
 // Modal: datos guardados de la cuenta del cliente (envío + facturación).
+// Sugerencias de etiquetas manuales (el admin también puede escribir libres).
+const TAGS_SUGERIDAS = ['VIP', 'Frecuente', 'Mayorista potencial', 'Revisar', 'No comprar', 'Problema', 'Prueba']
+
+// Modal para agregar/quitar etiquetas manuales de un cliente.
+function ModalEtiquetas({ cliente, onCerrar, onGuardar }) {
+  const [tags, setTags] = useState(Array.isArray(cliente.etiquetas_manuales) ? [...cliente.etiquetas_manuales] : [])
+  const [nueva, setNueva] = useState('')
+  const [guardando, setGuardando] = useState(false)
+  const add = (t) => { const v = (t || '').trim(); if (v && !tags.includes(v)) setTags([...tags, v]); setNueva('') }
+  const quitar = (t) => setTags(tags.filter(x => x !== t))
+  const guardar = async () => { setGuardando(true); try { await onGuardar(cliente.email, tags) } finally { setGuardando(false) } }
+  return (
+    <div className="overlay" style={{ alignItems: 'center' }} onClick={(e) => e.target === e.currentTarget && onCerrar()}>
+      <div className="popup" style={{ textAlign: 'left', maxWidth: 440 }}>
+        <button className="popup-x" onClick={onCerrar} aria-label="Cerrar"><X size={20} /></button>
+        <h2 className="serif" style={{ color: 'var(--selva)', fontSize: '1.2rem', marginBottom: 4 }}>Etiquetas manuales</h2>
+        <p style={{ fontSize: '0.8rem', color: 'var(--texto-suave)', margin: '0 0 12px' }}>{cliente.email}</p>
+
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10, minHeight: 24 }}>
+          {tags.length ? tags.map(t => (
+            <span key={t} className="badge" style={{ background: '#6d4c9f', color: '#fff', display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+              {t}<button type="button" onClick={() => quitar(t)} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '0.9rem', lineHeight: 1 }}>×</button>
+            </span>
+          )) : <span style={{ fontSize: '0.8rem', color: 'var(--texto-suave)' }}>Sin etiquetas manuales.</span>}
+        </div>
+
+        <div style={{ display: 'flex', gap: 6, marginBottom: 10 }}>
+          <input className="form-control" value={nueva} onChange={e => setNueva(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); add(nueva) } }} placeholder="Nueva etiqueta…" />
+          <button type="button" className="btn btn-sm btn-secondary" onClick={() => add(nueva)}>Agregar</button>
+        </div>
+
+        <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)', marginBottom: 6 }}>Sugeridas:</div>
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 14 }}>
+          {TAGS_SUGERIDAS.filter(t => !tags.includes(t)).map(t => (
+            <button key={t} type="button" className="badge" style={{ cursor: 'pointer', border: '1px solid #6d4c9f', background: 'transparent', color: '#6d4c9f', padding: '4px 10px' }} onClick={() => add(t)}>+ {t}</button>
+          ))}
+        </div>
+
+        <button className="btn btn-primary btn-sm" onClick={guardar} disabled={guardando}>{guardando ? 'Guardando…' : 'Guardar etiquetas'}</button>
+      </div>
+    </div>
+  )
+}
+
 function ModalPerfilCliente({ cliente, onCerrar }) {
   const p = cliente.perfil || {}
   const fila = (etq, val) => (
