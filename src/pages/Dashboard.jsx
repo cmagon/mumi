@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import { Bar, Doughnut } from 'react-chartjs-2'
@@ -6,7 +6,7 @@ import {
   Chart as ChartJS, CategoryScale, LinearScale, BarElement,
   ArcElement, Tooltip, Legend,
 } from 'chart.js'
-import { Factory, Users, Package, Handshake, Lightbulb, TrendingUp, PieChart as PieIcon, ClipboardList, BookOpen, Bell, AlertTriangle, Clock, CheckCircle2, GraduationCap, Pin, Download, Settings, GripVertical, Plus, EyeOff, RotateCcw, DollarSign } from 'lucide-react'
+import { Factory, Users, Package, Handshake, Lightbulb, TrendingUp, TrendingDown, PieChart as PieIcon, ClipboardList, BookOpen, Bell, AlertTriangle, Clock, CheckCircle2, GraduationCap, Pin, Download, Settings, GripVertical, Plus, EyeOff, RotateCcw, DollarSign } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import { fNum, fCOP, fFecha, getRolLabel, PARAMS_NOMINA_DEFAULT, getGastosOperacionales, getEstadoResultados, getSemaforoFinanciero, getCIFTotalMensual, getCostoNominaMensual } from '../lib/businessLogic'
 import { fraseDelDia } from '../lib/frases'
@@ -25,9 +25,10 @@ const MESES = ['Ene','Feb','Mar','Abr','May','Jun','Jul','Ago','Sep','Oct','Nov'
 const COLORS = ['#2d5a3d','#7CB342','#C8A94A','#8B5E3C','#3d7a52','#a87450']
 
 // Orden por defecto de los módulos del tablero (pendientes y alertas primero)
-const ORDEN_DEFAULT = ['frase', 'pendientes', 'kpis', 'inventario', 'produccion_mensual', 'distribucion', 'ultimas', 'sgc_cumplimiento', 'vencimientos', 'calidad_kpis', 'nc_severidad', 'resumen_calidad']
+const ORDEN_DEFAULT = ['frase', 'pendientes', 'kpis', 'costos_prod', 'inventario', 'produccion_mensual', 'distribucion', 'ultimas', 'sgc_cumplimiento', 'vencimientos', 'calidad_kpis', 'nc_severidad', 'resumen_calidad']
 const TITULOS = {
   frase: 'Frase del día', pendientes: 'Pendientes y alertas', kpis: 'Indicadores generales',
+  costos_prod: 'Costos de producción (mes/semana)',
   inventario: 'Inventario de materias primas', produccion_mensual: 'Producción mensual por categoría',
   distribucion: 'Distribución por producto', ultimas: 'Últimas producciones',
   sgc_cumplimiento: 'Cumplimiento de registros SGC', vencimientos: 'Vencimientos de programas',
@@ -41,12 +42,12 @@ export default function Dashboard() {
   const frase = fraseDelDia()
   const [devRole, setDevRoleState] = useState(getDevRole())
   useEffect(() => subscribeDevRole(setDevRoleState), [])
-  // El módulo financiero es sensible — solo se ofrece a admins (ni siquiera como oculto/personalizable).
+  // Los costos de producción son sensibles — solo se ofrecen a admins (ni como oculto/personalizable).
   // Si un admin está previsualizando la vista de OTRO rol (devRole), se evalúa como ese rol —
-  // así el módulo financiero no se filtra sin querer al layout guardado de un rol no-admin.
+  // así el módulo de costos no se filtra sin querer al layout guardado de un rol no-admin.
   const rolEfectivoDash = devRole || profile?.rol
   const esAdminDash = rolEfectivoDash === 'admin'
-  const ORDEN_DEFAULT_ROL = esAdminDash ? ORDEN_DEFAULT : ORDEN_DEFAULT.filter(k => k !== 'financiero')
+  const ORDEN_DEFAULT_ROL = esAdminDash ? ORDEN_DEFAULT : ORDEN_DEFAULT.filter(k => k !== 'costos_prod')
 
   // ----- Personalización del tablero (orden + módulos ocultos), guardada en la NUBE -----
   // Efectivo = personalización del usuario → vista por defecto del rol → orden por código.
@@ -54,6 +55,7 @@ export default function Dashboard() {
   const [orden, setOrden] = useState(ORDEN_DEFAULT_ROL)
   const [ocultos, setOcultos] = useState([])
   const [editando, setEditando] = useState(false)
+  const [costModo, setCostModo] = useState('mes')   // 'mes' | 'semana' — vista de costos de producción
   const cargadoRef = useRef(false)
   const ord = useReorder(setOrden)
 
@@ -236,6 +238,55 @@ export default function Dashboard() {
   const estadoResultados = estadoDe(mesActual)
   const estadoMesAnterior = estadoDe(mesAnterior)
   const semaforoFin = getSemaforoFinanciero(estadoResultados.margenBrutoPct, estadoResultados.margenNetoPct)
+
+  // ----- Costos de PRODUCCIÓN por mes/semana (solo lo que se USA al producir) -----
+  // Fuente: órdenes cerradas (ejecutada/aprobada) con su snapshot de costo real. Incluye MP
+  // consumida + conversión (mano de obra, CIF, empaque, destajo, tiempos). NO incluye compras de
+  // MP ni otros gastos: es el costo de fabricar lo que se produjo en el período.
+  const { data: ordenesCostoFin = [] } = useQuery({
+    queryKey: ['ordenes_costo_prod'],
+    queryFn: async () => {
+      const { data } = await supabase.from('production_orders')
+        .select('id, producto, estado, fecha_inicio, fecha_envio, cantidad_result, costo_snapshot')
+        .in('estado', ['ejecutada', 'aprobada'])
+      return data || []
+    },
+    enabled: esAdminDash,
+  })
+  // Clave de período: mes 'YYYY-MM' o lunes de la semana 'YYYY-MM-DD' (semana ISO, lunes a domingo).
+  const lunesKey = (ymd) => {
+    const [y, m, d] = String(ymd).split('-').map(Number)
+    const dt = new Date(y, (m || 1) - 1, d || 1)
+    const off = (dt.getDay() + 6) % 7   // Lun=0
+    dt.setDate(dt.getDate() - off)
+    return `${dt.getFullYear()}-${String(dt.getMonth() + 1).padStart(2, '0')}-${String(dt.getDate()).padStart(2, '0')}`
+  }
+  const resumenCostos = useMemo(() => {
+    const keyOf = costModo === 'semana' ? lunesKey : (d) => String(d).slice(0, 7)
+    const per = {}
+    for (const o of ordenesCostoFin) {
+      const snap = o.costo_snapshot && typeof o.costo_snapshot === 'object' ? o.costo_snapshot : null
+      if (!snap) continue
+      const fecha = o.fecha_inicio || (o.fecha_envio ? String(o.fecha_envio).slice(0, 10) : '')
+      if (!fecha) continue
+      const total = Number(snap.costo_real_total) || 0
+      if (!(total > 0)) continue
+      const mp = Number(snap.mp_total) || 0
+      const uni = Number(snap.cantidad_obtenida) || Number(o.cantidad_result) || 0
+      const fichaUnit = Number(snap.costo_ficha_unit) || 0
+      const k = keyOf(fecha)
+      const p = per[k] || (per[k] = { total: 0, mp: 0, conv: 0, uni: 0, prods: {} })
+      p.total += total; p.mp += mp; p.conv += (total - mp); p.uni += uni
+      const pr = p.prods[o.producto] || (p.prods[o.producto] = { real: 0, uni: 0, fichaW: 0 })
+      pr.real += total; pr.uni += uni; pr.fichaW += fichaUnit * uni
+    }
+    const keys = Object.keys(per).sort()   // ascendente
+    const hoy = new Date().toISOString().slice(0, 10)
+    const curKey = keyOf(hoy)
+    const prevKey = [...keys].filter(k => k < curKey).pop() || null
+    return { per, keys, curKey, prevKey }
+  }, [ordenesCostoFin, costModo])
+
   // Vistas por defecto del tablero por rol (nube)
   const { data: roleRows = [], refetch: refetchRoleLayouts } = useQuery({
     queryKey: ['role_layouts'],
@@ -390,6 +441,121 @@ export default function Dashboard() {
 
   // ===== Definición de módulos (widgets) =====
   const W = {}
+
+  // Widget: Costos de PRODUCCIÓN por mes/semana (solo admin) — MP consumida + operativos de producción.
+  if (esAdminDash) {
+    const { per, keys, curKey, prevKey } = resumenCostos
+    const cur = per[curKey] || { total: 0, mp: 0, conv: 0, uni: 0, prods: {} }
+    const prev = prevKey ? per[prevKey] : null
+    const labelKey = (k) => {
+      if (!k) return '—'
+      if (costModo === 'semana') { const [y, m, d] = k.split('-'); return `Sem ${d}/${m}/${String(y).slice(2)}` }
+      const [y, m] = k.split('-').map(Number); return `${MESES[m - 1]} ${y}`
+    }
+    const deltaTotalPct = prev && prev.total > 0 ? ((cur.total - prev.total) / prev.total) * 100 : null
+    const costoUnidCur = cur.uni > 0 ? cur.total / cur.uni : 0
+    // Semáforo por producto: costo/unidad real vs ficha (desviación).
+    const filasProd = Object.entries(cur.prods).map(([nombre, p]) => {
+      const realUnit = p.uni > 0 ? p.real / p.uni : 0
+      const fichaUnit = p.uni > 0 ? p.fichaW / p.uni : 0
+      const dev = fichaUnit > 0 ? ((realUnit - fichaUnit) / fichaUnit) * 100 : null
+      const tonoP = dev == null ? 'gris' : dev > 15 ? 'rojo' : dev > 5 ? 'dorado' : 'verde'
+      return { nombre, realUnit, fichaUnit, dev, uni: p.uni, tonoP }
+    }).sort((a, b) => (b.dev ?? -999) - (a.dev ?? -999))
+    // Histórico: últimos 6 períodos (ascendente) para las barras y la tabla.
+    const hist = keys.slice(-6).map(k => ({ k, ...per[k] }))
+    const maxHist = Math.max(1, ...hist.map(h => h.total))
+    const dotColor = (t) => t === 'rojo' ? 'var(--rojo, #c0392b)' : t === 'dorado' ? 'var(--dorado, #C8A94A)' : t === 'verde' ? 'var(--lima, #7CB342)' : 'var(--texto-suave)'
+
+    W.costos_prod = (
+      <div className="card">
+        <div className="card-title" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
+          <Ico as={Factory} size={18} />Costos de producción — {labelKey(curKey)}
+          <div style={{ marginLeft: 'auto', display: 'flex', border: '1px solid var(--crema-oscuro)', borderRadius: 6, overflow: 'hidden' }}>
+            {[['mes', 'Mes'], ['semana', 'Semana']].map(([k, l]) => (
+              <button key={k} type="button" onClick={() => setCostModo(k)}
+                style={{ padding: '3px 12px', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', border: 'none', background: costModo === k ? 'var(--selva)' : 'transparent', color: costModo === k ? 'var(--crema)' : 'var(--texto-suave)' }}>{l}</button>
+            ))}
+          </div>
+        </div>
+
+        {/* Totales del período */}
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 10, marginBottom: 12 }}>
+          <div style={{ background: 'var(--crema)', borderRadius: 8, padding: 10 }}>
+            <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Costo total de producción</div>
+            <div style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--selva)' }}>{fCOP(cur.total)}</div>
+            {deltaTotalPct != null && (
+              <div style={{ fontSize: '0.75rem', display: 'inline-flex', alignItems: 'center', gap: 3, color: deltaTotalPct > 0 ? 'var(--rojo, #c0392b)' : 'var(--lima, #7CB342)' }}>
+                <Ico as={deltaTotalPct > 0 ? TrendingUp : TrendingDown} size={13} />
+                {deltaTotalPct > 0 ? '+' : ''}{deltaTotalPct.toFixed(1)}% vs {labelKey(prevKey)}
+              </div>
+            )}
+          </div>
+          <div style={{ background: 'rgba(124,179,66,0.10)', borderRadius: 8, padding: 10 }}>
+            <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Materia prima consumida</div>
+            <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{fCOP(cur.mp)}</div>
+            <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>{cur.total > 0 ? (cur.mp / cur.total * 100).toFixed(0) : 0}% del total</div>
+          </div>
+          <div style={{ background: 'rgba(200,169,74,0.12)', borderRadius: 8, padding: 10 }}>
+            <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Operativos (MO + CIF + empaque + destajo)</div>
+            <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{fCOP(cur.conv)}</div>
+            <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>{cur.total > 0 ? (cur.conv / cur.total * 100).toFixed(0) : 0}% del total</div>
+          </div>
+          <div style={{ background: 'var(--crema)', borderRadius: 8, padding: 10 }}>
+            <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Unidades producidas</div>
+            <div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{fNum(cur.uni)}</div>
+            <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)' }}>Costo/unidad prom.: {fCOP(costoUnidCur)}</div>
+          </div>
+        </div>
+
+        {/* Semáforo por producto: costo/unidad real vs ficha */}
+        {filasProd.length > 0 ? (
+          <div className="table-wrap" style={{ marginBottom: 8 }}>
+            <table style={{ fontSize: '0.82rem' }}>
+              <thead><tr><th></th><th>Producto</th><th className="td-number">Unid.</th><th className="td-number">Costo/u real</th><th className="td-number">Ficha</th><th className="td-number">Desv.</th></tr></thead>
+              <tbody>
+                {filasProd.map((f, i) => (
+                  <tr key={i}>
+                    <td style={{ width: 18 }}><span style={{ display: 'inline-block', width: 10, height: 10, borderRadius: '50%', background: dotColor(f.tonoP) }} /></td>
+                    <td><strong>{f.nombre}</strong></td>
+                    <td className="td-number">{fNum(f.uni)}</td>
+                    <td className="td-number">{fCOP(f.realUnit)}</td>
+                    <td className="td-number">{f.fichaUnit > 0 ? fCOP(f.fichaUnit) : '—'}</td>
+                    <td className="td-number" style={{ color: dotColor(f.tonoP), fontWeight: 600 }}>{f.dev == null ? '—' : `${f.dev > 0 ? '+' : ''}${f.dev.toFixed(0)}%`}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)', marginTop: 4 }}>
+              🟢 dentro de lo esperado · 🟡 hasta +15% sobre la ficha · 🔴 más de +15% (revisar consumo, mermas o tiempos).
+            </div>
+          </div>
+        ) : (
+          <p className="empty-table" style={{ margin: '4px 0' }}>Sin producción registrada en este {costModo === 'semana' ? 'semana' : 'mes'}.</p>
+        )}
+
+        {/* Histórico: últimos períodos */}
+        {hist.length > 0 && (
+          <div style={{ marginTop: 10 }}>
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--selva)', marginBottom: 6 }}>Histórico ({costModo === 'semana' ? 'últimas semanas' : 'últimos meses'})</div>
+            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 90 }}>
+              {hist.map(h => (
+                <div key={h.k} title={`${labelKey(h.k)}: ${fCOP(h.total)}`} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 0 }}>
+                  <div style={{ fontSize: '0.62rem', color: 'var(--texto-suave)' }}>{fCOP(h.total)}</div>
+                  <div style={{ width: '70%', background: h.k === curKey ? 'var(--selva)' : 'var(--dorado, #C8A94A)', height: `${Math.max(4, (h.total / maxHist) * 60)}px`, borderRadius: '4px 4px 0 0' }} />
+                  <div style={{ fontSize: '0.62rem', color: 'var(--texto-suave)', textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{labelKey(h.k)}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        <div style={{ fontSize: '0.7rem', color: 'var(--texto-suave)', marginTop: 8 }}>
+          Solo el costo de <strong>fabricar</strong> lo producido (MP consumida + operativos de producción). No incluye compras de MP ni otros gastos.
+        </div>
+      </div>
+    )
+  }
+
   W.frase = (
     <div className="card" style={{ background: 'linear-gradient(135deg, #2d5a3d 0%, #3d7a52 100%)', color: '#fff' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
