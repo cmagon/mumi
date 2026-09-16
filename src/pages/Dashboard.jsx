@@ -56,6 +56,7 @@ export default function Dashboard() {
   const [ocultos, setOcultos] = useState([])
   const [editando, setEditando] = useState(false)
   const [costModo, setCostModo] = useState('mes')   // 'mes' | 'semana' — vista de costos de producción
+  const [costSel, setCostSel] = useState(null)      // período seleccionado en la lista (null = período actual)
   const cargadoRef = useRef(false)
   const ord = useReorder(setOrden)
 
@@ -444,8 +445,11 @@ export default function Dashboard() {
 
   // Widget: Costos de PRODUCCIÓN por mes/semana (solo admin) — MP consumida + operativos de producción.
   if (esAdminDash) {
-    const { per, keys, curKey, prevKey } = resumenCostos
-    const cur = per[curKey] || { total: 0, mp: 0, conv: 0, uni: 0, prods: {} }
+    const { per, keys, curKey } = resumenCostos
+    // Período mostrado: el seleccionado en la lista, o el actual por defecto.
+    const selKey = (costSel && per[costSel]) ? costSel : curKey
+    const cur = per[selKey] || { total: 0, mp: 0, conv: 0, uni: 0, prods: {} }
+    const prevKey = [...keys].filter(k => k < selKey).pop() || null
     const prev = prevKey ? per[prevKey] : null
     const labelKey = (k) => {
       if (!k) return '—'
@@ -462,18 +466,17 @@ export default function Dashboard() {
       const tonoP = dev == null ? 'gris' : dev > 15 ? 'rojo' : dev > 5 ? 'dorado' : 'verde'
       return { nombre, realUnit, fichaUnit, dev, uni: p.uni, tonoP }
     }).sort((a, b) => (b.dev ?? -999) - (a.dev ?? -999))
-    // Histórico: últimos 6 períodos (ascendente) para las barras y la tabla.
-    const hist = keys.slice(-6).map(k => ({ k, ...per[k] }))
-    const maxHist = Math.max(1, ...hist.map(h => h.total))
+    // Lista de todos los períodos con datos, del más reciente al más antiguo.
+    const listaPeriodos = [...keys].reverse()
     const dotColor = (t) => t === 'rojo' ? 'var(--rojo, #c0392b)' : t === 'dorado' ? 'var(--dorado, #C8A94A)' : t === 'verde' ? 'var(--lima, #7CB342)' : 'var(--texto-suave)'
 
     W.costos_prod = (
       <div className="card">
         <div className="card-title" style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}>
-          <Ico as={Factory} size={18} />Costos de producción — {labelKey(curKey)}
+          <Ico as={Factory} size={18} />Costos de producción — {labelKey(selKey)}{selKey !== curKey && <span style={{ fontSize: '0.7rem', fontWeight: 400, color: 'var(--texto-suave)' }}>(histórico)</span>}
           <div style={{ marginLeft: 'auto', display: 'flex', border: '1px solid var(--crema-oscuro)', borderRadius: 6, overflow: 'hidden' }}>
             {[['mes', 'Mes'], ['semana', 'Semana']].map(([k, l]) => (
-              <button key={k} type="button" onClick={() => setCostModo(k)}
+              <button key={k} type="button" onClick={() => { setCostModo(k); setCostSel(null) }}
                 style={{ padding: '3px 12px', fontSize: '0.75rem', fontWeight: 600, cursor: 'pointer', border: 'none', background: costModo === k ? 'var(--selva)' : 'transparent', color: costModo === k ? 'var(--crema)' : 'var(--texto-suave)' }}>{l}</button>
             ))}
           </div>
@@ -534,18 +537,33 @@ export default function Dashboard() {
           <p className="empty-table" style={{ margin: '4px 0' }}>Sin producción registrada en este {costModo === 'semana' ? 'semana' : 'mes'}.</p>
         )}
 
-        {/* Histórico: últimos períodos */}
-        {hist.length > 0 && (
+        {/* Lista de períodos (mes o semana): clic para ver el detalle de cada uno arriba */}
+        {listaPeriodos.length > 0 && (
           <div style={{ marginTop: 10 }}>
-            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--selva)', marginBottom: 6 }}>Histórico ({costModo === 'semana' ? 'últimas semanas' : 'últimos meses'})</div>
-            <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, height: 90 }}>
-              {hist.map(h => (
-                <div key={h.k} title={`${labelKey(h.k)}: ${fCOP(h.total)}`} style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4, minWidth: 0 }}>
-                  <div style={{ fontSize: '0.62rem', color: 'var(--texto-suave)' }}>{fCOP(h.total)}</div>
-                  <div style={{ width: '70%', background: h.k === curKey ? 'var(--selva)' : 'var(--dorado, #C8A94A)', height: `${Math.max(4, (h.total / maxHist) * 60)}px`, borderRadius: '4px 4px 0 0' }} />
-                  <div style={{ fontSize: '0.62rem', color: 'var(--texto-suave)', textAlign: 'center', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: '100%' }}>{labelKey(h.k)}</div>
-                </div>
-              ))}
+            <div style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--selva)', marginBottom: 6 }}>Historial por {costModo === 'semana' ? 'semana' : 'mes'} <span style={{ fontWeight: 400, color: 'var(--texto-suave)' }}>— toca uno para ver su detalle</span></div>
+            <div className="table-wrap" style={{ maxHeight: 220, overflowY: 'auto' }}>
+              <table style={{ fontSize: '0.82rem' }}>
+                <thead><tr><th>Período</th><th className="td-number">MP</th><th className="td-number">Operativos</th><th className="td-number">Unid.</th><th className="td-number">Total</th><th className="td-number">Costo/u</th></tr></thead>
+                <tbody>
+                  {listaPeriodos.map(k => {
+                    const p = per[k]
+                    const cu = p.uni > 0 ? p.total / p.uni : 0
+                    const activo = k === selKey
+                    return (
+                      <tr key={k} onClick={() => setCostSel(k)} style={{ cursor: 'pointer', background: activo ? 'rgba(45,90,61,0.10)' : undefined }}>
+                        <td style={{ fontWeight: activo ? 700 : 400, color: activo ? 'var(--selva)' : undefined, whiteSpace: 'nowrap' }}>
+                          {activo ? '▸ ' : ''}{labelKey(k)}{k === curKey ? <span style={{ fontSize: '0.68rem', color: 'var(--texto-suave)' }}> · actual</span> : ''}
+                        </td>
+                        <td className="td-number">{fCOP(p.mp)}</td>
+                        <td className="td-number">{fCOP(p.conv)}</td>
+                        <td className="td-number">{fNum(p.uni)}</td>
+                        <td className="td-number" style={{ fontWeight: 600 }}>{fCOP(p.total)}</td>
+                        <td className="td-number">{fCOP(cu)}</td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
             </div>
           </div>
         )}
