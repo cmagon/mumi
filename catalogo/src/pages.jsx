@@ -468,6 +468,12 @@ export function Producto() {
   const galeria = p ? imgsDe(p) : []
   const urlsWeb = galeria.map(g => g.url)
   const pasar = (d) => { if (galeria.length > 1) setImg(k => Math.max(0, Math.min(galeria.length - 1, k + d))) }
+  // Al cambiar de imagen, centra la miniatura activa dentro de su tira.
+  useEffect(() => {
+    if (galeria.length <= 1) return
+    document.querySelectorAll('.det-thumb.on').forEach(el =>
+      el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' }))
+  }, [img, galeria.length])
   const swipe = useSwipeable({
     onSwiping: (e) => {
       if (galeria.length <= 1) return
@@ -570,6 +576,14 @@ export function Producto() {
                     ))}
                   </div>
                 : <span className="ph-fruto"><FrutoIcon name={iconoDe(p.frutos)} size={72} /></span>}
+              {galeria.length > 1 && (
+                <>
+                  <button type="button" className="det-nav det-nav-prev" disabled={img === 0}
+                    onClick={e => { e.stopPropagation(); pasar(-1) }} aria-label="Imagen anterior"><ChevronLeft size={22} /></button>
+                  <button type="button" className="det-nav det-nav-next" disabled={img === galeria.length - 1}
+                    onClick={e => { e.stopPropagation(); pasar(1) }} aria-label="Imagen siguiente"><ChevronRight size={22} /></button>
+                </>
+              )}
             </div>
             {galeria.length > 1 && (
               <div className="det-dots" onClick={e => e.stopPropagation()}>
@@ -724,6 +738,14 @@ export function Producto() {
               ))}
             </div>
           : <span className="ph-fruto"><FrutoIcon name={iconoDe(p.frutos)} size={72} /></span>}
+        {galeria.length > 1 && (
+          <>
+            <button type="button" className="det-nav det-nav-prev" disabled={img === 0}
+              onClick={e => { e.stopPropagation(); pasar(-1) }} aria-label="Imagen anterior"><ChevronLeft size={22} /></button>
+            <button type="button" className="det-nav det-nav-next" disabled={img === galeria.length - 1}
+              onClick={e => { e.stopPropagation(); pasar(1) }} aria-label="Imagen siguiente"><ChevronRight size={22} /></button>
+          </>
+        )}
         {galeria.length > 0 && <span className="zoom-hint"><ZoomIn size={16} /> Ampliar</span>}
         {galeria.length > 1 && (
           <div className="det-dots" onClick={e => e.stopPropagation()}>
