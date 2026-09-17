@@ -628,9 +628,9 @@ export function Producto() {
               </div>
             )}
 
-            {p.resumen && <div className="det-lead rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.resumen) }} />}
+            {sinHtml(p.resumen) && <div className="det-lead rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.resumen) }} />}
 
-            {p.descripcion && (
+            {sinHtml(p.descripcion) && (
               <div className="det-desc-block">
                 <h3 className="serif det-sec-title">Características</h3>
                 <div className="det-desc rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.descripcion) }} />
@@ -790,8 +790,8 @@ export function Producto() {
           {p.beneficios?.length > 0 && (
             <div className="benes">{p.beneficios.map((b, i) => <span key={i} className="bene">{b}</span>)}</div>
           )}
-          {p.resumen && <div className="det-lead rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.resumen) }} />}
-          {p.descripcion && (
+          {sinHtml(p.resumen) && <div className="det-lead rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.resumen) }} />}
+          {sinHtml(p.descripcion) && (
             <div className="det-desc-block">
               <div className="det-desc rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.descripcion) }} />
             </div>

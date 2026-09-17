@@ -668,10 +668,13 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
       if (!nombreLimpio) throw new Error('Indica el nombre del producto')
       const imagenes = conAltProducto(imgs.map(normalizeImgAdmin).filter(Boolean), nombreLimpio)
       const imagen_url = imagenes[0]?.url || null
+      // El editor "vacío" produce <p></p> (no ''), que deja bloques vacíos en la ficha.
+      // Normaliza a null cuando no queda texto real tras quitar las etiquetas.
+      const htmlVacio = (h) => !String(h || '').replace(/<[^>]*>/g, '').replace(/&[a-z]+;/gi, ' ').trim()
       const baseUpd = {
         nombre: nombreLimpio,
         catalogo_frutos: frutos, catalogo_beneficios: beneficios, catalogo_destacado: destacado, catalogo_novedad: novedad,
-        catalogo_descripcion: descripcion || null, catalogo_resumen: resumen.trim() || null,
+        catalogo_descripcion: htmlVacio(descripcion) ? null : descripcion, catalogo_resumen: htmlVacio(resumen) ? null : resumen.trim(),
         catalogo_precio_oferta: (precioOferta === '' || Number(precioOferta) <= 0) ? null : Number(precioOferta),
         catalogo_seo_titulo: seoTitulo.trim() || null, catalogo_seo_desc: seoDesc.trim() || null,
         catalogo_contenido: contenido.trim() || null, catalogo_origen: origen.trim() || null,
