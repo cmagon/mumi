@@ -468,6 +468,12 @@ export function Producto() {
   const galeria = p ? imgsDe(p) : []
   const urlsWeb = galeria.map(g => g.url)
   const pasar = (d) => { if (galeria.length > 1) setImg(k => Math.max(0, Math.min(galeria.length - 1, k + d))) }
+  // Al cambiar de imagen, centra la miniatura activa dentro de su tira.
+  useEffect(() => {
+    if (galeria.length <= 1) return
+    document.querySelectorAll('.det-thumb.on').forEach(el =>
+      el.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' }))
+  }, [img, galeria.length])
   const swipe = useSwipeable({
     onSwiping: (e) => {
       if (galeria.length <= 1) return
