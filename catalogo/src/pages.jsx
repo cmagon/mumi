@@ -10,7 +10,7 @@ import 'yet-another-react-lightbox/styles.css'
 import 'yet-another-react-lightbox/plugins/thumbnails.css'
 import { supabase } from './supabase'
 import { useStore } from './store'
-import { Card, HeroSlider, BrandHero, Impacto, BannerGrupo, Newsletter, ModalNombre, ModalSesionCliente } from './ui'
+import { Card, HeroSlider, BrandHero, Impacto, BannerGrupo, Newsletter, ModalNombre, ModalSesionCliente, ImgFade, SkeletonCards } from './ui'
 import { fCOP, labelCategoria, getFrutos, iconoDe, iconoFruto, labelFruto, stockLabel, imgsDe, imgSrc, altImg, textoEnvio, sinTildes, sinHtml, registrarVisita, confirmarPedidoWA, setSEO, compartir, rutaProducto, buscarPorSlug, abrirWA, mensajeSolicitudMayorista, getCliente, setCliente, getEmail, getTelefono, emailValido, telefonoValido, desuscribirPorToken, sincronizarFavoritosLocales, FAVORITOS, BUSCADOR, videoEmbed, videoThumb, detectRed, formatoRed, paginaPorSlug, postCanvas, baseUrl, jsonLdSitio, jsonLdProducto, suscribir, enviarFormProtegido } from './utils'
 import { Turnstile } from './turnstile'
 import FrutoIcon from './FrutoIcon'
@@ -187,7 +187,7 @@ export function Home() {
     return r
   }, [productos, cat, fFruto, q, orden, precio])
 
-  if (productos === null) return <div className="spin" />
+  if (productos === null) return <SkeletonCards n={12} />
 
   const atelier = (cfg.diseno || 'selva') === 'atelier'
   const cardProps = (p) => ({ p, cfg, n: enCarrito(p.id), onOpen: (prod) => abrir(prod || p), onAdd: () => agregar(p, 1) })
@@ -406,7 +406,7 @@ function CardRelAtelier({ p, onOpen, onAdd, precioFn }) {
   return (
     <article className="rel-mini">
       <button type="button" className="rel-mini-media" onClick={onOpen} aria-label={p.nombre}>
-        {src ? <img src={src} alt={altImg(p, portada)} /> : <FrutoIcon name={iconoDe(p.frutos)} size={36} />}
+        {src ? <ImgFade srcWeb={src} alt={altImg(p, portada)} /> : <FrutoIcon name={iconoDe(p.frutos)} size={36} />}
         <span className="rel-mini-add" onClick={(e) => { e.stopPropagation(); onAdd() }} aria-hidden><Plus size={18} /></span>
       </button>
       <button type="button" className="rel-mini-name" onClick={onOpen}>{p.nombre}</button>
@@ -568,10 +568,7 @@ export function Producto() {
                 ? <div className="det-track" style={{ transform: `translate3d(calc(${-img * 100}% - ${drag}px), 0, 0)`, transition: drag ? 'none' : 'transform .38s cubic-bezier(.22,.61,.36,1)' }}>
                     {galeria.map((g, k) => (
                       <div className="det-slide" key={g.url}>
-                        <picture>
-                          {g.url_mobile && g.url_mobile !== g.url ? <source media="(max-width: 700px)" srcSet={g.url_mobile} /> : null}
-                          <img className="det-float" src={g.url} alt={altImg(p, g)} draggable={false} loading={k === 0 ? 'eager' : 'lazy'} />
-                        </picture>
+                        <ImgFade srcWeb={g.url} srcMob={g.url_mobile} alt={altImg(p, g)} className="det-float" loading={k === 0 ? 'eager' : 'lazy'} />
                       </div>
                     ))}
                   </div>
@@ -730,10 +727,7 @@ export function Producto() {
           ? <div className="det-track" style={{ transform: `translate3d(calc(${-img * 100}% - ${drag}px), 0, 0)`, transition: drag ? 'none' : 'transform .38s cubic-bezier(.22,.61,.36,1)' }}>
               {galeria.map((g, k) => (
                 <div className="det-slide" key={g.url}>
-                  <picture>
-                    {g.url_mobile && g.url_mobile !== g.url ? <source media="(max-width: 700px)" srcSet={g.url_mobile} /> : null}
-                    <img src={g.url} alt={altImg(p, g)} draggable={false} loading={k === 0 ? 'eager' : 'lazy'} />
-                  </picture>
+                  <ImgFade srcWeb={g.url} srcMob={g.url_mobile} alt={altImg(p, g)} loading={k === 0 ? 'eager' : 'lazy'} />
                 </div>
               ))}
             </div>

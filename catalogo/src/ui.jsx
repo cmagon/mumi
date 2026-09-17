@@ -6,6 +6,47 @@ import { fCOP, labelCategoria, iconoDe, stockLabel, suscribir, FAVORITOS, imgsDe
 import FrutoIcon from './FrutoIcon'
 import { useStore } from './store'
 
+/**
+ * Imagen con carga progresiva: muestra un skeleton con brillo mientras carga
+ * y hace fundido de entrada al terminar (estilo Facebook / Mercado Libre).
+ * Se apoya en el contenedor padre (position:relative) para el skeleton.
+ */
+export function ImgFade({ srcWeb, srcMob, alt = '', className = '', draggable = false, loading = 'lazy', onClick }) {
+  const [cargada, setCargada] = useState(false)
+  // Si la imagen ya estaba en caché, load puede dispararse antes de montar: lo detectamos.
+  const ref = (el) => { if (el && el.complete && !cargada) setCargada(true) }
+  useEffect(() => { setCargada(false) }, [srcWeb])
+  if (!srcWeb) return null
+  return (
+    <>
+      {!cargada && <span className="img-sk sk" aria-hidden />}
+      <picture>
+        {srcMob && srcMob !== srcWeb ? <source media="(max-width: 700px)" srcSet={srcMob} /> : null}
+        <img ref={ref} src={srcWeb} alt={alt} draggable={draggable} loading={loading} onClick={onClick}
+          className={`imgfade ${cargada ? 'on' : ''} ${className}`.trim()}
+          onLoad={() => setCargada(true)} onError={() => setCargada(true)} />
+      </picture>
+    </>
+  )
+}
+
+/** Grilla de tarjetas "fantasma" mientras cargan los productos. */
+export function SkeletonCards({ n = 8 }) {
+  return (
+    <div className="sk-grid">
+      {Array.from({ length: n }).map((_, i) => (
+        <div className="sk-card" key={i}>
+          <div className="sk-media sk" />
+          <div className="sk-body">
+            <div className="sk-line lg sk" />
+            <div className="sk-line sm sk" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
+}
+
 // Extrae el ID de un video de YouTube desde varias formas de URL
 export function ytId(u) {
   if (!u) return ''
@@ -152,10 +193,7 @@ export function Card({ p, cfg, n: nProp = 0, onOpen, onAdd }) {
     <div className={`card ${atelier ? 'card-atelier' : ''}`}>
       <div className="card-media" onClick={abrir}>
         {srcWeb
-          ? <picture>
-              {srcMob && srcMob !== srcWeb ? <source media="(max-width: 700px)" srcSet={srcMob} /> : null}
-              <img src={srcWeb} alt={altImg(activo, portada)} draggable={false} />
-            </picture>
+          ? <ImgFade srcWeb={srcWeb} srcMob={srcMob} alt={altImg(activo, portada)} />
           : <span className="ph-fruto"><FrutoIcon name={iconoDe(activo.frutos)} size={44} /></span>}
         {oferta && <span className="ribbon ribbon-oferta">{atelier ? 'Oferta' : `-${descuentoPct(activo)}%`}</span>}
         {activo.novedad && !oferta && <span className="ribbon ribbon-nuevo">Nuevo</span>}
