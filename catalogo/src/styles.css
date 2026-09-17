@@ -592,7 +592,7 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 .det-media img { width: 100%; height: 100%; object-fit: cover; }
 /* Tira deslizante de la galerÃ­a del producto */
 .det-track { display: flex; width: 100%; height: 100%; flex: 0 0 100%; align-self: stretch; will-change: transform; backface-visibility: hidden; }
-.det-slide { flex: 0 0 100%; width: 100%; height: 100%; overflow: hidden; }
+.det-slide { position: relative; flex: 0 0 100%; width: 100%; height: 100%; overflow: hidden; }
 .det-slide img { width: 100%; height: 100%; object-fit: cover; display: block; user-select: none; -webkit-user-drag: none; }
 /* Puntos de la galerÃ­a del producto (deslizar en tÃ¡ctiles) */
 .det-dots { position: absolute; bottom: 12px; left: 0; right: 0; display: flex; gap: 6px; justify-content: center; z-index: 2; }
@@ -679,6 +679,31 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 .empty { text-align: center; color: var(--texto-suave); padding: 54px 20px; }
 .spin { width: 46px; height: 46px; border: 5px solid var(--crema-oscuro); border-top-color: var(--selva); border-radius: 50%; animation: sp .8s linear infinite; margin: 70px auto; }
 @keyframes sp { to { transform: rotate(360deg); } }
+
+/* ===== Carga: skeletons con brillo (estilo Facebook / Mercado Libre) ===== */
+@keyframes shimmer { 100% { transform: translateX(100%); } }
+/* Bloque skeleton reutilizable: fondo suave + barrido de luz que recorre */
+.sk { position: relative; overflow: hidden; background: var(--crema-oscuro, #ece6dd); border-radius: 8px; }
+.sk::after { content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.55), transparent);
+  animation: shimmer 1.25s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) { .sk::after { animation: none; } }
+
+/* Imagen que aparece con fundido cuando termina de cargar */
+.imgfade { opacity: 0; transition: opacity .45s ease; }
+.imgfade.on { opacity: 1; }
+/* Skeleton que cubre el contenedor de la foto mientras carga */
+.img-sk { position: absolute; inset: 0; z-index: 1; }
+.card-media, .rel-mini-media, .det-media, .fruto-foto { position: relative; }
+
+/* Tarjeta de producto en carga */
+.sk-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 16px; padding: 16px; max-width: 1200px; margin: 0 auto; }
+.sk-card { border-radius: 16px; overflow: hidden; background: var(--blanco, #fff); box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+.sk-card .sk-media { width: 100%; aspect-ratio: 1 / 1; border-radius: 0; }
+.sk-card .sk-body { padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.sk-line { height: 12px; border-radius: 6px; }
+.sk-line.lg { height: 16px; width: 85%; }
+.sk-line.sm { width: 55%; }
 .footer-space { height: 92px; }
 
 /* ==================== NEWSLETTER ==================== */

@@ -571,6 +571,17 @@ function OrdenCategorias({ categorias, toast }) {
   )
 }
 
+// Textarea que se ajusta a la cantidad de texto escrito (crece de alto, sin scroll interno).
+function AutoTextarea({ value, onChange, maxLength, placeholder, className = 'form-control', minRows = 1 }) {
+  const ref = useRef(null)
+  const ajustar = (el) => { if (!el) return; el.style.height = 'auto'; el.style.height = el.scrollHeight + 'px' }
+  useEffect(() => { ajustar(ref.current) }, [value])
+  return (
+    <textarea ref={ref} className={className} rows={minRows} value={value} maxLength={maxLength} placeholder={placeholder}
+      onChange={e => onChange(e.target.value)} style={{ resize: 'none', overflow: 'hidden' }} />
+  )
+}
+
 // ---- Editor de un producto del catálogo (modal) ----
 function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyChange, onSyncedSheets }) {
   const [nombre, setNombre] = useState(producto.nombre || '')
@@ -668,10 +679,13 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
       if (!nombreLimpio) throw new Error('Indica el nombre del producto')
       const imagenes = conAltProducto(imgs.map(normalizeImgAdmin).filter(Boolean), nombreLimpio)
       const imagen_url = imagenes[0]?.url || null
+      // El editor "vacío" produce <p></p> (no ''), que deja bloques vacíos en la ficha.
+      // Normaliza a null cuando no queda texto real tras quitar las etiquetas.
+      const htmlVacio = (h) => !String(h || '').replace(/<[^>]*>/g, '').replace(/&[a-z]+;/gi, ' ').trim()
       const baseUpd = {
         nombre: nombreLimpio,
         catalogo_frutos: frutos, catalogo_beneficios: beneficios, catalogo_destacado: destacado, catalogo_novedad: novedad,
-        catalogo_descripcion: descripcion || null, catalogo_resumen: resumen.trim() || null,
+        catalogo_descripcion: htmlVacio(descripcion) ? null : descripcion, catalogo_resumen: htmlVacio(resumen) ? null : resumen.trim(),
         catalogo_precio_oferta: (precioOferta === '' || Number(precioOferta) <= 0) ? null : Number(precioOferta),
         catalogo_seo_titulo: seoTitulo.trim() || null, catalogo_seo_desc: seoDesc.trim() || null,
         catalogo_contenido: contenido.trim() || null, catalogo_origen: origen.trim() || null,
@@ -757,11 +771,11 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
       <div className="form-grid-2">
         <div className="form-group">
           <label className="form-label">Título SEO <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({seoTitulo.length}/60)</small></label>
-          <input className="form-control" value={seoTitulo} maxLength={70} onChange={e => setSeoTitulo(e.target.value)} placeholder={nombre.trim() || producto.nombre} />
+          <AutoTextarea value={seoTitulo} maxLength={70} onChange={setSeoTitulo} placeholder={nombre.trim() || producto.nombre} />
         </div>
         <div className="form-group">
           <label className="form-label">Descripción SEO <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({seoDesc.length}/155)</small></label>
-          <input className="form-control" value={seoDesc} maxLength={200} onChange={e => setSeoDesc(e.target.value)} placeholder="Se toma de la descripción corta si lo dejas vacío" />
+          <AutoTextarea value={seoDesc} maxLength={200} onChange={setSeoDesc} placeholder="Se toma de la descripción corta si lo dejas vacío" />
         </div>
       </div>
       <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginBottom: 12 }}>
@@ -1458,11 +1472,11 @@ function TabConfig({ toast, onDirtyChange }) {
           </label>
           <div className="form-group">
             <label className="form-label">Título SEO <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({(cfg.seo_titulo || '').length}/60)</small></label>
-            <input className="form-control" value={cfg.seo_titulo || ''} maxLength={70} onChange={e => set('seo_titulo', e.target.value)} placeholder={SEO_PLACEHOLDER.titulo} />
+            <AutoTextarea value={cfg.seo_titulo || ''} maxLength={70} onChange={v => set('seo_titulo', v)} placeholder={SEO_PLACEHOLDER.titulo} />
           </div>
           <div className="form-group">
             <label className="form-label">Meta descripción <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>({(cfg.seo_descripcion || '').length}/155)</small></label>
-            <textarea className="form-control" rows={3} value={cfg.seo_descripcion || ''} maxLength={200} onChange={e => set('seo_descripcion', e.target.value)} placeholder={SEO_PLACEHOLDER.desc} />
+            <AutoTextarea value={cfg.seo_descripcion || ''} minRows={2} maxLength={200} onChange={v => set('seo_descripcion', v)} placeholder={SEO_PLACEHOLDER.desc} />
           </div>
           <div className="form-group">
             <label className="form-label">Palabras clave <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(separadas por coma)</small></label>
