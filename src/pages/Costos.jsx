@@ -26,7 +26,7 @@ import { useConfirm } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import Receta from './Receta'
 import { CATALOGO_PARAMS, PARAM_UNIDAD, PRESENTACIONES } from '../lib/calidad'
-import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Printer, Settings, ShoppingCart, Tag, Trash2, TrendingUp, Undo2, Wrench, X, ChevronUp, ChevronDown, Plus } from 'lucide-react'
+import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Printer, Settings, ShoppingCart, Tag, Trash2, TrendingUp, Undo2, Wrench, X, ChevronUp, ChevronDown, Plus, Eye } from 'lucide-react'
 import { descargarFichaExcel } from '../lib/fichaExcel'
 import { getConfig } from '../lib/appConfig'
 import Select from '../components/ui/Select'
@@ -1643,106 +1643,32 @@ export default function Costos({ vista = 'productos' }) {
                     <span className="badge badge-gris">{grupo.items.length}</span>
                   </div>
                   {grupo.items.map(p => {
-                    const rc = recomputeProducto(p)
-                    const ind = indicadoresProducto(p, rc)
-                    const pctCIF = totalUnidsPortafolio > 0 ? ind.unidsMes / totalUnidsPortafolio * 100 : 0
-                    const colorUtil = ind.utilNeta >= 0 ? 'var(--selva)' : 'var(--rojo)'
                     const inactivo = p.activo === false
-                    const peq = peqMultiproducto.find(x => x.nombre === p.nombre)
                     const produccionMes = produccionMesPorProducto.get(String(p.id))
                     const bachesReales = produccionMes?.baches || 0
                     const bachesFicha = Number(p.baches_mes) || 0
-                    const diferenciaBaches = bachesReales - bachesFicha
-                    const desviacionBachesPct = bachesFicha > 0 ? (diferenciaBaches / bachesFicha) * 100 : (bachesReales > 0 ? 100 : 0)
+                    const desviacionBachesPct = bachesFicha > 0 ? ((bachesReales - bachesFicha) / bachesFicha) * 100 : (bachesReales > 0 ? 100 : 0)
                     const alertaBachesIgnorada = alertasIgnoradas.some(a => String(a.product_id) === String(p.id) && a.alert_type === 'baches_mes' && a.periodo === mesAnterior.periodo)
                     const produccionDesviada = !cargandoProduccionMes && Math.abs(desviacionBachesPct) >= 10 && !alertaBachesIgnorada
                     const costosRecientes = costosRecientesPorProducto.get(String(p.id)) || []
                     const costoDesviado = costosRecientes.some(c => Math.abs(c.desviacion) > 10)
+                    const hayAlerta = produccionDesviada || costoDesviado
+                    // Tarjeta minimalista: foto + nombre + Detalles/Editar. Todo lo demás vive en el modal Detalles.
                     return (
-                      <AccordionItem key={p.id}
-                        titulo={<>
-                          {p.imagen_url && <img src={p.imagen_url} alt="" style={{ width:24, height:24, borderRadius:3, objectFit:'cover', verticalAlign:'middle', marginRight:6 }} />}
-                          {p.nombre}
-                          {inactivo && <span className="badge badge-gris" style={{ marginLeft:6, fontSize:'0.65rem' }}><Ico as={Pause} size={12} />Inactivo</span>}
-                          {produccionDesviada && <span className="ficha-alerta-punto" title={`La producción de ${mesAnterior.label} difiere de la ficha`} aria-label="Alerta de producción" />}
-                          {costoDesviado && <span className="ficha-alerta-punto ficha-alerta-punto-costo" title="El costo de producción real (MP + empaque + MO + CIF) de una de las últimas tres órdenes difiere más de 10% vs la ficha" aria-label="Alerta de costo" />}
-                        </>}
-                        sub={<>Costo pleno {fCOP(ind.cPleno)} · Margen bruto <span style={{ color: ind.utilidadBruta >= 0 ? 'var(--selva)' : 'var(--rojo)' }}>{ind.margenBrutoPct != null ? `${ind.margenBrutoPct.toFixed(1)}%` : '—'}</span></>}
-                      >
-                        <Fila et="Tipo">{grupo.label}{inactivo ? ' · inactivo' : ''}</Fila>
-                        <Fila et="Unid/mes">{fNum(ind.unidsMes)} <small style={{ color:'var(--texto-suave)' }}>({pctCIF.toFixed(1)}% del portafolio)</small></Fila>
-                        <Fila et="Mínimo a vender (PE ponderado)">{!inactivo && peq?.mcu > 0 ? `${fNum(peq.pe)} unid/mes` : '—'}</Fila>
-                        <Fila et="MP + empaque">{fCOP(rc.cvu)}</Fila>
-                        <Fila et="Mano de obra + CIF">{fCOP(rc.moUnit)}</Fila>
-                        <Fila et="Costo de producción/u">{fCOP(rc.costoTotalUnit)}</Fila>
-                        <Fila et="Costo pleno/u (+ gastos)">{fCOP(ind.cPleno)}</Fila>
-                        <Fila et="P. Mayor">{fCOP(p.precio_mayor)}</Fila>
-                        <Fila et="Margen bruto/u"><span style={{ color: ind.utilidadBruta >= 0 ? 'var(--selva)' : 'var(--rojo)' }}>{fCOP(ind.utilidadBruta)}{ind.margenBrutoPct != null ? ` (${ind.margenBrutoPct.toFixed(1)}%)` : ''}</span></Fila>
-                        <Fila et="Margen op. est./u"><span style={{ color: colorUtil }} title="Estimado: precio − costo producción − comisión − gastos prorrateados. No es utilidad neta contable del ejercicio.">{fCOP(ind.utilNeta)}</span></Fila>
-                        <Fila et="Utilidad al mes"><span style={{ color: colorUtil }}>{fCOP(ind.utilMes)}</span></Fila>
-                        {produccionDesviada && (
-                          <div className="ficha-alerta-produccion" role="status">
-                            <span className="ficha-alerta-punto" aria-hidden="true" />
-                            <div>
-                              <strong>Revisa los baches configurados</strong>
-                              <div>
-                                En {mesAnterior.label} se produjeron aproximadamente <strong>{fNum(bachesReales)} baches</strong>,
-                                mientras la ficha indica <strong>{fNum(bachesFicha)} baches/mes</strong>
-                                ({diferenciaBaches > 0 ? `${fNum(diferenciaBaches)} más` : `${fNum(Math.abs(diferenciaBaches))} menos`}).
-                              </div>
-                              <small>
-                                Basado en {produccionMes?.ordenes || 0} orden(es) de producción cerrada(s). Los registros de producción no se incluyen.
-                              </small>
-                              <button type="button" className="btn btn-xs btn-secondary" style={{ marginTop:8 }} onClick={() => ignorarAlertaBaches(p.id)}>Ignorar hasta el próximo mes</button>
-                            </div>
-                          </div>
-                        )}
-                        {costosRecientes.length > 0 && (
-                          <div className={`ficha-alerta-costo ${costoDesviado ? 'activa' : ''}`} role="status">
-                            <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
-                              <strong>{costoDesviado ? '⚠ Variación de costo de producción > 10%' : 'Costos de producción recientes'}</strong>
-                              {costoDesviado && (
-                                <button
-                                  type="button"
-                                  className="btn btn-xs btn-primary"
-                                  style={{ marginLeft:'auto' }}
-                                  onClick={() => setDetalleCosto({
-                                    producto: p,
-                                    items: costosRecientes,
-                                    foco: costosRecientes.find(c => Math.abs(c.desviacion) > 10)?.ordenId,
-                                  })}
-                                >
-                                  <Ico as={BarChart3} size={13} />Ver detalle de costos
-                                </button>
-                              )}
-                            </div>
-                            <div className="ficha-costos-recientes">
-                              {costosRecientes.map(c => (
-                                <button
-                                  key={c.ordenId}
-                                  type="button"
-                                  className="ficha-costo-chip"
-                                  title={`Ver detalle · ${opCodigo(c.ordenId)} · ${c.fecha ? fFecha(String(c.fecha).slice(0, 10)) : ''}`}
-                                  onClick={() => setDetalleCosto({ producto: p, items: costosRecientes, foco: c.ordenId })}
-                                >
-                                  <span className="ficha-costo-chip-op">{opCodigo(c.ordenId)}</span>
-                                  {fCOP(c.costo)} <small style={{ color: c.desviacion > 10 ? 'var(--rojo)' : c.desviacion < -10 ? 'var(--tierra)' : 'var(--texto-suave)' }}>{c.desviacion >= 0 ? '+' : ''}{c.desviacion.toFixed(1)}%</small>
-                                </button>
-                              ))}
-                            </div>
-                            <small>Comparado con el <strong>costo de producción/u</strong> (MP + empaque + MO + CIF): {fCOP(recomputeProducto(p).costoTotalUnit)}.</small>
-                          </div>
-                        )}
-                        <div className="acordeon-acciones">
-                          <button className="btn btn-xs btn-secondary" onClick={() => { setVerProd(p); setVerModal(true) }}>Ver</button>
-                          <button className="btn btn-xs btn-secondary" onClick={() => pushTo(p.empaca_surtido ? '/ordenes' : '/produccion', { filtrarProducto: p.nombre })}><Ico as={ClipboardList} size={13} />{p.empaca_surtido ? 'Órdenes relacionadas' : 'Registros'}</button>
-                          <button className="btn btn-xs btn-primary" onClick={() => cargarProducto(p.id)}><Ico as={Pencil} size={14} />Editar</button>
-                          <button className="btn btn-xs btn-secondary" onClick={() => duplicarProducto.mutate(p)} disabled={duplicarProducto.isPending}>⧉ Duplicar</button>
-                          <button className={`btn btn-xs ${inactivo ? 'btn-success' : 'btn-secondary'}`} onClick={() => toggleActivoProducto.mutate(p)} disabled={toggleActivoProducto.isPending}>{inactivo ? '▶ Activar' : '⏸ Inactivar'}</button>
-                          <button className="btn btn-xs btn-dorado" title="Descargar ficha de costos en Excel" onClick={() => exportarFichaExcel(p)}><Ico as={FileSpreadsheet} size={13} />Excel</button>
-                          <button className="btn btn-xs btn-danger" onClick={() => { setConfirmDel(p); setDelText('') }}><X size={13} aria-hidden="true" /></button>
+                      <div key={p.id} className="ficha-min" style={{ display:'flex', alignItems:'center', gap:12, padding:'8px 12px', border:'1px solid var(--crema-oscuro)', borderRadius:'var(--radio)', marginBottom:8, background:'var(--blanco)', opacity: inactivo ? 0.6 : 1 }}>
+                        {p.imagen_url
+                          ? <img src={p.imagen_url} alt="" style={{ width:44, height:44, borderRadius:6, objectFit:'cover', flexShrink:0 }} />
+                          : <div style={{ width:44, height:44, borderRadius:6, background:'var(--crema)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontSize:'1.1rem' }} aria-hidden="true">📦</div>}
+                        <div style={{ flex:1, minWidth:0 }}>
+                          <strong style={{ display:'block', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.nombre}</strong>
+                          {inactivo && <span className="badge badge-gris" style={{ fontSize:'0.65rem' }}><Ico as={Pause} size={12} />Inactivo</span>}
                         </div>
-                      </AccordionItem>
+                        <button className="btn btn-xs btn-secondary" style={{ position:'relative' }} onClick={() => { setVerProd(p); setVerModal(true) }}>
+                          <Ico as={Eye} size={14} />Detalles
+                          {hayAlerta && <span className="ficha-alerta-punto" title="Tiene alertas por revisar (costo o baches)" style={{ position:'absolute', top:-4, right:-4 }} aria-label="Tiene alertas" />}
+                        </button>
+                        <button className="btn btn-xs btn-primary" onClick={() => cargarProducto(p.id)}><Ico as={Pencil} size={14} />Editar</button>
+                      </div>
                     )
                   })}
                 </div>
@@ -3884,8 +3810,69 @@ export default function Costos({ vista = 'productos' }) {
           const vCalidad = parseJSON(verProd.parametros_calidad, [])
           const vAdic = parseJSON(verProd.costos_adicionales, [])
           const totalG = vIngs.reduce((s, i) => s + (parseFloat(i.cantidad) || 0), 0)
+          // Alertas del producto (se muestran aquí, en el detalle).
+          const vInactivo = verProd.activo === false
+          const vProduccionMes = produccionMesPorProducto.get(String(verProd.id))
+          const vBachesReales = vProduccionMes?.baches || 0
+          const vBachesFicha = Number(verProd.baches_mes) || 0
+          const vDifBaches = vBachesReales - vBachesFicha
+          const vDesvBachesPct = vBachesFicha > 0 ? (vDifBaches / vBachesFicha) * 100 : (vBachesReales > 0 ? 100 : 0)
+          const vBachesIgn = alertasIgnoradas.some(a => String(a.product_id) === String(verProd.id) && a.alert_type === 'baches_mes' && a.periodo === mesAnterior.periodo)
+          const vProdDesviada = !cargandoProduccionMes && Math.abs(vDesvBachesPct) >= 10 && !vBachesIgn
+          const vCostosRec = costosRecientesPorProducto.get(String(verProd.id)) || []
+          const vCostoDesviado = vCostosRec.some(c => Math.abs(c.desviacion) > 10)
           return (
           <>
+            {/* Acciones del producto */}
+            <div style={{ display:'flex', flexWrap:'wrap', gap:6, marginBottom:12 }}>
+              <button className="btn btn-xs btn-secondary" onClick={() => pushTo(verProd.empaca_surtido ? '/ordenes' : '/produccion', { filtrarProducto: verProd.nombre })}><Ico as={ClipboardList} size={13} />{verProd.empaca_surtido ? 'Órdenes relacionadas' : 'Registros'}</button>
+              <button className="btn btn-xs btn-secondary" onClick={() => { duplicarProducto.mutate(verProd); setVerModal(false) }} disabled={duplicarProducto.isPending}>⧉ Duplicar</button>
+              <button className={`btn btn-xs ${vInactivo ? 'btn-success' : 'btn-secondary'}`} onClick={() => toggleActivoProducto.mutate(verProd)} disabled={toggleActivoProducto.isPending}>{vInactivo ? '▶ Activar' : '⏸ Inactivar'}</button>
+              <button className="btn btn-xs btn-dorado" title="Descargar ficha de costos en Excel" onClick={() => exportarFichaExcel(verProd)}><Ico as={FileSpreadsheet} size={13} />Excel</button>
+              <button className="btn btn-xs btn-danger" style={{ marginLeft:'auto' }} onClick={() => { setConfirmDel(verProd); setDelText(''); setVerModal(false) }}><Ico as={Trash2} size={13} />Eliminar</button>
+            </div>
+
+            {/* Alertas: baches configurados y variación de costo de producción */}
+            {vProdDesviada && (
+              <div className="ficha-alerta-produccion" role="status" style={{ marginBottom:10 }}>
+                <span className="ficha-alerta-punto" aria-hidden="true" />
+                <div>
+                  <strong>Revisa los baches configurados</strong>
+                  <div>
+                    En {mesAnterior.label} se produjeron aproximadamente <strong>{fNum(vBachesReales)} baches</strong>,
+                    mientras la ficha indica <strong>{fNum(vBachesFicha)} baches/mes</strong>
+                    ({vDifBaches > 0 ? `${fNum(vDifBaches)} más` : `${fNum(Math.abs(vDifBaches))} menos`}).
+                  </div>
+                  <small>Basado en {vProduccionMes?.ordenes || 0} orden(es) de producción cerrada(s).</small>
+                  <button type="button" className="btn btn-xs btn-secondary" style={{ marginTop:8 }} onClick={() => ignorarAlertaBaches(verProd.id)}>Ignorar hasta el próximo mes</button>
+                </div>
+              </div>
+            )}
+            {vCostosRec.length > 0 && (
+              <div className={`ficha-alerta-costo ${vCostoDesviado ? 'activa' : ''}`} role="status" style={{ marginBottom:12 }}>
+                <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
+                  <strong>{vCostoDesviado ? '⚠ Variación de costo de producción > 10%' : 'Costos de producción recientes'}</strong>
+                  {vCostoDesviado && (
+                    <button type="button" className="btn btn-xs btn-primary" style={{ marginLeft:'auto' }}
+                      onClick={() => setDetalleCosto({ producto: verProd, items: vCostosRec, foco: vCostosRec.find(c => Math.abs(c.desviacion) > 10)?.ordenId })}>
+                      <Ico as={BarChart3} size={13} />Ver detalle de costos
+                    </button>
+                  )}
+                </div>
+                <div className="ficha-costos-recientes">
+                  {vCostosRec.map(c => (
+                    <button key={c.ordenId} type="button" className="ficha-costo-chip"
+                      title={`Ver detalle · ${opCodigo(c.ordenId)} · ${c.fecha ? fFecha(String(c.fecha).slice(0, 10)) : ''}`}
+                      onClick={() => setDetalleCosto({ producto: verProd, items: vCostosRec, foco: c.ordenId })}>
+                      <span className="ficha-costo-chip-op">{opCodigo(c.ordenId)}</span>
+                      {fCOP(c.costo)} <small style={{ color: c.desviacion > 10 ? 'var(--rojo)' : c.desviacion < -10 ? 'var(--tierra)' : 'var(--texto-suave)' }}>{c.desviacion >= 0 ? '+' : ''}{c.desviacion.toFixed(1)}%</small>
+                    </button>
+                  ))}
+                </div>
+                <small>Comparado con el <strong>costo de producción/u</strong> (MP + empaque + MO + CIF): {fCOP(rc.costoTotalUnit)}.</small>
+              </div>
+            )}
+
             <div className="grid-resp" style={{ gridTemplateColumns:'1fr 1fr', gap:'8px 16px', marginBottom:16 }}>
               {verProd.imagen_url && <div style={{ gridColumn:'span 2' }}><img src={verProd.imagen_url} alt={verProd.nombre} style={{ height:120, objectFit:'contain', borderRadius:4 }} /></div>}
               <div><strong>Tipo:</strong> {verProd.tipo}</div>
