@@ -13,7 +13,6 @@ import {
 } from '../lib/businessLogic'
 import { useToast } from '../hooks/useToast'
 import { useReorder } from '../hooks/useReorder'
-import { usePantallaChica } from '../hooks/useMediaQuery'
 import { useNavTrail } from '../hooks/useNavTrail'
 import { useHistoryLayer } from '../hooks/useHistoryLayer'
 import { useAuth } from '../context/AuthContext'
@@ -77,14 +76,18 @@ export default function Costos({ vista = 'productos' }) {
   const labelModulo = vista === 'costos' ? 'Costos y Gastos' : 'Productos'
   const { pushTo, consumeArrival } = useNavTrail()
 
-  // Secciones de la ficha: en pantalla chica se comportan como acordeón EXCLUSIVO (todas cerradas
-  // al entrar y, al abrir una, el navegador cierra las demás gracias al atributo `name`). Así la
-  // ficha no queda como una tira interminable en el celular. En escritorio no cambia nada: se
-  // pueden tener varias secciones abiertas a la vez, que es cómodo con espacio de sobra.
-  const pantallaChica = usePantallaChica()
-  const secProps = (abiertaEnEscritorio) => pantallaChica
-    ? { name: 'ficha-seccion' }
-    : { open: abiertaEnEscritorio }
+  // Secciones de la ficha: acordeón EXCLUSIVO en todos los anchos. Al entrar solo la primera
+  // (Información básica) está abierta; al abrir otra, la anterior se cierra sola. Lo manejamos con
+  // estado propio (no con el atributo `name` del navegador) para que sea idéntico y predecible en
+  // escritorio y móvil. `secAbierta` guarda la clave de la sección abierta (o null = todas cerradas).
+  const [secAbierta, setSecAbierta] = useState('basica')
+  const secProps = (key) => ({
+    open: secAbierta === key,
+    onToggle: (e) => {
+      if (e.currentTarget.open) setSecAbierta(key)
+      else setSecAbierta(prev => (prev === key ? null : prev))
+    },
+  })
 
   // ---- Tabs y modo ----
   const [tab, setTab] = useState(tabInicial)
@@ -94,6 +97,8 @@ export default function Costos({ vista = 'productos' }) {
     const ok = { lista: puedeFicha, nuevo: puedeFicha, cif: puedeCif }
     if (!ok[tab]) setTab(tabInicial)
   }, [puedeFicha, puedeCif, tab, tabInicial])
+  // Al abrir el formulario de ficha, siempre empezar por el paso 1 (Información básica).
+  useEffect(() => { if (tab === 'nuevo') setSecAbierta('basica') }, [tab])
   const [editingId, setEditingId] = useState(null)   // null = nuevo, number = editando producto existente
   const [selFuente, setSelFuente] = useState('')     // valor del selector: '' | prod-{id} | recipe-{id}
   const [modoMpVend, setModoMpVend] = useState(false)   // "calcular costos de una MP vendible"
@@ -1642,6 +1647,7 @@ export default function Costos({ vista = 'productos' }) {
                     <strong>{grupo.label}</strong>
                     <span className="badge badge-gris">{grupo.items.length}</span>
                   </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill, minmax(158px, 1fr))', gap:12, marginBottom:8 }}>
                   {grupo.items.map(p => {
                     const inactivo = p.activo === false
                     const produccionMes = produccionMesPorProducto.get(String(p.id))
@@ -1653,24 +1659,30 @@ export default function Costos({ vista = 'productos' }) {
                     const costosRecientes = costosRecientesPorProducto.get(String(p.id)) || []
                     const costoDesviado = costosRecientes.some(c => Math.abs(c.desviacion) > 10)
                     const hayAlerta = produccionDesviada || costoDesviado
-                    // Tarjeta minimalista: foto + nombre + Detalles/Editar. Todo lo demás vive en el modal Detalles.
+                    // Tarjeta de producto: imagen principal grande arriba + nombre + Detalles/Editar.
+                    // Todo lo demás (cifras, alertas, duplicar, Excel, órdenes…) vive en el modal Detalles.
                     return (
-                      <div key={p.id} className="ficha-min" style={{ display:'flex', alignItems:'center', gap:12, padding:'8px 12px', border:'1px solid var(--crema-oscuro)', borderRadius:'var(--radio)', marginBottom:8, background:'var(--blanco)', opacity: inactivo ? 0.6 : 1 }}>
-                        {p.imagen_url
-                          ? <img src={p.imagen_url} alt="" style={{ width:44, height:44, borderRadius:6, objectFit:'cover', flexShrink:0 }} />
-                          : <div style={{ width:44, height:44, borderRadius:6, background:'var(--crema)', display:'flex', alignItems:'center', justifyContent:'center', flexShrink:0, fontSize:'1.1rem' }} aria-hidden="true">📦</div>}
-                        <div style={{ flex:1, minWidth:0 }}>
-                          <strong style={{ display:'block', overflow:'hidden', textOverflow:'ellipsis', whiteSpace:'nowrap' }}>{p.nombre}</strong>
-                          {inactivo && <span className="badge badge-gris" style={{ fontSize:'0.65rem' }}><Ico as={Pause} size={12} />Inactivo</span>}
+                      <div key={p.id} className="ficha-card" style={{ display:'flex', flexDirection:'column', border:'1px solid var(--crema-oscuro)', borderRadius:'var(--radio)', overflow:'hidden', background:'var(--blanco)', opacity: inactivo ? 0.62 : 1 }}>
+                        <div style={{ position:'relative', width:'100%', aspectRatio:'1 / 1', background:'var(--crema)' }}>
+                          {p.imagen_url
+                            ? <img src={p.imagen_url} alt="" loading="lazy" style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
+                            : <div style={{ width:'100%', height:'100%', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'2.2rem' }} aria-hidden="true">📦</div>}
+                          {inactivo && <span className="badge badge-gris" style={{ position:'absolute', top:6, left:6, fontSize:'0.62rem' }}><Ico as={Pause} size={11} />Inactivo</span>}
                         </div>
-                        <button className="btn btn-xs btn-secondary" style={{ position:'relative' }} onClick={() => { setVerProd(p); setVerModal(true) }}>
-                          <Ico as={Eye} size={14} />Detalles
-                          {hayAlerta && <span className="ficha-alerta-punto" title="Tiene alertas por revisar (costo o baches)" style={{ position:'absolute', top:-4, right:-4 }} aria-label="Tiene alertas" />}
-                        </button>
-                        <button className="btn btn-xs btn-primary" onClick={() => cargarProducto(p.id)}><Ico as={Pencil} size={14} />Editar</button>
+                        <div style={{ padding:'8px 10px', display:'flex', flexDirection:'column', gap:8, flex:1 }}>
+                          <strong style={{ fontSize:'0.9rem', lineHeight:1.25, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden', wordBreak:'break-word' }} title={p.nombre}>{p.nombre}</strong>
+                          <div style={{ display:'flex', gap:6, marginTop:'auto' }}>
+                            <button className="btn btn-xs btn-secondary" style={{ flex:1, position:'relative' }} onClick={() => { setVerProd(p); setVerModal(true) }}>
+                              <Ico as={Eye} size={13} />Detalles
+                              {hayAlerta && <span className="ficha-alerta-punto" title="Tiene alertas por revisar (costo o baches)" style={{ position:'absolute', top:-4, right:-4 }} aria-label="Tiene alertas" />}
+                            </button>
+                            <button className="btn btn-xs btn-primary" style={{ flex:1 }} onClick={() => cargarProducto(p.id)}><Ico as={Pencil} size={13} />Editar</button>
+                          </div>
+                        </div>
                       </div>
                     )
                   })}
+                  </div>
                 </div>
               ))}
 
@@ -1762,7 +1774,7 @@ export default function Costos({ vista = 'productos' }) {
           )}
 
           {/* ── Imagen + Info básica del producto ── */}
-          <details className="card" {...secProps(true)}>
+          <details className="card" {...secProps('basica')}>
             <summary className="card-title"><Ico as={FileText} size={14} />1 · Información básica<span className="card-hint">{formProd.nombre || 'nombre, tipo, SKU, vida útil...'}</span></summary>
             <div className="card-acc-body">
             {/* Galería de imágenes: la primera es la principal (miniatura del listado y del terminado) */}
@@ -1868,7 +1880,7 @@ export default function Costos({ vista = 'productos' }) {
           </details>
 
           {/* ── Ingredientes (integrado con toggle lista/manual de Calculadora de Receta) ── */}
-          <details className="card" {...secProps(!!editingId || ingredientes.length > 0)}>
+          <details className="card" {...secProps('ingredientes')}>
             <summary className="card-title ed-sec-title">
               <span className="ed-sec-title-main">🌿 2 · Materias Primas e Insumos</span>
               <span className="card-hint">{ingredientes.length} ingrediente{ingredientes.length === 1 ? '' : 's'}</span>
@@ -2062,7 +2074,7 @@ export default function Costos({ vista = 'productos' }) {
           </details>
 
           {/* ── Parámetros de producción ── */}
-          <details className="card" {...secProps(false)}>
+          <details className="card" {...secProps('parametros')}>
             <summary className="card-title"><Ico as={Settings} size={14} />3 · Parámetros de Producción <span className="card-hint">rendimiento, desperdicio, calidad</span></summary>
             <div className="card-acc-body">
             <div className="form-grid">
@@ -2357,7 +2369,7 @@ export default function Costos({ vista = 'productos' }) {
           </details>
 
           {/* ── Mano de obra ── */}
-          <details className="card" {...secProps(procesos.length > 0)}>
+          <details className="card" {...secProps('mano_obra')}>
             <summary className="card-title"><Ico as={Clock} size={14} />4 · Mano de Obra (por proceso)<span className="card-hint">{procesos.length} proceso{procesos.length === 1 ? '' : 's'}</span><div onClick={e => e.stopPropagation()} style={{ marginLeft:8 }}><button className="btn btn-sm btn-secondary" onClick={addProceso}>+ Agregar proceso</button></div></summary>
             <div className="card-acc-body">
             <div style={{ overflowX:'auto' }}>
@@ -2388,7 +2400,7 @@ export default function Costos({ vista = 'productos' }) {
           </details>
 
           {/* ── Empaque ── */}
-          <details className="card" {...secProps(empaque.length > 0)}>
+          <details className="card" {...secProps('empaque')}>
             <summary className="card-title"><Ico as={Package} size={14} />5 · Empaque & Envase<span className="card-hint">{empaque.length} ítem{empaque.length === 1 ? '' : 's'}</span><div onClick={e => e.stopPropagation()} style={{ marginLeft:8 }}><button className="btn btn-sm btn-secondary" onClick={addEmpaque}>+ Agregar</button></div></summary>
             <div className="card-acc-body">
             <div style={{ overflowX:'auto' }}>
@@ -2537,16 +2549,16 @@ export default function Costos({ vista = 'productos' }) {
             )}
           </div>
 
-          {/* ── Precios y Resumen ──
-              En móvil son dos acordeones más de la misma serie (se abren de a uno); en escritorio
-              se ven lado a lado y siempre abiertos, que es donde el usuario compara precio contra
-              costo mientras ajusta. */}
-          <div className="grid-resp" style={{ gridTemplateColumns:'1fr 1fr', gap:20 }}>
-            <details className="card" {...secProps(true)}>
-              <summary className="card-title"><Ico as={DollarSign} size={14} />7 · Precios de Venta
-                {calcResult && <span className="card-hint">{fCOP(parseFloat(formProd.precio_mayor) || 0)} por mayor</span>}
-              </summary>
-              <div className="card-acc-body">
+          {/* ── Precios y Resumen ── Una sola sección del acordeón: a la izquierda los precios,
+              a la derecha el resumen de costos. En escritorio quedan lado a lado (comparas precio
+              contra costo mientras ajustas); en móvil se apilan. */}
+          <details className="card" {...secProps('precios')}>
+            <summary className="card-title"><Ico as={DollarSign} size={14} />7 · Precios de Venta y Resumen
+              {calcResult && <span className="card-hint">{fCOP(parseFloat(formProd.precio_mayor) || 0)} por mayor</span>}
+            </summary>
+            <div className="card-acc-body">
+              <div className="grid-resp" style={{ gridTemplateColumns:'1fr 1fr', gap:20, alignItems:'start' }}>
+                <div>
 
               {/* ── Precio sugerido por la norma de costeo por absorción ── */}
               {calcResult && calcResult.costoTotalUnit > 0 && (() => {
@@ -2769,9 +2781,8 @@ export default function Costos({ vista = 'productos' }) {
                   </div>
                 </details>
               )}
-              </div>
-            </details>
-            <div className="costo-resumen">
+                </div>
+                <div className="costo-resumen">
               <div style={{ fontFamily:"'Playfair Display',serif", fontSize:'1.1rem', marginBottom:14, color:'var(--dorado)' }}>Resumen de Costos</div>
               {calcResult && (() => {
                 const pMayor = parseFloat(formProd.precio_mayor) || 0
@@ -2843,11 +2854,13 @@ export default function Costos({ vista = 'productos' }) {
                   )}
                 </>)
               })()}
+              </div>
+              </div>
             </div>
-          </div>
+          </details>
 
           {/* ── Ficha técnica (instrucciones paso a paso) ── */}
-          <details className="card" {...secProps(!!fichaNombre)}>
+          <details className="card" {...secProps('ficha_tecnica')}>
             <summary className="card-title"><Ico as={FileText} size={14} />8 · Ficha Técnica — Instrucciones de Elaboración<span className="card-hint">{fichaNombre || 'opcional'}</span></summary>
             <div className="card-acc-body">
             {/* En el celular el nombre largo del archivo empujaba los botones fuera de la pantalla
@@ -2870,7 +2883,7 @@ export default function Costos({ vista = 'productos' }) {
           </details>
 
           {/* ── Insumos imprimibles: PDFs que el operario imprime durante la producción ── */}
-          <details className="card" {...secProps(imprimibles.length > 0)}>
+          <details className="card" {...secProps('imprimibles')}>
             <summary className="card-title">
               <Ico as={Printer} size={14} />9 · Insumos Imprimibles
               <span className="card-hint">{imprimibles.length > 0 ? `${imprimibles.length} archivo(s)` : 'etiquetas, rótulos…'}</span>
