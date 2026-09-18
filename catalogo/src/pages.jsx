@@ -467,7 +467,8 @@ export function Producto() {
 
   const galeria = p ? imgsDe(p) : []
   const urlsWeb = galeria.map(g => g.url)
-  const pasar = (d) => { if (galeria.length > 1) setImg(k => Math.max(0, Math.min(galeria.length - 1, k + d))) }
+  // Navegación en bucle: al pasar del final vuelve al inicio y viceversa.
+  const pasar = (d) => { if (galeria.length > 1) setImg(k => (k + d + galeria.length) % galeria.length) }
   // Al cambiar de imagen, centra la miniatura activa dentro de su tira.
   useEffect(() => {
     if (galeria.length <= 1) return
@@ -575,10 +576,10 @@ export function Producto() {
                 : <span className="ph-fruto"><FrutoIcon name={iconoDe(p.frutos)} size={72} /></span>}
               {galeria.length > 1 && (
                 <>
-                  <button type="button" className="det-nav det-nav-prev" disabled={img === 0}
-                    onClick={e => { e.stopPropagation(); pasar(-1) }} aria-label="Imagen anterior"><ChevronLeft size={22} /></button>
-                  <button type="button" className="det-nav det-nav-next" disabled={img === galeria.length - 1}
-                    onClick={e => { e.stopPropagation(); pasar(1) }} aria-label="Imagen siguiente"><ChevronRight size={22} /></button>
+                  <button type="button" className="det-nav det-nav-prev"
+                    onClick={e => { e.stopPropagation(); pasar(-1) }} aria-label="Imagen anterior"><ChevronLeft size={26} strokeWidth={1.5} /></button>
+                  <button type="button" className="det-nav det-nav-next"
+                    onClick={e => { e.stopPropagation(); pasar(1) }} aria-label="Imagen siguiente"><ChevronRight size={26} strokeWidth={1.5} /></button>
                 </>
               )}
             </div>
@@ -734,10 +735,10 @@ export function Producto() {
           : <span className="ph-fruto"><FrutoIcon name={iconoDe(p.frutos)} size={72} /></span>}
         {galeria.length > 1 && (
           <>
-            <button type="button" className="det-nav det-nav-prev" disabled={img === 0}
-              onClick={e => { e.stopPropagation(); pasar(-1) }} aria-label="Imagen anterior"><ChevronLeft size={22} /></button>
-            <button type="button" className="det-nav det-nav-next" disabled={img === galeria.length - 1}
-              onClick={e => { e.stopPropagation(); pasar(1) }} aria-label="Imagen siguiente"><ChevronRight size={22} /></button>
+            <button type="button" className="det-nav det-nav-prev"
+              onClick={e => { e.stopPropagation(); pasar(-1) }} aria-label="Imagen anterior"><ChevronLeft size={26} strokeWidth={1.5} /></button>
+            <button type="button" className="det-nav det-nav-next"
+              onClick={e => { e.stopPropagation(); pasar(1) }} aria-label="Imagen siguiente"><ChevronRight size={26} strokeWidth={1.5} /></button>
           </>
         )}
         {galeria.length > 0 && <span className="zoom-hint"><ZoomIn size={16} /> Ampliar</span>}
