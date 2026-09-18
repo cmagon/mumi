@@ -75,20 +75,29 @@ function parseImagenes(raw: unknown): any[] {
 function urlsDeProducto(p: { imagen_url?: unknown; imagenes?: unknown } | null | undefined): string[] {
   if (!p) return []
   const out: string[] = []
+  // Variantes móviles de las fotos ya listadas: JAMÁS deben viajar al feed como
+  // imagen (ni principal ni adicional), para no duplicar la misma foto en otro tamaño.
+  const moviles = new Set<string>()
+  const norm = (u: unknown) => String(u || '').trim()
   const add = (u: unknown) => {
-    const s = String(u || '').trim()
-    if (esUrlImagen(s) && !out.includes(s)) out.push(s)
+    const s = norm(u)
+    if (esUrlImagen(s) && !out.includes(s) && !moviles.has(s)) out.push(s)
   }
-  // Una sola URL por foto: la de escritorio (url/src) y, solo si no hay, la móvil.
-  // NO se agregan las variantes de tamaño de la MISMA foto (antes url_mobile se sumaba
-  // aparte y un producto con una sola imagen enviaba esa foto repetida en otro tamaño
-  // como "imagen adicional").
+  // Cada foto = UNA sola URL (la de escritorio: url/src; si no hay, la móvil).
+  // Registramos aparte la url_mobile de cada foto para excluirla más abajo.
   for (const x of parseImagenes(p.imagenes)) {
-    if (typeof x === 'string') add(x)
-    else if (x && typeof x === 'object') add((x as any).url || (x as any).src || (x as any).url_mobile)
+    if (typeof x === 'string') { add(x); continue }
+    if (x && typeof x === 'object') {
+      const web = norm((x as any).url || (x as any).src)
+      const mob = norm((x as any).url_mobile)
+      if (mob && mob !== web) moviles.add(mob)
+      add(web || mob)
+    }
   }
+  // La imagen principal del producto solo si no es ya una foto listada ni una variante móvil.
   add(p.imagen_url)
-  return out
+  // Blindaje final: quita cualquier URL que sea una variante móvil de otra foto.
+  return out.filter((u) => !moviles.has(u))
 }
 
 function imgPrincipal(
