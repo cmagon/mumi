@@ -1763,7 +1763,7 @@ export default function Costos({ vista = 'productos' }) {
 
           {/* ── Imagen + Info básica del producto ── */}
           <details className="card" {...secProps(true)}>
-            <summary className="card-title"><Ico as={FileText} size={14} />Información básica<span className="card-hint">{formProd.nombre || 'nombre, tipo, SKU, vida útil...'}</span></summary>
+            <summary className="card-title"><Ico as={FileText} size={14} />1 · Información básica<span className="card-hint">{formProd.nombre || 'nombre, tipo, SKU, vida útil...'}</span></summary>
             <div className="card-acc-body">
             {/* Galería de imágenes: la primera es la principal (miniatura del listado y del terminado) */}
             <div className="form-group">
@@ -1870,7 +1870,7 @@ export default function Costos({ vista = 'productos' }) {
           {/* ── Ingredientes (integrado con toggle lista/manual de Calculadora de Receta) ── */}
           <details className="card" {...secProps(!!editingId || ingredientes.length > 0)}>
             <summary className="card-title ed-sec-title">
-              <span className="ed-sec-title-main">🌿 Materias Primas e Insumos</span>
+              <span className="ed-sec-title-main">🌿 2 · Materias Primas e Insumos</span>
               <span className="card-hint">{ingredientes.length} ingrediente{ingredientes.length === 1 ? '' : 's'}</span>
               <div className="ed-sec-actions" onClick={e => e.stopPropagation()}>
                 <button className="btn btn-sm btn-secondary" onClick={addIngrediente}>+ Normal</button>
@@ -2063,7 +2063,7 @@ export default function Costos({ vista = 'productos' }) {
 
           {/* ── Parámetros de producción ── */}
           <details className="card" {...secProps(false)}>
-            <summary className="card-title"><Ico as={Settings} size={14} />Parámetros de Producción <span className="card-hint">rendimiento, desperdicio, calidad</span></summary>
+            <summary className="card-title"><Ico as={Settings} size={14} />3 · Parámetros de Producción <span className="card-hint">rendimiento, desperdicio, calidad</span></summary>
             <div className="card-acc-body">
             <div className="form-grid">
               <div className="form-group"><label className="form-label">{presLabel}s por bache</label><input type="number" className="form-control" value={formProd.bache} onChange={e => setFormProd(f=>({...f,bache:e.target.value}))} min={0} step="any" /></div>
@@ -2358,7 +2358,7 @@ export default function Costos({ vista = 'productos' }) {
 
           {/* ── Mano de obra ── */}
           <details className="card" {...secProps(procesos.length > 0)}>
-            <summary className="card-title"><Ico as={Clock} size={14} />Mano de Obra (por proceso)<span className="card-hint">{procesos.length} proceso{procesos.length === 1 ? '' : 's'}</span><div onClick={e => e.stopPropagation()} style={{ marginLeft:8 }}><button className="btn btn-sm btn-secondary" onClick={addProceso}>+ Agregar proceso</button></div></summary>
+            <summary className="card-title"><Ico as={Clock} size={14} />4 · Mano de Obra (por proceso)<span className="card-hint">{procesos.length} proceso{procesos.length === 1 ? '' : 's'}</span><div onClick={e => e.stopPropagation()} style={{ marginLeft:8 }}><button className="btn btn-sm btn-secondary" onClick={addProceso}>+ Agregar proceso</button></div></summary>
             <div className="card-acc-body">
             <div style={{ overflowX:'auto' }}>
               <div className="ed-wrap" style={{ minWidth:500 }}>
@@ -2389,7 +2389,7 @@ export default function Costos({ vista = 'productos' }) {
 
           {/* ── Empaque ── */}
           <details className="card" {...secProps(empaque.length > 0)}>
-            <summary className="card-title"><Ico as={Package} size={14} />Empaque & Envase<span className="card-hint">{empaque.length} ítem{empaque.length === 1 ? '' : 's'}</span><div onClick={e => e.stopPropagation()} style={{ marginLeft:8 }}><button className="btn btn-sm btn-secondary" onClick={addEmpaque}>+ Agregar</button></div></summary>
+            <summary className="card-title"><Ico as={Package} size={14} />5 · Empaque & Envase<span className="card-hint">{empaque.length} ítem{empaque.length === 1 ? '' : 's'}</span><div onClick={e => e.stopPropagation()} style={{ marginLeft:8 }}><button className="btn btn-sm btn-secondary" onClick={addEmpaque}>+ Agregar</button></div></summary>
             <div className="card-acc-body">
             <div style={{ overflowX:'auto' }}>
               <div className="ed-wrap" style={{ minWidth:720 }}>
@@ -2457,7 +2457,7 @@ export default function Costos({ vista = 'productos' }) {
           {/* ── Costos adicionales personalizados — la depreciación se gestiona centralmente ── */}
           <div className="card">
             <div className="card-title" style={{ cursor:'pointer' }} onClick={() => setAdicOpen(o => !o)}>
-              <Ico as={DollarSign} size={14} />Costos Adicionales {(adicionales.length + costosHora.length) > 0 ? `(${adicionales.length + costosHora.length})` : ''}
+              <Ico as={DollarSign} size={14} />6 · Costos Adicionales {(adicionales.length + costosHora.length) > 0 ? `(${adicionales.length + costosHora.length})` : ''}
               <button type="button" className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={(e) => { e.stopPropagation(); setAdicOpen(o => !o) }}><Ico as={adicOpen ? ChevronUp : ChevronDown} size={14} />{adicOpen ? 'Ocultar' : 'Mostrar'}</button>
             </div>
             {adicOpen && (
@@ -2537,74 +2537,13 @@ export default function Costos({ vista = 'productos' }) {
             )}
           </div>
 
-          {/* ── Ficha técnica (instrucciones paso a paso) ── */}
-          <details className="card" {...secProps(!!fichaNombre)}>
-            <summary className="card-title"><Ico as={FileText} size={14} />Ficha Técnica — Instrucciones de Elaboración<span className="card-hint">{fichaNombre || 'opcional'}</span></summary>
-            <div className="card-acc-body">
-            {/* En el celular el nombre largo del archivo empujaba los botones fuera de la pantalla
-                y no se podía quitar la ficha: por eso la fila envuelve y los botones no se encogen. */}
-            {fichaNombre && (
-              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12, padding:'8px 12px', background:'rgba(124,179,66,0.08)', borderRadius:'var(--radio)', border:'1px solid rgba(124,179,66,0.2)', flexWrap:'wrap' }}>
-                <span style={{ flex:'1 1 140px', minWidth:0, fontSize:'0.88rem', color:'var(--selva-claro)', overflowWrap:'anywhere' }}><Ico as={FileText} size={14} /><strong>{fichaNombre}</strong></span>
-                {fichaFile && <span style={{ fontSize:'0.75rem', color:'var(--texto-suave)', flexShrink:0 }}>pendiente de guardar</span>}
-                <div style={{ display:'flex', gap:6, flexShrink:0, marginLeft:'auto' }}>
-                  {fichaPath && !fichaFile && <button className="btn btn-xs btn-dorado" onClick={descargarFicha}><Ico as={Download} size={14} />Descargar</button>}
-                  <button className="btn btn-xs btn-danger" title="Quitar la ficha técnica" onClick={() => { setFichaFile(null); setFichaNombre(''); setFichaPath('') }}><X size={13} aria-hidden="true" />Quitar</button>
-                </div>
-              </div>
-            )}
-            <label className="btn btn-secondary btn-sm" style={{ cursor:'pointer', display:'inline-flex' }}>
-              📎 {fichaNombre ? 'Reemplazar PDF/Word' : 'Subir PDF o Word'}
-              <input type="file" accept=".pdf,.doc,.docx" onChange={e => { const f=e.target.files[0]; if(f){setFichaFile(f);setFichaNombre(f.name)} }} style={{ display:'none' }} />
-            </label>
-            </div>
-          </details>
-
-          {/* ── Insumos imprimibles: PDFs que el operario imprime durante la producción ── */}
-          <details className="card" {...secProps(imprimibles.length > 0)}>
-            <summary className="card-title">
-              <Ico as={Printer} size={14} />Insumos Imprimibles
-              <span className="card-hint">{imprimibles.length > 0 ? `${imprimibles.length} archivo(s)` : 'etiquetas, rótulos…'}</span>
-            </summary>
-            <div className="card-acc-body">
-              <div className="alert alert-info" style={{ fontSize:'0.82rem' }}>
-                ℹ Sube en PDF las <strong>etiquetas, rótulos o instructivos</strong> que se imprimen al fabricar este producto.
-                El operario los verá al diligenciar la orden de producción y podrá imprimirlos directo desde la tablet,
-                sin tener que buscarlos ni pedirlos.
-              </div>
-              {imprimibles.length > 0 && (
-                <div style={{ display:'grid', gap:6, marginBottom:10 }}>
-                  {imprimibles.map((imp, i) => (
-                    // En pantalla angosta el nombre empujaba los botones fuera de la caja y no se
-                    // podía eliminar: ahora el nombre se parte en varias líneas y los botones
-                    // nunca se encogen (flexShrink 0), así siempre quedan accesibles.
-                    <div key={i} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background:'var(--crema)', borderRadius:'var(--radio)', flexWrap:'wrap' }}>
-                      <Ico as={FileText} size={14} />
-                      <span style={{ flex:'1 1 140px', fontSize:'0.86rem', minWidth:0, overflowWrap:'anywhere' }}>{imp.nombre}</span>
-                      {imp.size > 0 && <small style={{ color:'var(--texto-suave)', flexShrink:0 }}>{(imp.size / 1024).toFixed(0)} KB</small>}
-                      <div style={{ display:'flex', gap:6, flexShrink:0, marginLeft:'auto' }}>
-                        <button type="button" className="btn btn-xs btn-secondary" onClick={() => abrirImprimible(imp)}><Ico as={Printer} size={13} />Ver</button>
-                        <button type="button" className="btn btn-xs btn-danger" title="Quitar este archivo" onClick={() => quitarImprimible(i)}><X size={13} aria-hidden="true" />Quitar</button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-              <label className={`btn btn-secondary btn-sm ${subiendoImp ? 'disabled' : ''}`} style={{ cursor: subiendoImp ? 'wait' : 'pointer', display:'inline-flex' }}>
-                <Ico as={Printer} size={14} />{subiendoImp ? 'Subiendo…' : 'Agregar PDF imprimible'}
-                <input type="file" accept="application/pdf" multiple disabled={subiendoImp} onChange={subirImprimible} style={{ display:'none' }} />
-              </label>
-              <small style={{ display:'block', marginTop:6, color:'var(--texto-suave)', fontSize:'0.72rem' }}>Solo PDF, hasta 15 MB por archivo. Puedes subir varios a la vez.</small>
-            </div>
-          </details>
-
           {/* ── Precios y Resumen ──
               En móvil son dos acordeones más de la misma serie (se abren de a uno); en escritorio
               se ven lado a lado y siempre abiertos, que es donde el usuario compara precio contra
               costo mientras ajusta. */}
           <div className="grid-resp" style={{ gridTemplateColumns:'1fr 1fr', gap:20 }}>
             <details className="card" {...secProps(true)}>
-              <summary className="card-title"><Ico as={DollarSign} size={14} />Precios de Venta
+              <summary className="card-title"><Ico as={DollarSign} size={14} />7 · Precios de Venta
                 {calcResult && <span className="card-hint">{fCOP(parseFloat(formProd.precio_mayor) || 0)} por mayor</span>}
               </summary>
               <div className="card-acc-body">
@@ -2906,6 +2845,67 @@ export default function Costos({ vista = 'productos' }) {
               })()}
             </div>
           </div>
+
+          {/* ── Ficha técnica (instrucciones paso a paso) ── */}
+          <details className="card" {...secProps(!!fichaNombre)}>
+            <summary className="card-title"><Ico as={FileText} size={14} />8 · Ficha Técnica — Instrucciones de Elaboración<span className="card-hint">{fichaNombre || 'opcional'}</span></summary>
+            <div className="card-acc-body">
+            {/* En el celular el nombre largo del archivo empujaba los botones fuera de la pantalla
+                y no se podía quitar la ficha: por eso la fila envuelve y los botones no se encogen. */}
+            {fichaNombre && (
+              <div style={{ display:'flex', alignItems:'center', gap:8, marginBottom:12, padding:'8px 12px', background:'rgba(124,179,66,0.08)', borderRadius:'var(--radio)', border:'1px solid rgba(124,179,66,0.2)', flexWrap:'wrap' }}>
+                <span style={{ flex:'1 1 140px', minWidth:0, fontSize:'0.88rem', color:'var(--selva-claro)', overflowWrap:'anywhere' }}><Ico as={FileText} size={14} /><strong>{fichaNombre}</strong></span>
+                {fichaFile && <span style={{ fontSize:'0.75rem', color:'var(--texto-suave)', flexShrink:0 }}>pendiente de guardar</span>}
+                <div style={{ display:'flex', gap:6, flexShrink:0, marginLeft:'auto' }}>
+                  {fichaPath && !fichaFile && <button className="btn btn-xs btn-dorado" onClick={descargarFicha}><Ico as={Download} size={14} />Descargar</button>}
+                  <button className="btn btn-xs btn-danger" title="Quitar la ficha técnica" onClick={() => { setFichaFile(null); setFichaNombre(''); setFichaPath('') }}><X size={13} aria-hidden="true" />Quitar</button>
+                </div>
+              </div>
+            )}
+            <label className="btn btn-secondary btn-sm" style={{ cursor:'pointer', display:'inline-flex' }}>
+              📎 {fichaNombre ? 'Reemplazar PDF/Word' : 'Subir PDF o Word'}
+              <input type="file" accept=".pdf,.doc,.docx" onChange={e => { const f=e.target.files[0]; if(f){setFichaFile(f);setFichaNombre(f.name)} }} style={{ display:'none' }} />
+            </label>
+            </div>
+          </details>
+
+          {/* ── Insumos imprimibles: PDFs que el operario imprime durante la producción ── */}
+          <details className="card" {...secProps(imprimibles.length > 0)}>
+            <summary className="card-title">
+              <Ico as={Printer} size={14} />9 · Insumos Imprimibles
+              <span className="card-hint">{imprimibles.length > 0 ? `${imprimibles.length} archivo(s)` : 'etiquetas, rótulos…'}</span>
+            </summary>
+            <div className="card-acc-body">
+              <div className="alert alert-info" style={{ fontSize:'0.82rem' }}>
+                ℹ Sube en PDF las <strong>etiquetas, rótulos o instructivos</strong> que se imprimen al fabricar este producto.
+                El operario los verá al diligenciar la orden de producción y podrá imprimirlos directo desde la tablet,
+                sin tener que buscarlos ni pedirlos.
+              </div>
+              {imprimibles.length > 0 && (
+                <div style={{ display:'grid', gap:6, marginBottom:10 }}>
+                  {imprimibles.map((imp, i) => (
+                    // En pantalla angosta el nombre empujaba los botones fuera de la caja y no se
+                    // podía eliminar: ahora el nombre se parte en varias líneas y los botones
+                    // nunca se encogen (flexShrink 0), así siempre quedan accesibles.
+                    <div key={i} style={{ display:'flex', alignItems:'center', gap:8, padding:'8px 10px', background:'var(--crema)', borderRadius:'var(--radio)', flexWrap:'wrap' }}>
+                      <Ico as={FileText} size={14} />
+                      <span style={{ flex:'1 1 140px', fontSize:'0.86rem', minWidth:0, overflowWrap:'anywhere' }}>{imp.nombre}</span>
+                      {imp.size > 0 && <small style={{ color:'var(--texto-suave)', flexShrink:0 }}>{(imp.size / 1024).toFixed(0)} KB</small>}
+                      <div style={{ display:'flex', gap:6, flexShrink:0, marginLeft:'auto' }}>
+                        <button type="button" className="btn btn-xs btn-secondary" onClick={() => abrirImprimible(imp)}><Ico as={Printer} size={13} />Ver</button>
+                        <button type="button" className="btn btn-xs btn-danger" title="Quitar este archivo" onClick={() => quitarImprimible(i)}><X size={13} aria-hidden="true" />Quitar</button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <label className={`btn btn-secondary btn-sm ${subiendoImp ? 'disabled' : ''}`} style={{ cursor: subiendoImp ? 'wait' : 'pointer', display:'inline-flex' }}>
+                <Ico as={Printer} size={14} />{subiendoImp ? 'Subiendo…' : 'Agregar PDF imprimible'}
+                <input type="file" accept="application/pdf" multiple disabled={subiendoImp} onChange={subirImprimible} style={{ display:'none' }} />
+              </label>
+              <small style={{ display:'block', marginTop:6, color:'var(--texto-suave)', fontSize:'0.72rem' }}>Solo PDF, hasta 15 MB por archivo. Puedes subir varios a la vez.</small>
+            </div>
+          </details>
 
           {/* ── Botones ── */}
           <div style={{ display:'flex', gap:10, justifyContent:'flex-end', marginTop:8 }}>
