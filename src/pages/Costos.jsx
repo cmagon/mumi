@@ -1775,7 +1775,7 @@ export default function Costos({ vista = 'productos' }) {
 
           {/* ── Imagen + Info básica del producto ── */}
           <details className="card" {...secProps('basica')}>
-            <summary className="card-title"><Ico as={FileText} size={14} />1 · Información básica<span className="card-hint">{formProd.nombre || 'nombre, tipo, SKU, vida útil...'}</span></summary>
+            <summary className="card-title"><span className="ed-paso-num">1</span><Ico as={FileText} size={14} />Información básica<span className="card-hint">{formProd.nombre || 'nombre, tipo, SKU, vida útil...'}</span></summary>
             <div className="card-acc-body">
             {/* Galería de imágenes: la primera es la principal (miniatura del listado y del terminado) */}
             <div className="form-group">
@@ -1804,14 +1804,25 @@ export default function Costos({ vista = 'productos' }) {
               {cropImg && <ImageCropper file={cropImg} aspect={1} salidaW={1000} salidaH={1000} onCancel={() => setCropImg(null)} onCropped={(blob) => { setCropImg(null); subirImgBlob(blob) }} />}
             </div>
 
-            {/* Campos */}
+            {/* Campos — orden de llenado: primero la identidad (nombre, tipo, presentación),
+                luego el estado, la descripción y las categorías extra. */}
             <div className="form-grid">
                 <div className="form-group" style={{ gridColumn:'1 / -1' }}><label className="form-label">Nombre del Producto</label><input className="form-control" value={formProd.nombre} onChange={e => setFormProd(f=>({...f,nombre:e.target.value}))} placeholder="Nombre de mi producto" /></div>
-                <div className="form-group" style={{ gridColumn:'1 / -1' }}>
-                  <label className="form-label">Descripción del producto <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(opcional)</small></label>
-                  <textarea className="form-control" rows={2} maxLength={500} value={formProd.descripcion || ''} onChange={e => setFormProd(f=>({...f,descripcion:e.target.value}))} />
+                <div className="form-group">
+                  <label className="form-label" style={{ display:'flex', alignItems:'center' }}>
+                    Tipo
+                    {esAdmin && <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft:'auto' }} onClick={() => setTiposModal(true)}><Ico as={Settings} size={14} />Gestionar</button>}
+                  </label>
+                  <Select className="form-control" value={formProd.tipo} onChange={e => setFormProd(f=>({...f,tipo:e.target.value}))}>
+                    {opcionesTipo.map(t => <option key={t} value={t}>{tipoLabel(t)}</option>)}
+                  </Select>
                 </div>
                 <div className="form-group">
+                  <label className="form-label">Presentación <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(elige o escribe una)</small></label>
+                  <input className="form-control" list="dl-presentaciones" value={formProd.presentacion || ''} onChange={e => setFormProd(f=>({...f,presentacion:e.target.value}))} placeholder="Ej: Caja, Unidad, Kilo..." />
+                  <datalist id="dl-presentaciones">{PRESENTACIONES.map(p => <option key={p} value={p} />)}</datalist>
+                </div>
+                <div className="form-group" style={{ gridColumn:'1 / -1' }}>
                   <label className="form-label">Estado del producto</label>
                   <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', padding:'8px 0' }}>
                     <input type="checkbox" checked={formProd.activo !== false} onChange={e => setFormProd(f=>({...f, activo: e.target.checked}))} />
@@ -1823,14 +1834,9 @@ export default function Costos({ vista = 'productos' }) {
                     sus minutos salen del reparto y aparecen como capacidad ociosa.
                   </small>
                 </div>
-                <div className="form-group">
-                  <label className="form-label" style={{ display:'flex', alignItems:'center' }}>
-                    Tipo
-                    {esAdmin && <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft:'auto' }} onClick={() => setTiposModal(true)}><Ico as={Settings} size={14} />Gestionar</button>}
-                  </label>
-                  <Select className="form-control" value={formProd.tipo} onChange={e => setFormProd(f=>({...f,tipo:e.target.value}))}>
-                    {opcionesTipo.map(t => <option key={t} value={t}>{tipoLabel(t)}</option>)}
-                  </Select>
+                <div className="form-group" style={{ gridColumn:'1 / -1' }}>
+                  <label className="form-label">Descripción del producto <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(opcional)</small></label>
+                  <textarea className="form-control" rows={2} maxLength={500} value={formProd.descripcion || ''} onChange={e => setFormProd(f=>({...f,descripcion:e.target.value}))} />
                 </div>
                 {/* Categorías adicionales — sobre todo para MP vendibles que caben en varias categorías */}
                 {formProd.tipo === 'mp' && (
@@ -1847,11 +1853,6 @@ export default function Costos({ vista = 'productos' }) {
                     {categorias.length > 0 && <small style={{ display:'block', marginTop:4, color:'var(--selva)' }}>Categorías: {[formProd.tipo, ...categorias].map(tipoLabel).join(', ')}</small>}
                   </div>
                 )}
-                <div className="form-group">
-                  <label className="form-label">Presentación <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(elige o escribe una)</small></label>
-                  <input className="form-control" list="dl-presentaciones" value={formProd.presentacion || ''} onChange={e => setFormProd(f=>({...f,presentacion:e.target.value}))} placeholder="Ej: Caja, Unidad, Kilo..." />
-                  <datalist id="dl-presentaciones">{PRESENTACIONES.map(p => <option key={p} value={p} />)}</datalist>
-                </div>
             </div>
 
             {/* Campos personalizados */}
@@ -1882,7 +1883,7 @@ export default function Costos({ vista = 'productos' }) {
           {/* ── Ingredientes (integrado con toggle lista/manual de Calculadora de Receta) ── */}
           <details className="card" {...secProps('ingredientes')}>
             <summary className="card-title ed-sec-title">
-              <span className="ed-sec-title-main">🌿 2 · Materias Primas e Insumos</span>
+              <span className="ed-sec-title-main"><span className="ed-paso-num">2</span>🌿 Materias Primas e Insumos</span>
               <span className="card-hint">{ingredientes.length} ingrediente{ingredientes.length === 1 ? '' : 's'}</span>
               <div className="ed-sec-actions" onClick={e => e.stopPropagation()}>
                 <button className="btn btn-sm btn-secondary" onClick={addIngrediente}>+ Normal</button>
@@ -2075,11 +2076,13 @@ export default function Costos({ vista = 'productos' }) {
 
           {/* ── Parámetros de producción ── */}
           <details className="card" {...secProps('parametros')}>
-            <summary className="card-title"><Ico as={Settings} size={14} />3 · Parámetros de Producción <span className="card-hint">rendimiento, desperdicio, calidad</span></summary>
+            <summary className="card-title"><span className="ed-paso-num">3</span><Ico as={Settings} size={14} />Parámetros de Producción <span className="card-hint">rendimiento, desperdicio, calidad</span></summary>
             <div className="card-acc-body">
             <div className="form-grid">
+              <div style={{ gridColumn:'1 / -1', fontWeight:700, color:'var(--selva)', fontSize:'0.78rem', textTransform:'uppercase', letterSpacing:'0.03em' }}>Producción y rendimiento</div>
               <div className="form-group"><label className="form-label">{presLabel}s por bache</label><input type="number" className="form-control" value={formProd.bache} onChange={e => setFormProd(f=>({...f,bache:e.target.value}))} min={0} step="any" /></div>
               <div className="form-group"><label className="form-label">Baches por mes</label><input type="number" className="form-control" value={formProd.baches_mes} onChange={e => setFormProd(f=>({...f,baches_mes:e.target.value}))} min={1} /></div>
+              <div className="form-group"><label className="form-label">Peso por {presLabel} (g)</label><input type="number" className="form-control" value={pesoUnidad} onChange={e => setPesoUnidad(e.target.value)} min={1} /></div>
               <div className="form-group">
                 <label className="form-label">Vida útil <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(opcional)</small></label>
                 <div style={{ display:'flex', gap:6, alignItems:'center' }}>
@@ -2091,9 +2094,12 @@ export default function Costos({ vista = 'productos' }) {
                 </div>
                 <small style={{ color:'var(--texto-suave)', fontSize:'0.68rem' }}>Precarga el vencimiento al producir.</small>
               </div>
+
+              <div style={{ gridColumn:'1 / -1', fontWeight:700, color:'var(--selva)', fontSize:'0.78rem', textTransform:'uppercase', letterSpacing:'0.03em', marginTop:6 }}>Merma y calidad</div>
               <div className="form-group"><label className="form-label">Rendimiento esperado (%)</label><input type="number" className="form-control" value={rendimiento} onChange={e => setRendimiento(e.target.value)} min={1} max={100} step={0.1} /><small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>% de la mezcla que se convierte en producto (ej. por evaporación/cocción).</small></div>
               <div className="form-group"><label className="form-label">% Desperdicio</label><input type="number" className="form-control" value={desperdicio} onChange={e => setDesperdicio(e.target.value)} min={0} max={50} step={0.1} /><small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Desperdicio <strong>adicional</strong> que se pierde <strong>después</strong> del rendimiento (no es la diferencia de 100 − rendimiento; se descuenta sobre lo ya rendido).</small></div>
-              <div className="form-group"><label className="form-label">Peso por {presLabel} (g)</label><input type="number" className="form-control" value={pesoUnidad} onChange={e => setPesoUnidad(e.target.value)} min={1} /></div>
+
+              <div style={{ gridColumn:'1 / -1', fontWeight:700, color:'var(--selva)', fontSize:'0.78rem', textTransform:'uppercase', letterSpacing:'0.03em', marginTop:6 }}>Presentación y empaque</div>
               <div className="form-group">
                 <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:'0.85rem', cursor:'pointer', fontWeight:600, color:'var(--selva)', minHeight:'1.2rem' }}>
                   <input type="checkbox" checked={porciona} onChange={e => setPorciona(e.target.checked)} />
@@ -2370,8 +2376,14 @@ export default function Costos({ vista = 'productos' }) {
 
           {/* ── Mano de obra ── */}
           <details className="card" {...secProps('mano_obra')}>
-            <summary className="card-title"><Ico as={Clock} size={14} />4 · Mano de Obra (por proceso)<span className="card-hint">{procesos.length} proceso{procesos.length === 1 ? '' : 's'}</span><div onClick={e => e.stopPropagation()} style={{ marginLeft:8 }}><button className="btn btn-sm btn-secondary" onClick={addProceso}>+ Agregar proceso</button></div></summary>
+            <summary className="card-title"><span className="ed-paso-num">4</span><Ico as={Clock} size={14} />Mano de Obra (por proceso)<span className="card-hint">{procesos.length} proceso{procesos.length === 1 ? '' : 's'}</span><div onClick={e => e.stopPropagation()} style={{ marginLeft:8 }}><button className="btn btn-sm btn-secondary" onClick={addProceso}>+ Agregar proceso</button></div></summary>
             <div className="card-acc-body">
+            {/* Resumen fijo: no hay que sumar mentalmente los procesos para ver el total */}
+            <div style={{ display:'flex', flexWrap:'wrap', gap:'8px 16px', alignItems:'center', padding:'8px 12px', marginBottom:12, background:'var(--crema)', borderRadius:'var(--radio)', fontSize:'0.82rem' }}>
+              <span><Ico as={Clock} size={13} /> Total: <strong>{fNum(calcResult?.totalMinutos || 0)} min/bache</strong></span>
+              <span>Costo/min: <strong>{fCOP(costoMin)}</strong></span>
+              <span style={{ marginLeft:'auto' }}>MO + CIF por unidad: <strong style={{ color:'var(--dorado)' }}>{fCOP(calcResult?.moUnit || 0)}</strong></span>
+            </div>
             <div style={{ overflowX:'auto' }}>
               <div className="ed-wrap" style={{ minWidth:500 }}>
                 <div className="ed-head" style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr 44px', gap:8, paddingBottom:8, fontSize:'0.72rem', fontWeight:700, color:'var(--texto-suave)', textTransform:'uppercase' }}>
@@ -2401,8 +2413,13 @@ export default function Costos({ vista = 'productos' }) {
 
           {/* ── Empaque ── */}
           <details className="card" {...secProps('empaque')}>
-            <summary className="card-title"><Ico as={Package} size={14} />5 · Empaque & Envase<span className="card-hint">{empaque.length} ítem{empaque.length === 1 ? '' : 's'}</span><div onClick={e => e.stopPropagation()} style={{ marginLeft:8 }}><button className="btn btn-sm btn-secondary" onClick={addEmpaque}>+ Agregar</button></div></summary>
+            <summary className="card-title"><span className="ed-paso-num">5</span><Ico as={Package} size={14} />Empaque & Envase<span className="card-hint">{empaque.length} ítem{empaque.length === 1 ? '' : 's'}</span><div onClick={e => e.stopPropagation()} style={{ marginLeft:8 }}><button className="btn btn-sm btn-secondary" onClick={addEmpaque}>+ Agregar</button></div></summary>
             <div className="card-acc-body">
+            {/* Resumen fijo del empaque, siempre visible arriba */}
+            <div style={{ display:'flex', flexWrap:'wrap', gap:'8px 16px', alignItems:'center', padding:'8px 12px', marginBottom:12, background:'var(--crema)', borderRadius:'var(--radio)', fontSize:'0.82rem' }}>
+              <span><Ico as={Package} size={13} /> Total empaque: <strong>{fCOP(calcResult?.totalEmpBache || 0)}/bache</strong></span>
+              <span style={{ marginLeft:'auto' }}>Empaque por unidad: <strong style={{ color:'var(--dorado)' }}>{fCOP(calcResult?.empUnit || 0)}</strong></span>
+            </div>
             <div style={{ overflowX:'auto' }}>
               <div className="ed-wrap" style={{ minWidth:720 }}>
                 <div className="ed-head" style={{ display:'grid', gridTemplateColumns:'2.2fr 1fr 1fr 1fr 1fr 44px', gap:8, paddingBottom:6, fontSize:'0.72rem', fontWeight:700, color:'var(--texto-suave)', textTransform:'uppercase' }}>
@@ -2469,7 +2486,7 @@ export default function Costos({ vista = 'productos' }) {
           {/* ── Costos adicionales personalizados — la depreciación se gestiona centralmente ── */}
           <div className="card">
             <div className="card-title" style={{ cursor:'pointer' }} onClick={() => setAdicOpen(o => !o)}>
-              <Ico as={DollarSign} size={14} />6 · Costos Adicionales {(adicionales.length + costosHora.length) > 0 ? `(${adicionales.length + costosHora.length})` : ''}
+              <span className="ed-paso-num">6</span><Ico as={DollarSign} size={14} />Costos Adicionales {(adicionales.length + costosHora.length) > 0 ? `(${adicionales.length + costosHora.length})` : ''}
               <button type="button" className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={(e) => { e.stopPropagation(); setAdicOpen(o => !o) }}><Ico as={adicOpen ? ChevronUp : ChevronDown} size={14} />{adicOpen ? 'Ocultar' : 'Mostrar'}</button>
             </div>
             {adicOpen && (
@@ -2553,7 +2570,7 @@ export default function Costos({ vista = 'productos' }) {
               a la derecha el resumen de costos. En escritorio quedan lado a lado (comparas precio
               contra costo mientras ajustas); en móvil se apilan. */}
           <details className="card" {...secProps('precios')}>
-            <summary className="card-title"><Ico as={DollarSign} size={14} />7 · Precios de Venta y Resumen
+            <summary className="card-title"><span className="ed-paso-num">7</span><Ico as={DollarSign} size={14} />Precios de Venta y Resumen
               {calcResult && <span className="card-hint">{fCOP(parseFloat(formProd.precio_mayor) || 0)} por mayor</span>}
             </summary>
             <div className="card-acc-body">
@@ -2648,7 +2665,15 @@ export default function Costos({ vista = 'productos' }) {
               })()}
 
               <div style={{ display:'grid', gridTemplateColumns:'2fr 1fr', gap:10 }}>
-                <div className="form-group"><label className="form-label">Precio de venta por mayor <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(tu precio de lista)</small></label><MoneyInput value={formProd.precio_mayor} onChange={v => setFormProd(f=>({...f,precio_mayor:v}))} /></div>
+                <div className="form-group"><label className="form-label">Precio de venta por mayor <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(tu precio de lista)</small></label><MoneyInput value={formProd.precio_mayor} onChange={v => setFormProd(f=>({...f,precio_mayor:v}))} />
+                  {calcResult && calcResult.costoTotalUnit > 0 && (() => {
+                    const utilFicha = formProd.utilidad_objetivo !== '' && formProd.utilidad_objetivo != null ? (parseFloat(formProd.utilidad_objetivo) || 0) : utilidadObjetivo
+                    const sug = getPrecioSugerido({ costoProduccionUnit: calcResult.costoTotalUnit, tasaGastosOper, comisionPct: parseFloat(formProd.comision) || 0, icaPct: 0, utilidadPct: utilFicha })
+                    if (!sug.viable) return null
+                    const objetivo = Math.ceil(sug.precioObjetivo / 50) * 50
+                    return <button type="button" className="btn btn-xs btn-dorado" style={{ marginTop:6 }} onClick={() => setFormProd(f => ({ ...f, precio_mayor: objetivo }))} title="Aplica el precio objetivo sugerido (redondeado a $50)"><Ico as={TrendingUp} size={12} />Usar sugerido: {fCOP(objetivo)}</button>
+                  })()}
+                </div>
                 <div className="form-group"><label className="form-label">% Comisión <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(vendedor)</small></label><input type="number" className="form-control" value={formProd.comision} onChange={e => setFormProd(f=>({...f,comision:e.target.value}))} min={0} max={100} step={0.5} /></div>
               </div>
               {calcResult && (parseFloat(formProd.comision) || 0) > 0 && (
@@ -2861,7 +2886,7 @@ export default function Costos({ vista = 'productos' }) {
 
           {/* ── Ficha técnica (instrucciones paso a paso) ── */}
           <details className="card" {...secProps('ficha_tecnica')}>
-            <summary className="card-title"><Ico as={FileText} size={14} />8 · Ficha Técnica — Instrucciones de Elaboración<span className="card-hint">{fichaNombre || 'opcional'}</span></summary>
+            <summary className="card-title"><span className="ed-paso-num">8</span><Ico as={FileText} size={14} />Ficha Técnica — Instrucciones de Elaboración<span className="card-hint">{fichaNombre || 'opcional'}</span></summary>
             <div className="card-acc-body">
             {/* En el celular el nombre largo del archivo empujaba los botones fuera de la pantalla
                 y no se podía quitar la ficha: por eso la fila envuelve y los botones no se encogen. */}
@@ -2885,7 +2910,7 @@ export default function Costos({ vista = 'productos' }) {
           {/* ── Insumos imprimibles: PDFs que el operario imprime durante la producción ── */}
           <details className="card" {...secProps('imprimibles')}>
             <summary className="card-title">
-              <Ico as={Printer} size={14} />9 · Insumos Imprimibles
+              <span className="ed-paso-num">9</span><Ico as={Printer} size={14} />Insumos Imprimibles
               <span className="card-hint">{imprimibles.length > 0 ? `${imprimibles.length} archivo(s)` : 'etiquetas, rótulos…'}</span>
             </summary>
             <div className="card-acc-body">

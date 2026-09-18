@@ -1005,6 +1005,18 @@ details.card[open] > .card-title { border-bottom: 1px solid var(--crema-oscuro);
 details.card[open] > .card-title::after { transform: rotate(180deg); }
 details.card > .card-title .card-hint { margin-left: auto; font-weight: 400; font-size: 0.78rem; color: var(--texto-suave); font-family: 'Source Sans 3', sans-serif; }
 details.card > .card-acc-body { padding: 20px 24px; }
+/* La sección abierta se resalta como el "paso" activo del acordeón */
+details.card[open] { border-color: var(--dorado); box-shadow: 0 0 0 1px var(--dorado-claro), var(--sombra); }
+details.card[open] > .card-title { background: rgba(200,169,74,0.08); }
+/* Número del paso en un círculo dentro del título de cada sección */
+.ed-paso-num {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--crema-oscuro); color: var(--selva);
+  font-size: 0.8rem; font-weight: 700; flex-shrink: 0;
+  font-family: 'Source Sans 3', sans-serif;
+}
+details.card[open] > .card-title .ed-paso-num { background: var(--dorado); color: #2b1c04; }
 @media (max-width: 640px) {
   details.card > .card-title { padding: 16px; }
   details.card > .card-acc-body { padding: 16px; }
