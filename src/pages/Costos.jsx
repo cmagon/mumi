@@ -1671,12 +1671,14 @@ export default function Costos({ vista = 'productos' }) {
                         </div>
                         <div style={{ padding:'8px 10px', display:'flex', flexDirection:'column', gap:8, flex:1 }}>
                           <strong style={{ fontSize:'0.9rem', lineHeight:1.25, display:'-webkit-box', WebkitLineClamp:2, WebkitBoxOrient:'vertical', overflow:'hidden', wordBreak:'break-word' }} title={p.nombre}>{p.nombre}</strong>
-                          <div style={{ display:'flex', gap:6, marginTop:'auto' }}>
-                            <button className="btn btn-xs btn-secondary" style={{ flex:1, position:'relative' }} onClick={() => { setVerProd(p); setVerModal(true) }}>
+                          {/* Botones apilados a lo ancho: en tarjetas angostas nunca se recorta el texto
+                              (la tarjeta tiene overflow:hidden por las esquinas de la imagen). */}
+                          <div style={{ display:'flex', flexDirection:'column', gap:6, marginTop:'auto' }}>
+                            <button className="btn btn-xs btn-secondary" style={{ width:'100%', justifyContent:'center', position:'relative' }} onClick={() => { setVerProd(p); setVerModal(true) }}>
                               <Ico as={Eye} size={13} />Detalles
                               {hayAlerta && <span className="ficha-alerta-punto" title="Tiene alertas por revisar (costo o baches)" style={{ position:'absolute', top:-4, right:-4 }} aria-label="Tiene alertas" />}
                             </button>
-                            <button className="btn btn-xs btn-primary" style={{ flex:1 }} onClick={() => cargarProducto(p.id)}><Ico as={Pencil} size={13} />Editar</button>
+                            <button className="btn btn-xs btn-primary" style={{ width:'100%', justifyContent:'center' }} onClick={() => cargarProducto(p.id)}><Ico as={Pencil} size={13} />Editar</button>
                           </div>
                         </div>
                       </div>
