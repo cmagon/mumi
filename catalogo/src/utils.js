@@ -1,4 +1,4 @@
-import { supabase } from './supabase'
+import { supabase, supabasePublic } from './supabase'
 
 // Carga (o actualiza) las fuentes de Google usadas por el catálogo
 export function cargarGoogleFonts(familias) {
@@ -334,9 +334,12 @@ export function tipoDispositivo() {
 }
 
 // ---- Registro de visita (best-effort, no bloquea) ----
+// Usa el cliente ANÓNIMO: si el visitante tiene un token de sesión viejo/expirado, con el
+// cliente con sesión la inserción podía fallar (401) y la visita no se contaba. El anónimo
+// inserta siempre (política RLS de insert para anon).
 export function registrarVisita(producto = null) {
   try {
-    supabase.from('visitas_catalogo').insert({
+    supabasePublic.from('visitas_catalogo').insert({
       producto, dispositivo: tipoDispositivo(), referrer: document.referrer || null,
     }).then(() => {}, () => {})
   } catch { /* noop */ }
