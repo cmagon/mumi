@@ -212,6 +212,12 @@ function buildMetaRow(p: any, extra: any, ctx: Ctx): Record<string, string> | nu
     brand: ctx.marca,
     google_product_category: googleCategory(categoria),
     fb_product_category: categoria || 'Alimentos',
+    // product_type = tu categoría propia (la que ves en el admin). Meta lo usa para agrupar
+    // por TUS categorías, no por su taxonomía genérica. Si defines subcategoría con el grupo,
+    // se envía como "Categoría > Grupo".
+    product_type: categoria
+      ? (p.grupo ? `${categoria} > ${String(p.grupo)}` : categoria)
+      : '',
     quantity_to_sell_on_facebook: '',
     sale_price: enOferta ? priceFeed(oferta) : '',
     sale_price_effective_date: '',
