@@ -10,7 +10,7 @@ import 'yet-another-react-lightbox/styles.css'
 import 'yet-another-react-lightbox/plugins/thumbnails.css'
 import { supabase } from './supabase'
 import { useStore } from './store'
-import { Card, HeroSlider, BrandHero, Impacto, BannerGrupo, Newsletter, ModalNombre, ModalSesionCliente, ImgFade, SkeletonCards } from './ui'
+import { Card, HeroSlider, BrandHero, Impacto, BannerGrupo, Newsletter, ModalNombre, ModalSesionCliente, ImgFade, SkeletonCards, SkeletonDetalle, SkeletonTexto } from './ui'
 import { fCOP, labelCategoria, getFrutos, iconoDe, iconoFruto, labelFruto, stockLabel, imgsDe, imgSrc, altImg, textoEnvio, sinTildes, sinHtml, registrarVisita, confirmarPedidoWA, setSEO, compartir, rutaProducto, buscarPorSlug, abrirWA, mensajeSolicitudMayorista, getCliente, setCliente, getEmail, getTelefono, emailValido, telefonoValido, desuscribirPorToken, sincronizarFavoritosLocales, FAVORITOS, BUSCADOR, videoEmbed, videoThumb, detectRed, formatoRed, paginaPorSlug, postCanvas, baseUrl, jsonLdSitio, jsonLdProducto, suscribir, enviarFormProtegido } from './utils'
 import { Turnstile } from './turnstile'
 import FrutoIcon from './FrutoIcon'
@@ -495,7 +495,7 @@ export function Producto() {
     delta: 12,
   })
 
-  if (productos === null) return <div className="spin" />
+  if (productos === null) return <SkeletonDetalle />
   if (!p) return <div className="empty">Producto no encontrado. <Link to="/tienda" className="sec-link">Volver a la tienda</Link></div>
 
   const n = enCarrito(p.id)
@@ -850,7 +850,7 @@ export function Favoritos() {
       jsonLd: null,
     })
   }, [cfg.nombre_tienda, cfg.url_publica])
-  if (productos === null) return <div className="spin" />
+  if (productos === null) return <SkeletonCards n={8} />
   const logueado = emailValido(emailSesion)
   const lista = (productos || []).filter(p => favs.some(id => String(id) === String(p.id)))
   return (
@@ -1261,7 +1261,7 @@ export function Pagina() {
       jsonLd: null,
     })
   }, [pag?.titulo, pag?.seo_titulo, pag?.slug, pag?.seo_desc, pag?.seo_imagen, pag?.subtitulo, cfg.nombre_tienda, cfg.url_publica, cfg.seo_imagen, cfg.logo_url, cfg.seo_descripcion, cfg.seo_keywords, cfg.seo_verificacion, cfg.seo_indexar])
-  if (cfg.paginas == null) return <div className="spin" />
+  if (cfg.paginas == null) return <SkeletonTexto />
   if (!pag) return <div className="empty">Página no encontrada. <Link to="/tienda" className="sec-link">Volver a la tienda</Link></div>
   return (
     <div className="page">

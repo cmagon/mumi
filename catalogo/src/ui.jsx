@@ -30,6 +30,35 @@ export function ImgFade({ srcWeb, srcMob, alt = '', className = '', draggable = 
   )
 }
 
+/** Ficha de producto "fantasma" mientras carga el detalle. */
+export function SkeletonDetalle() {
+  return (
+    <div className="sk-detalle">
+      <div className="sk-det-media sk" />
+      <div className="sk-det-body">
+        <div className="sk-line sm sk" />
+        <div className="sk-line sk" style={{ width: '80%', height: 24 }} />
+        <div className="sk-line sk" style={{ width: '38%', height: 22, margin: '6px 0 10px' }} />
+        <div className="sk-line sk" />
+        <div className="sk-line sk" />
+        <div className="sk-line lg sk" />
+        <div className="sk-btn sk" />
+      </div>
+    </div>
+  )
+}
+
+/** Bloque de texto "fantasma" para páginas (Nosotros, páginas personalizadas). */
+export function SkeletonTexto() {
+  return (
+    <div className="sk-texto">
+      <div className="sk-line sk" style={{ width: '55%', height: 26, margin: '0 auto 22px' }} />
+      <div className="sk-line sk" /><div className="sk-line sk" /><div className="sk-line lg sk" />
+      <div className="sk-line sk" style={{ marginTop: 18 }} /><div className="sk-line sk" /><div className="sk-line sm sk" />
+    </div>
+  )
+}
+
 /** Grilla de tarjetas "fantasma" mientras cargan los productos. */
 export function SkeletonCards({ n = 8 }) {
   return (

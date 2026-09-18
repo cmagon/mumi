@@ -704,6 +704,16 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 .sk-line { height: 12px; border-radius: 6px; }
 .sk-line.lg { height: 16px; width: 85%; }
 .sk-line.sm { width: 55%; }
+
+/* Detalle de producto fantasma */
+.sk-detalle { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; max-width: 1100px; margin: 0 auto; padding: 20px 16px; }
+.sk-det-media { width: 100%; aspect-ratio: 1 / 1; border-radius: 16px; }
+.sk-det-body { display: flex; flex-direction: column; gap: 12px; padding-top: 8px; }
+.sk-btn { height: 46px; border-radius: 999px; width: 100%; margin-top: 14px; }
+@media (max-width: 860px) { .sk-detalle { grid-template-columns: 1fr; } }
+
+/* Texto de página fantasma */
+.sk-texto { max-width: 760px; margin: 0 auto; padding: 32px 16px; display: flex; flex-direction: column; gap: 12px; }
 .footer-space { height: 92px; }
 
 /* ==================== NEWSLETTER ==================== */
