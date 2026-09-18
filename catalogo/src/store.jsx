@@ -49,7 +49,9 @@ export function StoreProvider({ children }) {
   const [banners, setBanners] = useState([])
   const [bannerDraft, setBannerDraft] = useState(null) // borrador del modal "Editar banner" (postMessage)
   const [carrito, setCarrito] = useState(() => { try { return JSON.parse(localStorage.getItem('mumi_carrito') || '[]') } catch { return [] } })
-  const [favs, setFavs] = useState(() => { try { return JSON.parse(localStorage.getItem('mumi_favs') || '[]') } catch { return [] } })
+  // Favoritos: NO se leen de localStorage. Solo existen si el cliente inició sesión (Auth);
+  // se cargan desde la BD por su correo. Así no aparecen favoritos ajenos ni tras un pedido.
+  const [favs, setFavs] = useState([])
   const [emailSesion, setEmailSesion] = useState(() => getEmail())
   const [usuario, setUsuario] = useState(null)     // usuario de Supabase Auth (cliente)
   const [perfil, setPerfil] = useState(null)       // fila clientes_catalogo
@@ -208,21 +210,18 @@ export function StoreProvider({ children }) {
   }, [])
 
   useEffect(() => { try { localStorage.setItem('mumi_carrito', JSON.stringify(carrito)) } catch { /* noop */ } }, [carrito])
-  useEffect(() => { try { localStorage.setItem('mumi_favs', JSON.stringify(favs)) } catch { /* noop */ } }, [favs])
 
-  // Carga los favoritos guardados SOLO cuando hay sesión iniciada (login).
-  // No se cargan por la sesión "suave" del correo (p. ej. al hacer un pedido),
-  // para no mostrar los favoritos sin haber iniciado sesión.
+  // Los favoritos dependen EXCLUSIVAMENTE de la sesión iniciada (Supabase Auth):
+  // - Con sesión → se cargan (reemplazando) desde la BD por el correo del usuario.
+  // - Sin sesión (visitante, o solo sesión "suave" por un pedido) → lista vacía.
+  // No se persisten en localStorage para que no reaparezcan favoritos ajenos ni tras un pedido.
   useEffect(() => {
     const email = usuario?.email
-    if (!emailValido(email)) return
+    if (!emailValido(email)) { setFavs([]); return }
     let cancel = false
     listarFavoritosRemotos(email).then((ids) => {
-      if (cancel || !ids?.length) return
-      setFavs((prev) => {
-        const set = new Set([...prev.map(String), ...ids.map(String)])
-        return [...set]
-      })
+      if (cancel) return
+      setFavs((ids || []).map(String))
     })
     return () => { cancel = true }
   }, [usuario]) // eslint-disable-line react-hooks/exhaustive-deps

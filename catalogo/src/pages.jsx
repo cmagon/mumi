@@ -90,12 +90,16 @@ function RowConFlechas({ children }) {
   }, [children])
   const mover = (dir) => { const el = ref.current; if (el) el.scrollBy({ left: dir * el.clientWidth * 0.85, behavior: 'smooth' }) }
 
-  // Arrastrar con el mouse (el táctil usa el scroll nativo del navegador)
+  // Arrastrar con el mouse (el táctil usa el scroll nativo del navegador).
+  // Usamos pointer capture para que, aunque el arrastre empiece sobre una imagen o el
+  // texto, TODOS los pointermove/up sigan llegando a la fila (antes el navegador robaba
+  // el puntero al iniciar un drag nativo de la imagen y el scroll dejaba de responder).
   const onDown = (e) => {
     if (e.pointerType === 'touch') return
     const el = ref.current; if (!el) return
     drag.current = { x: e.clientX, left: el.scrollLeft }
     arrastro.current = false
+    try { el.setPointerCapture(e.pointerId) } catch { /* noop */ }
   }
   const onMove = (e) => {
     if (!drag.current) return
@@ -104,7 +108,11 @@ function RowConFlechas({ children }) {
     if (Math.abs(dx) > 4) arrastro.current = true
     el.scrollLeft = drag.current.left - dx
   }
-  const onUp = () => { drag.current = null }
+  const onUp = (e) => {
+    const el = ref.current
+    if (el && e?.pointerId != null) { try { el.releasePointerCapture(e.pointerId) } catch { /* noop */ } }
+    drag.current = null
+  }
 
   return (
     <div className="fila-scroll">
@@ -115,7 +123,8 @@ function RowConFlechas({ children }) {
         onPointerDown={onDown}
         onPointerMove={onMove}
         onPointerUp={onUp}
-        onPointerLeave={onUp}
+        onPointerCancel={onUp}
+        onDragStart={(e) => e.preventDefault()}
         onClickCapture={(e) => { if (arrastro.current) { e.preventDefault(); e.stopPropagation(); arrastro.current = false } }}
       >{children}</div>
       <button type="button" className={`fila-arrow fila-arrow-r ${(estado.fin || !estado.hay) ? 'off' : ''}`} onClick={() => mover(1)} aria-label="Ver más"><ChevronRight size={22} /></button>
