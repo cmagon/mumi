@@ -275,7 +275,7 @@ function TabProductos({ toast, qc, onDirtyChange }) {
   const { data: productos = [], isLoading } = useQuery({
     queryKey: ['catalogo_admin_productos'],
     queryFn: async () => {
-      const cols = 'id, nombre, product_id, precio_detal, precio_mayor, imagen_url, imagenes, descripcion, catalogo_descripcion, catalogo_resumen, categoria_alegra_nombre, catalogo_visible, catalogo_frutos, catalogo_beneficios, catalogo_destacado, catalogo_novedad, catalogo_precio_oferta, catalogo_seo_titulo, catalogo_seo_desc, catalogo_contenido, catalogo_origen, catalogo_grupo, catalogo_pack_label, catalogo_pack_orden, stock, activo'
+      const cols = 'id, nombre, product_id, precio_detal, precio_mayor, imagen_url, imagenes, descripcion, catalogo_descripcion, catalogo_resumen, categoria_alegra_nombre, catalogo_visible, catalogo_frutos, catalogo_beneficios, catalogo_destacado, catalogo_novedad, catalogo_precio_oferta, catalogo_seo_titulo, catalogo_seo_desc, catalogo_contenido, catalogo_origen, catalogo_grupo, catalogo_pack_label, catalogo_pack_orden, catalogo_orden, stock, activo'
       const { data, error } = await supabase.from('finished_products').select(cols).order('nombre')
       if (error) throw error
       const prods = (data || []).filter(p => p.activo !== false)
@@ -602,6 +602,7 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
   const [grupo, setGrupo] = useState(producto.catalogo_grupo || '')
   const [packLabel, setPackLabel] = useState(producto.catalogo_pack_label || '')
   const [packOrden, setPackOrden] = useState(producto.catalogo_pack_orden ?? 0)
+  const [orden, setOrden] = useState(producto.catalogo_orden ?? 0)   // orden dentro de su categoría (feed/hoja)
   const [imgs, setImgs] = useState(imgsDe(producto))
   const [subiendo, setSubiendo] = useState(false)
   const [cropFile, setCropFile] = useState(null)   // archivo pendiente de recortar
@@ -610,7 +611,7 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
   const [saving, setSaving] = useState(false)
   const confirmar = useConfirm()
   const formSnap = () => snapConfig({
-    nombre, frutos, beneficios, destacado, novedad, descripcion, resumen, precioOferta, seoTitulo, seoDesc, contenido, origen, grupo, packLabel, packOrden, imgs,
+    nombre, frutos, beneficios, destacado, novedad, descripcion, resumen, precioOferta, seoTitulo, seoDesc, contenido, origen, grupo, packLabel, packOrden, orden, imgs,
   })
   // Genera Título + Descripción SEO con IA, a partir de nombre + descripción corta + características
   const generarSEO = async () => {
@@ -689,6 +690,7 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
         catalogo_precio_oferta: (precioOferta === '' || Number(precioOferta) <= 0) ? null : Number(precioOferta),
         catalogo_seo_titulo: seoTitulo.trim() || null, catalogo_seo_desc: seoDesc.trim() || null,
         catalogo_contenido: contenido.trim() || null, catalogo_origen: origen.trim() || null,
+        catalogo_orden: Number(orden) || 0,
         imagen_url, imagenes,
       }
       const packUpd = {
@@ -748,7 +750,15 @@ function EditorProducto({ producto, frutosCat = [], toast, qc, onClose, onDirtyC
         <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontWeight: 600, color: 'var(--selva)' }}>
           <input type="checkbox" checked={novedad} onChange={e => setNovedad(e.target.checked)} /> ✨ Novedad
         </label>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 600, color: 'var(--selva)' }}>
+          Orden en su categoría
+          <input type="number" className="form-control" style={{ width: 90 }} value={orden}
+            onChange={e => setOrden(e.target.value)} title="Menor = aparece primero dentro de su categoría en la hoja/feed" />
+        </label>
       </div>
+      <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginTop: -8, marginBottom: 12 }}>
+        En la hoja/feed los productos se agrupan por categoría; el <strong>orden</strong> (menor primero) decide cuál va primero dentro de su categoría. 0 = por nombre.
+      </small>
 
       {/* Descripción corta (subtítulo, texto enriquecido) — se muestra en la ficha y alimenta el feed de Meta */}
       <div className="form-group">

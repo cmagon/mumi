@@ -277,9 +277,23 @@ Deno.serve(async (req) => {
       porFicha,
     }
 
+    // Orden del feed: agrupado por CATEGORÍA (alfabético) y, dentro de cada categoría,
+    // por `orden` (menor = primero; lo define el admin) y luego por nombre.
+    const cmpTxt = (a: string, b: string) => a.localeCompare(b, 'es', { sensitivity: 'base' })
+    const ordenados = [...(prods || [])].sort((a: any, b: any) => {
+      const ca = String(a.categoria || 'zzz').trim()
+      const cb = String(b.categoria || 'zzz').trim()
+      const catCmp = cmpTxt(ca, cb)
+      if (catCmp !== 0) return catCmp
+      const oa = Number(a.orden) || 0
+      const ob = Number(b.orden) || 0
+      if (oa !== ob) return oa - ob
+      return cmpTxt(String(a.nombre || ''), String(b.nombre || ''))
+    })
+
     const omitidos: string[] = []
     const rows: Record<string, string>[] = []
-    for (const p of prods || []) {
+    for (const p of ordenados) {
       const row = buildMetaRow(p, extraPorId.get(String(p.id)) || {}, ctx)
       if (!row) {
         omitidos.push(String(p.nombre || p.id))
