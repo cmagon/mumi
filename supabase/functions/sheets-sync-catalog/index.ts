@@ -257,7 +257,7 @@ Deno.serve(async (req) => {
 
     const [{ data: prods, error: eProd }, { data: cfg }, { data: fichas }, { data: terminados }] = await Promise.all([
       sb.from('catalogo_productos').select('*').order('nombre'),
-      sb.from('config_catalogo').select('nombre_tienda, url_publica').eq('id', 1).maybeSingle(),
+      sb.from('config_catalogo').select('nombre_tienda, url_publica, categorias_orden').eq('id', 1).maybeSingle(),
       sb.from('products_costing').select('id, imagen_url, imagenes'),
       sb.from('finished_products')
         .select('id, product_id, nombre, surtido_a, surtido_b, sku, imagen_url, imagenes, categoria_alegra_nombre')
@@ -277,17 +277,26 @@ Deno.serve(async (req) => {
       porFicha,
     }
 
-    // Orden del feed: agrupado por CATEGORÍA (alfabético) y, dentro de cada categoría,
-    // por `orden` (menor = primero; lo define el admin) y luego por nombre.
+    // Orden del feed: agrupado por CATEGORÍA respetando el orden configurado por el admin
+    // (config_catalogo.categorias_orden, el mismo del catálogo público); las categorías no
+    // listadas van después, alfabéticamente. Dentro de cada categoría: por `orden`
+    // (menor = primero, lo define el admin por producto) y luego por nombre.
     const cmpTxt = (a: string, b: string) => a.localeCompare(b, 'es', { sensitivity: 'base' })
+    const ordenCats: string[] = Array.isArray((cfg as any)?.categorias_orden) ? (cfg as any).categorias_orden : []
+    const rankCat = (c: string) => {
+      const i = ordenCats.findIndex((x) => cmpTxt(String(x || '').trim(), c) === 0)
+      return i === -1 ? Number.MAX_SAFE_INTEGER : i
+    }
     const ordenados = [...(prods || [])].sort((a: any, b: any) => {
       const ca = String(a.categoria || 'zzz').trim()
       const cb = String(b.categoria || 'zzz').trim()
-      const catCmp = cmpTxt(ca, cb)
+      const ra = rankCat(ca), rb = rankCat(cb)
+      if (ra !== rb) return ra - rb                 // categorías en el orden configurado
+      const catCmp = cmpTxt(ca, cb)                 // no listadas → alfabético
       if (catCmp !== 0) return catCmp
       const oa = Number(a.orden) || 0
       const ob = Number(b.orden) || 0
-      if (oa !== ob) return oa - ob
+      if (oa !== ob) return oa - ob                 // orden del producto dentro de la categoría
       return cmpTxt(String(a.nombre || ''), String(b.nombre || ''))
     })
 
