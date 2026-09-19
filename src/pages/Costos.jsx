@@ -1824,17 +1824,13 @@ export default function Costos({ vista = 'productos' }) {
                   <input className="form-control" list="dl-presentaciones" value={formProd.presentacion || ''} onChange={e => setFormProd(f=>({...f,presentacion:e.target.value}))} placeholder="Ej: Caja, Unidad, Kilo..." />
                   <datalist id="dl-presentaciones">{PRESENTACIONES.map(p => <option key={p} value={p} />)}</datalist>
                 </div>
-                <div className="form-group" style={{ gridColumn:'1 / -1' }}>
-                  <label className="form-label">Estado del producto</label>
-                  <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', padding:'8px 0' }}>
+                <div className="form-group">
+                  <label className="form-label" title='"Activo" = se fabrica hoy (no que se venda). Los productos internos (mermelada, pulpa) van activos: consumen planta y absorben CIF. Inactiva solo lo que dejaste de producir; sus minutos salen del reparto y aparecen como capacidad ociosa.'>Estado del producto ⓘ</label>
+                  <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', padding:'4px 0' }}>
                     <input type="checkbox" checked={formProd.activo !== false} onChange={e => setFormProd(f=>({...f, activo: e.target.checked}))} />
                     <span style={{ fontWeight:600, color: formProd.activo !== false ? 'var(--selva)' : 'var(--texto-suave)' }}>{formProd.activo !== false ? '✓ Activo (en producción)' : '⏸ Inactivo (no reparte CIF)'}</span>
                   </label>
-                  <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>
-                    "Activo" = <strong>se fabrica hoy</strong>, no que se venda. Los productos internos (mermelada, pulpa)
-                    van activos: consumen planta y deben absorber CIF. Inactiva solo lo que dejaste de producir —
-                    sus minutos salen del reparto y aparecen como capacidad ociosa.
-                  </small>
+                  <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>“Activo” = se fabrica hoy (no que se venda). Inactiva solo lo que dejaste de producir.</small>
                 </div>
                 <div className="form-group" style={{ gridColumn:'1 / -1' }}>
                   <label className="form-label">Descripción del producto <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(opcional)</small></label>
@@ -2099,7 +2095,7 @@ export default function Costos({ vista = 'productos' }) {
 
               <div style={{ gridColumn:'1 / -1', fontWeight:700, color:'var(--selva)', fontSize:'0.78rem', textTransform:'uppercase', letterSpacing:'0.03em', marginTop:6 }}>Merma y calidad</div>
               <div className="form-group"><label className="form-label">Rendimiento esperado (%)</label><input type="number" className="form-control" value={rendimiento} onChange={e => setRendimiento(e.target.value)} min={1} max={100} step={0.1} /><small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>% de la mezcla que se convierte en producto (ej. por evaporación/cocción).</small></div>
-              <div className="form-group"><label className="form-label">% Desperdicio</label><input type="number" className="form-control" value={desperdicio} onChange={e => setDesperdicio(e.target.value)} min={0} max={50} step={0.1} /><small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Desperdicio <strong>adicional</strong> que se pierde <strong>después</strong> del rendimiento (no es la diferencia de 100 − rendimiento; se descuenta sobre lo ya rendido).</small></div>
+              <div className="form-group"><label className="form-label">% Desperdicio</label><input type="number" className="form-control" value={desperdicio} onChange={e => setDesperdicio(e.target.value)} min={0} max={50} step={0.1} /><small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }} title="No es 100 − rendimiento: es una merma adicional que se descuenta sobre lo ya rendido.">Merma adicional, después del rendimiento. ⓘ</small></div>
 
               <div style={{ gridColumn:'1 / -1', fontWeight:700, color:'var(--selva)', fontSize:'0.78rem', textTransform:'uppercase', letterSpacing:'0.03em', marginTop:6 }}>Presentación y empaque</div>
               <div className="form-group">
@@ -2130,9 +2126,9 @@ export default function Costos({ vista = 'productos' }) {
               <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', marginBottom:6 }}>
                 <Ico as={Tag} size={14} />Método de loteo
               </div>
-              <p style={{ fontSize:'0.78rem', color:'var(--texto-suave)', margin:'0 0 10px' }}>
-                Para la serie tipo <strong>10026 → 10426</strong> usa el atajo <strong>Serie nAA</strong> (Numeración + Año aa).
-                Si armas Día + Mes + Año <em>sin</em> Numeración, en órdenes sugerirá la fecha del día (<strong>260826</strong>), no el consecutivo.
+              <p style={{ fontSize:'0.76rem', color:'var(--texto-suave)', margin:'0 0 8px' }}
+                 title="Serie nAA = Numeración + Año aa (10026 → 10426, consecutivo). Día + Mes + Año sin Numeración → sugiere la fecha del día (260826), no el consecutivo.">
+                Serie tipo <strong>10026 → 10426</strong>: usa el atajo <strong>Serie nAA</strong>. ⓘ
               </p>
 
               {(() => {
