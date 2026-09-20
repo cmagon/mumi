@@ -466,6 +466,11 @@ tr:hover td { background: rgba(26,58,42,0.03); }
 .kpi-card.lima::before   { background: linear-gradient(90deg, var(--lima), var(--selva-claro)); }
 .kpi-label { font-size: 0.72rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.6px; color: var(--texto-suave); margin-bottom: 8px; padding-right: 52px; }
 .kpi-value { font-family: var(--fuente-titulos, 'Playfair Display'), serif; font-size: 1.95rem; color: var(--selva); line-height: 1; }
+/* KPIs compactos (números de resumen más pequeños, p. ej. Inventario MP) */
+.kpi-mini { gap: 10px; margin-bottom: 16px; }
+.kpi-mini .kpi-card { padding: 10px 14px; }
+.kpi-mini .kpi-label { margin-bottom: 4px; padding-right: 0; }
+.kpi-mini .kpi-value { font-size: 1.3rem; }
 .kpi-sub   { font-size: 0.78rem; color: var(--texto-suave); margin-top: 4px; }
 /* Ícono en badge de color (SVG, no emoji) */
 .kpi-icon  {
