@@ -22,7 +22,7 @@ import {
 } from '../lib/inventarioHelpers'
 
 import * as XLSX from 'xlsx'
-import { Download, Tags, Tag, Plus, Pencil, X, Package, ClipboardList, FileText, AlertTriangle, Trash2, Undo2, Lock, Search, Clock, Layers } from 'lucide-react'
+import { Download, Tags, Tag, Plus, Pencil, X, Package, ClipboardList, FileText, AlertTriangle, Trash2, Undo2, Lock, Search, Clock, Layers, Filter } from 'lucide-react'
 import ReservasMPPanel from '../components/ReservasMPPanel'
 import { explicarDescuadrePeps, resumenReservasPorMp, reservadoEnLotes } from '../lib/reservasMp'
 import Select from '../components/ui/Select'
@@ -687,6 +687,7 @@ export default function Inventario() {
   const cero = mps.filter(m => m.stock <= 0).length
   // Filtro por ESTADO del stock: sin stock, stock bajo, por vencer/vencidas
   const [filtroEstado, setFiltroEstado] = useState('')
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false)   // panel de filtros plegable
   const tieneLotePorVencer = (m) => lotesDe(m.id).some(l => (l.cantidad_actual || 0) > 0 && ['por_vencer', 'vencido'].includes(estadoLote(l.vencimiento)))
   const pasaEstado = (m) => {
     if (!filtroEstado) return true
@@ -793,7 +794,7 @@ export default function Inventario() {
             </button>
           </div>
         )}
-        <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div style={{ display: 'flex', gap: 10, marginBottom: filtrosAbiertos ? 10 : 16, flexWrap: 'wrap', alignItems: 'center' }}>
           <div style={{ position: 'relative', flex: '1 1 240px', maxWidth: 340, minWidth: 180 }}>
             <Search size={15} aria-hidden="true" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--texto-suave)', pointerEvents: 'none' }} />
             <input className="form-control" style={{ width: '100%', paddingLeft: 32, paddingRight: buscarMP ? 32 : 12 }} placeholder="Buscar materia prima o categoría…" value={buscarMP} onChange={e => setBuscarMP(e.target.value)} />
@@ -804,22 +805,30 @@ export default function Inventario() {
               </button>
             )}
           </div>
-          <label className="form-label" style={{ margin: 0 }}>Categoría:</label>
-          <Select className="form-control" value={filtroCat} onChange={e => setFiltroCat(e.target.value)} style={{ width: 'auto' }}>
-            <option value="">Todas las categorías</option>
-            {categorias.map(c => <option key={c} value={c}>{c}</option>)}
-          </Select>
-          <label className="form-label" style={{ margin: 0 }}>Estado:</label>
-          <Select className="form-control" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} style={{ width: 'auto' }}>
-            <option value="">Todos</option>
-            <option value="sin_stock">Sin stock</option>
-            <option value="negativo">Stock negativo</option>
-            <option value="bajo">Stock bajo</option>
-            <option value="por_vencer">Por vencer / vencidas</option>
-          </Select>
-          {(filtroCat || filtroEstado || buscarMP) && <button className="btn btn-sm btn-secondary" onClick={() => { setFiltroCat(''); setFiltroEstado(''); setBuscarMP('') }}><Ico as={X} size={13} />Limpiar</button>}
+          <button type="button" className={`btn btn-sm ${(filtroCat || filtroEstado) ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFiltrosAbiertos(o => !o)}>
+            <Ico as={Filter} size={14} />Filtrar
+            {(filtroCat || filtroEstado) && <span className="badge badge-gris" style={{ marginLeft: 4 }}>{(filtroCat ? 1 : 0) + (filtroEstado ? 1 : 0)}</span>}
+          </button>
           <span style={{ marginLeft: 'auto', fontSize: '0.8rem', color: 'var(--texto-suave)' }}>Clic en una fila para ver su historial</span>
         </div>
+        {filtrosAbiertos && (
+          <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center', padding: '10px 12px', background: 'var(--crema)', borderRadius: 'var(--radio)' }}>
+            <label className="form-label" style={{ margin: 0 }}>Categoría:</label>
+            <Select className="form-control" value={filtroCat} onChange={e => setFiltroCat(e.target.value)} style={{ width: 'auto' }}>
+              <option value="">Todas las categorías</option>
+              {categorias.map(c => <option key={c} value={c}>{c}</option>)}
+            </Select>
+            <label className="form-label" style={{ margin: 0 }}>Estado:</label>
+            <Select className="form-control" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} style={{ width: 'auto' }}>
+              <option value="">Todos</option>
+              <option value="sin_stock">Sin stock</option>
+              <option value="negativo">Stock negativo</option>
+              <option value="bajo">Stock bajo</option>
+              <option value="por_vencer">Por vencer / vencidas</option>
+            </Select>
+            {(filtroCat || filtroEstado) && <button className="btn btn-sm btn-secondary" onClick={() => { setFiltroCat(''); setFiltroEstado('') }}><Ico as={X} size={13} />Limpiar filtros</button>}
+          </div>
+        )}
 
         {/* ===== Versión móvil: acordeón ===== */}
         <div className="solo-movil">
