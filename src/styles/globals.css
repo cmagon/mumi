@@ -1020,11 +1020,13 @@ details.card[open] > .card-title { background: rgba(200,169,74,0.08); }
 .ed-paso-num {
   display: inline-flex; align-items: center; justify-content: center;
   width: 24px; height: 24px; border-radius: 50%;
-  background: var(--crema-oscuro); color: var(--selva);
+  background: var(--selva); color: var(--crema);
   font-size: 0.8rem; font-weight: 700; flex-shrink: 0;
   font-family: 'Source Sans 3', sans-serif;
 }
 details.card[open] > .card-title .ed-paso-num { background: var(--dorado); color: #2b1c04; }
+/* Afordancia: al pasar el mouse sobre una sección cerrada, se insinúa que es clicable */
+details.card:not([open]) > .card-title:hover { background: rgba(8,73,8,0.04); }
 @media (max-width: 640px) {
   details.card > .card-title { padding: 16px; }
   details.card > .card-acc-body { padding: 16px; }
