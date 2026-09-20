@@ -25,7 +25,7 @@ import { useConfirm } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import Receta from './Receta'
 import { CATALOGO_PARAMS, PARAM_UNIDAD, PRESENTACIONES } from '../lib/calidad'
-import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Printer, Settings, ShoppingCart, Tag, Trash2, TrendingUp, Undo2, Wrench, X, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Plus, Eye, Check, AlertTriangle, Save, Upload, ShoppingBasket, Info, Star } from 'lucide-react'
+import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Printer, Settings, ShoppingCart, Tag, Trash2, TrendingUp, Undo2, Wrench, X, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Plus, Eye, Check, AlertTriangle, Save, Upload, ShoppingBasket, Info, Star, GripVertical } from 'lucide-react'
 import { descargarFichaExcel } from '../lib/fichaExcel'
 import { getConfig } from '../lib/appConfig'
 import Select from '../components/ui/Select'
@@ -1365,6 +1365,24 @@ export default function Costos({ vista = 'productos' }) {
   const addIngrediente = () => setIngredientes(p => [...p, { ...EMPTY_ING, _id: Date.now() + Math.random() }])
   const addIngredienteRelativo = () => setIngredientes(p => [...p, { ...EMPTY_ING, _id: Date.now() + Math.random(), tipo: 'relativo', base: [] }])
   const nombresIngNormal = ingredientes.filter(r => r.tipo !== 'relativo' && r.nombre).map(r => r.nombre)
+  // Modal de un solo ingrediente (agregar/editar) + selector de tipo antes de crear.
+  const [ingModal, setIngModal] = useState(null)      // { id, isNew } | null
+  const [ingChooser, setIngChooser] = useState(false) // muestra la elección Normal/Relativo
+  const abrirIngNuevo = (tipo) => {
+    const _id = Date.now() + Math.random()
+    const nuevo = tipo === 'relativo'
+      ? { ...EMPTY_ING, _id, tipo: 'relativo', base: [] }
+      : { ...EMPTY_ING, _id }
+    setIngredientes(p => [...p, nuevo])
+    setIngModal({ id: _id, isNew: true })
+  }
+  const abrirIngEditar = (id) => setIngModal({ id, isNew: false })
+  const cerrarIngModal = (guardar) => {
+    // Cancelar un ingrediente recién creado lo descarta; editar existente no borra nada.
+    if (!guardar && ingModal?.isNew) setIngredientes(p => p.filter(r => r._id !== ingModal.id))
+    setIngModal(null)
+  }
+  const eliminarIng = (id) => { setIngredientes(p => p.filter(r => r._id !== id)); setIngModal(null) }
   const addProceso     = () => setProcesos(p => [...p, { _id: Date.now(), nombre: '', minutos: '' }])
   const addEmpaque     = () => setEmpaque(p => [...p, { _id: Date.now(), mpId: '', nombre: '', modo: 'lista', precio: '', presentacion: 1, cantidad: '' }])
   const updIng  = (id, f, v) => setIngredientes(p => p.map(r => r._id === id ? { ...r, [f]: v } : r))
@@ -1877,10 +1895,6 @@ export default function Costos({ vista = 'productos' }) {
             <summary className="card-title ed-sec-title">
               <span className="ed-sec-title-main"><span className="ed-paso-num">2</span><Ico as={ShoppingBasket} size={14} />Materias Primas e Insumos</span>
               <span className="card-hint">{ingredientes.length} ingrediente{ingredientes.length === 1 ? '' : 's'}</span>
-              <div className="ed-sec-actions" onClick={e => e.stopPropagation()}>
-                <button className="btn btn-sm btn-secondary" onClick={addIngrediente}>+ Normal</button>
-                <button className="btn btn-sm btn-dorado" onClick={addIngredienteRelativo}>+ Relativo</button>
-              </div>
             </summary>
             <div className="card-acc-body">
             {/* Modo de ingreso: gramos/bache o porcentaje */}
@@ -1911,160 +1925,201 @@ export default function Costos({ vista = 'productos' }) {
                 </button>
               )}
             </div>
-            <p className="ed-hint-costo" style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', margin: '0 0 10px' }}>
-              El costo de cada MP sigue el <strong>promedio ponderado</strong> del inventario (se actualiza al ingresar lotes). Sin override, la ficha lo usa en vivo; el botón sirve si quedó un costo fijo o desfasado.
-            </p>
-            <div className="ed-scroll">
-              <div className="ed-wrap ed-ings" style={{ minWidth:820 }}>
-                {/* Header */}
-                <div className="ed-head" style={{ display:'grid', gridTemplateColumns:'2.2fr 0.7fr 0.9fr 0.8fr 0.9fr 44px', gap:8, paddingBottom:6, fontSize:'0.72rem', fontWeight:700, color:'var(--texto-suave)', textTransform:'uppercase' }}>
-                  <span>Ingrediente</span>
-                  <span style={{ textAlign:'right' }}>% receta</span>
-                  <span style={{ textAlign:'right' }}>g / bache</span>
-                  <span style={{ textAlign:'right' }}>$ / Kg</span>
-                  <span style={{ textAlign:'right' }}>Subtotal</span>
-                  <span></span>
-                </div>
 
-                {ingredientes.map((r, idx) => {
-                  const eff = ingredientesEff.find(x => x._id === r._id) || {}
-                  const cantEff = eff.cantidad || 0           // g/bache efectivo (resuelto para relativos)
-                  const pctRow  = eff.pctReceta || 0          // % sobre el total de la receta
-                  const precioEff = eff.precio != null ? eff.precio : (parseFloat(r.precio)||0)  // precio actual de la MP si es de lista
-                  const sub = (precioEff / (parseFloat(r.presentacion)||1000)) * cantEff
-                  const modo = r.modo || 'lista'
-                  const esRelativo = r.tipo === 'relativo'
-                  const accent = esRelativo ? 'var(--dorado)' : undefined
-                  return (
-                    <div key={r._id} className={ordIng.rowClassName(idx)} {...ordIng.rowProps(idx)} style={{ display:'grid', gridTemplateColumns:'2.2fr 0.7fr 0.9fr 0.8fr 0.9fr 44px', gap:8, alignItems:'start', marginBottom:10 }}>
-                      {/* Asa de arrastre + Nombre (toggle + input/select + base si es relativo) */}
-                      <div className="ed-col-nombre" style={{ display:'flex', gap:6, alignItems:'flex-start' }}>
-                        <span className="ed-drag solo-desktop" {...ordIng.handleProps(idx)}>⠿</span>
-                        <div style={{ display:'flex', flexDirection:'column', gap:3, flex:1, minWidth:0 }}>
-                        <div style={{ display:'flex' }}>
-                          {['lista','manual'].map((m, i) => (
-                            <button key={m} type="button" onClick={() => toggleModo(r._id, m)} style={{
-                              flex:1, padding:'2px 0', fontSize:'0.67rem', cursor:'pointer',
-                              fontFamily:"'Source Sans 3',sans-serif", fontWeight:600,
-                              background: modo===m ? (esRelativo?'var(--tierra)':'var(--selva)') : 'transparent',
-                              color: modo===m ? 'var(--crema)' : 'var(--texto-suave)',
-                              border: `1px solid ${modo===m ? (esRelativo?'var(--tierra)':'var(--selva)') : 'var(--crema-oscuro)'}`,
-                              borderRadius: i===0 ? '3px 0 0 3px' : '0 3px 3px 0', marginLeft: i===1 ? -1 : 0,
-                            }}>
-                              {m==='lista' ? <><Ico as={Package} size={12} />Lista</> : <><Ico as={Pencil} size={12} />Manual</>}
-                            </button>
-                          ))}
-                        </div>
-                        {modo === 'manual'
-                          ? <>
-                              <input key={`ing-man-${r._id}`} className="form-control" placeholder="Nombre ingrediente" value={r.nombre||''} onChange={e => updIng(r._id,'nombre',e.target.value)} style={{ borderColor: accent }} />
-                              {(r.nombre||'').trim() && (
-                                <button type="button" onClick={() => abrirNuevaMpDesdeIng(r)}
-                                  style={{ background:'none', border:'none', padding:0, textAlign:'left', cursor:'pointer', color:'var(--selva-claro)', fontSize:'0.7rem', textDecoration:'underline' }}>
-                                  + Agregar "{r.nombre.trim()}" al inventario de MP
-                                </button>
-                              )}
-                            </>
-                          : <BuscadorSelect key={`ing-lst-${r._id}`} value={r.mpId||''} placeholder="Escribe para buscar la MP..."
-                              opciones={mpsIngredientes.map(m => ({ value: String(m.id), label: m.nombre, sub: `${fCOP(m.precio)}/${m.unidad}` }))}
-                              onSelect={(v) => handleSelectMP(r._id, v)} />
-                        }
-                        {esRelativo && (
-                          <div style={{ display:'flex', flexDirection:'column', gap:3, fontSize:'0.72rem', color:'var(--tierra)' }}>
-                            <span>relativo a la suma de (marca uno o varios):</span>
-                            <div style={{ display:'flex', flexWrap:'wrap', gap:'2px 8px', border:'1px solid var(--dorado)', borderRadius:4, padding:'4px 6px', maxHeight:90, overflowY:'auto' }}>
-                              {nombresIngNormal.filter(n => n !== r.nombre).length === 0
-                                ? <span style={{ color:'var(--texto-suave)' }}>Agrega ingredientes normales primero</span>
-                                : nombresIngNormal.filter(n => n !== r.nombre).map(n => {
-                                  const sel = Array.isArray(r.base) ? r.base : (r.base ? [r.base] : [])
-                                  const checked = sel.includes(n)
-                                  return (
-                                    <label key={n} style={{ display:'flex', alignItems:'center', gap:3, cursor:'pointer', whiteSpace:'nowrap' }}>
-                                      <input type="checkbox" checked={checked} onChange={() => updIng(r._id,'base', checked ? sel.filter(x => x !== n) : [...sel, n])} />
-                                      {n}
-                                    </label>
-                                  )
-                                })}
-                            </div>
-                          </div>
-                        )}
-                        </div>
-                      </div>
-
-                      {/* % receta */}
-                      <div className="ed-col-pct" data-label="% receta">
-                      {esRelativo
-                        ? <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
-                            <input type="number" className="form-control" placeholder="0" value={r.pct||''} onFocus={e => e.target.select()} onChange={e => updIng(r._id,'pct',e.target.value)} step="0.01" style={{ textAlign:'right', paddingRight:16, borderColor: accent }} />
-                            <span style={{ position:'absolute', right:6, fontSize:'0.78rem', color:'var(--texto-suave)', pointerEvents:'none' }}>%</span>
-                          </div>
-                        : <span style={{ textAlign:'right', paddingTop:8, fontSize:'0.88rem', color: pctRow>0 ? 'var(--selva)' : 'var(--texto-suave)', fontWeight: pctRow>0 ? 600 : 400 }}>
-                            {pctRow > 0 ? pctRow.toFixed(1) + '%' : '—'}
-                          </span>
-                      }
-                      </div>
-
-                      {/* g/bache (modo gramos) o % (modo porcentaje) — calculado para relativo */}
-                      <div className="ed-col-cant" data-label={modoIng === 'porcentaje' && !esRelativo ? '% ingreso' : 'g / bache'}>
-                      {esRelativo
-                        ? <span style={{ textAlign:'right', paddingTop:8, fontSize:'0.88rem', color:'var(--tierra)' }} title="Calculado desde la base">
-                            {cantEff > 0 ? cantEff.toFixed(1) + ' g' : '—'}
-                          </span>
-                        : modoIng === 'porcentaje'
-                          ? <div style={{ display:'flex', flexDirection:'column' }}>
-                              <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
-                                <input type="number" className="form-control" placeholder="%" value={r.pct||''} onFocus={e => e.target.select()} onChange={e => updIng(r._id,'pct',e.target.value)} step="0.01" style={{ textAlign:'right', paddingRight:16, background:'rgba(124,179,66,0.06)' }} />
-                                <span style={{ position:'absolute', right:6, fontSize:'0.78rem', color:'var(--texto-suave)', pointerEvents:'none' }}>%</span>
-                              </div>
-                              <span style={{ fontSize:'0.68rem', color:'var(--texto-suave)', textAlign:'right' }}>{cantEff > 0 ? cantEff.toFixed(1)+' g' : '—'}</span>
-                            </div>
-                          : <input type="number" className="form-control" placeholder="g/bache" value={r.cantidad||''} onFocus={e => e.target.select()} onChange={e => handleCantidadChange(r._id, e.target.value)} style={{ textAlign:'right', background:'rgba(124,179,66,0.06)' }} />
-                      }
-                      </div>
-
-                      {/* $/Kg — editable; si es de lista y se cambia, queda como override (no toca la MP hasta confirmar al guardar) */}
-                      <div className="ed-col-precio" data-label="$ / Kg" style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                        <div style={{ position:'relative', display:'flex', alignItems:'center' }}>
-                          <span style={{ position:'absolute', left:6, fontSize:'0.78rem', color:'var(--texto-suave)', pointerEvents:'none' }}>$</span>
-                          {r.mpId
-                            ? <MoneyInput
-                                value={r.precioOverride ? (r.precio || '') : String(precioEff || r.precio || '')}
-                                onChange={v => setIngredientes(p => p.map(x => x._id === r._id ? { ...x, precio: v, precioOverride: true } : x))}
-                                style={{ paddingLeft:16, background: r.precioOverride ? 'rgba(200,169,74,0.12)' : 'rgba(124,179,66,0.08)', borderColor: r.precioOverride || costoDesfasado(r) ? 'var(--dorado)' : undefined }}
-                              />
-                            : <MoneyInput value={r.precio||''} onChange={v => updIng(r._id,'precio',v)} style={{ paddingLeft:16, borderColor: accent }} />
-                          }
-                        </div>
-                        {r.mpId && costoDesfasado(r) && (
-                          <button type="button" className="btn-link-emp" style={{ fontSize: '0.68rem', textAlign: 'right' }}
-                            title={`Inventario: ${fCOP(precioInventarioIng(r) || 0)}/${mps.find(m => String(m.id) === String(r.mpId))?.unidad || 'Kg'}`}
-                            onClick={() => actualizarCostoIng(r._id)}>
-                            Actualizar costo
-                          </button>
-                        )}
-                      </div>
-
-                      {/* Subtotal */}
-                      <span className="ed-sub ed-col-sub" data-label="Subtotal" style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', paddingTop:8, textAlign:'right' }}>{fCOP(sub)}</span>
-                      <div className="ed-controls" style={{ display:'flex', alignItems:'center', gap:2, marginTop:6 }}>
-                        <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === 0} title="Subir" onClick={() => ordIng.moverArriba(idx)}><ChevronUp size={13} aria-hidden="true" /></button>
-                        <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === ingredientes.length - 1} title="Bajar" onClick={() => ordIng.moverAbajo(idx)}><ChevronDown size={13} aria-hidden="true" /></button>
-                        <button className="btn btn-danger btn-xs" onClick={() => setIngredientes(p => p.filter(x => x._id !== r._id))}><X size={13} aria-hidden="true" /></button>
-                      </div>
+            {/* Lista compacta: cada ingrediente muestra nombre, cantidad, % y costo.
+                Se arrastra por el asa para reordenar; el lápiz abre el modal de edición. */}
+            <div className="ed-ing-lista">
+              {ingredientes.map((r, idx) => {
+                const eff = ingredientesEff.find(x => x._id === r._id) || {}
+                const cantEff = eff.cantidad || 0
+                const pctRow  = eff.pctReceta || 0
+                const precioEff = eff.precio != null ? eff.precio : (parseFloat(r.precio)||0)
+                const sub = (precioEff / (parseFloat(r.presentacion)||1000)) * cantEff
+                const esRelativo = r.tipo === 'relativo'
+                const nombre = (r.nombre && r.nombre.trim())
+                  || (r.mpId ? (mps.find(m => String(m.id) === String(r.mpId))?.nombre) : '')
+                  || 'Sin nombre'
+                const incompleto = nombre === 'Sin nombre' || !(cantEff > 0)
+                return (
+                  <div key={r._id} className={`ed-ing-item ${ordIng.rowClassName(idx)}`} {...ordIng.rowProps(idx)}>
+                    <span className="ed-drag" {...ordIng.handleProps(idx)}><GripVertical size={16} aria-hidden="true" /></span>
+                    <button type="button" className="ed-ing-main" onClick={() => abrirIngEditar(r._id)}>
+                      <span className="ed-ing-nombre">
+                        {nombre}
+                        {esRelativo && <span className="badge" style={{ background:'rgba(200,169,74,0.18)', color:'var(--tierra)', fontSize:'0.6rem', fontWeight:700 }}>RELATIVO</span>}
+                        {incompleto && <Ico as={AlertTriangle} size={12} />}
+                      </span>
+                      <span className="ed-ing-datos">
+                        <span>{fNum(Math.round(cantEff))} g</span>
+                        <span>{pctRow > 0 ? pctRow.toFixed(1) + '%' : '—'}</span>
+                        <span>{fCOP(sub)}</span>
+                      </span>
+                    </button>
+                    <div className="ed-ing-acc">
+                      <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === 0} title="Subir" onClick={() => ordIng.moverArriba(idx)}><ChevronUp size={13} aria-hidden="true" /></button>
+                      <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === ingredientes.length - 1} title="Bajar" onClick={() => ordIng.moverAbajo(idx)}><ChevronDown size={13} aria-hidden="true" /></button>
+                      <button type="button" className="btn btn-xs btn-secondary" title="Editar ingrediente" onClick={() => abrirIngEditar(r._id)}><Pencil size={14} aria-hidden="true" /></button>
                     </div>
-                  )
-                })}
-                {ingredientes.length === 0 && <p style={{ color:'var(--texto-suave)', fontSize:'0.88rem', padding:'8px 0' }}>Agrega ingredientes (Normal o Relativo a...)</p>}
-              </div>
+                  </div>
+                )
+              })}
+              {ingredientes.length === 0 && <p style={{ color:'var(--texto-suave)', fontSize:'0.88rem', padding:'8px 0' }}>Aún no hay ingredientes. Usa el botón para agregar el primero.</p>}
             </div>
+
+            {/* Botón para agregar: pregunta si es normal o relativo antes de abrir el modal */}
+            <div className="ed-ing-add">
+              {ingChooser ? (
+                <div className="ed-ing-chooser">
+                  <span style={{ fontSize:'0.82rem', color:'var(--texto-suave)', width:'100%' }}>¿Qué tipo de ingrediente vas a agregar?</span>
+                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => { abrirIngNuevo('normal'); setIngChooser(false) }}><Ico as={ShoppingBasket} size={13} />Normal</button>
+                  <button type="button" className="btn btn-sm btn-dorado" onClick={() => { abrirIngNuevo('relativo'); setIngChooser(false) }}><Ico as={TrendingUp} size={13} />Relativo (a otros)</button>
+                  <button type="button" className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={() => setIngChooser(false)}>Cancelar</button>
+                </div>
+              ) : (
+                <button type="button" className="ed-ing-add-btn" onClick={() => setIngChooser(true)}>
+                  <Plus size={20} aria-hidden="true" />Agregar ingrediente
+                </button>
+              )}
+            </div>
+
             <div className="ed-footer-ings">
               <small style={{ color:'var(--texto-suave)', fontSize:'0.78rem' }}>
-                <strong>g/bache</strong> = gramos usados por bache (define el costo) · <strong>%</strong> receta se calcula automáticamente
+                Toca un ingrediente o el lápiz para editarlo · arrástralo por el asa para cambiar el orden
               </small>
               <strong>Total MP: {fCOP(calcResult?.totalMPBache||0)}</strong>
             </div>
             </div>
           </details>
+
+          {/* ── Modal: agregar / editar un ingrediente ── */}
+          <Modal open={!!ingModal} onClose={() => cerrarIngModal(false)} guard={false}
+            title={ingModal?.isNew ? 'Agregar ingrediente' : 'Editar ingrediente'}
+            footer={ingModal && (
+              <div style={{ display:'flex', gap:8, width:'100%', alignItems:'center' }}>
+                <button type="button" className="btn btn-danger btn-sm" onClick={() => eliminarIng(ingModal.id)}><Ico as={Trash2} size={14} />Eliminar</button>
+                <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => cerrarIngModal(false)}>Cancelar</button>
+                  <button type="button" className="btn btn-primary btn-sm" onClick={() => cerrarIngModal(true)}><Ico as={Check} size={14} />Guardar en la lista</button>
+                </div>
+              </div>
+            )}>
+            {ingModal && (() => {
+              const r = ingredientes.find(x => x._id === ingModal.id)
+              if (!r) return null
+              const eff = ingredientesEff.find(x => x._id === ingModal.id) || {}
+              const cantEff = eff.cantidad || 0
+              const pctRow  = eff.pctReceta || 0
+              const precioEff = eff.precio != null ? eff.precio : (parseFloat(r.precio)||0)
+              const sub = (precioEff / (parseFloat(r.presentacion)||1000)) * cantEff
+              const modo = r.modo || 'lista'
+              const esRelativo = r.tipo === 'relativo'
+              const accent = esRelativo ? 'var(--dorado)' : undefined
+              const seg = (activo, primero) => ({
+                flex:1, padding:'6px 0', fontSize:'0.8rem', cursor:'pointer', fontFamily:"'Source Sans 3',sans-serif", fontWeight:600,
+                display:'inline-flex', alignItems:'center', justifyContent:'center', gap:4,
+                background: activo ? 'var(--selva)' : 'transparent', color: activo ? 'var(--crema)' : 'var(--texto-suave)',
+                border:`1px solid ${activo ? 'var(--selva)' : 'var(--crema-oscuro)'}`,
+                borderRadius: primero ? '4px 0 0 4px' : '0 4px 4px 0', marginLeft: primero ? 0 : -1,
+              })
+              return (
+                <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+                  {/* Tipo */}
+                  <div>
+                    <label className="form-label">Tipo de ingrediente</label>
+                    <div style={{ display:'flex' }}>
+                      <button type="button" style={seg(!esRelativo, true)} onClick={() => setIngredientes(p => p.map(x => x._id===r._id ? { ...x, tipo:'normal' } : x))}>Normal</button>
+                      <button type="button" style={seg(esRelativo, false)} onClick={() => setIngredientes(p => p.map(x => x._id===r._id ? { ...x, tipo:'relativo', base: Array.isArray(x.base)?x.base:[] } : x))}>Relativo (a otros)</button>
+                    </div>
+                  </div>
+
+                  {/* Fuente: inventario o manual */}
+                  <div>
+                    <label className="form-label">Fuente</label>
+                    <div style={{ display:'flex' }}>
+                      <button type="button" style={seg(modo==='lista', true)} onClick={() => toggleModo(r._id, 'lista')}><Package size={13} aria-hidden="true" />De inventario</button>
+                      <button type="button" style={seg(modo==='manual', false)} onClick={() => toggleModo(r._id, 'manual')}><Pencil size={13} aria-hidden="true" />Manual</button>
+                    </div>
+                  </div>
+
+                  {/* Ingrediente */}
+                  <div>
+                    <label className="form-label">Ingrediente</label>
+                    {modo === 'manual'
+                      ? <>
+                          <input className="form-control" placeholder="Nombre del ingrediente" value={r.nombre||''} onChange={e => updIng(r._id,'nombre',e.target.value)} style={{ borderColor: accent }} />
+                          {(r.nombre||'').trim() && (
+                            <button type="button" onClick={() => abrirNuevaMpDesdeIng(r)}
+                              style={{ background:'none', border:'none', padding:'4px 0 0', textAlign:'left', cursor:'pointer', color:'var(--selva-claro)', fontSize:'0.72rem', textDecoration:'underline' }}>
+                              + Agregar "{r.nombre.trim()}" al inventario de MP
+                            </button>
+                          )}
+                        </>
+                      : <BuscadorSelect value={r.mpId||''} placeholder="Escribe para buscar la MP..."
+                          opciones={mpsIngredientes.map(m => ({ value: String(m.id), label: m.nombre, sub: `${fCOP(m.precio)}/${m.unidad}` }))}
+                          onSelect={(v) => handleSelectMP(r._id, v)} />
+                    }
+                  </div>
+
+                  {/* Cantidad (normal) o base + % (relativo) */}
+                  {esRelativo ? (
+                    <>
+                      <div>
+                        <label className="form-label">Relativo a la suma de <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(marca uno o varios)</small></label>
+                        <div style={{ display:'flex', flexWrap:'wrap', gap:'4px 12px', border:'1px solid var(--dorado)', borderRadius:4, padding:'8px 10px', maxHeight:140, overflowY:'auto' }}>
+                          {nombresIngNormal.filter(n => n !== r.nombre).length === 0
+                            ? <span style={{ color:'var(--texto-suave)', fontSize:'0.82rem' }}>Agrega ingredientes normales primero</span>
+                            : nombresIngNormal.filter(n => n !== r.nombre).map(n => {
+                                const sel = Array.isArray(r.base) ? r.base : (r.base ? [r.base] : [])
+                                const checked = sel.includes(n)
+                                return (
+                                  <label key={n} style={{ display:'flex', alignItems:'center', gap:4, cursor:'pointer', whiteSpace:'nowrap', fontSize:'0.85rem' }}>
+                                    <input type="checkbox" checked={checked} onChange={() => updIng(r._id,'base', checked ? sel.filter(x => x !== n) : [...sel, n])} />
+                                    {n}
+                                  </label>
+                                )
+                              })}
+                        </div>
+                      </div>
+                      <div>
+                        <label className="form-label">% relativo</label>
+                        <input type="number" className="form-control" value={r.pct||''} onFocus={e => e.target.select()} onChange={e => updIng(r._id,'pct',e.target.value)} step="0.01" placeholder="0" style={{ borderColor: accent }} />
+                      </div>
+                    </>
+                  ) : (
+                    <div>
+                      <label className="form-label">{modoIng === 'porcentaje' ? '% de la receta' : 'Cantidad (g / bache)'}</label>
+                      {modoIng === 'porcentaje'
+                        ? <input type="number" className="form-control" value={r.pct||''} onFocus={e => e.target.select()} onChange={e => updIng(r._id,'pct',e.target.value)} step="0.01" placeholder="%" />
+                        : <input type="number" className="form-control" value={r.cantidad||''} onFocus={e => e.target.select()} onChange={e => handleCantidadChange(r._id, e.target.value)} placeholder="g / bache" />}
+                    </div>
+                  )}
+
+                  {/* Costo $/Kg */}
+                  <div>
+                    <label className="form-label">Costo $ / Kg</label>
+                    {r.mpId
+                      ? <MoneyInput value={r.precioOverride ? (r.precio || '') : String(precioEff || r.precio || '')}
+                          onChange={v => setIngredientes(p => p.map(x => x._id === r._id ? { ...x, precio: v, precioOverride: true } : x))}
+                          style={{ background: r.precioOverride ? 'rgba(200,169,74,0.12)' : 'rgba(124,179,66,0.08)', borderColor: r.precioOverride || costoDesfasado(r) ? 'var(--dorado)' : undefined }} />
+                      : <MoneyInput value={r.precio||''} onChange={v => updIng(r._id,'precio',v)} style={{ borderColor: accent }} />}
+                    {r.mpId && costoDesfasado(r) && (
+                      <button type="button" className="btn-link-emp" style={{ fontSize:'0.72rem', marginTop:4 }}
+                        onClick={() => actualizarCostoIng(r._id)}>
+                        Actualizar costo desde inventario ({fCOP(precioInventarioIng(r) || 0)}/{mps.find(m => String(m.id) === String(r.mpId))?.unidad || 'Kg'})
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Cálculo en vivo */}
+                  <div style={{ background:'var(--crema)', borderRadius:'var(--radio)', padding:'10px 12px', display:'flex', flexWrap:'wrap', gap:'4px 16px', fontSize:'0.85rem' }}>
+                    <span>Cantidad: <strong>{fNum(Math.round(cantEff))} g</strong></span>
+                    <span>% receta: <strong>{pctRow > 0 ? pctRow.toFixed(1) + '%' : '—'}</strong></span>
+                    <span style={{ marginLeft:'auto' }}>Costo: <strong style={{ color:'var(--selva)' }}>{fCOP(sub)}</strong></span>
+                  </div>
+                </div>
+              )
+            })()}
+          </Modal>
 
           {/* ── Parámetros de producción ── */}
           <details className="card" {...secProps('parametros')}>
