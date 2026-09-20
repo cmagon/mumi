@@ -891,33 +891,43 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
         </div>
       </div>
 
-      {/* Modal "Ver recetas guardadas" — solo recetas rápidas (las base se administran en Ficha de Producto) */}
+      {/* Modal "Ver recetas guardadas" — recetas base (productos) + recetas rápidas.
+          El icono superior izquierdo diferencia el tipo: estrella = base, matraz = rápida. */}
       <Modal open={recetasModal} onClose={() => setRecetasModal(false)} guard={false} size="modal-lg"
-        title={`Recetas rápidas guardadas (${recetas.length})`}>
-        {recetas.length === 0
-          ? <p className="empty-table">Aún no hay recetas rápidas guardadas.</p>
+        title={`Recetas guardadas (${filasGuardadas.length})`}>
+        {filasGuardadas.length === 0
+          ? <p className="empty-table">Aún no hay recetas guardadas.</p>
           : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {recetas.map(r => (
-                <div key={r.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, border: '1px solid var(--crema-oscuro)', borderRadius: 'var(--radio)', padding: '8px 12px', background: 'var(--blanco)' }}>
-                  {/* Icono de tipo: matraz = receta rápida (arriba a la izquierda) */}
-                  <span title="Receta rápida" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, background: 'rgba(124,179,66,0.16)', color: 'var(--selva)', flexShrink: 0 }}>
-                    <FlaskConical size={16} aria-hidden="true" />
-                  </span>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <strong style={{ display: 'block', color: 'var(--selva)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.nombre}</strong>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>{r.creado_por || '—'} · {fFecha(r.fecha)}</div>
+              {filasGuardadas.map(r => {
+                const esProd = r._origen === 'prod'
+                const key = `${r._origen}-${r.id}`
+                const fecha = esProd ? r.fecha_creado : r.fecha
+                return (
+                  <div key={key} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, border: '1px solid var(--crema-oscuro)', borderRadius: 'var(--radio)', padding: '8px 12px', background: 'var(--blanco)' }}>
+                    {/* Icono de tipo: estrella = receta base (producto) · matraz = receta rápida */}
+                    <span title={esProd ? 'Receta base (producto)' : 'Receta rápida'}
+                      style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, flexShrink: 0,
+                        background: esProd ? 'rgba(200,169,74,0.18)' : 'rgba(124,179,66,0.16)', color: esProd ? 'var(--tierra)' : 'var(--selva)' }}>
+                      {esProd ? <Star size={16} aria-hidden="true" /> : <FlaskConical size={16} aria-hidden="true" />}
+                    </span>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <strong style={{ display: 'block', color: 'var(--selva)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.nombre}</strong>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>
+                        <span style={{ color: esProd ? 'var(--tierra)' : 'var(--selva)', fontWeight: 600 }}>{esProd ? 'Base' : 'Rápida'}</span> · {r.creado_por || '—'}{fecha ? ` · ${fFecha(fecha)}` : ''}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                      {r.ficha_url && (
+                        <button type="button" className="btn btn-xs btn-secondary" title="Descargar ficha técnica" onClick={() => descargarFicha(r.ficha_url, r.ficha_nombre)}><Ico as={Download} size={13} />Ficha</button>
+                      )}
+                      <button type="button" className="btn btn-sm btn-primary" onClick={() => { cargarReceta(key); setRecetasModal(false) }}>Cargar</button>
+                      {!esProd && puedeEliminarReceta(r) && (
+                        <button type="button" className="btn btn-xs btn-danger" title="Eliminar receta" onClick={() => eliminarReceta(r.id, r.nombre)}><Trash2 size={14} aria-hidden="true" /></button>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                    {r.ficha_url && (
-                      <button type="button" className="btn btn-xs btn-secondary" title="Descargar ficha técnica" onClick={() => descargarFicha(r.ficha_url, r.ficha_nombre)}><Ico as={Download} size={13} />Ficha</button>
-                    )}
-                    <button type="button" className="btn btn-sm btn-primary" onClick={() => { cargarReceta(`recipe-${r.id}`); setRecetasModal(false) }}>Cargar</button>
-                    {puedeEliminarReceta(r) && (
-                      <button type="button" className="btn btn-xs btn-danger" title="Eliminar receta" onClick={() => eliminarReceta(r.id, r.nombre)}><Trash2 size={14} aria-hidden="true" /></button>
-                    )}
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
         }
       </Modal>
