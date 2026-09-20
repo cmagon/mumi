@@ -84,8 +84,18 @@ export default function Costos({ vista = 'productos' }) {
   const secProps = (key) => ({
     open: secAbierta === key,
     onToggle: (e) => {
-      if (e.currentTarget.open) setSecAbierta(key)
-      else setSecAbierta(prev => (prev === key ? null : prev))
+      if (e.currentTarget.open) {
+        setSecAbierta(key)
+        // Al abrir una sección, llevar la vista justo al inicio de esa sección (debajo del
+        // header fijo). Se espera a que React cierre la anterior y se acomode el alto.
+        const el = e.currentTarget
+        setTimeout(() => {
+          const top = el.getBoundingClientRect().top + window.scrollY - 72
+          window.scrollTo({ top: Math.max(0, top), behavior: 'smooth' })
+        }, 80)
+      } else {
+        setSecAbierta(prev => (prev === key ? null : prev))
+      }
     },
   })
 
