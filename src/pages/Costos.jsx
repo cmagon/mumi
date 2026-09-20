@@ -1360,6 +1360,8 @@ export default function Costos({ vista = 'productos' }) {
   const ordIng  = useReorder(setIngredientes)
   const ordProc = useReorder(setProcesos)
   const ordEmp  = useReorder(setEmpaque)
+  const ordAdic = useReorder(setAdicionales)
+  const ordHora = useReorder(setCostosHora)
 
   // ---- Ingrediente helpers ----
   const addIngrediente = () => setIngredientes(p => [...p, { ...EMPTY_ING, _id: Date.now() + Math.random() }])
@@ -1385,6 +1387,39 @@ export default function Costos({ vista = 'productos' }) {
   const eliminarIng = (id) => { setIngredientes(p => p.filter(r => r._id !== id)); setIngModal(null) }
   const addProceso     = () => setProcesos(p => [...p, { _id: Date.now(), nombre: '', minutos: '' }])
   const addEmpaque     = () => setEmpaque(p => [...p, { _id: Date.now(), mpId: '', nombre: '', modo: 'lista', precio: '', presentacion: 1, cantidad: '' }])
+  // Modal por proceso (Mano de obra)
+  const [procModal, setProcModal] = useState(null)
+  const abrirProcNuevo = () => { const _id = Date.now() + Math.random(); setProcesos(p => [...p, { _id, nombre: '', minutos: '' }]); setProcModal({ id: _id, isNew: true }) }
+  const abrirProcEditar = (id) => setProcModal({ id, isNew: false })
+  const cerrarProcModal = (g) => { if (!g && procModal?.isNew) setProcesos(p => p.filter(r => r._id !== procModal.id)); setProcModal(null) }
+  const eliminarProc = (id) => { setProcesos(p => p.filter(r => r._id !== id)); setProcModal(null) }
+  // Modal por ítem de empaque
+  const [empModal, setEmpModal] = useState(null)
+  const abrirEmpNuevo = () => { const _id = Date.now() + Math.random(); setEmpaque(p => [...p, { _id, mpId: '', nombre: '', modo: 'lista', precio: '', presentacion: 1, cantidad: '' }]); setEmpModal({ id: _id, isNew: true }) }
+  const abrirEmpEditar = (id) => setEmpModal({ id, isNew: false })
+  const cerrarEmpModal = (g) => { if (!g && empModal?.isNew) setEmpaque(p => p.filter(r => r._id !== empModal.id)); setEmpModal(null) }
+  const eliminarEmp = (id) => { setEmpaque(p => p.filter(r => r._id !== id)); setEmpModal(null) }
+  // Modal por costo adicional (simple o depreciación) + selector de tipo
+  const [adicModal, setAdicModal] = useState(null)
+  const [adicChooser, setAdicChooser] = useState(false)
+  const updAdic = (id, campos) => setAdicionales(arr => arr.map(x => x._id === id ? { ...x, ...campos } : x))
+  const abrirAdicNuevo = (tipo) => {
+    const _id = Date.now() + Math.random()
+    const nuevo = tipo === 'dep'
+      ? { _id, descripcion: '', valor: '', base: 'bache', dep: { valorMaquina: '', horasVida: '', horasBache: '' } }
+      : { _id, descripcion: '', valor: '', base: 'unidad' }
+    setAdicionales(arr => [...arr, nuevo]); setAdicModal({ id: _id, isNew: true })
+  }
+  const abrirAdicEditar = (id) => setAdicModal({ id, isNew: false })
+  const cerrarAdicModal = (g) => { if (!g && adicModal?.isNew) setAdicionales(arr => arr.filter(x => x._id !== adicModal.id)); setAdicModal(null) }
+  const eliminarAdic = (id) => { setAdicionales(arr => arr.filter(x => x._id !== id)); setAdicModal(null) }
+  // Modal por costo de tiempo (horas/días — solo MP/subproducto)
+  const [horaModal, setHoraModal] = useState(null)
+  const updHora = (id, campos) => setCostosHora(arr => arr.map(x => x._id === id ? { ...x, ...campos } : x))
+  const abrirHoraNuevo = () => { const _id = Date.now() + Math.random(); setCostosHora(arr => [...arr, { _id, nombre: '', unidad: 'hora', tarifa: '', cantidad_default: '' }]); setHoraModal({ id: _id, isNew: true }) }
+  const abrirHoraEditar = (id) => setHoraModal({ id, isNew: false })
+  const cerrarHoraModal = (g) => { if (!g && horaModal?.isNew) setCostosHora(arr => arr.filter(x => x._id !== horaModal.id)); setHoraModal(null) }
+  const eliminarHora = (id) => { setCostosHora(arr => arr.filter(x => x._id !== id)); setHoraModal(null) }
   const updIng  = (id, f, v) => setIngredientes(p => p.map(r => r._id === id ? { ...r, [f]: v } : r))
   const updProc = (id, f, v) => setProcesos(p => p.map(r => r._id === id ? { ...r, [f]: v } : r))
   const updEmp  = (id, f, v) => setEmpaque(p => p.map(r => r._id === id ? { ...r, [f]: v } : r))
@@ -2423,195 +2458,345 @@ export default function Costos({ vista = 'productos' }) {
 
           {/* ── Mano de obra ── */}
           <details className="card" {...secProps('mano_obra')}>
-            <summary className="card-title"><span className="ed-paso-num">4</span><Ico as={Clock} size={14} />Mano de Obra (por proceso)<span className="card-hint">{procesos.length} proceso{procesos.length === 1 ? '' : 's'}</span><div onClick={e => e.stopPropagation()} style={{ marginLeft:8 }}><button className="btn btn-sm btn-secondary" onClick={addProceso}>+ Agregar proceso</button></div></summary>
+            <summary className="card-title"><span className="ed-paso-num">4</span><Ico as={Clock} size={14} />Mano de Obra (por proceso)<span className="card-hint">{procesos.length} proceso{procesos.length === 1 ? '' : 's'}</span></summary>
             <div className="card-acc-body">
-            {/* Resumen fijo: no hay que sumar mentalmente los procesos para ver el total */}
+            {/* Resumen fijo: total de minutos y costo por unidad, sin sumar mentalmente */}
             <div style={{ display:'flex', flexWrap:'wrap', gap:'8px 16px', alignItems:'center', padding:'8px 12px', marginBottom:12, background:'var(--crema)', borderRadius:'var(--radio)', fontSize:'0.82rem' }}>
               <span><Ico as={Clock} size={13} /> Total: <strong>{fNum(calcResult?.totalMinutos || 0)} min/bache</strong></span>
               <span>Costo/min: <strong>{fCOP(costoMin)}</strong></span>
               <span style={{ marginLeft:'auto' }}>MO + CIF por unidad: <strong style={{ color:'var(--dorado)' }}>{fCOP(calcResult?.moUnit || 0)}</strong></span>
             </div>
-            <div style={{ overflowX:'auto' }}>
-              <div className="ed-wrap" style={{ minWidth:500 }}>
-                <div className="ed-head" style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr 44px', gap:8, paddingBottom:8, fontSize:'0.72rem', fontWeight:700, color:'var(--texto-suave)', textTransform:'uppercase' }}>
-                  <span>Proceso</span><span>Minutos/bache</span><span>Costo (auto)</span><span></span>
-                </div>
-                {procesos.map((r, idx) => (
-                  <div key={r._id} className={ordProc.rowClassName(idx)} {...ordProc.rowProps(idx)} style={{ display:'grid', gridTemplateColumns:'2fr 1fr 1fr 44px', gap:8, alignItems:'center', marginBottom:8 }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:6 }}>
-                      <span {...ordProc.handleProps(idx)}>⠿</span>
-                      <input className="form-control" placeholder="Nombre del proceso" value={r.nombre} onChange={e => updProc(r._id,'nombre',e.target.value)} style={{ flex:1, minWidth:0 }} />
-                    </div>
-                    <input type="number" className="form-control" placeholder="Minutos" value={r.minutos} onChange={e => updProc(r._id,'minutos',e.target.value)} />
-                    <span className="ed-sub" style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.9rem' }}>{fCOP((parseFloat(r.minutos)||0)*costoMin)}</span>
-                    <div className="ed-controls" style={{ display:'flex', alignItems:'center', gap:2 }}>
-                      <button className="btn btn-danger btn-xs" onClick={() => setProcesos(p => p.filter(x => x._id !== r._id))}><X size={13} aria-hidden="true" /></button>
+            <div className="ed-ing-lista">
+              {procesos.map((r, idx) => {
+                const costo = (parseFloat(r.minutos)||0) * costoMin
+                const nombre = (r.nombre && r.nombre.trim()) || 'Sin nombre'
+                const incompleto = nombre === 'Sin nombre' || !((parseFloat(r.minutos)||0) > 0)
+                return (
+                  <div key={r._id} className={`ed-ing-item ${ordProc.rowClassName(idx)}`} {...ordProc.rowProps(idx)}>
+                    <span className="ed-drag" {...ordProc.handleProps(idx)}><GripVertical size={16} aria-hidden="true" /></span>
+                    <button type="button" className="ed-ing-main" onClick={() => abrirProcEditar(r._id)}>
+                      <span className="ed-ing-nombre">{nombre}{incompleto && <Ico as={AlertTriangle} size={12} />}</span>
+                      <span className="ed-ing-datos"><span>{fNum(parseFloat(r.minutos)||0)} min</span><span>{fCOP(costo)}</span></span>
+                    </button>
+                    <div className="ed-ing-acc">
+                      <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === 0} title="Subir" onClick={() => ordProc.moverArriba(idx)}><ChevronUp size={13} aria-hidden="true" /></button>
+                      <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === procesos.length - 1} title="Bajar" onClick={() => ordProc.moverAbajo(idx)}><ChevronDown size={13} aria-hidden="true" /></button>
+                      <button type="button" className="btn btn-xs btn-secondary" title="Editar proceso" onClick={() => abrirProcEditar(r._id)}><Pencil size={14} aria-hidden="true" /></button>
                     </div>
                   </div>
-                ))}
-                <div style={{ fontSize:'0.78rem', color:'var(--texto-suave)', marginTop:8 }}>
-                  Costo/minuto: <strong>{fCOP(costoMin)}</strong> ({operariosActivos} operarios · CIF {fCOP(cifTotal)})
-                </div>
-              </div>
+                )
+              })}
+              {procesos.length === 0 && <p style={{ color:'var(--texto-suave)', fontSize:'0.88rem', padding:'8px 0' }}>Aún no hay procesos. Usa el botón para agregar el primero.</p>}
             </div>
-            <div style={{ display:'flex', justifyContent:'flex-end', marginTop:8 }}><strong>Total MO: {fCOP(calcResult?.totalMOBache||0)}</strong></div>
+            <div className="ed-ing-add">
+              <button type="button" className="ed-ing-add-btn" onClick={abrirProcNuevo}><Plus size={20} aria-hidden="true" />Agregar proceso</button>
+            </div>
+            <div style={{ display:'flex', justifyContent:'flex-end' }}><strong>Total MO: {fCOP(calcResult?.totalMOBache||0)}</strong></div>
             </div>
           </details>
 
+          {/* ── Modal: agregar / editar un proceso ── */}
+          <Modal open={!!procModal} onClose={() => cerrarProcModal(false)} guard={false}
+            title={procModal?.isNew ? 'Agregar proceso' : 'Editar proceso'}
+            footer={procModal && (
+              <div style={{ display:'flex', gap:8, width:'100%', alignItems:'center' }}>
+                <button type="button" className="btn btn-danger btn-sm" onClick={() => eliminarProc(procModal.id)}><Ico as={Trash2} size={14} />Eliminar</button>
+                <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => cerrarProcModal(false)}>Cancelar</button>
+                  <button type="button" className="btn btn-primary btn-sm" onClick={() => cerrarProcModal(true)}><Ico as={Check} size={14} />Guardar en la lista</button>
+                </div>
+              </div>
+            )}>
+            {procModal && (() => {
+              const r = procesos.find(x => x._id === procModal.id)
+              if (!r) return null
+              const costo = (parseFloat(r.minutos)||0) * costoMin
+              return (
+                <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+                  <div><label className="form-label">Nombre del proceso</label><input className="form-control" placeholder="Ej. Cocción, empacado…" value={r.nombre||''} onChange={e => updProc(r._id,'nombre',e.target.value)} /></div>
+                  <div><label className="form-label">Minutos por bache</label><input type="number" className="form-control" placeholder="Minutos" value={r.minutos||''} onFocus={e => e.target.select()} onChange={e => updProc(r._id,'minutos',e.target.value)} /></div>
+                  <div style={{ background:'var(--crema)', borderRadius:'var(--radio)', padding:'10px 12px', display:'flex', flexWrap:'wrap', gap:'4px 16px', fontSize:'0.85rem' }}>
+                    <span>Costo por minuto: <strong>{fCOP(costoMin)}</strong></span>
+                    <span style={{ marginLeft:'auto' }}>Costo del proceso: <strong style={{ color:'var(--selva)' }}>{fCOP(costo)}</strong></span>
+                  </div>
+                </div>
+              )
+            })()}
+          </Modal>
+
           {/* ── Empaque ── */}
           <details className="card" {...secProps('empaque')}>
-            <summary className="card-title"><span className="ed-paso-num">5</span><Ico as={Package} size={14} />Empaque & Envase<span className="card-hint">{empaque.length} ítem{empaque.length === 1 ? '' : 's'}</span><div onClick={e => e.stopPropagation()} style={{ marginLeft:8 }}><button className="btn btn-sm btn-secondary" onClick={addEmpaque}>+ Agregar</button></div></summary>
+            <summary className="card-title"><span className="ed-paso-num">5</span><Ico as={Package} size={14} />Empaque & Envase<span className="card-hint">{empaque.length} ítem{empaque.length === 1 ? '' : 's'}</span></summary>
             <div className="card-acc-body">
-            {/* Resumen fijo del empaque, siempre visible arriba */}
+            {/* Resumen fijo del empaque */}
             <div style={{ display:'flex', flexWrap:'wrap', gap:'8px 16px', alignItems:'center', padding:'8px 12px', marginBottom:12, background:'var(--crema)', borderRadius:'var(--radio)', fontSize:'0.82rem' }}>
               <span><Ico as={Package} size={13} /> Total empaque: <strong>{fCOP(calcResult?.totalEmpBache || 0)}/bache</strong></span>
               <span style={{ marginLeft:'auto' }}>Empaque por unidad: <strong style={{ color:'var(--dorado)' }}>{fCOP(calcResult?.empUnit || 0)}</strong></span>
             </div>
-            <div style={{ overflowX:'auto' }}>
-              <div className="ed-wrap" style={{ minWidth:720 }}>
-                <div className="ed-head" style={{ display:'grid', gridTemplateColumns:'2.2fr 1fr 1fr 1fr 1fr 44px', gap:8, paddingBottom:6, fontSize:'0.72rem', fontWeight:700, color:'var(--texto-suave)', textTransform:'uppercase' }}>
-                  <span>Ítem</span><span style={{ textAlign:'right' }}>$ precio/u</span><span style={{ textAlign:'right' }}>Presentación</span><span style={{ textAlign:'right' }}>Cantidad</span><span style={{ textAlign:'right' }}>Subtotal</span><span></span>
-                </div>
-                {empaque.map((r, idx) => {
-                  const sub = ((parseFloat(r.precio)||0)/(parseFloat(r.presentacion)||1))*(parseFloat(r.cantidad)||0)
-                  const modo = r.modo || 'lista'
-                  return (
-                    <div key={r._id} className={ordEmp.rowClassName(idx)} {...ordEmp.rowProps(idx)} style={{ display:'grid', gridTemplateColumns:'2.2fr 1fr 1fr 1fr 1fr 44px', gap:8, alignItems:'start', marginBottom:10 }}>
-                      {/* Asa + Nombre: toggle + select(empaque)/input */}
-                      <div style={{ display:'flex', gap:6, alignItems:'flex-start' }}>
-                        <span {...ordEmp.handleProps(idx)}>⠿</span>
-                        <div style={{ display:'flex', flexDirection:'column', gap:3, flex:1, minWidth:0 }}>
-                        <div style={{ display:'flex' }}>
-                          {['lista','manual'].map((m, i) => (
-                            <button key={m} type="button" onClick={() => toggleModoEmpaque(r._id, m)} style={{
-                              flex:1, padding:'2px 0', fontSize:'0.67rem', cursor:'pointer',
-                              fontFamily:"'Source Sans 3',sans-serif", fontWeight:600,
-                              background: modo===m ? 'var(--selva)' : 'transparent',
-                              color: modo===m ? 'var(--crema)' : 'var(--texto-suave)',
-                              border: `1px solid ${modo===m ? 'var(--selva)' : 'var(--crema-oscuro)'}`,
-                              borderRadius: i===0 ? '3px 0 0 3px' : '0 3px 3px 0', marginLeft: i===1 ? -1 : 0,
-                            }}>
-                              {m==='lista' ? <><Ico as={Package} size={12} />Lista</> : <><Ico as={Pencil} size={12} />Manual</>}
-                            </button>
-                          ))}
-                        </div>
-                        {modo === 'manual'
-                          ? <input key={`emp-man-${r._id}`} className="form-control" placeholder="Ítem (caja, bolsa...)" value={r.nombre||''} onChange={e => updEmp(r._id,'nombre',e.target.value)} />
-                          : <Select key={`emp-lst-${r._id}`} className="form-control" value={r.mpId||''} onChange={e => handleSelectEmpaqueMP(r._id, e.target.value)}>
-                              <option value="">Seleccionar empaque...</option>
-                              {mpsEmpaque.map(m => <option key={m.id} value={m.id}>{m.nombre} — {fCOP(m.precio)}/{m.unidad}</option>)}
-                              {mpsEmpaque.length === 0 && <option value="" disabled>No hay insumos de empaque — usa modo Manual o créalos en Inventario MP</option>}
-                            </Select>
-                        }
-                        </div>
-                      </div>
-                      <MoneyInput value={r.precio} onChange={v => updEmp(r._id,'precio',v)} placeholder="$ precio/u" style={{ background: r.mpId ? 'rgba(124,179,66,0.04)' : undefined }} />
-                      <input type="number" className="form-control" placeholder="Presentación" value={r.presentacion} onChange={e => updEmp(r._id,'presentacion',e.target.value)} style={{ textAlign:'right' }} />
-                      <div style={{ display:'flex', flexDirection:'column', gap:3 }}>
-                        <input type="number" className="form-control" placeholder="Cantidad" value={r.cantidad} onChange={e => updEmp(r._id,'cantidad',e.target.value)} style={{ textAlign:'right' }} />
-                        <button type="button" className="btn btn-xs btn-success"
-                          disabled={!((parseFloat(formProd.bache)||0) > 0)}
-                          title="Igualar a las unidades por bache"
-                          onClick={() => updEmp(r._id,'cantidad', parseFloat(formProd.bache)||0)}>
-                          = bache ({parseFloat(formProd.bache)||0})
-                        </button>
-                      </div>
-                      <span className="ed-sub" style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', paddingTop:8, textAlign:'right' }}>{fCOP(sub)}</span>
-                      <div className="ed-controls" style={{ display:'flex', alignItems:'center', gap:2, marginTop:6 }}>
-                        <button className="btn btn-danger btn-xs" onClick={() => setEmpaque(p => p.filter(x => x._id !== r._id))}><X size={13} aria-hidden="true" /></button>
-                      </div>
+            <div className="ed-ing-lista">
+              {empaque.map((r, idx) => {
+                const sub = ((parseFloat(r.precio)||0)/(parseFloat(r.presentacion)||1))*(parseFloat(r.cantidad)||0)
+                const nombre = (r.nombre && r.nombre.trim())
+                  || (r.mpId ? (mps.find(m => String(m.id) === String(r.mpId))?.nombre) : '')
+                  || 'Sin nombre'
+                const incompleto = nombre === 'Sin nombre' || !((parseFloat(r.cantidad)||0) > 0)
+                return (
+                  <div key={r._id} className={`ed-ing-item ${ordEmp.rowClassName(idx)}`} {...ordEmp.rowProps(idx)}>
+                    <span className="ed-drag" {...ordEmp.handleProps(idx)}><GripVertical size={16} aria-hidden="true" /></span>
+                    <button type="button" className="ed-ing-main" onClick={() => abrirEmpEditar(r._id)}>
+                      <span className="ed-ing-nombre">{nombre}{incompleto && <Ico as={AlertTriangle} size={12} />}</span>
+                      <span className="ed-ing-datos"><span>{fNum(parseFloat(r.cantidad)||0)} u</span><span>{fCOP(sub)}</span></span>
+                    </button>
+                    <div className="ed-ing-acc">
+                      <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === 0} title="Subir" onClick={() => ordEmp.moverArriba(idx)}><ChevronUp size={13} aria-hidden="true" /></button>
+                      <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === empaque.length - 1} title="Bajar" onClick={() => ordEmp.moverAbajo(idx)}><ChevronDown size={13} aria-hidden="true" /></button>
+                      <button type="button" className="btn btn-xs btn-secondary" title="Editar empaque" onClick={() => abrirEmpEditar(r._id)}><Pencil size={14} aria-hidden="true" /></button>
                     </div>
-                  )
-                })}
-                {empaque.length === 0 && <p style={{ color:'var(--texto-suave)', fontSize:'0.88rem', padding:'8px 0' }}>Agrega empaques (caja, bolsa, etiqueta...)</p>}
-              </div>
+                  </div>
+                )
+              })}
+              {empaque.length === 0 && <p style={{ color:'var(--texto-suave)', fontSize:'0.88rem', padding:'8px 0' }}>Aún no hay empaques. Usa el botón para agregar el primero.</p>}
             </div>
-            <div style={{ display:'flex', justifyContent:'flex-end', marginTop:8 }}><strong>Total Empaque: {fCOP(calcResult?.totalEmpBache||0)}</strong></div>
+            <div className="ed-ing-add">
+              <button type="button" className="ed-ing-add-btn" onClick={abrirEmpNuevo}><Plus size={20} aria-hidden="true" />Agregar empaque</button>
+            </div>
+            <div style={{ display:'flex', justifyContent:'flex-end' }}><strong>Total Empaque: {fCOP(calcResult?.totalEmpBache||0)}</strong></div>
             </div>
           </details>
 
-          {/* ── Costos adicionales personalizados — la depreciación se gestiona centralmente ── */}
-          <div className="card">
-            <div className="card-title" style={{ cursor:'pointer' }} onClick={() => setAdicOpen(o => !o)}>
-              <span className="ed-paso-num">6</span><Ico as={DollarSign} size={14} />Costos Adicionales {(adicionales.length + costosHora.length) > 0 ? `(${adicionales.length + costosHora.length})` : ''}
-              <button type="button" className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={(e) => { e.stopPropagation(); setAdicOpen(o => !o) }}><Ico as={adicOpen ? ChevronUp : ChevronDown} size={14} />{adicOpen ? 'Ocultar' : 'Mostrar'}</button>
-            </div>
-            {adicOpen && (
-              <div>
-                <small style={{ color:'var(--texto-suave)', display:'block', marginBottom:8 }}>Costos extra exclusivos de esta ficha. Suman al <strong>costo final por unidad</strong> según su base.</small>
-                <div className="alert alert-warning" style={{ fontSize:'0.8rem' }}>
-                  <Ico as={AlertTriangle} size={13} /><strong>Úsalo solo para valores exclusivos de este producto.</strong> La depreciación y asignación de máquinas
-                  se configura centralmente en <strong>Costos y Gastos → Agregar depreciación</strong>, para evitar contarla dos veces.
+          {/* ── Modal: agregar / editar un empaque ── */}
+          <Modal open={!!empModal} onClose={() => cerrarEmpModal(false)} guard={false}
+            title={empModal?.isNew ? 'Agregar empaque' : 'Editar empaque'}
+            footer={empModal && (
+              <div style={{ display:'flex', gap:8, width:'100%', alignItems:'center' }}>
+                <button type="button" className="btn btn-danger btn-sm" onClick={() => eliminarEmp(empModal.id)}><Ico as={Trash2} size={14} />Eliminar</button>
+                <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => cerrarEmpModal(false)}>Cancelar</button>
+                  <button type="button" className="btn btn-primary btn-sm" onClick={() => cerrarEmpModal(true)}><Ico as={Check} size={14} />Guardar en la lista</button>
                 </div>
-                {adicionales.map((a, i) => {
-                  const updA = (campos) => setAdicionales(arr => arr.map((x,idx) => idx===i ? { ...x, ...campos } : x))
-                  if (a.dep) {
-                    // Modo depreciación por horas: valor de la máquina ÷ horas de vida útil × horas por bache.
-                    // Cada cambio en los 3 parámetros recalcula `valor` (base bache), que es lo que usa el costeo.
-                    const vm = parseFloat(a.dep.valorMaquina) || 0, hv = parseFloat(a.dep.horasVida) || 0, hb = parseFloat(a.dep.horasBache) || 0
-                    const costoHora = hv > 0 ? vm / hv : 0
-                    const valorBache = costoHora * hb
-                    const updDep = (campo, val) => {
-                      const dep = { ...a.dep, [campo]: val }
-                      const vm2 = parseFloat(dep.valorMaquina) || 0, hv2 = parseFloat(dep.horasVida) || 0, hb2 = parseFloat(dep.horasBache) || 0
-                      updA({ dep, valor: hv2 > 0 ? (vm2 / hv2) * hb2 : 0, base: 'bache' })
-                    }
-                    return (
-                      <div key={a._id || i} style={{ border:'1px solid var(--crema-oscuro)', borderRadius:'var(--radio)', padding:'8px 10px', marginBottom:6 }}>
-                        <div style={{ display:'grid', gridTemplateColumns:'1.4fr 0.9fr 0.7fr 0.7fr auto', gap:6, alignItems:'end' }}>
-                          <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Máquina / equipo</label><input className="form-control" value={a.descripcion || ''} onChange={e => updA({ descripcion: e.target.value })} placeholder="Ej. Depreciación horno" /></div>
-                          <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Valor máquina ($)</label><input type="number" className="form-control" value={a.dep.valorMaquina ?? ''} onChange={e => updDep('valorMaquina', e.target.value)} min={0} step="any" placeholder="4000000" /></div>
-                          <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Vida útil (horas)</label><input type="number" className="form-control" value={a.dep.horasVida ?? ''} onChange={e => updDep('horasVida', e.target.value)} min={0} step="any" placeholder="10000" /></div>
-                          <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Horas por bache</label><input type="number" className="form-control" value={a.dep.horasBache ?? ''} onChange={e => updDep('horasBache', e.target.value)} min={0} step="any" placeholder="2" /></div>
-                          <button type="button" className="btn btn-xs btn-danger" onClick={() => setAdicionales(arr => arr.filter((_,idx) => idx!==i))}>✕</button>
-                        </div>
-                        <small style={{ display:'block', marginTop:4, color: valorBache > 0 ? 'var(--selva)' : 'var(--texto-suave)', fontSize:'0.72rem' }}>
-                          {valorBache > 0
-                            ? <>Costo/hora: <strong>{fCOP(costoHora)}</strong> × {hb} h = <strong>{fCOP(valorBache)}</strong> por bache (se divide entre las unidades del bache).</>
-                            : 'Llena los tres valores para calcular la depreciación por bache.'}
-                        </small>
-                      </div>
-                    )
-                  }
-                  return (
-                  <div key={a._id || i} style={{ display:'grid', gridTemplateColumns:'1.4fr 0.9fr 0.9fr auto', gap:6, alignItems:'end', marginBottom:6 }}>
-                    <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Descripción</label><input className="form-control" value={a.descripcion || ''} onChange={e => updA({ descripcion: e.target.value })} placeholder="Ej. Depreciación horno" /></div>
-                    <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Valor (COP)</label><input type="number" className="form-control" value={a.valor ?? ''} onChange={e => updA({ valor: e.target.value })} min={0} step="any" /></div>
-                    <div><label style={{ fontSize:'0.68rem', color:'var(--texto-suave)' }}>Base</label><Select className="form-control" value={a.base || 'unidad'} onChange={e => updA({ base: e.target.value })}><option value="unidad">por unidad</option><option value="bache">por bache</option><option value="mes">por mes</option></Select></div>
-                    <button type="button" className="btn btn-xs btn-danger" onClick={() => setAdicionales(arr => arr.filter((_,idx) => idx!==i))}>✕</button>
+              </div>
+            )}>
+            {empModal && (() => {
+              const r = empaque.find(x => x._id === empModal.id)
+              if (!r) return null
+              const modo = r.modo || 'lista'
+              const sub = ((parseFloat(r.precio)||0)/(parseFloat(r.presentacion)||1))*(parseFloat(r.cantidad)||0)
+              const seg = (activo, primero) => ({
+                flex:1, padding:'6px 0', fontSize:'0.8rem', cursor:'pointer', fontFamily:"'Source Sans 3',sans-serif", fontWeight:600,
+                display:'inline-flex', alignItems:'center', justifyContent:'center', gap:4,
+                background: activo ? 'var(--selva)' : 'transparent', color: activo ? 'var(--crema)' : 'var(--texto-suave)',
+                border:`1px solid ${activo ? 'var(--selva)' : 'var(--crema-oscuro)'}`,
+                borderRadius: primero ? '4px 0 0 4px' : '0 4px 4px 0', marginLeft: primero ? 0 : -1,
+              })
+              return (
+                <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+                  <div>
+                    <label className="form-label">Fuente</label>
+                    <div style={{ display:'flex' }}>
+                      <button type="button" style={seg(modo==='lista', true)} onClick={() => toggleModoEmpaque(r._id, 'lista')}><Package size={13} aria-hidden="true" />De inventario</button>
+                      <button type="button" style={seg(modo==='manual', false)} onClick={() => toggleModoEmpaque(r._id, 'manual')}><Pencil size={13} aria-hidden="true" />Manual</button>
+                    </div>
                   </div>
+                  <div>
+                    <label className="form-label">Ítem de empaque</label>
+                    {modo === 'manual'
+                      ? <input className="form-control" placeholder="Ítem (caja, bolsa, etiqueta…)" value={r.nombre||''} onChange={e => updEmp(r._id,'nombre',e.target.value)} />
+                      : <Select className="form-control" value={r.mpId||''} onChange={e => handleSelectEmpaqueMP(r._id, e.target.value)}>
+                          <option value="">Seleccionar empaque...</option>
+                          {mpsEmpaque.map(m => <option key={m.id} value={m.id}>{m.nombre} — {fCOP(m.precio)}/{m.unidad}</option>)}
+                          {mpsEmpaque.length === 0 && <option value="" disabled>No hay insumos de empaque — usa modo Manual o créalos en Inventario MP</option>}
+                        </Select>
+                    }
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                    <div><label className="form-label">Precio por presentación ($)</label><MoneyInput value={r.precio} onChange={v => updEmp(r._id,'precio',v)} style={{ background: r.mpId ? 'rgba(124,179,66,0.04)' : undefined }} /></div>
+                    <div><label className="form-label">Unidades por presentación</label><input type="number" className="form-control" placeholder="Ej: 1, 100…" value={r.presentacion} onChange={e => updEmp(r._id,'presentacion',e.target.value)} /></div>
+                  </div>
+                  <div>
+                    <label className="form-label">Cantidad usada por bache</label>
+                    <input type="number" className="form-control" placeholder="Cantidad" value={r.cantidad} onFocus={e => e.target.select()} onChange={e => updEmp(r._id,'cantidad',e.target.value)} />
+                    <button type="button" className="btn btn-xs btn-success" style={{ marginTop:6 }}
+                      disabled={!((parseFloat(formProd.bache)||0) > 0)}
+                      title="Igualar a las unidades por bache"
+                      onClick={() => updEmp(r._id,'cantidad', parseFloat(formProd.bache)||0)}>
+                      = unidades por bache ({parseFloat(formProd.bache)||0})
+                    </button>
+                  </div>
+                  <div style={{ background:'var(--crema)', borderRadius:'var(--radio)', padding:'10px 12px', display:'flex', flexWrap:'wrap', gap:'4px 16px', fontSize:'0.85rem' }}>
+                    <span>Subtotal empaque: <strong style={{ color:'var(--selva)' }}>{fCOP(sub)}</strong></span>
+                  </div>
+                </div>
+              )
+            })()}
+          </Modal>
+
+          {/* ── Costos adicionales — sección del acordeón (paso 6) ── */}
+          <details className="card" {...secProps('costos_adic')}>
+            <summary className="card-title"><span className="ed-paso-num">6</span><Ico as={DollarSign} size={14} />Costos Adicionales<span className="card-hint">{(adicionales.length + costosHora.length) > 0 ? `${adicionales.length + costosHora.length} ítem(s)` : 'opcional'}</span></summary>
+            <div className="card-acc-body">
+              <div className="alert alert-warning" style={{ fontSize:'0.8rem' }}>
+                <Ico as={AlertTriangle} size={13} /><strong>Úsalo solo para valores exclusivos de este producto.</strong> La depreciación y asignación de máquinas
+                se configura centralmente en <strong>Costos y Gastos → Agregar depreciación</strong>, para evitar contarla dos veces.
+              </div>
+              <div className="ed-ing-lista">
+                {adicionales.map((a, idx) => {
+                  const esDep = !!a.dep
+                  let costoTxt
+                  if (esDep) {
+                    const vm = parseFloat(a.dep.valorMaquina)||0, hv = parseFloat(a.dep.horasVida)||0, hb = parseFloat(a.dep.horasBache)||0
+                    const valorBache = hv > 0 ? (vm/hv)*hb : 0
+                    costoTxt = `${fCOP(valorBache)} / bache`
+                  } else {
+                    const baseTxt = a.base === 'unidad' ? 'unidad' : a.base === 'mes' ? 'mes' : 'bache'
+                    costoTxt = `${fCOP(parseFloat(a.valor)||0)} / ${baseTxt}`
+                  }
+                  const nombre = (a.descripcion && a.descripcion.trim()) || 'Sin descripción'
+                  return (
+                    <div key={a._id} className={`ed-ing-item ${ordAdic.rowClassName(idx)}`} {...ordAdic.rowProps(idx)}>
+                      <span className="ed-drag" {...ordAdic.handleProps(idx)}><GripVertical size={16} aria-hidden="true" /></span>
+                      <button type="button" className="ed-ing-main" onClick={() => abrirAdicEditar(a._id)}>
+                        <span className="ed-ing-nombre">{nombre}{esDep && <span className="badge" style={{ background:'rgba(200,169,74,0.18)', color:'var(--tierra)', fontSize:'0.6rem', fontWeight:700 }}>DEPRECIACIÓN</span>}</span>
+                        <span className="ed-ing-datos"><span>{costoTxt}</span></span>
+                      </button>
+                      <div className="ed-ing-acc">
+                        <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === 0} title="Subir" onClick={() => ordAdic.moverArriba(idx)}><ChevronUp size={13} aria-hidden="true" /></button>
+                        <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === adicionales.length - 1} title="Bajar" onClick={() => ordAdic.moverAbajo(idx)}><ChevronDown size={13} aria-hidden="true" /></button>
+                        <button type="button" className="btn btn-xs btn-secondary" title="Editar costo" onClick={() => abrirAdicEditar(a._id)}><Pencil size={14} aria-hidden="true" /></button>
+                      </div>
+                    </div>
                   )
                 })}
-                <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
-                  <button type="button" className="btn btn-sm btn-secondary" onClick={() => setAdicionales(arr => [...arr, { _id: Date.now()+Math.random(), descripcion:'', valor:'', base:'unidad' }])}><Ico as={Plus} size={13} /> Agregar costo</button>
-                </div>
-                <small style={{ display:'block', marginTop:8, color:'var(--texto-suave)', fontSize:'0.72rem' }}>Base: <strong>por unidad</strong> suma directo; <strong>por bache</strong> se divide entre las unidades del bache; <strong>por mes</strong> se divide entre las unidades del mes.</small>
-
-                {(formProd.tipo === 'mp' || formProd.tipo === 'subproducto') && (
-                  <div style={{ marginTop:16, paddingTop:14, borderTop:'1px solid var(--crema-oscuro)' }}>
-                    <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:8 }}>
-                      <strong style={{ color:'var(--selva)' }}><Ico as={Clock} size={14} />Costos adicionales por horas o días</strong>
-                      <button type="button" className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={() => setCostosHora(arr => [...arr, { _id: Date.now() + Math.random(), nombre:'', unidad:'hora', tarifa:'', cantidad_default:'' }])}>+ Agregar costo</button>
-                    </div>
-                    <small style={{ color:'var(--texto-suave)', display:'block', marginBottom:8 }}>
-                      Ejemplo: consumo energético del horno por hora. La <strong>cantidad sugerida × tarifa</strong> entra al costo de producto
-                      (repartida entre las unidades del bache). En cada orden se diligencia la cantidad real.
-                    </small>
-                    {costosHora.length === 0
-                      ? <p style={{ fontSize:'0.82rem', color:'var(--texto-suave)', margin:0 }}>Sin costos por tiempo. Agrégalos para que aparezcan al diligenciar la orden.</p>
-                      : costosHora.map((c, i) => (
-                        <div key={c._id || i} className="form-grid-4" style={{ marginBottom:8, alignItems:'end' }}>
-                          <div><label className="form-label">Concepto</label><input className="form-control" value={c.nombre || ''} onChange={e => setCostosHora(arr => arr.map((x, idx) => idx === i ? { ...x, nombre:e.target.value } : x))} placeholder="Energía horno" /></div>
-                          <div><label className="form-label">Unidad</label><Select className="form-control" value={c.unidad || 'hora'} onChange={e => setCostosHora(arr => arr.map((x, idx) => idx === i ? { ...x, unidad:e.target.value } : x))}><option value="hora">Hora</option><option value="dia">Día</option></Select></div>
-                          <div><label className="form-label">Tarifa</label><MoneyInput value={c.tarifa || ''} onChange={v => setCostosHora(arr => arr.map((x, idx) => idx === i ? { ...x, tarifa:v } : x))} /></div>
-                          <div style={{ display:'flex', gap:6, alignItems:'end' }}><div style={{ flex:1 }}><label className="form-label">Cantidad sugerida</label><input type="number" min="0" step="any" className="form-control" value={c.cantidad_default || ''} onChange={e => setCostosHora(arr => arr.map((x, idx) => idx === i ? { ...x, cantidad_default:e.target.value } : x))} /></div><button type="button" className="btn btn-xs btn-danger" onClick={() => setCostosHora(arr => arr.filter((_, idx) => idx !== i))}><X size={13} aria-hidden="true" /></button></div>
-                        </div>
-                      ))}
+                {adicionales.length === 0 && <p style={{ color:'var(--texto-suave)', fontSize:'0.88rem', padding:'8px 0' }}>Sin costos adicionales. Agrega uno si este producto tiene costos exclusivos.</p>}
+              </div>
+              <div className="ed-ing-add">
+                {adicChooser ? (
+                  <div className="ed-ing-chooser">
+                    <span style={{ fontSize:'0.82rem', color:'var(--texto-suave)', width:'100%' }}>¿Qué tipo de costo vas a agregar?</span>
+                    <button type="button" className="btn btn-sm btn-secondary" onClick={() => { abrirAdicNuevo('simple'); setAdicChooser(false) }}><Ico as={DollarSign} size={13} />Costo simple</button>
+                    <button type="button" className="btn btn-sm btn-dorado" onClick={() => { abrirAdicNuevo('dep'); setAdicChooser(false) }}><Ico as={Wrench} size={13} />Depreciación por horas</button>
+                    <button type="button" className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={() => setAdicChooser(false)}>Cancelar</button>
                   </div>
+                ) : (
+                  <button type="button" className="ed-ing-add-btn" onClick={() => setAdicChooser(true)}><Plus size={20} aria-hidden="true" />Agregar costo</button>
                 )}
               </div>
-            )}
-          </div>
+              <small style={{ display:'block', color:'var(--texto-suave)', fontSize:'0.72rem' }}>Base: <strong>por unidad</strong> suma directo; <strong>por bache</strong> se divide entre las unidades del bache; <strong>por mes</strong> entre las unidades del mes.</small>
+
+              {(formProd.tipo === 'mp' || formProd.tipo === 'subproducto') && (
+                <div style={{ marginTop:16, paddingTop:14, borderTop:'1px solid var(--crema-oscuro)' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:6 }}>
+                    <strong style={{ color:'var(--selva)' }}><Ico as={Clock} size={14} />Costos adicionales por horas o días</strong>
+                  </div>
+                  <small style={{ color:'var(--texto-suave)', display:'block', marginBottom:8 }}>
+                    Ejemplo: consumo energético del horno por hora. La <strong>cantidad sugerida × tarifa</strong> entra al costo de producto
+                    (repartida entre las unidades del bache). En cada orden se diligencia la cantidad real.
+                  </small>
+                  <div className="ed-ing-lista">
+                    {costosHora.map((c, idx) => {
+                      const nombre = (c.nombre && c.nombre.trim()) || 'Sin concepto'
+                      return (
+                        <div key={c._id} className={`ed-ing-item ${ordHora.rowClassName(idx)}`} {...ordHora.rowProps(idx)}>
+                          <span className="ed-drag" {...ordHora.handleProps(idx)}><GripVertical size={16} aria-hidden="true" /></span>
+                          <button type="button" className="ed-ing-main" onClick={() => abrirHoraEditar(c._id)}>
+                            <span className="ed-ing-nombre">{nombre}</span>
+                            <span className="ed-ing-datos"><span>{fCOP(parseFloat(c.tarifa)||0)}/{c.unidad === 'dia' ? 'día' : 'hora'}</span><span>sugerido: {c.cantidad_default || 0}</span></span>
+                          </button>
+                          <div className="ed-ing-acc">
+                            <button type="button" className="btn btn-xs btn-secondary" title="Editar costo" onClick={() => abrirHoraEditar(c._id)}><Pencil size={14} aria-hidden="true" /></button>
+                          </div>
+                        </div>
+                      )
+                    })}
+                    {costosHora.length === 0 && <p style={{ fontSize:'0.82rem', color:'var(--texto-suave)', margin:0, padding:'6px 0' }}>Sin costos por tiempo. Agrégalos para que aparezcan al diligenciar la orden.</p>}
+                  </div>
+                  <div className="ed-ing-add">
+                    <button type="button" className="ed-ing-add-btn" onClick={abrirHoraNuevo}><Plus size={20} aria-hidden="true" />Agregar costo por tiempo</button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </details>
+
+          {/* ── Modal: agregar / editar un costo adicional ── */}
+          <Modal open={!!adicModal} onClose={() => cerrarAdicModal(false)} guard={false}
+            title={adicModal?.isNew ? 'Agregar costo adicional' : 'Editar costo adicional'}
+            footer={adicModal && (
+              <div style={{ display:'flex', gap:8, width:'100%', alignItems:'center' }}>
+                <button type="button" className="btn btn-danger btn-sm" onClick={() => eliminarAdic(adicModal.id)}><Ico as={Trash2} size={14} />Eliminar</button>
+                <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => cerrarAdicModal(false)}>Cancelar</button>
+                  <button type="button" className="btn btn-primary btn-sm" onClick={() => cerrarAdicModal(true)}><Ico as={Check} size={14} />Guardar en la lista</button>
+                </div>
+              </div>
+            )}>
+            {adicModal && (() => {
+              const a = adicionales.find(x => x._id === adicModal.id)
+              if (!a) return null
+              if (a.dep) {
+                const vm = parseFloat(a.dep.valorMaquina)||0, hv = parseFloat(a.dep.horasVida)||0, hb = parseFloat(a.dep.horasBache)||0
+                const costoHora = hv > 0 ? vm/hv : 0
+                const valorBache = costoHora * hb
+                const updDep = (campo, val) => {
+                  const dep = { ...a.dep, [campo]: val }
+                  const vm2 = parseFloat(dep.valorMaquina)||0, hv2 = parseFloat(dep.horasVida)||0, hb2 = parseFloat(dep.horasBache)||0
+                  updAdic(a._id, { dep, valor: hv2 > 0 ? (vm2/hv2)*hb2 : 0, base: 'bache' })
+                }
+                return (
+                  <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+                    <div><label className="form-label">Máquina / equipo</label><input className="form-control" value={a.descripcion||''} onChange={e => updAdic(a._id, { descripcion: e.target.value })} placeholder="Ej. Depreciación horno" /></div>
+                    <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                      <div><label className="form-label">Valor máquina ($)</label><input type="number" className="form-control" value={a.dep.valorMaquina ?? ''} onChange={e => updDep('valorMaquina', e.target.value)} min={0} step="any" placeholder="4000000" /></div>
+                      <div><label className="form-label">Vida útil (horas)</label><input type="number" className="form-control" value={a.dep.horasVida ?? ''} onChange={e => updDep('horasVida', e.target.value)} min={0} step="any" placeholder="10000" /></div>
+                    </div>
+                    <div><label className="form-label">Horas por bache</label><input type="number" className="form-control" value={a.dep.horasBache ?? ''} onChange={e => updDep('horasBache', e.target.value)} min={0} step="any" placeholder="2" /></div>
+                    <div style={{ background:'var(--crema)', borderRadius:'var(--radio)', padding:'10px 12px', fontSize:'0.82rem', color: valorBache > 0 ? 'var(--selva)' : 'var(--texto-suave)' }}>
+                      {valorBache > 0
+                        ? <>Costo/hora: <strong>{fCOP(costoHora)}</strong> × {hb} h = <strong>{fCOP(valorBache)}</strong> por bache (se divide entre las unidades del bache).</>
+                        : 'Llena los tres valores para calcular la depreciación por bache.'}
+                    </div>
+                  </div>
+                )
+              }
+              return (
+                <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+                  <div><label className="form-label">Descripción</label><input className="form-control" value={a.descripcion||''} onChange={e => updAdic(a._id, { descripcion: e.target.value })} placeholder="Ej. Etiqueta especial, transporte…" /></div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                    <div><label className="form-label">Valor (COP)</label><input type="number" className="form-control" value={a.valor ?? ''} onChange={e => updAdic(a._id, { valor: e.target.value })} min={0} step="any" /></div>
+                    <div><label className="form-label">Base</label><Select className="form-control" value={a.base || 'unidad'} onChange={e => updAdic(a._id, { base: e.target.value })}><option value="unidad">por unidad</option><option value="bache">por bache</option><option value="mes">por mes</option></Select></div>
+                  </div>
+                  <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Base: <strong>por unidad</strong> suma directo; <strong>por bache</strong> se divide entre las unidades del bache; <strong>por mes</strong> entre las unidades del mes.</small>
+                </div>
+              )
+            })()}
+          </Modal>
+
+          {/* ── Modal: agregar / editar un costo por hora/día ── */}
+          <Modal open={!!horaModal} onClose={() => cerrarHoraModal(false)} guard={false}
+            title={horaModal?.isNew ? 'Agregar costo por tiempo' : 'Editar costo por tiempo'}
+            footer={horaModal && (
+              <div style={{ display:'flex', gap:8, width:'100%', alignItems:'center' }}>
+                <button type="button" className="btn btn-danger btn-sm" onClick={() => eliminarHora(horaModal.id)}><Ico as={Trash2} size={14} />Eliminar</button>
+                <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => cerrarHoraModal(false)}>Cancelar</button>
+                  <button type="button" className="btn btn-primary btn-sm" onClick={() => cerrarHoraModal(true)}><Ico as={Check} size={14} />Guardar en la lista</button>
+                </div>
+              </div>
+            )}>
+            {horaModal && (() => {
+              const c = costosHora.find(x => x._id === horaModal.id)
+              if (!c) return null
+              return (
+                <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+                  <div><label className="form-label">Concepto</label><input className="form-control" value={c.nombre||''} onChange={e => updHora(c._id, { nombre: e.target.value })} placeholder="Energía horno" /></div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                    <div><label className="form-label">Unidad</label><Select className="form-control" value={c.unidad || 'hora'} onChange={e => updHora(c._id, { unidad: e.target.value })}><option value="hora">Hora</option><option value="dia">Día</option></Select></div>
+                    <div><label className="form-label">Tarifa</label><MoneyInput value={c.tarifa || ''} onChange={v => updHora(c._id, { tarifa: v })} /></div>
+                  </div>
+                  <div><label className="form-label">Cantidad sugerida</label><input type="number" min="0" step="any" className="form-control" value={c.cantidad_default || ''} onChange={e => updHora(c._id, { cantidad_default: e.target.value })} /></div>
+                </div>
+              )
+            })()}
+          </Modal>
 
           {/* ── Precios y Resumen ── Una sola sección del acordeón: a la izquierda los precios,
               a la derecha el resumen de costos. En escritorio quedan lado a lado (comparas precio
