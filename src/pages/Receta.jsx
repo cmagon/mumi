@@ -13,6 +13,9 @@ import Modal from '../components/ui/Modal'
 import ImageCropper from '../components/ui/ImageCropper'
 import BuscadorSelect from '../components/ui/BuscadorSelect'
 import Select from '../components/ui/Select'
+import { ShoppingBasket, TrendingUp, Package, Pencil, Plus, X, Check, Trash2, GripVertical, AlertTriangle, Lock } from 'lucide-react'
+
+const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 export default function Receta({ embedded = false, productos = [], onConvertir }) {
   const toast = useToast()
@@ -265,6 +268,24 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
   const nombresIng = ingredientes.map(i => i.nombre).filter(Boolean)
   const ordIng = useReorder(setIngredientes)
 
+  // Modal de un solo ingrediente (agregar/editar), igual que en las fichas
+  const [ingModal, setIngModal] = useState(null)      // { id, isNew } | null
+  const [ingChooser, setIngChooser] = useState(false) // elección Normal / Relativo
+  const abrirIngNuevo = (tipo) => {
+    const _id = Date.now() + Math.random()
+    const nuevo = tipo === 'relativo'
+      ? { ...EMPTY_ING_BASE, _id, nombre: '', tipo: 'relativo', base: [] }
+      : { ...EMPTY_ING_BASE, _id, nombre: '', tipo: 'normal', base: 'total' }
+    setIngredientes(p => [...p, nuevo])
+    setIngModal({ id: _id, isNew: true })
+  }
+  const abrirIngEditar = (id) => setIngModal({ id, isNew: false })
+  const cerrarIngModal = (guardar) => {
+    if (!guardar && ingModal?.isNew) setIngredientes(p => p.filter(r => r._id !== ingModal.id))
+    setIngModal(null)
+  }
+  const eliminarIngModal = (id) => { delIng(id); setIngModal(null) }
+
   // Al editar el % de un normal: para que los porcentajes ESCRITOS por el usuario se sostengan
   // (y no se "descuadren" recalculándose entre sí), se trabaja SIEMPRE contra un peso total fijo:
   // si el usuario no lo ha definido, se congela automáticamente el total actual de gramos la
@@ -508,121 +529,159 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
           {/* Columna izquierda */}
           <div>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
-              <strong style={{ color: 'var(--selva)', fontSize: '0.95rem' }}>📋 Ingredientes</strong>
+              <strong style={{ color: 'var(--selva)', fontSize: '0.95rem', display:'inline-flex', alignItems:'center' }}><Ico as={ShoppingBasket} size={15} />Ingredientes</strong>
               <label style={{ fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 6 }}>
                 Peso total mezcla (g):
                 <input type="number" className="form-control" style={{ width: 120 }} value={pesoTotalMezcla} disabled={soloLectura} onChange={e => setPesoTotalMezcla(e.target.value)} placeholder="Ej: 1000" />
               </label>
-              {puedeAgregarIng && (
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button className="btn btn-xs btn-secondary" onClick={addIngNormal}>+ Normal</button>
-                  <button className="btn btn-xs btn-dorado" onClick={addIngRelativo}>+ Relativo a...</button>
-                </div>
-              )}
             </div>
             {parseFloat(pesoTotalMezcla) > 0 && <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', marginBottom: 6 }}>Con el peso total fijo: al escribir <strong>%</strong> se calculan los <strong>gramos</strong> y viceversa.</div>}
-            {/* Header columnas */}
-            <div className="ed-head" style={{ display: 'grid', gridTemplateColumns: '2fr 0.8fr 0.8fr 0.8fr 44px', gap: 5, padding: '4px 0', fontSize: '0.7rem', fontWeight: 700, color: 'var(--texto-suave)', textTransform: 'uppercase' }}>
-              <span>Ingrediente</span><span style={{ textAlign: 'right' }}>% receta</span><span style={{ textAlign: 'right' }}>g (opc.)</span><span style={{ textAlign: 'right' }}>$/Kg</span><span></span>
+
+            {/* Lista compacta: nombre + %/g/$ y lápiz para editar; arrastra por el asa para reordenar */}
+            <div className="ed-ing-lista">
+              {ingredientes.map((r, idx) => {
+                const esRelativo = r.tipo === 'relativo'
+                const nombre = (r.nombre && r.nombre.trim())
+                  || (r.mpId ? mps.find(m => String(m.id) === String(r.mpId))?.nombre : '')
+                  || 'Sin nombre'
+                const bloqueado = esOperario && r._base
+                const incompleto = nombre === 'Sin nombre' || !((parseFloat(r.pct)||0) > 0 || (parseFloat(r.gramos)||0) > 0)
+                return (
+                  <div key={r._id} className={`ed-ing-item ${ordIng.rowClassName(idx)}`} {...(soloLectura ? {} : ordIng.rowProps(idx))}>
+                    {!soloLectura && <span className="ed-drag" {...ordIng.handleProps(idx)}><GripVertical size={16} aria-hidden="true" /></span>}
+                    <button type="button" className="ed-ing-main" onClick={() => abrirIngEditar(r._id)}>
+                      <span className="ed-ing-nombre">
+                        {nombre}
+                        {esRelativo && <span className="badge" style={{ background:'rgba(200,169,74,0.18)', color:'var(--tierra)', fontSize:'0.6rem', fontWeight:700 }}>RELATIVO</span>}
+                        {bloqueado && <Ico as={Lock} size={12} />}
+                        {incompleto && !bloqueado && <Ico as={AlertTriangle} size={12} />}
+                      </span>
+                      <span className="ed-ing-datos">
+                        <span>{(parseFloat(r.pct)||0) > 0 ? Number(r.pct).toFixed(1)+'%' : '—'}</span>
+                        {(parseFloat(r.gramos)||0) > 0 && <span>{fNum(parseFloat(r.gramos))} g</span>}
+                        <span>{fCOP(parseFloat(r.precio)||0)}/Kg</span>
+                      </span>
+                    </button>
+                    <div className="ed-ing-acc">
+                      <button type="button" className="ed-ing-edit" title={soloLectura ? 'Ver ingrediente' : 'Editar ingrediente'} onClick={() => abrirIngEditar(r._id)}><Pencil size={14} aria-hidden="true" /></button>
+                    </div>
+                  </div>
+                )
+              })}
+              {ingredientes.length === 0 && <p style={{ color:'var(--texto-suave)', fontSize:'0.88rem', padding:'8px 0' }}>Aún no hay ingredientes.{puedeAgregarIng ? ' Usa el botón para agregar el primero.' : ''}</p>}
             </div>
-            {ingredientes.map((r, idx) => {
-              const esRelativo = r.tipo === 'relativo'
-              const accentColor = esRelativo ? 'var(--dorado)' : undefined
-              return (
-                <div key={r._id} className={ordIng.rowClassName(idx)} {...ordIng.rowProps(idx)} style={{ display: 'grid', gridTemplateColumns: '2fr 0.8fr 0.8fr 0.8fr 44px', gap: 5, marginBottom: 8, alignItems: 'start' }}>
-
-                  {/* ---- Asa de arrastre + Columna nombre: toggle lista/manual + input/select ---- */}
-                  <div style={{ display: 'flex', gap: 6, alignItems: 'flex-start' }}>
-                    <span {...ordIng.handleProps(idx)}>⠿</span>
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: 3, flex: 1, minWidth: 0 }}>
-                    {/* Toggle modo */}
-                    <div style={{ display: 'flex' }}>
-                      {['lista','manual'].map((m, i) => (
-                        <button
-                          key={m}
-                          type="button"
-                          disabled={soloLectura}
-                          onClick={() => toggleModo(r._id, m)}
-                          style={{
-                            flex: 1, padding: '2px 0', fontSize: '0.67rem', cursor: soloLectura ? 'default' : 'pointer',
-                            fontFamily: "'Source Sans 3', sans-serif", fontWeight: 600,
-                            background: r.modo === m ? (esRelativo ? 'var(--tierra)' : 'var(--selva)') : 'transparent',
-                            color: r.modo === m ? 'var(--crema)' : 'var(--texto-suave)',
-                            border: `1px solid ${r.modo === m ? (esRelativo ? 'var(--tierra)' : 'var(--selva)') : 'var(--crema-oscuro)'}`,
-                            borderRadius: i === 0 ? '3px 0 0 3px' : '0 3px 3px 0',
-                            marginLeft: i === 1 ? -1 : 0,
-                          }}
-                        >
-                          {m === 'lista' ? '📦 Lista' : '✏ Manual'}
-                        </button>
-                      ))}
-                    </div>
-
-                    {/* Input según modo */}
-                    {r.modo === 'manual'
-                      ? <input
-                          className="form-control"
-                          placeholder="Nombre ingrediente"
-                          value={r.nombre}
-                          disabled={soloLectura}
-                          onChange={e => updIng(r._id, 'nombre', e.target.value)}
-                          style={{ borderColor: accentColor }}
-                        />
-                      : <BuscadorSelect value={r.mpId || ''} disabled={soloLectura} placeholder="Escribe para buscar la MP..."
-                          opciones={mps.map(m => ({ value: String(m.id), label: m.nombre, sub: `${fCOP(m.precio)}/${m.unidad}` }))}
-                          onSelect={(v) => handleSelectMP(r._id, v)} />
-                    }
-
-                    {/* Selector "relativo a" (uno o varios) solo para tipo relativo */}
-                    {esRelativo && (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 3, fontSize: '0.72rem', color: 'var(--tierra)' }}>
-                        <span>relativo a la suma de (marca uno o varios):</span>
-                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '2px 8px', border: '1px solid var(--dorado)', borderRadius: 4, padding: '4px 6px', maxHeight: 90, overflowY: 'auto' }}>
-                          {nombresIng.filter(n => n !== r.nombre).length === 0
-                            ? <span style={{ color: 'var(--texto-suave)' }}>Agrega ingredientes normales primero</span>
-                            : nombresIng.filter(n => n !== r.nombre).map(n => {
-                              const sel = Array.isArray(r.base) ? r.base : (r.base ? [r.base] : [])
-                              const checked = sel.includes(n)
-                              return (
-                                <label key={n} style={{ display: 'flex', alignItems: 'center', gap: 3, cursor: soloLectura ? 'default' : 'pointer', whiteSpace: 'nowrap' }}>
-                                  <input type="checkbox" checked={checked} disabled={soloLectura} onChange={() => updIng(r._id, 'base', checked ? sel.filter(x => x !== n) : [...sel, n])} />
-                                  {n}
-                                </label>
-                              )
-                            })}
-                        </div>
-                      </div>
-                    )}
-                    </div>
+            {puedeAgregarIng && (
+              <div className="ed-ing-add">
+                {ingChooser ? (
+                  <div className="ed-ing-chooser">
+                    <span style={{ fontSize:'0.82rem', color:'var(--texto-suave)', width:'100%' }}>¿Qué tipo de ingrediente vas a agregar?</span>
+                    <button type="button" className="btn btn-sm btn-secondary" onClick={() => { abrirIngNuevo('normal'); setIngChooser(false) }}><Ico as={ShoppingBasket} size={13} />Normal</button>
+                    <button type="button" className="btn btn-sm btn-dorado" onClick={() => { abrirIngNuevo('relativo'); setIngChooser(false) }}><Ico as={TrendingUp} size={13} />Relativo (a otros)</button>
+                    <button type="button" className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={() => setIngChooser(false)}>Cancelar</button>
                   </div>
-
-                  {/* % */}
-                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                    <input type="number" className="form-control" placeholder="0" value={r.pct} disabled={soloLectura} onFocus={e => e.target.select()} onChange={e => esRelativo ? updIng(r._id, 'pct', e.target.value) : handlePctChange(r._id, e.target.value)} step="0.01" style={{ textAlign: 'right', paddingRight: 18, borderColor: accentColor }} />
-                    <span style={{ position: 'absolute', right: 6, fontSize: '0.78rem', color: 'var(--texto-suave)', pointerEvents: 'none' }}>%</span>
-                  </div>
-                  {/* g */}
-                  <input type="number" className="form-control" placeholder="g" value={r.gramos || ''} disabled={soloLectura} onFocus={e => e.target.select()} onChange={e => handleGramosChange(r._id, e.target.value)} style={{ textAlign: 'right', background: esRelativo ? 'rgba(200,169,74,0.1)' : 'rgba(124,179,66,0.08)', borderColor: accentColor }} />
-                  {/* $/Kg — editable aunque venga de lista */}
-                  <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                    <span style={{ position: 'absolute', left: 6, fontSize: '0.78rem', color: 'var(--texto-suave)', pointerEvents: 'none' }}>$</span>
-                    <MoneyInput value={r.precio} disabled={soloLectura} onChange={v => updIng(r._id, 'precio', v)} style={{ paddingLeft: 16, borderColor: accentColor, background: r.modo === 'lista' && r.mpId ? 'rgba(124,179,66,0.06)' : undefined }} />
-                  </div>
-                  {/* Reordenar + eliminar */}
-                  <div className="ed-controls" style={{ display: 'flex', alignItems: 'center', gap: 2, marginTop: 4 }}>
-                    {puedeEliminarFila(r)
-                      ? <button className="btn btn-danger btn-xs" onClick={() => delIng(r._id)}>✕</button>
-                      : (esOperario && r._base) ? <span title="Ingrediente de la receta base — no se puede eliminar" style={{ color: 'var(--texto-suave)', fontSize: '0.8rem' }}>🔒</span> : null}
-                  </div>
-                </div>
-              )
-            })}
+                ) : (
+                  <button type="button" className="ed-ing-add-btn" onClick={() => setIngChooser(true)}><Plus size={20} aria-hidden="true" />Agregar ingrediente</button>
+                )}
+              </div>
+            )}
             <div style={{ fontSize: '0.8rem', marginTop: 6, height: 18, color: Math.abs(totalPctNormales - 100) > 0.5 ? 'var(--rojo)' : 'var(--lima)' }}>
               {ingredientes.length > 0 && (Math.abs(totalPctNormales - 100) > 0.5
                 ? `⚠ % normales suman: ${totalPctNormales.toFixed(2)}% (idealmente 100%)`
-                : `✅ % normales: ${totalPctNormales.toFixed(2)}%`)
+                : `✓ % normales: ${totalPctNormales.toFixed(2)}%`)
               }
             </div>
+
+            {/* Modal: agregar / editar un ingrediente de la receta rápida */}
+            <Modal open={!!ingModal} onClose={() => cerrarIngModal(false)} guard={false}
+              title={ingModal?.isNew ? 'Agregar ingrediente' : (soloLectura ? 'Ingrediente' : 'Editar ingrediente')}
+              footer={ingModal && (
+                <div style={{ display: 'flex', gap: 8, width: '100%', alignItems: 'center' }}>
+                  {(() => { const r = ingredientes.find(x => x._id === ingModal.id); return r && puedeEliminarFila(r)
+                    ? <button type="button" className="btn btn-danger btn-sm" onClick={() => eliminarIngModal(ingModal.id)}><Ico as={Trash2} size={14} />Eliminar</button>
+                    : <span /> })()}
+                  <div style={{ marginLeft: 'auto', display: 'flex', gap: 8 }}>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => cerrarIngModal(false)}>{soloLectura ? 'Cerrar' : 'Cancelar'}</button>
+                    {!soloLectura && <button type="button" className="btn btn-primary btn-sm" onClick={() => cerrarIngModal(true)}><Ico as={Check} size={14} />Guardar en la lista</button>}
+                  </div>
+                </div>
+              )}>
+              {ingModal && (() => {
+                const r = ingredientes.find(x => x._id === ingModal.id)
+                if (!r) return null
+                const esRelativo = r.tipo === 'relativo'
+                const modo = r.modo || 'lista'
+                const accent = esRelativo ? 'var(--dorado)' : undefined
+                const dis = soloLectura
+                const seg = (activo, primero) => ({
+                  flex: 1, padding: '6px 0', fontSize: '0.8rem', cursor: dis ? 'default' : 'pointer', fontFamily: "'Source Sans 3',sans-serif", fontWeight: 600,
+                  display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4,
+                  background: activo ? 'var(--selva)' : 'transparent', color: activo ? 'var(--crema)' : 'var(--texto-suave)',
+                  border: `1px solid ${activo ? 'var(--selva)' : 'var(--crema-oscuro)'}`,
+                  borderRadius: primero ? '4px 0 0 4px' : '0 4px 4px 0', marginLeft: primero ? 0 : -1,
+                })
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+                    <div>
+                      <label className="form-label">Tipo de ingrediente</label>
+                      <div style={{ display: 'flex' }}>
+                        <button type="button" disabled={dis} style={seg(!esRelativo, true)} onClick={() => setIngredientes(p => p.map(x => x._id === r._id ? { ...x, tipo: 'normal', base: 'total' } : x))}>Normal</button>
+                        <button type="button" disabled={dis} style={seg(esRelativo, false)} onClick={() => setIngredientes(p => p.map(x => x._id === r._id ? { ...x, tipo: 'relativo', base: Array.isArray(x.base) ? x.base : [] } : x))}>Relativo (a otros)</button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="form-label">Fuente</label>
+                      <div style={{ display: 'flex' }}>
+                        <button type="button" disabled={dis} style={seg(modo === 'lista', true)} onClick={() => toggleModo(r._id, 'lista')}><Package size={13} aria-hidden="true" />De inventario</button>
+                        <button type="button" disabled={dis} style={seg(modo === 'manual', false)} onClick={() => toggleModo(r._id, 'manual')}><Pencil size={13} aria-hidden="true" />Manual</button>
+                      </div>
+                    </div>
+                    <div>
+                      <label className="form-label">Ingrediente</label>
+                      {modo === 'manual'
+                        ? <input className="form-control" placeholder="Nombre del ingrediente" value={r.nombre || ''} disabled={dis} onChange={e => updIng(r._id, 'nombre', e.target.value)} style={{ borderColor: accent }} />
+                        : <BuscadorSelect value={r.mpId || ''} disabled={dis} placeholder="Escribe para buscar la MP..."
+                            opciones={mps.map(m => ({ value: String(m.id), label: m.nombre, sub: `${fCOP(m.precio)}/${m.unidad}` }))}
+                            onSelect={(v) => handleSelectMP(r._id, v)} />
+                      }
+                    </div>
+                    {esRelativo && (
+                      <div>
+                        <label className="form-label">Relativo a la suma de <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(marca uno o varios)</small></label>
+                        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 12px', border: '1px solid var(--dorado)', borderRadius: 4, padding: '8px 10px', maxHeight: 140, overflowY: 'auto' }}>
+                          {nombresIng.filter(n => n !== r.nombre).length === 0
+                            ? <span style={{ color: 'var(--texto-suave)', fontSize: '0.82rem' }}>Agrega ingredientes normales primero</span>
+                            : nombresIng.filter(n => n !== r.nombre).map(n => {
+                                const sel = Array.isArray(r.base) ? r.base : (r.base ? [r.base] : [])
+                                const checked = sel.includes(n)
+                                return (
+                                  <label key={n} style={{ display: 'flex', alignItems: 'center', gap: 4, cursor: dis ? 'default' : 'pointer', whiteSpace: 'nowrap', fontSize: '0.85rem' }}>
+                                    <input type="checkbox" checked={checked} disabled={dis} onChange={() => updIng(r._id, 'base', checked ? sel.filter(x => x !== n) : [...sel, n])} />
+                                    {n}
+                                  </label>
+                                )
+                              })}
+                        </div>
+                      </div>
+                    )}
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                      <div>
+                        <label className="form-label">% receta</label>
+                        <input type="number" className="form-control" placeholder="0" value={r.pct} disabled={dis} onFocus={e => e.target.select()} step="0.01"
+                          onChange={e => esRelativo ? updIng(r._id, 'pct', e.target.value) : handlePctChange(r._id, e.target.value)} style={{ textAlign: 'right', borderColor: accent }} />
+                      </div>
+                      <div>
+                        <label className="form-label">Gramos <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(opcional)</small></label>
+                        <input type="number" className="form-control" placeholder="g" value={r.gramos || ''} disabled={dis} onFocus={e => e.target.select()} onChange={e => handleGramosChange(r._id, e.target.value)} style={{ textAlign: 'right', borderColor: accent }} />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="form-label">Costo $ / Kg</label>
+                      <MoneyInput value={r.precio} disabled={dis} onChange={v => updIng(r._id, 'precio', v)} style={{ background: modo === 'lista' && r.mpId ? 'rgba(124,179,66,0.06)' : undefined, borderColor: accent }} />
+                    </div>
+                  </div>
+                )
+              })()}
+            </Modal>
 
             <hr className="divider" />
 
