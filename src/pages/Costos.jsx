@@ -3529,11 +3529,9 @@ export default function Costos({ vista = 'productos' }) {
           </Modal>
 
           {costosSubtab === 'analisis' && <>
-          <div className="card">
-          <div className="card-title"><Ico as={Clock} size={15} />Cálculo y reparto del CIF</div>
-          {/* Desglose y simulador del costo por minuto de mano de obra */}
-          <div style={{ marginTop:12, padding:12, background:'#fff8e8', border:'1px solid var(--dorado)', borderRadius:'var(--radio)' }}>
-            <strong style={{ color:'var(--selva)' }}><Ico as={Clock} size={14} />Costo por minuto de mano de obra (producción)</strong>
+          <details className="card" open>
+            <summary className="card-title"><Ico as={Clock} size={15} />Costo por minuto de mano de obra<span className="card-hint">{fCOP(costoMin)}/min</span></summary>
+            <div className="card-acc-body">
             <div style={{ fontSize:'0.85rem', marginTop:8, display:'grid', gap:4 }}>
               <div>Costos de producción (CIF) del mes: <strong>{fCOP(cifTotal)}</strong> <small style={{ color:'var(--texto-suave)' }}>(ítems CIF {fCOP(cifManual)} + nómina producción {fCOP(costoNomina.total)} + depreciación general {fCOP(depreciacionGeneral)})</small></div>
               <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap' }}>
@@ -3553,13 +3551,12 @@ export default function Costos({ vista = 'productos' }) {
               <div style={{ fontSize:'1rem', marginTop:2 }}>Costo/minuto = {fCOP(cifTotal)} ÷ {fNum(Math.round(minsDisponibles))} = <strong style={{ color:'var(--dorado)' }}>{fCOP(costoMin)}/min</strong></div>
             </div>
 
-          </div>
-
-          <div style={{ marginTop:12, padding:12, background:'var(--crema)', borderRadius:'var(--radio)' }}>
-            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, flexWrap:'wrap', gap:8 }}>
-              <strong style={{ color:'var(--selva)' }}><Ico as={BarChart3} size={14} />Absorción del CIF por producto</strong>
-              <div style={{ fontSize:'1.05rem', fontWeight:600, color:'var(--selva)' }}>CIF del mes: <span style={{ color:'var(--dorado)' }}>{fCOP(cifTotal)}</span></div>
             </div>
+          </details>
+
+          <details className="card">
+            <summary className="card-title"><Ico as={BarChart3} size={15} />Absorción del CIF por producto<span className="card-hint">CIF {fCOP(cifTotal)}/mes</span></summary>
+            <div className="card-acc-body">
             {cifAbsorcion.items.length === 0
               ? <p style={{ color:'var(--texto-suave)', fontSize:'0.9rem' }}>Agrega fichas de costos para ver la absorción</p>
               : (() => {
@@ -3655,8 +3652,12 @@ export default function Costos({ vista = 'productos' }) {
                 <div style={{ fontSize:'0.72rem', color:'var(--texto-suave)', marginTop:4 }}>Solo se usa mientras no haya fichas de producto. Al crear productos, el CIF se reparte automáticamente y este valor se ignora.</div>
               </div>
             )}
-          </div>
+            </div>
+          </details>
 
+          <details className="card">
+            <summary className="card-title"><Ico as={DollarSign} size={15} />Punto de equilibrio (contable vs. de caja)</summary>
+            <div className="card-acc-body">
           {/* Punto de equilibrio de CAJA: el abono a deuda no es gasto pero sí hay que generarlo */}
           {(() => {
             const mcTotalMes = peqMultiproducto.reduce((s, i) => s + i.mcu * i.q, 0)
@@ -3668,8 +3669,7 @@ export default function Costos({ vista = 'productos' }) {
             const peContable = getPEqCaja(fijosTot, 0, mcuProm)
             const peCaja = getPEqCaja(fijosTot, gastosOp.pasivo.total, mcuProm)
             return (
-              <div style={{ marginTop:12, padding:12, background:'var(--crema)', borderRadius:'var(--radio)' }}>
-                <strong style={{ color:'var(--selva)' }}><Ico as={DollarSign} size={14} />Punto de equilibrio: contable vs. de caja</strong>
+              <>
                 {mcuProm <= 0
                   ? <p style={{ fontSize:'0.85rem', color:'var(--texto-suave)', marginTop:8 }}>Necesitas fichas con precio y costo variable para calcularlo.</p>
                   : <>
@@ -3728,10 +3728,11 @@ export default function Costos({ vista = 'productos' }) {
                         </div>
                       </div>
                     </>}
-              </div>
+              </>
             )
           })()}
-        </div>
+            </div>
+          </details>
           </>}
         </>
         )
