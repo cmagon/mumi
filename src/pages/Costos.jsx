@@ -25,7 +25,7 @@ import { useConfirm } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import Receta from './Receta'
 import { CATALOGO_PARAMS, PARAM_UNIDAD, PRESENTACIONES } from '../lib/calidad'
-import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Printer, Settings, ShoppingCart, Tag, Trash2, TrendingUp, Undo2, Wrench, X, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Plus, Eye, Check, AlertTriangle, Save, Upload, Leaf, Info, Star } from 'lucide-react'
+import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Printer, Settings, ShoppingCart, Tag, Trash2, TrendingUp, Undo2, Wrench, X, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Plus, Eye, Check, AlertTriangle, Save, Upload, ShoppingBasket, Info, Star } from 'lucide-react'
 import { descargarFichaExcel } from '../lib/fichaExcel'
 import { getConfig } from '../lib/appConfig'
 import Select from '../components/ui/Select'
@@ -1875,7 +1875,7 @@ export default function Costos({ vista = 'productos' }) {
           {/* ── Ingredientes (integrado con toggle lista/manual de Calculadora de Receta) ── */}
           <details className="card" {...secProps('ingredientes')}>
             <summary className="card-title ed-sec-title">
-              <span className="ed-sec-title-main"><span className="ed-paso-num">2</span><Ico as={Leaf} size={14} />Materias Primas e Insumos</span>
+              <span className="ed-sec-title-main"><span className="ed-paso-num">2</span><Ico as={ShoppingBasket} size={14} />Materias Primas e Insumos</span>
               <span className="card-hint">{ingredientes.length} ingrediente{ingredientes.length === 1 ? '' : 's'}</span>
               <div className="ed-sec-actions" onClick={e => e.stopPropagation()}>
                 <button className="btn btn-sm btn-secondary" onClick={addIngrediente}>+ Normal</button>
