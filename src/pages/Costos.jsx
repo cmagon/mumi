@@ -1991,9 +1991,7 @@ export default function Costos({ vista = 'productos' }) {
                       </span>
                     </button>
                     <div className="ed-ing-acc">
-                      <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === 0} title="Subir" onClick={() => ordIng.moverArriba(idx)}><ChevronUp size={13} aria-hidden="true" /></button>
-                      <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === ingredientes.length - 1} title="Bajar" onClick={() => ordIng.moverAbajo(idx)}><ChevronDown size={13} aria-hidden="true" /></button>
-                      <button type="button" className="btn btn-xs btn-secondary" title="Editar ingrediente" onClick={() => abrirIngEditar(r._id)}><Pencil size={14} aria-hidden="true" /></button>
+                      <button type="button" className="ed-ing-edit" title="Editar ingrediente" onClick={() => abrirIngEditar(r._id)}><Pencil size={14} aria-hidden="true" /></button>
                     </div>
                   </div>
                 )
@@ -2479,9 +2477,7 @@ export default function Costos({ vista = 'productos' }) {
                       <span className="ed-ing-datos"><span>{fNum(parseFloat(r.minutos)||0)} min</span><span>{fCOP(costo)}</span></span>
                     </button>
                     <div className="ed-ing-acc">
-                      <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === 0} title="Subir" onClick={() => ordProc.moverArriba(idx)}><ChevronUp size={13} aria-hidden="true" /></button>
-                      <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === procesos.length - 1} title="Bajar" onClick={() => ordProc.moverAbajo(idx)}><ChevronDown size={13} aria-hidden="true" /></button>
-                      <button type="button" className="btn btn-xs btn-secondary" title="Editar proceso" onClick={() => abrirProcEditar(r._id)}><Pencil size={14} aria-hidden="true" /></button>
+                      <button type="button" className="ed-ing-edit" title="Editar proceso" onClick={() => abrirProcEditar(r._id)}><Pencil size={14} aria-hidden="true" /></button>
                     </div>
                   </div>
                 )
@@ -2548,9 +2544,7 @@ export default function Costos({ vista = 'productos' }) {
                       <span className="ed-ing-datos"><span>{fNum(parseFloat(r.cantidad)||0)} u</span><span>{fCOP(sub)}</span></span>
                     </button>
                     <div className="ed-ing-acc">
-                      <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === 0} title="Subir" onClick={() => ordEmp.moverArriba(idx)}><ChevronUp size={13} aria-hidden="true" /></button>
-                      <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === empaque.length - 1} title="Bajar" onClick={() => ordEmp.moverAbajo(idx)}><ChevronDown size={13} aria-hidden="true" /></button>
-                      <button type="button" className="btn btn-xs btn-secondary" title="Editar empaque" onClick={() => abrirEmpEditar(r._id)}><Pencil size={14} aria-hidden="true" /></button>
+                      <button type="button" className="ed-ing-edit" title="Editar empaque" onClick={() => abrirEmpEditar(r._id)}><Pencil size={14} aria-hidden="true" /></button>
                     </div>
                   </div>
                 )
@@ -2659,9 +2653,7 @@ export default function Costos({ vista = 'productos' }) {
                         <span className="ed-ing-datos"><span>{costoTxt}</span></span>
                       </button>
                       <div className="ed-ing-acc">
-                        <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === 0} title="Subir" onClick={() => ordAdic.moverArriba(idx)}><ChevronUp size={13} aria-hidden="true" /></button>
-                        <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === adicionales.length - 1} title="Bajar" onClick={() => ordAdic.moverAbajo(idx)}><ChevronDown size={13} aria-hidden="true" /></button>
-                        <button type="button" className="btn btn-xs btn-secondary" title="Editar costo" onClick={() => abrirAdicEditar(a._id)}><Pencil size={14} aria-hidden="true" /></button>
+                        <button type="button" className="ed-ing-edit" title="Editar costo" onClick={() => abrirAdicEditar(a._id)}><Pencil size={14} aria-hidden="true" /></button>
                       </div>
                     </div>
                   )
@@ -2702,7 +2694,7 @@ export default function Costos({ vista = 'productos' }) {
                             <span className="ed-ing-datos"><span>{fCOP(parseFloat(c.tarifa)||0)}/{c.unidad === 'dia' ? 'día' : 'hora'}</span><span>sugerido: {c.cantidad_default || 0}</span></span>
                           </button>
                           <div className="ed-ing-acc">
-                            <button type="button" className="btn btn-xs btn-secondary" title="Editar costo" onClick={() => abrirHoraEditar(c._id)}><Pencil size={14} aria-hidden="true" /></button>
+                            <button type="button" className="ed-ing-edit" title="Editar costo" onClick={() => abrirHoraEditar(c._id)}><Pencil size={14} aria-hidden="true" /></button>
                           </div>
                         </div>
                       )
