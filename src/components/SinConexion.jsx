@@ -1,7 +1,17 @@
+import { useEffect } from 'react'
+
 // Página completa "Sin conexión": se muestra cuando la app arranca (o se recarga) sin internet.
 // La app trabaja en línea sí o sí, así que en vez de un spinner infinito o datos viejos, se
 // muestra esta pantalla con un botón de reintento.
 export default function SinConexion({ onReintentar }) {
+  // Al volver la conexión, recargar automáticamente para traer la app y los datos frescos
+  // (evita quedarse con la versión en caché y sin datos tras restablecerse internet).
+  useEffect(() => {
+    const alVolver = () => window.location.reload()
+    window.addEventListener('online', alVolver)
+    return () => window.removeEventListener('online', alVolver)
+  }, [])
+
   return (
     <div style={{
       position: 'fixed', inset: 0, zIndex: 5000,

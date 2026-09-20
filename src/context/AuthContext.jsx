@@ -98,6 +98,9 @@ export function AuthProvider({ children }) {
       } else {
         setUser(null); setLoading(false)
       }
+    }).catch(() => {
+      // Sin conexión al arrancar: no dejar el spinner colgado para siempre.
+      setLoading(false)
     })
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
