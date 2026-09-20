@@ -1340,7 +1340,6 @@ export default function Costos({ vista = 'productos' }) {
     onError: (e) => toast('No se pudo sincronizar con Alegra: ' + e.message, 'error'),
   })
 
-
   // ---- CIF CRUD ----
   // Guarda el N° de operarios de capacidad en los parámetros de operación (sin perder los demás)
   const guardarNumOperarios = async (val) => {
@@ -1768,26 +1767,6 @@ export default function Costos({ vista = 'productos' }) {
           <div style={{ marginBottom: 12 }}>
             <button type="button" className="btn btn-secondary btn-sm" onClick={closeFicha}>← Volver a productos</button>
           </div>
-          {/* ── Selector: cargar producto (editar) o receta rápida (convertir a producto) ── */}
-          <div className="card" style={{ padding:'14px 20px', marginBottom:16, background:'rgba(26,58,42,0.03)' }}>
-            <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
-              <span style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', whiteSpace:'nowrap', display:'inline-flex', alignItems:'center' }}>
-                {editingId ? <><Ico as={Pencil} size={14} />Editando producto:</> : (selFuente.startsWith('recipe-') ? <><Ico as={FlaskConical} size={14} />Convirtiendo receta a producto:</> : <><Ico as={Download} size={14} />Cargar:</>)}
-              </span>
-              <Select className="form-control" value={selFuente} onChange={e => cargarFuente(e.target.value)} style={{ maxWidth:340 }}>
-                <option value="">— nueva ficha en blanco —</option>
-                {productos.length > 0 && <optgroup label="Productos (editar)">{productos.map(p => <option key={p.id} value={`prod-${p.id}`}>{p.nombre}</option>)}</optgroup>}
-                {recetas.length > 0 && <optgroup label="Recetas rápidas (convertir a producto)">{recetas.map(r => <option key={r.id} value={`recipe-${r.id}`}>{r.nombre}</option>)}</optgroup>}
-              </Select>
-              {(editingId || selFuente) && (
-                <button className="btn btn-secondary btn-sm" onClick={limpiarForm}>+ Nueva ficha</button>
-              )}
-              {selFuente.startsWith('recipe-') && (
-                <span style={{ fontSize:'0.8rem', color:'var(--tierra)' }}>Agrega MO, empaque y precios; al guardar se creará como producto base.</span>
-              )}
-            </div>
-          </div>
-
           {/* Calcular costos de una MP fabricada internamente (vendible O interna no vendible) */}
           {!editingId && (
             <div className="card" style={{ padding:'14px 20px', marginBottom:16, background:'rgba(124,179,66,0.06)', border:'1px solid rgba(124,179,66,0.3)' }}>
@@ -2179,6 +2158,30 @@ export default function Costos({ vista = 'productos' }) {
               <div className="form-group"><label className="form-label">Rendimiento esperado (%)</label><input type="number" className="form-control" value={rendimiento} onChange={e => setRendimiento(e.target.value)} min={1} max={100} step={0.1} /><small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>% de la mezcla que se convierte en producto (ej. por evaporación/cocción).</small></div>
               <div className="form-group"><label className="form-label">% Desperdicio</label><input type="number" className="form-control" value={desperdicio} onChange={e => setDesperdicio(e.target.value)} min={0} max={50} step={0.1} /><small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }} title="No es 100 − rendimiento: es una merma adicional que se descuenta sobre lo ya rendido.">Merma adicional, después del rendimiento. <Info size={11} style={{ verticalAlign:'-1px', marginLeft:1 }} aria-hidden="true" /></small></div>
 
+            {/* Conexión receta → unidades por bache */}
+            <div style={{ gridColumn:'1 / -1', marginTop:2, padding:'10px 14px', background:'rgba(124,179,66,0.08)', borderRadius:'var(--radio)', border:'1px solid rgba(124,179,66,0.2)', display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
+              <span style={{ fontSize:'0.85rem', color:'var(--selva)' }}>
+                Mezcla: <strong>{fNum(totalGramosBache)} g/bache</strong> →
+                Unidades estimadas: <strong style={{ color:'var(--selva)' }}>{unidadesDesdeReceta > 0 ? unidadesDesdeReceta.toFixed(1) : '—'}</strong>
+                {' '}<small style={{ color:'var(--texto-suave)' }}>(g × rend% × (1−desp%) ÷ peso unidad)</small>
+              </span>
+              {(() => {
+                // Se conservan hasta 2 decimales (no se redondea a entero): un bache que rinde
+                // 62,5 unidades cuesta distinto por unidad que uno de 63, y para el costeo esa
+                // fracción importa. El campo "Unidades por bache" acepta decimales.
+                const estimada = Math.round(unidadesDesdeReceta * 100) / 100
+                return (
+                  <button
+                    className="btn btn-xs btn-success"
+                    disabled={!(unidadesDesdeReceta > 0)}
+                    onClick={() => { setFormProd(f => ({ ...f, bache: estimada })); toast('Unidades por bache actualizadas desde la receta ✓') }}
+                    title="Copia las unidades estimadas al campo 'Unidades por bache' (Información del Producto)"
+                  >
+                    <Ico as={ChevronUp} size={13} />Usar como "Unidades por bache" ({unidadesDesdeReceta > 0 ? estimada.toLocaleString('es-CO', { maximumFractionDigits: 2 }) : 0})
+                  </button>
+                )
+              })()}
+            </div>
               <div style={{ gridColumn:'1 / -1', fontWeight:700, color:'var(--selva)', fontSize:'0.78rem', textTransform:'uppercase', letterSpacing:'0.03em', marginTop:6 }}>Presentación y empaque</div>
               <div className="form-group">
                 <label style={{ display:'flex', alignItems:'center', gap:8, fontSize:'0.85rem', cursor:'pointer', fontWeight:600, color:'var(--selva)', minHeight:'1.2rem' }}>
@@ -2201,6 +2204,27 @@ export default function Costos({ vista = 'productos' }) {
                 </label>
                 <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Habilita el campo “Empacó surtido” al diligenciar e imprimir la orden.</small>
               </div>
+            </div>
+
+            {/* Parámetros de calidad (fisicoquímicos, reológicos, nutricionales...) */}
+            <div style={{ marginTop:14, paddingTop:12, borderTop:'1px solid var(--crema-oscuro)' }}>
+              <div style={{ display:'flex', alignItems:'center', marginBottom:8 }}>
+                <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem' }}><Ico as={FlaskConical} size={14} />Parámetros de Calidad <small style={{ fontWeight:400, color:'var(--texto-suave)' }}>— fisicoquímicos, reológicos, nutricionales y de pureza</small></div>
+                <button type="button" className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={addParamCalidad}>+ Agregar parámetro</button>
+              </div>
+              <datalist id="dl-params-calidad">
+                {CATALOGO_PARAMS.map(g => g.items.map(i => <option key={i.nombre} value={i.nombre}>{g.grupo}</option>))}
+              </datalist>
+              {paramsCalidad.length === 0
+                ? <p style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}>Sin parámetros. Agrega Brix, % humedad, pH, proteínas, etc.</p>
+                : paramsCalidad.map((pc, i) => (
+                  <div key={i} style={{ display:'grid', gridTemplateColumns:'2fr 1fr 0.8fr auto', gap:8, marginBottom:8, alignItems:'center' }}>
+                    <input className="form-control" list="dl-params-calidad" placeholder="Parámetro (ej. pH, Brix...)" value={pc.nombre} onChange={e => updParamCalidad(i,'nombre',e.target.value)} />
+                    <input className="form-control" placeholder="Valor" value={pc.valor} onChange={e => updParamCalidad(i,'valor',e.target.value)} />
+                    <input className="form-control" placeholder="Unidad" value={pc.unidad} onChange={e => updParamCalidad(i,'unidad',e.target.value)} />
+                    <button type="button" className="btn btn-danger btn-xs" onClick={() => delParamCalidad(i)}><X size={13} aria-hidden="true" /></button>
+                  </div>
+                ))}
             </div>
 
             {/* Método de loteo — constructor por fichas (click → arma el patrón) */}
@@ -2406,51 +2430,6 @@ export default function Costos({ vista = 'productos' }) {
               })()}
             </div>
 
-            {/* Parámetros de calidad (fisicoquímicos, reológicos, nutricionales...) */}
-            <div style={{ marginTop:14, paddingTop:12, borderTop:'1px solid var(--crema-oscuro)' }}>
-              <div style={{ display:'flex', alignItems:'center', marginBottom:8 }}>
-                <div style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem' }}><Ico as={FlaskConical} size={14} />Parámetros de Calidad <small style={{ fontWeight:400, color:'var(--texto-suave)' }}>— fisicoquímicos, reológicos, nutricionales y de pureza</small></div>
-                <button type="button" className="btn btn-sm btn-secondary" style={{ marginLeft:'auto' }} onClick={addParamCalidad}>+ Agregar parámetro</button>
-              </div>
-              <datalist id="dl-params-calidad">
-                {CATALOGO_PARAMS.map(g => g.items.map(i => <option key={i.nombre} value={i.nombre}>{g.grupo}</option>))}
-              </datalist>
-              {paramsCalidad.length === 0
-                ? <p style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}>Sin parámetros. Agrega Brix, % humedad, pH, proteínas, etc.</p>
-                : paramsCalidad.map((pc, i) => (
-                  <div key={i} style={{ display:'grid', gridTemplateColumns:'2fr 1fr 0.8fr auto', gap:8, marginBottom:8, alignItems:'center' }}>
-                    <input className="form-control" list="dl-params-calidad" placeholder="Parámetro (ej. pH, Brix...)" value={pc.nombre} onChange={e => updParamCalidad(i,'nombre',e.target.value)} />
-                    <input className="form-control" placeholder="Valor" value={pc.valor} onChange={e => updParamCalidad(i,'valor',e.target.value)} />
-                    <input className="form-control" placeholder="Unidad" value={pc.unidad} onChange={e => updParamCalidad(i,'unidad',e.target.value)} />
-                    <button type="button" className="btn btn-danger btn-xs" onClick={() => delParamCalidad(i)}><X size={13} aria-hidden="true" /></button>
-                  </div>
-                ))}
-            </div>
-
-            {/* Conexión receta → unidades por bache */}
-            <div style={{ marginTop:12, padding:'10px 14px', background:'rgba(124,179,66,0.08)', borderRadius:'var(--radio)', border:'1px solid rgba(124,179,66,0.2)', display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
-              <span style={{ fontSize:'0.85rem', color:'var(--selva)' }}>
-                Mezcla: <strong>{fNum(totalGramosBache)} g/bache</strong> →
-                Unidades estimadas: <strong style={{ color:'var(--selva)' }}>{unidadesDesdeReceta > 0 ? unidadesDesdeReceta.toFixed(1) : '—'}</strong>
-                {' '}<small style={{ color:'var(--texto-suave)' }}>(g × rend% × (1−desp%) ÷ peso unidad)</small>
-              </span>
-              {(() => {
-                // Se conservan hasta 2 decimales (no se redondea a entero): un bache que rinde
-                // 62,5 unidades cuesta distinto por unidad que uno de 63, y para el costeo esa
-                // fracción importa. El campo "Unidades por bache" acepta decimales.
-                const estimada = Math.round(unidadesDesdeReceta * 100) / 100
-                return (
-                  <button
-                    className="btn btn-xs btn-success"
-                    disabled={!(unidadesDesdeReceta > 0)}
-                    onClick={() => { setFormProd(f => ({ ...f, bache: estimada })); toast('Unidades por bache actualizadas desde la receta ✓') }}
-                    title="Copia las unidades estimadas al campo 'Unidades por bache' (Información del Producto)"
-                  >
-                    <Ico as={ChevronUp} size={13} />Usar como "Unidades por bache" ({unidadesDesdeReceta > 0 ? estimada.toLocaleString('es-CO', { maximumFractionDigits: 2 }) : 0})
-                  </button>
-                )
-              })()}
-            </div>
             </div>
           </details>
 
