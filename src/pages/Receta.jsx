@@ -13,7 +13,7 @@ import Modal from '../components/ui/Modal'
 import ImageCropper from '../components/ui/ImageCropper'
 import BuscadorSelect from '../components/ui/BuscadorSelect'
 import Select from '../components/ui/Select'
-import { ShoppingBasket, TrendingUp, Package, Pencil, Plus, X, Check, Trash2, GripVertical, AlertTriangle, Lock, FlaskConical, Download } from 'lucide-react'
+import { ShoppingBasket, TrendingUp, Package, Pencil, Plus, X, Check, Trash2, GripVertical, AlertTriangle, Lock, FlaskConical, Download, BookOpen, Target, Save, Send, Star, RefreshCw, Copy, Camera, Settings, DollarSign, BarChart3 } from 'lucide-react'
 
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
@@ -33,6 +33,7 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
 
   // ---- Estado de la calculadora ----
   const [selValue, setSelValue]       = useState('')   // valor del selector: '' | prod-{id} | recipe-{id}
+  const [recetasModal, setRecetasModal] = useState(false)   // modal "Ver recetas guardadas"
   const [recetaSelId, setRecetaSelId] = useState('')   // id de receta rápida en edición (null si viene de producto)
   const [nombre, setNombre]           = useState('')
   const [ingredientes, setIngredientes] = useState([])
@@ -492,21 +493,15 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
       )}
 
       <div className="card">
-        <div className="card-title">🧪 Calculadora por Ingrediente Ancla</div>
-        <div className="alert alert-info" style={{ fontSize: '0.88rem' }}>
-          Ingresa la cantidad de un ingrediente ancla y el sistema calcula el resto de la receta, peso esperado, rendimiento, unidades y costos.
+        <div className="card-title" style={{ display: 'flex', alignItems: 'center' }}>
+          <Ico as={FlaskConical} size={16} />Calculadora de recetas
+          <button type="button" className="btn btn-sm btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => setRecetasModal(true)}>
+            <Ico as={BookOpen} size={14} />Ver recetas guardadas
+          </button>
         </div>
 
-        {/* Selector + nombre + imagen */}
-        <div className="grid-resp" style={{ gridTemplateColumns: '1fr 1fr auto', gap: 16, marginBottom: 20, alignItems: 'end' }}>
-          <div className="form-group" style={{ margin: 0 }}>
-            <label className="form-label">Cargar receta existente</label>
-            <Select className="form-control" value={selValue} onChange={e => cargarReceta(e.target.value)}>
-              <option value="">— nueva receta —</option>
-              {productosBase.length > 0 && <optgroup label="⭐ Recetas Base (productos)">{productosBase.map(p => <option key={p.id} value={`prod-${p.id}`}>⭐ {p.nombre}</option>)}</optgroup>}
-              {!esAuxiliar && recetas.length > 0 && <optgroup label="💾 Recetas Rápidas">{recetas.map(r => <option key={r.id} value={`recipe-${r.id}`}>💾 {r.nombre}</option>)}</optgroup>}
-            </Select>
-          </div>
+        {/* Nombre + imagen */}
+        <div className="grid-resp" style={{ gridTemplateColumns: '1fr auto', gap: 16, marginBottom: 20, alignItems: 'end' }}>
           <div className="form-group" style={{ margin: 0 }}>
             <label className="form-label">Nombre de la receta</label>
             <input className="form-control" value={nombre} onChange={e => setNombre(e.target.value)} placeholder="Ej: Dulce Mumi de Seje" />
@@ -518,7 +513,7 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
               title={esBase ? 'La imagen del producto se edita en Ficha de Producto' : 'Cambiar imagen'}
               style={{ position: 'relative', width: 64, height: 64, border: '2px dashed var(--crema-oscuro)', borderRadius: 'var(--radio)', overflow: 'hidden', cursor: esBase ? 'not-allowed' : 'pointer', opacity: esBase ? 0.7 : 1 }}
             >
-              {imgData ? <img src={imgData} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="receta" /> : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: '1.4rem' }}>📷</div>}
+              {imgData ? <img src={imgData} style={{ width: '100%', height: '100%', objectFit: 'cover' }} alt="receta" /> : <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--texto-suave)' }}><Camera size={22} aria-hidden="true" /></div>}
               {!esBase && <input type="file" accept="image/*" ref={imgInputRef} onChange={handleImg} style={{ display: 'none' }} />}
             </div>
             {cropRec && <ImageCropper file={cropRec} aspect={1} salidaW={1000} salidaH={1000} onCancel={() => setCropRec(null)} onCropped={recortada} />}
@@ -688,7 +683,7 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
             {/* Parámetros */}
             <div style={{ marginTop: 14, padding: 14, background: 'var(--crema)', borderRadius: 'var(--radio)' }}>
               <div style={{ fontWeight: 600, color: 'var(--selva)', marginBottom: 10, fontSize: '0.88rem' }}>
-                ⚙️ Parámetros de Producción {paramsBloqueados && <span style={{ fontWeight: 400, fontSize: '0.75rem', color: 'var(--texto-suave)' }}>🔒 {esOperario ? 'agrega un ingrediente nuevo para editarlos' : 'solo lectura'}</span>}
+                <Ico as={Settings} size={14} />Parámetros de Producción {paramsBloqueados && <span style={{ fontWeight: 400, fontSize: '0.75rem', color: 'var(--texto-suave)' }}><Ico as={Lock} size={12} />{esOperario ? 'agrega un ingrediente nuevo para editarlos' : 'solo lectura'}</span>}
               </div>
               <div className="form-grid-2" style={{ gap: 10 }}>
                 <div className="form-group" style={{ margin: 0 }}><label className="form-label">Rendimiento esperado (%)</label><input type="number" className="form-control" value={rendimiento} disabled={paramsBloqueados} onChange={e => setRendimiento(e.target.value)} min={1} max={100} step={0.1} /></div>
@@ -713,8 +708,8 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
               {/* Parámetros de calidad */}
               <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--crema-oscuro)' }}>
                 <div style={{ display: 'flex', alignItems: 'center', marginBottom: 8 }}>
-                  <div style={{ fontWeight: 600, color: 'var(--selva)', fontSize: '0.85rem' }}>🧪 Parámetros de Calidad</div>
-                  {!paramsBloqueados && <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={addParamCalidad}>+ Agregar</button>}
+                  <div style={{ fontWeight: 600, color: 'var(--selva)', fontSize: '0.85rem' }}><Ico as={FlaskConical} size={14} />Parámetros de Calidad</div>
+                  {!paramsBloqueados && <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={addParamCalidad}><Ico as={Plus} size={13} />Agregar</button>}
                 </div>
                 <datalist id="dl-params-receta">{CATALOGO_PARAMS.map(g => g.items.map(i => <option key={i.nombre} value={i.nombre}>{g.grupo}</option>))}</datalist>
                 {paramsCalidad.length === 0
@@ -724,49 +719,31 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
                       <input className="form-control" list="dl-params-receta" placeholder="Parámetro" value={pc.nombre} disabled={paramsBloqueados} onChange={e => updParamCalidad(i, 'nombre', e.target.value)} />
                       <input className="form-control" placeholder="Valor" value={pc.valor} disabled={paramsBloqueados} onChange={e => updParamCalidad(i, 'valor', e.target.value)} />
                       <input className="form-control" placeholder="Unidad" value={pc.unidad} disabled={paramsBloqueados} onChange={e => updParamCalidad(i, 'unidad', e.target.value)} />
-                      {!paramsBloqueados && <button type="button" className="btn btn-danger btn-xs" onClick={() => delParamCalidad(i)}>✕</button>}
+                      {!paramsBloqueados && <button type="button" className="btn btn-danger btn-xs" onClick={() => delParamCalidad(i)}><X size={13} aria-hidden="true" /></button>}
                     </div>
                   ))}
               </div>
 
             </div>
 
-            {/* Ficha técnica */}
-            <div style={{ marginTop: 14, padding: 14, background: 'var(--crema)', borderRadius: 'var(--radio)' }}>
-              <div style={{ fontWeight: 600, color: 'var(--selva)', marginBottom: 8, fontSize: '0.88rem' }}>📄 Ficha Técnica (instrucciones paso a paso)</div>
-              {fichaNombre && (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, padding: '8px 10px', background: 'rgba(124,179,66,0.08)', borderRadius: 'var(--radio)', border: '1px solid rgba(124,179,66,0.2)' }}>
-                  <span style={{ fontSize: '0.82rem', color: 'var(--selva-claro)', flex: 1 }}>📄 <strong>{fichaNombre}</strong></span>
-                  {fichaStoragePath && !fichaFile && (
-                    <button className="btn btn-xs btn-dorado" onClick={() => descargarFicha(fichaStoragePath, fichaNombre)}>
-                      ⬇ Descargar
-                    </button>
-                  )}
-                  {fichaFile && <span style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>pendiente de guardar</span>}
-                </div>
-              )}
-              <small style={{ color: 'var(--texto-suave)', fontSize: '0.78rem' }}>
-                {fichaNombre
-                  ? 'Solo descarga disponible. La ficha técnica se sube al crear/editar el producto en Ficha de Producto.'
-                  : 'Sin ficha técnica. Se sube al crear/editar el producto en Ficha de Producto.'}
-              </small>
-            </div>
           </div>
 
           {/* Columna derecha: resultados */}
           <div>
             {/* Cálculo de la receta (por ingrediente ancla o por unidades a fabricar) */}
             <div style={{ background: 'var(--selva)', color: 'var(--crema)', borderRadius: 'var(--radio)', padding: 16, marginBottom: 14 }}>
+              <div style={{ fontFamily: "var(--fuente-titulos, 'Playfair Display'), serif", fontSize: '1.1rem', marginBottom: 12, color: 'var(--dorado)' }}>Calcular cantidades</div>
               {/* Selector de modo */}
               <div style={{ display: 'flex', marginBottom: 12 }}>
-                {[['ancla', '🎯 Por ingrediente ancla'], ['unidades', '📦 Por unidades a fabricar']].map(([m, lbl], i) => (
+                {[['ancla', 'Por ingrediente ancla', Target], ['unidades', 'Por unidades a fabricar', Package]].map(([m, lbl, I], i) => (
                   <button key={m} type="button" onClick={() => setModoCalc(m)} style={{
                     flex: 1, padding: '6px 4px', fontSize: '0.78rem', cursor: 'pointer', fontWeight: 600,
+                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 4,
                     background: modoCalc === m ? 'var(--dorado)' : 'rgba(8,72,11,0.4)',
                     color: modoCalc === m ? 'var(--selva)' : 'rgba(245,240,232,0.7)',
                     border: '1px solid rgba(200,169,74,0.4)',
                     borderRadius: i === 0 ? '4px 0 0 4px' : '0 4px 4px 0', marginLeft: i === 1 ? -1 : 0,
-                  }}>{lbl}</button>
+                  }}><I size={13} aria-hidden="true" />{lbl}</button>
                 ))}
               </div>
 
@@ -801,7 +778,7 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
               )}
             </div>
 
-            <div style={{ fontWeight: 600, color: 'var(--selva)', marginBottom: 10, fontSize: '0.95rem' }}>📊 Resultados</div>
+            <div style={{ fontWeight: 600, color: 'var(--selva)', marginBottom: 10, fontSize: '0.95rem' }}><Ico as={BarChart3} size={15} />Resultados</div>
 
             <div style={{ background: 'var(--blanco)', border: '1px solid var(--crema-oscuro)', borderRadius: 'var(--radio)', overflow: 'hidden', marginBottom: 14 }}>
               <table>
@@ -838,7 +815,7 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
             {/* Datos previstos */}
             {resultado && (
               <div style={{ background: 'var(--selva)', color: 'var(--crema)', borderRadius: 'var(--radio)', padding: 16, marginBottom: 14 }}>
-                <div style={{ fontFamily: "'Playfair Display', serif", color: 'var(--dorado)', marginBottom: 12 }}>📦 Datos Previstos</div>
+                <div style={{ fontFamily: "'Playfair Display', serif", color: 'var(--dorado)', marginBottom: 12 }}><Ico as={Package} size={15} />Datos Previstos</div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, fontSize: '0.88rem' }}>
                   <div><div style={{ opacity: 0.6, fontSize: '0.75rem' }}>Peso total mezcla</div><strong>{resultado.totalMezcla.toFixed(0)} g</strong></div>
                   <div><div style={{ opacity: 0.6, fontSize: '0.75rem' }}>Peso esperado producto</div><strong>{resultado.pesoEsperado.toFixed(1)} g</strong></div>
@@ -878,7 +855,7 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
             {/* Costos MP */}
             {resultado && (
               <div style={{ background: 'var(--crema)', borderRadius: 'var(--radio)', padding: 14, border: '1px solid var(--crema-oscuro)', marginBottom: 14 }}>
-                <div style={{ fontWeight: 600, color: 'var(--selva)', marginBottom: 8, fontSize: '0.88rem' }}>💰 Costos de Materia Prima</div>
+                <div style={{ fontWeight: 600, color: 'var(--selva)', marginBottom: 8, fontSize: '0.88rem' }}><Ico as={DollarSign} size={14} />Costos de Materia Prima</div>
                 <table style={{ fontSize: '0.88rem', width: '100%' }}>
                   <tbody>
                     <tr><td>Total MP</td><td className="td-number"><strong>{fCOP(resultado.totalCostoMP)}</strong></td></tr>
@@ -891,20 +868,20 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
 
             {/* Botones acción */}
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {puedeLimpiar && <button className="btn btn-secondary btn-sm" onClick={limpiar}>🗑 Limpiar</button>}
+              {puedeLimpiar && <button className="btn btn-secondary btn-sm" onClick={limpiar}><Ico as={Trash2} size={14} />Limpiar</button>}
               {puedeGuardar && (recetaSelId
                 ? <>
                     {/* Receta rápida cargada: se puede reemplazar o guardar como copia nueva */}
-                    <button className="btn btn-success btn-sm" onClick={() => guardarReceta('reemplazo')} disabled={saving}>♻ Reemplazar receta</button>
-                    <button className="btn btn-secondary btn-sm" onClick={() => guardarReceta('nueva')} disabled={saving}>📄 Guardar como copia</button>
+                    <button className="btn btn-success btn-sm" onClick={() => guardarReceta('reemplazo')} disabled={saving}><Ico as={RefreshCw} size={14} />Reemplazar receta</button>
+                    <button className="btn btn-secondary btn-sm" onClick={() => guardarReceta('nueva')} disabled={saving}><Ico as={Copy} size={14} />Guardar como copia</button>
                   </>
                 : <button className="btn btn-success btn-sm" onClick={() => guardarReceta('nueva')} disabled={saving}>
-                    💾 Guardar {esBase ? 'como receta rápida (copia)' : 'receta rápida'}
+                    <Ico as={Save} size={14} />Guardar {esBase ? 'como receta rápida (copia)' : 'receta rápida'}
                   </button>
               )}
-              <button className="btn btn-primary btn-sm" onClick={enviarAOrden}>📤 Enviar a orden de producción</button>
+              <button className="btn btn-primary btn-sm" onClick={enviarAOrden}><Ico as={Send} size={14} />Enviar a orden de producción</button>
               {onConvertir && recetaSelId && (
-                <button className="btn btn-primary btn-sm" onClick={convertirABase}>⭐ Convertir a receta base (producto)</button>
+                <button className="btn btn-primary btn-sm" onClick={convertirABase}><Ico as={Star} size={14} />Convertir a receta base (producto)</button>
               )}
             </div>
             <p style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', marginTop: 8 }}>
@@ -914,18 +891,15 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
         </div>
       </div>
 
-      {/* Recetas rápidas guardadas — las recetas base se administran en Ficha de Producto */}
-      <div className="card">
-        <div className="card-title">
-          <Ico as={FlaskConical} size={16} />Recetas rápidas guardadas
-          <span className="badge badge-verde" style={{ marginLeft: 8 }}>{recetas.length}</span>
-        </div>
+      {/* Modal "Ver recetas guardadas" — solo recetas rápidas (las base se administran en Ficha de Producto) */}
+      <Modal open={recetasModal} onClose={() => setRecetasModal(false)} guard={false} size="modal-lg"
+        title={`Recetas rápidas guardadas (${recetas.length})`}>
         {recetas.length === 0
           ? <p className="empty-table">Aún no hay recetas rápidas guardadas.</p>
           : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {recetas.map(r => (
                 <div key={r.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, border: '1px solid var(--crema-oscuro)', borderRadius: 'var(--radio)', padding: '8px 12px', background: 'var(--blanco)' }}>
-                  {/* Icono que diferencia el tipo (rápida vs base); aquí solo hay rápidas */}
+                  {/* Icono de tipo: matraz = receta rápida (arriba a la izquierda) */}
                   <span title="Receta rápida" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, background: 'rgba(124,179,66,0.16)', color: 'var(--selva)', flexShrink: 0 }}>
                     <FlaskConical size={16} aria-hidden="true" />
                   </span>
@@ -937,16 +911,16 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
                     {r.ficha_url && (
                       <button type="button" className="btn btn-xs btn-secondary" title="Descargar ficha técnica" onClick={() => descargarFicha(r.ficha_url, r.ficha_nombre)}><Ico as={Download} size={13} />Ficha</button>
                     )}
-                    <button type="button" className="btn btn-sm btn-primary" onClick={() => cargarReceta(`recipe-${r.id}`)}>Cargar</button>
+                    <button type="button" className="btn btn-sm btn-primary" onClick={() => { cargarReceta(`recipe-${r.id}`); setRecetasModal(false) }}>Cargar</button>
                     {puedeEliminarReceta(r) && (
-                      <button type="button" className="btn btn-xs btn-danger" title="Eliminar receta" onClick={() => eliminarReceta(r.id, r.nombre)}><X size={13} aria-hidden="true" /></button>
+                      <button type="button" className="btn btn-xs btn-danger" title="Eliminar receta" onClick={() => eliminarReceta(r.id, r.nombre)}><Trash2 size={14} aria-hidden="true" /></button>
                     )}
                   </div>
                 </div>
               ))}
             </div>
         }
-      </div>
+      </Modal>
     </div>
   )
 }
