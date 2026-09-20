@@ -22,7 +22,7 @@ import {
 } from '../lib/inventarioHelpers'
 
 import * as XLSX from 'xlsx'
-import { Download, Tags, Tag, Plus, Pencil, X, Package, ClipboardList, FileText, AlertTriangle, Trash2, Undo2, Lock } from 'lucide-react'
+import { Download, Tags, Tag, Plus, Pencil, X, Package, ClipboardList, FileText, AlertTriangle, Trash2, Undo2, Lock, Search, Clock, Layers } from 'lucide-react'
 import ReservasMPPanel from '../components/ReservasMPPanel'
 import { explicarDescuadrePeps, resumenReservasPorMp, reservadoEnLotes } from '../lib/reservasMp'
 import Select from '../components/ui/Select'
@@ -743,7 +743,7 @@ export default function Inventario() {
         </div>
       </div>
 
-      <div className="kpi-grid" style={{ gridTemplateColumns: 'repeat(3,1fr)' }}>
+      <div className="kpi-grid kpi-mini" style={{ gridTemplateColumns: 'repeat(3,1fr)' }}>
         <div className="kpi-card verde"><div className="kpi-label">Total Ítems</div><div className="kpi-value">{mps.length}</div></div>
         <div className="kpi-card dorado"><div className="kpi-label" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>Stock Bajo <AlertTriangle size={13} aria-hidden="true" /></div><div className="kpi-value">{bajo}</div></div>
         <div className="kpi-card tierra"><div className="kpi-label">Sin Stock</div><div className="kpi-value">{cero}</div></div>
@@ -793,8 +793,17 @@ export default function Inventario() {
             </button>
           </div>
         )}
-        <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-          <input className="form-control" style={{ width: 200 }} placeholder="🔍 Buscar materia prima..." value={buscarMP} onChange={e => setBuscarMP(e.target.value)} />
+        <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ position: 'relative', flex: '1 1 240px', maxWidth: 340, minWidth: 180 }}>
+            <Search size={15} aria-hidden="true" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--texto-suave)', pointerEvents: 'none' }} />
+            <input className="form-control" style={{ width: '100%', paddingLeft: 32, paddingRight: buscarMP ? 32 : 12 }} placeholder="Buscar materia prima o categoría…" value={buscarMP} onChange={e => setBuscarMP(e.target.value)} />
+            {buscarMP && (
+              <button type="button" title="Limpiar búsqueda" aria-label="Limpiar búsqueda" onClick={() => setBuscarMP('')}
+                style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--texto-suave)', display: 'inline-flex', padding: 2 }}>
+                <X size={15} aria-hidden="true" />
+              </button>
+            )}
+          </div>
           <label className="form-label" style={{ margin: 0 }}>Categoría:</label>
           <Select className="form-control" value={filtroCat} onChange={e => setFiltroCat(e.target.value)} style={{ width: 'auto' }}>
             <option value="">Todas las categorías</option>
@@ -808,7 +817,7 @@ export default function Inventario() {
             <option value="bajo">Stock bajo</option>
             <option value="por_vencer">Por vencer / vencidas</option>
           </Select>
-          {(filtroCat || filtroEstado) && <button className="btn btn-sm btn-secondary" onClick={() => { setFiltroCat(''); setFiltroEstado('') }}>Limpiar filtros</button>}
+          {(filtroCat || filtroEstado || buscarMP) && <button className="btn btn-sm btn-secondary" onClick={() => { setFiltroCat(''); setFiltroEstado(''); setBuscarMP('') }}><Ico as={X} size={13} />Limpiar</button>}
           <span style={{ marginLeft: 'auto', fontSize: '0.8rem', color: 'var(--texto-suave)' }}>Clic en una fila para ver su historial</span>
         </div>
 
@@ -838,8 +847,8 @@ export default function Inventario() {
                   <Fila et="Vence">{lv.vence ? fFecha(lv.vence) : '—'}</Fila>
                   <div className="acordeon-acciones">
                     {puedeEditarInv && <button className="btn btn-xs btn-primary" onClick={() => openMovimiento(m.id)}>+/− Mov.</button>}
-                    <button className="btn btn-xs btn-secondary" onClick={() => openHistorial(m)}>🕑 Historial</button>
-                    <button className="btn btn-xs btn-secondary" onClick={() => { setLotesMP(m); setModalLotes(true) }}>Lotes PEPS</button>
+                    <button className="btn btn-xs btn-secondary" onClick={() => openHistorial(m)}><Ico as={Clock} size={13} />Historial</button>
+                    <button className="btn btn-xs btn-secondary" onClick={() => { setLotesMP(m); setModalLotes(true) }}><Ico as={Layers} size={13} />Lotes PEPS</button>
                     {esAdmin && desq?.igualar && (
                       <button className="btn btn-xs btn-dorado" disabled={reconciliarPEPS.isPending}
                         onClick={() => confirmar(
@@ -888,8 +897,8 @@ export default function Inventario() {
                       <td onClick={e => e.stopPropagation()}>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                           {puedeEditarInv && <button className="btn btn-xs btn-primary" onClick={() => openMovimiento(m.id)} title="Compra, salida o ajuste de conteo">+/− Mov.</button>}
-                          <button className="btn btn-xs btn-secondary" onClick={() => openHistorial(m)}>🕑</button>
-                          <button className="btn btn-xs btn-secondary" title="Lotes (PEPS)" onClick={() => { setLotesMP(m); setModalLotes(true) }}>🧊</button>
+                          <button className="btn btn-xs btn-secondary" title="Historial" onClick={() => openHistorial(m)}><Clock size={13} aria-hidden="true" /></button>
+                          <button className="btn btn-xs btn-secondary" title="Lotes (PEPS)" onClick={() => { setLotesMP(m); setModalLotes(true) }}><Layers size={13} aria-hidden="true" /></button>
                           {esAdmin && desq?.igualar && (
                             <button className="btn btn-xs btn-dorado" disabled={reconciliarPEPS.isPending}
                               title={desq.diff > 0 ? `Crear PEPS "sin lote" por ${fBase(desq.diff, m.unidad)}` : `Igualar lotes al stock`}
@@ -951,7 +960,7 @@ export default function Inventario() {
 
       {/* Modal MP */}
       <Modal open={modalMP} onClose={() => { setModalMP(false); setFormMP(EMPTY_MP); setEditMPId(null) }}
-        title={`🌿 ${editMPId ? 'Editar' : 'Nueva'} Materia Prima`}
+        title={`${editMPId ? 'Editar' : 'Nueva'} Materia Prima`}
         footer={
           <>
             <button className="btn btn-secondary" onClick={() => setModalMP(false)}>Cancelar</button>
@@ -1348,7 +1357,7 @@ export default function Inventario() {
         )}
       </Modal>
 
-      <Modal open={!!bajaLote} onClose={() => setBajaLote(null)} title={`🗑 Dar de baja lote — ${bajaLote?.mp?.nombre || ''}`}
+      <Modal open={!!bajaLote} onClose={() => setBajaLote(null)} title={`Dar de baja lote — ${bajaLote?.mp?.nombre || ''}`}
         footer={<>
           <button className="btn btn-secondary" onClick={() => setBajaLote(null)}>Cancelar</button>
           <button className="btn btn-danger" onClick={() => darBajaLote.mutate()} disabled={darBajaLote.isPending}>{darBajaLote.isPending ? 'Guardando…' : 'Dar de baja'}</button>
@@ -1386,7 +1395,7 @@ export default function Inventario() {
       </Modal>
 
       {/* Modal Historial por MP */}
-      <Modal open={modalHist} onClose={() => setModalHist(false)} title={`🕑 Historial — ${histMP?.nombre || ''}`} size="modal-lg"
+      <Modal open={modalHist} onClose={() => setModalHist(false)} title={`Historial — ${histMP?.nombre || ''}`} size="modal-lg"
         footer={<button className="btn btn-secondary" onClick={() => setModalHist(false)}>Cerrar</button>}
       >
         {histMP && (
@@ -1448,7 +1457,7 @@ export default function Inventario() {
               </table>
             </div>
 
-            <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 14 }}>✏ Ediciones de la ficha ({histEdits.length})</div>
+            <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 14 }}><Ico as={Pencil} size={14} />Ediciones de la ficha ({histEdits.length})</div>
             {histEdits.length === 0
               ? <p style={{ fontSize: '0.82rem', color: 'var(--texto-suave)' }}>Sin ediciones registradas (se auditan desde que se activó el registro).</p>
               : <div className="table-wrap" style={{ maxHeight: 220, overflowY: 'auto' }}>
