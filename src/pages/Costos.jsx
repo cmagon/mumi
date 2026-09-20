@@ -1367,6 +1367,40 @@ export default function Costos({ vista = 'productos' }) {
   const updateCIF = async (id, field, val) => { await supabase.from('cif_items').update({ [field]: val }).eq('id', id); refetchCIF() }
   const deleteCIF = async (id) => { await supabase.from('cif_items').delete().eq('id', id); refetchCIF(); toast('Ítem eliminado') }
 
+  // ---- Modal por costo/gasto (mismo estilo que Materias Primas) ----
+  const [cifModal, setCifModal] = useState(null)   // { id, isNew } | null
+  const [cifDraft, setCifDraft] = useState(null)   // { descripcion, categoria, frecuencia, valor, grupo }
+  const abrirCifNuevo = async (grupo = 'cif') => {
+    const { data, error } = await supabase.from('cif_items')
+      .insert({ descripcion: '', categoria: 'General', grupo, frecuencia: 'mensual', valor: 0 })
+      .select().single()
+    if (error || !data) { toast('No se pudo crear el ítem', 'error'); return }
+    await refetchCIF()
+    setCifDraft({ descripcion: '', categoria: 'General', frecuencia: 'mensual', valor: '', grupo })
+    setCifModal({ id: data.id, isNew: true })
+  }
+  const abrirCifEditar = (c) => {
+    setCifDraft({ descripcion: c.descripcion || '', categoria: c.categoria || '', frecuencia: c.frecuencia || 'mensual', valor: c.valor ?? '', grupo: c.grupo || 'cif' })
+    setCifModal({ id: c.id, isNew: false })
+  }
+  const cerrarCifModal = async (guardar) => {
+    if (guardar && cifModal && cifDraft) {
+      await supabase.from('cif_items').update({
+        descripcion: cifDraft.descripcion || 'Sin nombre',
+        categoria: cifDraft.categoria || 'General',
+        frecuencia: cifDraft.frecuencia || 'mensual',
+        valor: parseFloat(cifDraft.valor) || 0,
+        grupo: cifDraft.grupo || 'cif',
+      }).eq('id', cifModal.id)
+      await refetchCIF()
+      toast('Guardado ✓')
+    } else if (!guardar && cifModal?.isNew) {
+      await supabase.from('cif_items').delete().eq('id', cifModal.id); await refetchCIF()
+    }
+    setCifModal(null); setCifDraft(null)
+  }
+  const eliminarCifModal = async (id) => { await deleteCIF(id); setCifModal(null); setCifDraft(null) }
+
   // ---- Reordenar listas (arrastrar y soltar) ----
   const ordIng  = useReorder(setIngredientes)
   const ordProc = useReorder(setProcesos)
@@ -3400,43 +3434,105 @@ export default function Costos({ vista = 'productos' }) {
                         {equipos.length > 0 && <span className="badge badge-gris" style={{ marginLeft:4 }}>{equipos.length}</span>}
                       </button>
                     )}
-                    <button type="button" className="btn btn-sm btn-secondary" onClick={() => addCIF(caja.g)}>+ Agregar ítem</button>
                   </div>
                 </div>
                 <div style={{ fontSize:'0.8rem', color:'var(--texto-suave)', marginBottom:8 }}>{caja.desc}</div>
-                <div className="table-wrap">
-                  <table>
-                    <thead><tr><th>Descripción</th><th>Categoría</th><th>Frecuencia</th><th>Valor ($)</th><th title="Mover a otro grupo">Grupo</th><th></th></tr></thead>
-                    <tbody>
-                      {items.length === 0 && !(caja.nomina > 0)
-                        ? <tr><td colSpan={6} className="empty-table">Sin ítems — usa "+ Agregar ítem"</td></tr>
-                        : items.map(filaItem)}
-                      {caja.nomina > 0 && (
-                        <tr style={{ background:'rgba(124,179,66,0.10)' }}>
-                          <td colSpan={3}><strong><Ico as={Users} size={13} />{caja.nominaLbl}</strong><div style={{ fontSize:'0.72rem', color:'var(--texto-suave)' }}>{caja.nominaDet || 'Según empleados activos de esta área — el área se asigna en Nómina'}</div></td>
-                          <td className="td-number"><strong>{fCOP(caja.nomina)}</strong></td>
-                          <td colSpan={2} style={{ fontSize:'0.72rem', color:'var(--texto-suave)' }} title="Calculado desde Empleados">automático</td>
-                        </tr>
-                      )}
-                    </tbody>
-                    <tfoot>
-                      <tr style={{ background:'var(--crema)' }}>
-                        <td colSpan={3}><strong>TOTAL MENSUAL</strong></td>
-                        <td className="td-number"><strong>{fCOP(caja.total)}</strong></td>
-                        <td colSpan={2}></td>
-                      </tr>
-                    </tfoot>
-                  </table>
+                <div className="ed-ing-lista">
+                  {items.map(c => {
+                    const mensual = getCIFMensual(c)
+                    const nombre = (c.descripcion && c.descripcion.trim()) || 'Sin nombre'
+                    const frecTxt = (c.frecuencia && c.frecuencia !== 'mensual') ? `${c.frecuencia}` : 'Mensual'
+                    return (
+                      <div key={c.id} className="ed-ing-item">
+                        <button type="button" className="ed-ing-main" onClick={() => abrirCifEditar(c)}>
+                          <span className="ed-ing-nombre">{nombre}</span>
+                          <span className="ed-ing-datos">
+                            {c.categoria && <span>{c.categoria}</span>}
+                            <span>{frecTxt}</span>
+                            <span>{fCOP(mensual)}/mes</span>
+                          </span>
+                        </button>
+                        <div className="ed-ing-acc">
+                          <button type="button" className="ed-ing-edit" title="Editar" onClick={() => abrirCifEditar(c)}><Pencil size={14} aria-hidden="true" /></button>
+                        </div>
+                      </div>
+                    )
+                  })}
+                  {caja.nomina > 0 && (
+                    <div className="ed-ing-item" style={{ background:'rgba(124,179,66,0.08)' }} title={caja.nominaDet || 'Según empleados activos de esta área — el área se asigna en Nómina'}>
+                      <span className="ed-ing-main" style={{ cursor:'default' }}>
+                        <span className="ed-ing-nombre"><Ico as={Users} size={14} />{caja.nominaLbl}</span>
+                        <span className="ed-ing-datos"><span>automático (desde Nómina)</span></span>
+                      </span>
+                      <strong style={{ color:'var(--selva)', fontSize:'0.9rem', whiteSpace:'nowrap' }}>{fCOP(caja.nomina)}/mes</strong>
+                    </div>
+                  )}
+                  {items.length === 0 && !(caja.nomina > 0) && <p style={{ color:'var(--texto-suave)', fontSize:'0.85rem', padding:'6px 0' }}>Sin ítems. Usa el botón para agregar el primero.</p>}
+                </div>
+                <div className="ed-ing-add">
+                  <button type="button" className="ed-ing-add-btn" onClick={() => abrirCifNuevo(caja.g)}><Plus size={20} aria-hidden="true" />Agregar {caja.g === 'cif' ? 'costo' : 'gasto'}</button>
+                </div>
+                <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', paddingTop:8, borderTop:'1px solid var(--crema-oscuro)' }}>
+                  <strong style={{ fontSize:'0.9rem' }}>Total mensual</strong>
+                  <strong style={{ color:'var(--selva)' }}>{fCOP(caja.total)}</strong>
                 </div>
               </div>
             )
           })}
 
+          {/* Modal agregar / editar un costo o gasto */}
+          <Modal open={!!cifModal} onClose={() => cerrarCifModal(false)} guard={false}
+            title={cifModal?.isNew ? 'Agregar costo / gasto' : 'Editar costo / gasto'}
+            footer={cifModal && (
+              <div style={{ display:'flex', gap:8, width:'100%', alignItems:'center' }}>
+                <button type="button" className="btn btn-danger btn-sm" onClick={() => eliminarCifModal(cifModal.id)}><Ico as={Trash2} size={14} />Eliminar</button>
+                <div style={{ marginLeft:'auto', display:'flex', gap:8 }}>
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => cerrarCifModal(false)}>Cancelar</button>
+                  <button type="button" className="btn btn-primary btn-sm" onClick={() => cerrarCifModal(true)}><Ico as={Check} size={14} />Guardar</button>
+                </div>
+              </div>
+            )}>
+            {cifModal && cifDraft && (() => {
+              const mensual = cifDraft.frecuencia === 'anual' ? (parseFloat(cifDraft.valor)||0)/12
+                : cifDraft.frecuencia === 'semestral' ? (parseFloat(cifDraft.valor)||0)/6
+                : cifDraft.frecuencia === 'trimestral' ? (parseFloat(cifDraft.valor)||0)/3
+                : (parseFloat(cifDraft.valor)||0)
+              const setD = (campos) => setCifDraft(d => ({ ...d, ...campos }))
+              return (
+                <div style={{ display:'flex', flexDirection:'column', gap:14 }}>
+                  <div><label className="form-label">Descripción</label><input className="form-control" value={cifDraft.descripcion} onChange={e => setD({ descripcion: e.target.value })} placeholder="Ej. Arriendo planta, energía…" /></div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                    <div><label className="form-label">Categoría</label><input className="form-control" value={cifDraft.categoria} onChange={e => setD({ categoria: e.target.value })} placeholder="General" /></div>
+                    <div><label className="form-label">Frecuencia</label>
+                      <Select className="form-control" value={cifDraft.frecuencia} onChange={e => setD({ frecuencia: e.target.value })}>
+                        <option value="mensual">Mensual</option><option value="trimestral">Trimestral</option>
+                        <option value="semestral">Semestral</option><option value="anual">Anual</option>
+                      </Select>
+                    </div>
+                  </div>
+                  <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12 }}>
+                    <div><label className="form-label">Valor ($)</label><input type="number" className="form-control" value={cifDraft.valor} onFocus={e => e.target.select()} onChange={e => setD({ valor: e.target.value })} style={{ textAlign:'right' }} /></div>
+                    <div><label className="form-label" title="Mueve el ítem a otra caja contable">Grupo</label>
+                      <Select className="form-control" value={cifDraft.grupo} onChange={e => setD({ grupo: e.target.value })}>
+                        {GRUPOS_CIF.map(g => <option key={g.value} value={g.value}>{g.label}</option>)}
+                      </Select>
+                    </div>
+                  </div>
+                  {cifDraft.frecuencia !== 'mensual' && (
+                    <div style={{ background:'var(--crema)', borderRadius:'var(--radio)', padding:'8px 12px', fontSize:'0.82rem' }}>
+                      Prorrateado: <strong style={{ color:'var(--selva)' }}>{fCOP(mensual)}/mes</strong>
+                    </div>
+                  )}
+                </div>
+              )
+            })()}
+          </Modal>
+
           {costosSubtab === 'analisis' && <>
           <div className="card">
           <div className="card-title"><Ico as={Clock} size={15} />Cálculo y reparto del CIF</div>
           {/* Desglose y simulador del costo por minuto de mano de obra */}
-          <div style={{ marginTop:16, padding:16, background:'#fff8e8', border:'1px solid var(--dorado)', borderRadius:'var(--radio)' }}>
+          <div style={{ marginTop:12, padding:12, background:'#fff8e8', border:'1px solid var(--dorado)', borderRadius:'var(--radio)' }}>
             <strong style={{ color:'var(--selva)' }}><Ico as={Clock} size={14} />Costo por minuto de mano de obra (producción)</strong>
             <div style={{ fontSize:'0.85rem', marginTop:8, display:'grid', gap:4 }}>
               <div>Costos de producción (CIF) del mes: <strong>{fCOP(cifTotal)}</strong> <small style={{ color:'var(--texto-suave)' }}>(ítems CIF {fCOP(cifManual)} + nómina producción {fCOP(costoNomina.total)} + depreciación general {fCOP(depreciacionGeneral)})</small></div>
@@ -3459,7 +3555,7 @@ export default function Costos({ vista = 'productos' }) {
 
           </div>
 
-          <div style={{ marginTop:16, padding:16, background:'var(--crema)', borderRadius:'var(--radio)' }}>
+          <div style={{ marginTop:12, padding:12, background:'var(--crema)', borderRadius:'var(--radio)' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, flexWrap:'wrap', gap:8 }}>
               <strong style={{ color:'var(--selva)' }}><Ico as={BarChart3} size={14} />Absorción del CIF por producto</strong>
               <div style={{ fontSize:'1.05rem', fontWeight:600, color:'var(--selva)' }}>CIF del mes: <span style={{ color:'var(--dorado)' }}>{fCOP(cifTotal)}</span></div>
@@ -3572,7 +3668,7 @@ export default function Costos({ vista = 'productos' }) {
             const peContable = getPEqCaja(fijosTot, 0, mcuProm)
             const peCaja = getPEqCaja(fijosTot, gastosOp.pasivo.total, mcuProm)
             return (
-              <div style={{ marginTop:16, padding:16, background:'var(--crema)', borderRadius:'var(--radio)' }}>
+              <div style={{ marginTop:12, padding:12, background:'var(--crema)', borderRadius:'var(--radio)' }}>
                 <strong style={{ color:'var(--selva)' }}><Ico as={DollarSign} size={14} />Punto de equilibrio: contable vs. de caja</strong>
                 {mcuProm <= 0
                   ? <p style={{ fontSize:'0.85rem', color:'var(--texto-suave)', marginTop:8 }}>Necesitas fichas con precio y costo variable para calcularlo.</p>
