@@ -13,7 +13,7 @@ import Modal from '../components/ui/Modal'
 import ImageCropper from '../components/ui/ImageCropper'
 import BuscadorSelect from '../components/ui/BuscadorSelect'
 import Select from '../components/ui/Select'
-import { ShoppingBasket, TrendingUp, Package, Pencil, Plus, X, Check, Trash2, GripVertical, AlertTriangle, Lock } from 'lucide-react'
+import { ShoppingBasket, TrendingUp, Package, Pencil, Plus, X, Check, Trash2, GripVertical, AlertTriangle, Lock, FlaskConical, Download } from 'lucide-react'
 
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
@@ -914,54 +914,38 @@ export default function Receta({ embedded = false, productos = [], onConvertir }
         </div>
       </div>
 
-      {/* Tabla combinada: productos (base) + recetas rápidas */}
+      {/* Recetas rápidas guardadas — las recetas base se administran en Ficha de Producto */}
       <div className="card">
         <div className="card-title">
-          📚 Recetas Guardadas
-          <span className="badge badge-verde" style={{ marginLeft: 8 }}>{filasGuardadas.length}</span>
-          <span style={{ marginLeft: 'auto', fontSize: '0.78rem', color: 'var(--texto-suave)', fontWeight: 400 }}>
-            ⭐ Base = productos (editar en Ficha de Producto) · 💾 Rápida = recetas de prueba
-          </span>
+          <Ico as={FlaskConical} size={16} />Recetas rápidas guardadas
+          <span className="badge badge-verde" style={{ marginLeft: 8 }}>{recetas.length}</span>
         </div>
-        <div className="table-wrap">
-          <table>
-            <thead><tr><th>Nombre</th><th>Tipo</th><th>Creado por</th><th>Costo MP</th><th>Fecha</th><th>Acciones</th></tr></thead>
-            <tbody>
-              {filasGuardadas.length === 0
-                ? <tr><td colSpan={6} className="empty-table">No hay recetas ni productos</td></tr>
-                : filasGuardadas.map(r => {
-                    const esProd = r._origen === 'prod'
-                    const ings = Array.isArray(r.ingredientes) ? r.ingredientes : JSON.parse(r.ingredientes || '[]')
-                    const res  = (!esProd && r.ancla)
-                      ? calcularReceta({ ingredientes: ings, ancla: r.ancla, cantidadAncla: r.cantidad_ancla || 0, rendimiento: r.rendimiento, desperdicio: r.desperdicio, pesoUnidad: r.peso_unidad })
-                      : null
-                    const key = `${r._origen}-${r.id}`
-                    return (
-                      <tr key={key}>
-                        <td>
-                          {r.imagen_url && <img src={r.imagen_url} style={{ width: 32, height: 32, borderRadius: 3, objectFit: 'cover', marginRight: 6, verticalAlign: 'middle' }} alt="" />}
-                          <strong>{r.nombre}</strong>
-                        </td>
-                        <td><span className={`badge ${esProd ? 'badge-dorado' : 'badge-verde'}`}>{esProd ? '⭐ Base' : '💾 Rápida'}</span></td>
-                        <td>{r.creado_por || '—'}</td>
-                        <td className="td-number">{esProd ? fCOP(r.costo_final || 0) : (res ? fCOP(res.totalCostoMP) : '—')}</td>
-                        <td>{fFecha(esProd ? r.fecha_creado : r.fecha)}</td>
-                        <td style={{ whiteSpace: 'nowrap' }}>
-                          <button className="btn btn-xs btn-secondary" onClick={() => cargarReceta(key)}>
-                            {esProd ? '📥 Cargar' : '✏ Editar'}
-                          </button>{' '}
-                          {r.ficha_url && (
-                            <button className="btn btn-xs btn-dorado" onClick={() => descargarFicha(r.ficha_url, r.ficha_nombre)}>⬇ Ficha</button>
-                          )}{' '}
-                          {!esProd && puedeEliminarReceta(r) && <button className="btn btn-xs btn-danger" onClick={() => eliminarReceta(r.id, r.nombre)}>✕</button>}
-                        </td>
-                      </tr>
-                    )
-                  })
-              }
-            </tbody>
-          </table>
-        </div>
+        {recetas.length === 0
+          ? <p className="empty-table">Aún no hay recetas rápidas guardadas.</p>
+          : <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {recetas.map(r => (
+                <div key={r.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 10, border: '1px solid var(--crema-oscuro)', borderRadius: 'var(--radio)', padding: '8px 12px', background: 'var(--blanco)' }}>
+                  {/* Icono que diferencia el tipo (rápida vs base); aquí solo hay rápidas */}
+                  <span title="Receta rápida" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 30, height: 30, borderRadius: 8, background: 'rgba(124,179,66,0.16)', color: 'var(--selva)', flexShrink: 0 }}>
+                    <FlaskConical size={16} aria-hidden="true" />
+                  </span>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <strong style={{ display: 'block', color: 'var(--selva)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.nombre}</strong>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>{r.creado_por || '—'} · {fFecha(r.fecha)}</div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+                    {r.ficha_url && (
+                      <button type="button" className="btn btn-xs btn-secondary" title="Descargar ficha técnica" onClick={() => descargarFicha(r.ficha_url, r.ficha_nombre)}><Ico as={Download} size={13} />Ficha</button>
+                    )}
+                    <button type="button" className="btn btn-sm btn-primary" onClick={() => cargarReceta(`recipe-${r.id}`)}>Cargar</button>
+                    {puedeEliminarReceta(r) && (
+                      <button type="button" className="btn btn-xs btn-danger" title="Eliminar receta" onClick={() => eliminarReceta(r.id, r.nombre)}><X size={13} aria-hidden="true" /></button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+        }
       </div>
     </div>
   )
