@@ -924,6 +924,8 @@ export default function Costos({ vista = 'productos' }) {
     setImprimibles(parseJSON(p.imprimibles, []))
     setFichaNombre(p.ficha_nombre || ''); setFichaPath(p.ficha_url || ''); setFichaFile(null)
     setTab('nuevo')
+    // Al entrar a editar, mostrar la ficha desde arriba (no donde quedó el scroll del listado).
+    if (typeof window !== 'undefined') requestAnimationFrame(() => window.scrollTo({ top: 0, behavior: 'auto' }))
     toast(`"${p.nombre}" cargado para edición`)
   }
 
