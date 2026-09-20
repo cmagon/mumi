@@ -25,7 +25,7 @@ import { useConfirm } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import Receta from './Receta'
 import { CATALOGO_PARAMS, PARAM_UNIDAD, PRESENTACIONES } from '../lib/calidad'
-import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Printer, Settings, ShoppingCart, Tag, Trash2, TrendingUp, Undo2, Wrench, X, ChevronUp, ChevronDown, Plus, Eye } from 'lucide-react'
+import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Printer, Settings, ShoppingCart, Tag, Trash2, TrendingUp, Undo2, Wrench, X, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Plus, Eye, Check, AlertTriangle, Save, Upload, Leaf, Info, Star } from 'lucide-react'
 import { descargarFichaExcel } from '../lib/fichaExcel'
 import { getConfig } from '../lib/appConfig'
 import Select from '../components/ui/Select'
@@ -1718,13 +1718,13 @@ export default function Costos({ vista = 'productos' }) {
           {/* ── Selector: cargar producto (editar) o receta rápida (convertir a producto) ── */}
           <div className="card" style={{ padding:'14px 20px', marginBottom:16, background:'rgba(26,58,42,0.03)' }}>
             <div style={{ display:'flex', alignItems:'center', gap:12, flexWrap:'wrap' }}>
-              <span style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', whiteSpace:'nowrap' }}>
-                {editingId ? '✏ Editando producto:' : (selFuente.startsWith('recipe-') ? '🔄 Convirtiendo receta a producto:' : '📋 Cargar:')}
+              <span style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', whiteSpace:'nowrap', display:'inline-flex', alignItems:'center' }}>
+                {editingId ? <><Ico as={Pencil} size={14} />Editando producto:</> : (selFuente.startsWith('recipe-') ? <><Ico as={FlaskConical} size={14} />Convirtiendo receta a producto:</> : <><Ico as={Download} size={14} />Cargar:</>)}
               </span>
               <Select className="form-control" value={selFuente} onChange={e => cargarFuente(e.target.value)} style={{ maxWidth:340 }}>
                 <option value="">— nueva ficha en blanco —</option>
-                {productos.length > 0 && <optgroup label="⭐ Productos (editar)">{productos.map(p => <option key={p.id} value={`prod-${p.id}`}>{p.nombre}</option>)}</optgroup>}
-                {recetas.length > 0 && <optgroup label="💾 Recetas rápidas (convertir a producto)">{recetas.map(r => <option key={r.id} value={`recipe-${r.id}`}>{r.nombre}</option>)}</optgroup>}
+                {productos.length > 0 && <optgroup label="Productos (editar)">{productos.map(p => <option key={p.id} value={`prod-${p.id}`}>{p.nombre}</option>)}</optgroup>}
+                {recetas.length > 0 && <optgroup label="Recetas rápidas (convertir a producto)">{recetas.map(r => <option key={r.id} value={`recipe-${r.id}`}>{r.nombre}</option>)}</optgroup>}
               </Select>
               {(editingId || selFuente) && (
                 <button className="btn btn-secondary btn-sm" onClick={limpiarForm}>+ Nueva ficha</button>
@@ -1762,7 +1762,7 @@ export default function Costos({ vista = 'productos' }) {
                       {mpFabricadas.map(m => <option key={m.id} value={m.id}>{m.nombre} · {m.unidad}{m.vendible ? ' · vendible' : ' · interna'}</option>)}
                     </Select>
                     {mpFabricadas.length === 0 && <small style={{ display:'block', marginTop:6, color:'var(--texto-suave)' }}>No hay MP pendientes. En <strong>Inventario MP</strong> marca la MP como "Se puede vender" (vendible) o créala con tipo <strong>Fabricada/interna</strong>.</small>}
-                    {formProd.tipo === 'mp' && formProd.mp_id && <small style={{ display:'block', marginTop:6, color:'var(--selva)' }}>✓ Ficha de MP: <strong>{formProd.nombre}</strong>. Agrega sus ingredientes/procesos y guarda: el costo calculado se guardará como su precio en Inventario MP y se propagará a las recetas que la usan.</small>}
+                    {formProd.tipo === 'mp' && formProd.mp_id && <small style={{ display:'block', marginTop:6, color:'var(--selva)' }}><Ico as={Check} size={12} />Ficha de MP: <strong>{formProd.nombre}</strong>. Agrega sus ingredientes/procesos y guarda: el costo calculado se guardará como su precio en Inventario MP y se propagará a las recetas que la usan.</small>}
                   </div>
                 )
               })()}
@@ -1781,19 +1781,19 @@ export default function Costos({ vista = 'productos' }) {
                   <div key={urlDeImg(im) + i} style={{ position:'relative', width:72, height:72, borderRadius:'var(--radio)', overflow:'hidden', border: i === 0 ? '2px solid var(--dorado)' : '1px solid var(--crema-oscuro)' }}>
                     <img src={urlDeImg(im)} alt={formProd.nombre || `imagen ${i + 1}`} style={{ width:'100%', height:'100%', objectFit:'cover' }} />
                     <div style={{ position:'absolute', top:2, right:2, display:'flex', gap:2 }}>
-                      {i > 0 && <button type="button" title="Hacer principal" onClick={() => hacerPrincipal(i)} style={{ background:'rgba(0,0,0,0.55)', color:'#ffd54f', border:'none', borderRadius:4, cursor:'pointer', fontSize:'0.7rem', padding:'1px 4px' }}>★</button>}
-                      <button type="button" title="Quitar imagen" onClick={() => quitarImagen(i)} style={{ background:'rgba(0,0,0,0.55)', color:'#fff', border:'none', borderRadius:4, cursor:'pointer', fontSize:'0.7rem', padding:'1px 4px' }}>✕</button>
+                      {i > 0 && <button type="button" title="Hacer principal" onClick={() => hacerPrincipal(i)} style={{ background:'rgba(0,0,0,0.55)', color:'#ffd54f', border:'none', borderRadius:4, cursor:'pointer', display:'inline-flex', padding:'3px' }}><Star size={13} fill="currentColor" aria-hidden="true" /></button>}
+                      <button type="button" title="Quitar imagen" onClick={() => quitarImagen(i)} style={{ background:'rgba(0,0,0,0.55)', color:'#fff', border:'none', borderRadius:4, cursor:'pointer', display:'inline-flex', padding:'3px' }}><X size={13} aria-hidden="true" /></button>
                     </div>
                     {i === 0 && <span style={{ position:'absolute', bottom:2, left:2, background:'var(--dorado)', color:'#2b1c04', fontSize:'0.58rem', fontWeight:700, borderRadius:3, padding:'0 4px' }}>PRINCIPAL</span>}
                     <div style={{ position:'absolute', bottom:2, right:2, display:'flex', gap:2 }}>
-                      <button type="button" title="Mover izquierda" disabled={i === 0} onClick={() => setImagenes(prev => { const b=[...prev];[b[i-1],b[i]]=[b[i],b[i-1]];return b })} style={{ background:'rgba(0,0,0,0.55)', color:'#fff', border:'none', borderRadius:4, cursor:'pointer', fontSize:'0.75rem', padding:'0 5px', opacity:i===0?0.3:1 }}>‹</button>
-                      <button type="button" title="Mover derecha" disabled={i === imagenes.length - 1} onClick={() => setImagenes(prev => { const b=[...prev];[b[i+1],b[i]]=[b[i],b[i+1]];return b })} style={{ background:'rgba(0,0,0,0.55)', color:'#fff', border:'none', borderRadius:4, cursor:'pointer', fontSize:'0.75rem', padding:'0 5px', opacity:i===imagenes.length-1?0.3:1 }}>›</button>
+                      <button type="button" title="Mover izquierda" disabled={i === 0} onClick={() => setImagenes(prev => { const b=[...prev];[b[i-1],b[i]]=[b[i],b[i-1]];return b })} style={{ background:'rgba(0,0,0,0.55)', color:'#fff', border:'none', borderRadius:4, cursor:'pointer', display:'inline-flex', padding:'3px', opacity:i===0?0.3:1 }}><ChevronLeft size={13} aria-hidden="true" /></button>
+                      <button type="button" title="Mover derecha" disabled={i === imagenes.length - 1} onClick={() => setImagenes(prev => { const b=[...prev];[b[i+1],b[i]]=[b[i],b[i+1]];return b })} style={{ background:'rgba(0,0,0,0.55)', color:'#fff', border:'none', borderRadius:4, cursor:'pointer', display:'inline-flex', padding:'3px', opacity:i===imagenes.length-1?0.3:1 }}><ChevronRight size={13} aria-hidden="true" /></button>
                     </div>
                   </div>
                 ))}
-                <div onClick={() => !subiendoImg && imgInputRef.current?.click()}
-                  style={{ width:72, height:72, border:'2px dashed var(--crema-oscuro)', borderRadius:'var(--radio)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', fontSize:'1.6rem', background:'var(--crema)', color:'var(--texto-suave)' }}>
-                  {subiendoImg ? '…' : '＋'}
+                <div onClick={() => !subiendoImg && imgInputRef.current?.click()} title="Agregar imagen"
+                  style={{ width:72, height:72, border:'2px dashed var(--crema-oscuro)', borderRadius:'var(--radio)', cursor:'pointer', display:'flex', alignItems:'center', justifyContent:'center', background:'var(--crema)', color:'var(--texto-suave)' }}>
+                  {subiendoImg ? '…' : <Plus size={26} aria-hidden="true" />}
                   <input type="file" accept="image/*" ref={imgInputRef} onChange={handleImg} style={{ display:'none' }} />
                 </div>
               </div>
@@ -1819,10 +1819,10 @@ export default function Costos({ vista = 'productos' }) {
                   <datalist id="dl-presentaciones">{PRESENTACIONES.map(p => <option key={p} value={p} />)}</datalist>
                 </div>
                 <div className="form-group">
-                  <label className="form-label" title='"Activo" = se fabrica hoy (no que se venda). Los productos internos (mermelada, pulpa) van activos: consumen planta y absorben CIF. Inactiva solo lo que dejaste de producir; sus minutos salen del reparto y aparecen como capacidad ociosa.'>Estado del producto ⓘ</label>
+                  <label className="form-label" title='"Activo" = se fabrica hoy (no que se venda). Los productos internos (mermelada, pulpa) van activos: consumen planta y absorben CIF. Inactiva solo lo que dejaste de producir; sus minutos salen del reparto y aparecen como capacidad ociosa.'>Estado del producto <Info size={12} style={{ verticalAlign:'-2px', marginLeft:2 }} aria-hidden="true" /></label>
                   <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', padding:'4px 0' }}>
                     <input type="checkbox" checked={formProd.activo !== false} onChange={e => setFormProd(f=>({...f, activo: e.target.checked}))} />
-                    <span style={{ fontWeight:600, color: formProd.activo !== false ? 'var(--selva)' : 'var(--texto-suave)' }}>{formProd.activo !== false ? '✓ Activo (en producción)' : '⏸ Inactivo (no reparte CIF)'}</span>
+                    <span style={{ fontWeight:600, display:'inline-flex', alignItems:'center', color: formProd.activo !== false ? 'var(--selva)' : 'var(--texto-suave)' }}>{formProd.activo !== false ? <><Ico as={Check} size={14} />Activo (en producción)</> : <><Ico as={Pause} size={14} />Inactivo (no reparte CIF)</>}</span>
                   </label>
                   <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>“Activo” = se fabrica hoy (no que se venda). Inactiva solo lo que dejaste de producir.</small>
                 </div>
@@ -1838,7 +1838,7 @@ export default function Costos({ vista = 'productos' }) {
                       {opcionesTipo.filter(t => t !== formProd.tipo).map(t => { const on = categorias.includes(t); return (
                         <button type="button" key={t} className={`btn btn-xs ${on ? 'btn-primary' : 'btn-secondary'}`}
                           onClick={() => setCategorias(cs => on ? cs.filter(x => x !== t) : [...cs, t])}>
-                          {on ? '✓ ' : '+ '}{tipoLabel(t)}
+                          <Ico as={on ? Check : Plus} size={12} />{tipoLabel(t)}
                         </button>
                       ) })}
                     </div>
@@ -1875,7 +1875,7 @@ export default function Costos({ vista = 'productos' }) {
           {/* ── Ingredientes (integrado con toggle lista/manual de Calculadora de Receta) ── */}
           <details className="card" {...secProps('ingredientes')}>
             <summary className="card-title ed-sec-title">
-              <span className="ed-sec-title-main"><span className="ed-paso-num">2</span>🌿 Materias Primas e Insumos</span>
+              <span className="ed-sec-title-main"><span className="ed-paso-num">2</span><Ico as={Leaf} size={14} />Materias Primas e Insumos</span>
               <span className="card-hint">{ingredientes.length} ingrediente{ingredientes.length === 1 ? '' : 's'}</span>
               <div className="ed-sec-actions" onClick={e => e.stopPropagation()}>
                 <button className="btn btn-sm btn-secondary" onClick={addIngrediente}>+ Normal</button>
@@ -1951,7 +1951,7 @@ export default function Costos({ vista = 'productos' }) {
                               border: `1px solid ${modo===m ? (esRelativo?'var(--tierra)':'var(--selva)') : 'var(--crema-oscuro)'}`,
                               borderRadius: i===0 ? '3px 0 0 3px' : '0 3px 3px 0', marginLeft: i===1 ? -1 : 0,
                             }}>
-                              {m==='lista' ? '📦 Lista' : '✏ Manual'}
+                              {m==='lista' ? <><Ico as={Package} size={12} />Lista</> : <><Ico as={Pencil} size={12} />Manual</>}
                             </button>
                           ))}
                         </div>
@@ -2047,8 +2047,8 @@ export default function Costos({ vista = 'productos' }) {
                       {/* Subtotal */}
                       <span className="ed-sub ed-col-sub" data-label="Subtotal" style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', paddingTop:8, textAlign:'right' }}>{fCOP(sub)}</span>
                       <div className="ed-controls" style={{ display:'flex', alignItems:'center', gap:2, marginTop:6 }}>
-                        <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === 0} title="Subir" onClick={() => ordIng.moverArriba(idx)}>↑</button>
-                        <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === ingredientes.length - 1} title="Bajar" onClick={() => ordIng.moverAbajo(idx)}>↓</button>
+                        <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === 0} title="Subir" onClick={() => ordIng.moverArriba(idx)}><ChevronUp size={13} aria-hidden="true" /></button>
+                        <button type="button" className="btn btn-xs btn-secondary solo-movil" disabled={idx === ingredientes.length - 1} title="Bajar" onClick={() => ordIng.moverAbajo(idx)}><ChevronDown size={13} aria-hidden="true" /></button>
                         <button className="btn btn-danger btn-xs" onClick={() => setIngredientes(p => p.filter(x => x._id !== r._id))}><X size={13} aria-hidden="true" /></button>
                       </div>
                     </div>
@@ -2089,7 +2089,7 @@ export default function Costos({ vista = 'productos' }) {
 
               <div style={{ gridColumn:'1 / -1', fontWeight:700, color:'var(--selva)', fontSize:'0.78rem', textTransform:'uppercase', letterSpacing:'0.03em', marginTop:6 }}>Merma y calidad</div>
               <div className="form-group"><label className="form-label">Rendimiento esperado (%)</label><input type="number" className="form-control" value={rendimiento} onChange={e => setRendimiento(e.target.value)} min={1} max={100} step={0.1} /><small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>% de la mezcla que se convierte en producto (ej. por evaporación/cocción).</small></div>
-              <div className="form-group"><label className="form-label">% Desperdicio</label><input type="number" className="form-control" value={desperdicio} onChange={e => setDesperdicio(e.target.value)} min={0} max={50} step={0.1} /><small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }} title="No es 100 − rendimiento: es una merma adicional que se descuenta sobre lo ya rendido.">Merma adicional, después del rendimiento. ⓘ</small></div>
+              <div className="form-group"><label className="form-label">% Desperdicio</label><input type="number" className="form-control" value={desperdicio} onChange={e => setDesperdicio(e.target.value)} min={0} max={50} step={0.1} /><small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }} title="No es 100 − rendimiento: es una merma adicional que se descuenta sobre lo ya rendido.">Merma adicional, después del rendimiento. <Info size={11} style={{ verticalAlign:'-1px', marginLeft:1 }} aria-hidden="true" /></small></div>
 
               <div style={{ gridColumn:'1 / -1', fontWeight:700, color:'var(--selva)', fontSize:'0.78rem', textTransform:'uppercase', letterSpacing:'0.03em', marginTop:6 }}>Presentación y empaque</div>
               <div className="form-group">
@@ -2122,7 +2122,7 @@ export default function Costos({ vista = 'productos' }) {
               </div>
               <p style={{ fontSize:'0.76rem', color:'var(--texto-suave)', margin:'0 0 8px' }}
                  title="Serie nAA = Numeración + Año aa (10026 → 10426, consecutivo). Día + Mes + Año sin Numeración → sugiere la fecha del día (260826), no el consecutivo.">
-                Serie tipo <strong>10026 → 10426</strong>: usa el atajo <strong>Serie nAA</strong>. ⓘ
+                Serie tipo <strong>10026 → 10426</strong>: usa el atajo <strong>Serie nAA</strong>. <Info size={11} style={{ verticalAlign:'-1px', marginLeft:1 }} aria-hidden="true" />
               </p>
 
               {(() => {
@@ -2358,7 +2358,7 @@ export default function Costos({ vista = 'productos' }) {
                     onClick={() => { setFormProd(f => ({ ...f, bache: estimada })); toast('Unidades por bache actualizadas desde la receta ✓') }}
                     title="Copia las unidades estimadas al campo 'Unidades por bache' (Información del Producto)"
                   >
-                    ↑ Usar como "Unidades por bache" ({unidadesDesdeReceta > 0 ? estimada.toLocaleString('es-CO', { maximumFractionDigits: 2 }) : 0})
+                    <Ico as={ChevronUp} size={13} />Usar como "Unidades por bache" ({unidadesDesdeReceta > 0 ? estimada.toLocaleString('es-CO', { maximumFractionDigits: 2 }) : 0})
                   </button>
                 )
               })()}
@@ -2436,7 +2436,7 @@ export default function Costos({ vista = 'productos' }) {
                               border: `1px solid ${modo===m ? 'var(--selva)' : 'var(--crema-oscuro)'}`,
                               borderRadius: i===0 ? '3px 0 0 3px' : '0 3px 3px 0', marginLeft: i===1 ? -1 : 0,
                             }}>
-                              {m==='lista' ? '📦 Lista' : '✏ Manual'}
+                              {m==='lista' ? <><Ico as={Package} size={12} />Lista</> : <><Ico as={Pencil} size={12} />Manual</>}
                             </button>
                           ))}
                         </div>
@@ -2445,7 +2445,7 @@ export default function Costos({ vista = 'productos' }) {
                           : <Select key={`emp-lst-${r._id}`} className="form-control" value={r.mpId||''} onChange={e => handleSelectEmpaqueMP(r._id, e.target.value)}>
                               <option value="">Seleccionar empaque...</option>
                               {mpsEmpaque.map(m => <option key={m.id} value={m.id}>{m.nombre} — {fCOP(m.precio)}/{m.unidad}</option>)}
-                              {mpsEmpaque.length === 0 && <option value="" disabled>No hay insumos de empaque — usa modo ✏ Manual o créalos en Inventario MP</option>}
+                              {mpsEmpaque.length === 0 && <option value="" disabled>No hay insumos de empaque — usa modo Manual o créalos en Inventario MP</option>}
                             </Select>
                         }
                         </div>
@@ -2458,7 +2458,7 @@ export default function Costos({ vista = 'productos' }) {
                           disabled={!((parseFloat(formProd.bache)||0) > 0)}
                           title="Igualar a las unidades por bache"
                           onClick={() => updEmp(r._id,'cantidad', parseFloat(formProd.bache)||0)}>
-                          ⚡ = bache ({parseFloat(formProd.bache)||0})
+                          = bache ({parseFloat(formProd.bache)||0})
                         </button>
                       </div>
                       <span className="ed-sub" style={{ fontWeight:600, color:'var(--selva)', fontSize:'0.88rem', paddingTop:8, textAlign:'right' }}>{fCOP(sub)}</span>
@@ -2485,7 +2485,7 @@ export default function Costos({ vista = 'productos' }) {
               <div>
                 <small style={{ color:'var(--texto-suave)', display:'block', marginBottom:8 }}>Costos extra exclusivos de esta ficha. Suman al <strong>costo final por unidad</strong> según su base.</small>
                 <div className="alert alert-warning" style={{ fontSize:'0.8rem' }}>
-                  ⚠ <strong>Úsalo solo para valores exclusivos de este producto.</strong> La depreciación y asignación de máquinas
+                  <Ico as={AlertTriangle} size={13} /><strong>Úsalo solo para valores exclusivos de este producto.</strong> La depreciación y asignación de máquinas
                   se configura centralmente en <strong>Costos y Gastos → Agregar depreciación</strong>, para evitar contarla dos veces.
                 </div>
                 {adicionales.map((a, i) => {
@@ -2634,10 +2634,10 @@ export default function Costos({ vista = 'productos' }) {
                           {/* Qué significa el precio que tienes puesto, en plata contante */}
                           {precioActual > 0 && (
                             <div style={{ marginTop:8, padding:'8px 10px', background:'#fff', borderRadius:'var(--radio)', border:`1px solid ${color}`, fontSize:'0.8rem' }}>
-                              <div style={{ color, fontWeight:600, marginBottom:4 }}>
-                                {bajoMinimo ? `⚠ Tu precio de ${fCOP(precioActual)} está por debajo del mínimo: pierdes ${fCOP(sug.precioMinimo - precioActual)} por unidad`
-                                  : bajoObjetivo ? `Tu precio de ${fCOP(precioActual)} cubre los costos, pero queda ${fCOP(sug.precioObjetivo - precioActual)} bajo el objetivo`
-                                  : `✓ Tu precio de ${fCOP(precioActual)} alcanza o supera el objetivo`}
+                              <div style={{ color, fontWeight:600, marginBottom:4, display:'flex', alignItems:'flex-start', gap:4 }}>
+                                {bajoMinimo ? <><Ico as={AlertTriangle} size={13} />{`Tu precio de ${fCOP(precioActual)} está por debajo del mínimo: pierdes ${fCOP(sug.precioMinimo - precioActual)} por unidad`}</>
+                                  : bajoObjetivo ? <span>{`Tu precio de ${fCOP(precioActual)} cubre los costos, pero queda ${fCOP(sug.precioObjetivo - precioActual)} bajo el objetivo`}</span>
+                                  : <><Ico as={Check} size={13} />{`Tu precio de ${fCOP(precioActual)} alcanza o supera el objetivo`}</>}
                               </div>
                               <div style={{ color:'var(--texto-suave)' }}>
                                 Utilidad <strong>bruta</strong> (precio − costo de producción): <strong style={{ color:'var(--selva)' }}>{fCOP(utilBrutaRealUnit)} ({utilBrutaRealPct.toFixed(1)}%)</strong>.<br />
@@ -2670,7 +2670,7 @@ export default function Costos({ vista = 'productos' }) {
               </div>
               {calcResult && (parseFloat(formProd.comision) || 0) > 0 && (
                 <div style={{ background:'rgba(124,179,66,0.08)', border:'1px solid rgba(124,179,66,0.25)', borderRadius:'var(--radio)', padding:'10px 12px', marginBottom:14 }}>
-                  <div style={{ fontSize:'0.76rem', color:'var(--texto-suave)' }}>💼 Precio especial para el distribuidor <small>(precio por mayor − {formProd.comision}% de comisión)</small></div>
+                  <div style={{ fontSize:'0.76rem', color:'var(--texto-suave)' }}><Ico as={ShoppingCart} size={13} />Precio especial para el distribuidor <small>(precio por mayor − {formProd.comision}% de comisión)</small></div>
                   <div style={{ fontWeight:700, color:'var(--selva)', fontSize:'1.05rem' }}>{fCOP((parseFloat(formProd.precio_mayor)||0) - calcResult.comUnit)}</div>
                   <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>
                     La comisión representa <strong>{fCOP(calcResult.comUnit)}/u</strong> que le cedes al distribuidor. Tu ganancia pasa de {fCOP(calcResult.utilMayor)}/u a <strong>{fCOP(calcResult.utilMayorNeto)}/u</strong>.
@@ -2719,7 +2719,7 @@ export default function Costos({ vista = 'productos' }) {
                 </div>
                 {icuiP > 0 && icuiP !== 20 && (
                   <div style={{ fontSize:'0.75rem', color:'var(--tierra)', marginTop:6 }}>
-                    ⚠ La tarifa vigente del ICUI es <strong>20%</strong> desde 2025 (tienes {icuiP}%).
+                    <Ico as={AlertTriangle} size={12} />La tarifa vigente del ICUI es <strong>20%</strong> desde 2025 (tienes {icuiP}%).
                   </div>
                 )}
                 {hayImp && (
@@ -2865,7 +2865,7 @@ export default function Costos({ vista = 'productos' }) {
                   </div>
                   {utilBrutaMayor < 0 && pMayor > 0 && (
                     <div style={{ marginTop:8, padding:'8px 10px', background:'rgba(192,57,43,0.20)', borderRadius:6, fontSize:'0.78rem' }}>
-                      ⚠ Con este precio <strong>pierdes {fCOP(-utilBrutaMayor)} por unidad</strong> frente al costo de producción.
+                      <Ico as={AlertTriangle} size={13} />Con este precio <strong>pierdes {fCOP(-utilBrutaMayor)} por unidad</strong> frente al costo de producción.
                       Mira el precio sugerido a la izquierda.
                     </div>
                   )}
@@ -2893,7 +2893,7 @@ export default function Costos({ vista = 'productos' }) {
               </div>
             )}
             <label className="btn btn-secondary btn-sm" style={{ cursor:'pointer', display:'inline-flex' }}>
-              📎 {fichaNombre ? 'Reemplazar PDF/Word' : 'Subir PDF o Word'}
+              <Ico as={Upload} size={14} />{fichaNombre ? 'Reemplazar PDF/Word' : 'Subir PDF o Word'}
               <input type="file" accept=".pdf,.doc,.docx" onChange={e => { const f=e.target.files[0]; if(f){setFichaFile(f);setFichaNombre(f.name)} }} style={{ display:'none' }} />
             </label>
             </div>
@@ -2942,7 +2942,7 @@ export default function Costos({ vista = 'productos' }) {
             <button className="btn btn-secondary" onClick={limpiarForm}>Limpiar</button>
             <button className="btn btn-dorado" onClick={() => window.print()}><Ico as={Download} size={14} />PDF</button>
             <button className="btn btn-primary" onClick={guardarFicha} disabled={saveProducto.isPending}>
-              {saveProducto.isPending ? 'Guardando...' : editingId ? '✏ Actualizar Ficha' : '💾 Guardar Ficha'}
+              {saveProducto.isPending ? 'Guardando...' : editingId ? <><Ico as={Pencil} size={14} />Actualizar Ficha</> : <><Ico as={Save} size={14} />Guardar Ficha</>}
             </button>
           </div>
 
