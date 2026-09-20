@@ -1008,6 +1008,9 @@ details.card > .card-acc-body { padding: 16px 20px; }
 /* Compactación de la ficha: menos aire dentro de cada sección para que no se vea desordenada.
    Va scopeado a details.card (solo las secciones de la ficha), no afecta el resto de la app. */
 details.card .form-grid, details.card .form-grid-2, details.card .form-grid-3, details.card .form-grid-4 { gap: 10px 14px; }
+/* Columnas más angostas dentro de la ficha: los campos pequeños (números, %, días)
+   empacan varios por fila y no dejan huecos, sin desordenar el orden. */
+details.card .form-grid, details.card .form-grid-3 { grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
 details.card .form-group { margin-bottom: 10px; }
 details.card .form-label { font-size: 0.76rem; margin-bottom: 3px; letter-spacing: 0.3px; }
 details.card .form-control { padding: 7px 11px; font-size: 0.9rem; }
