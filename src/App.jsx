@@ -76,6 +76,14 @@ function ProtectedLayout() {
   const location = useLocation()
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [asistModo, setAsistModo] = useState(null)   // null | 'login' | 'logout'
+  // Si la carga inicial se cuelga (normalmente porque no hay internet real, aunque el
+  // dispositivo crea que sí), no dejamos el spinner girando: mostramos "Sin conexión".
+  const [cargaColgada, setCargaColgada] = useState(false)
+  useEffect(() => {
+    if (!loading) { setCargaColgada(false); return }
+    const t = setTimeout(() => setCargaColgada(true), 8000)
+    return () => clearTimeout(t)
+  }, [loading])
   useEffect(() => { loadConfig() }, [])
   useResponsiveTableLabels()
 
@@ -113,6 +121,9 @@ function ProtectedLayout() {
   const pedirCierre = () => { if (empVinculado) setAsistModo('logout'); else cerrarSesion() }
 
   if (loading) {
+    // Carga colgada (sin internet real): en vez del spinner infinito, la pantalla de "Sin conexión"
+    // (que además se recarga sola cuando vuelve la red).
+    if (cargaColgada || !navigator.onLine) return <SinConexion onReintentar={() => window.location.reload()} />
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 26, height: '100vh', background: 'var(--crema)' }}>
         <div style={{
