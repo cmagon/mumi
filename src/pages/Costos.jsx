@@ -1629,12 +1629,6 @@ export default function Costos({ vista = 'productos' }) {
       {tab === 'lista' && (
         <div className="card fichas-lista">
           <div className="card-title"><Ico as={Package} size={14} />Fichas de Productos</div>
-          <div className="alert alert-info" style={{ fontSize:'0.82rem' }}>
-            ℹ Todo se recalcula <strong>en vivo</strong> con el CIF y los precios de MP actuales.
-            El <strong>margen operacional estimado</strong> prorratea gastos admin/ventas/financieros y comisión sobre el costo de producción: es referencia de gestión, no la utilidad neta contable del ejercicio (ver Tablero).
-            Los valores <strong>guardados</strong> (los que usan Producto Terminado, Órdenes y el Tablero) solo cambian al guardar la
-            ficha o con <strong>"↻ Aplicar a las fichas"</strong> en Costos y Gastos.
-          </div>
 
           {productos.length === 0 ? (
             <p className="empty-table">No hay fichas. Crea la primera →</p>
