@@ -25,7 +25,7 @@ import { useConfirm } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import Receta from './Receta'
 import { CATALOGO_PARAMS, PARAM_UNIDAD, PRESENTACIONES } from '../lib/calidad'
-import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Printer, Settings, ShoppingCart, Tag, Trash2, TrendingUp, Undo2, Wrench, X, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Plus, Eye, Check, AlertTriangle, Save, Upload, ShoppingBasket, Info, Star, GripVertical } from 'lucide-react'
+import { BarChart3, ClipboardList, Clock, DollarSign, Download, FileText, FileSpreadsheet, FlaskConical, Package, Pause, Pencil, Printer, Settings, ShoppingCart, Tag, Trash2, TrendingUp, Undo2, Wrench, X, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, Plus, Eye, Check, AlertTriangle, Save, Upload, ShoppingBasket, Info, Star, GripVertical, Factory, Archive, Landmark, Receipt, TrendingDown, Users, Leaf } from 'lucide-react'
 import { descargarFichaExcel } from '../lib/fichaExcel'
 import { getConfig } from '../lib/appConfig'
 import Select from '../components/ui/Select'
@@ -3328,22 +3328,22 @@ export default function Costos({ vista = 'productos' }) {
           )
         }
         const CAJAS = [
-          { g:'cif', icono:'🏭', titulo:'Costos de producción (CIF)', afecta:true,
+          { g:'cif', icono:Factory, titulo:'Costos de producción (CIF)', afecta:true,
             desc:'Existen porque hay producción: arriendo/energía/agua de la planta, mantenimiento de equipos, dotación de operarias, insumos de aseo de producción. Se reparten entre los productos vía costo/minuto.',
             nomina: costoNomina.total, nominaLbl:'Nómina de producción (automática)',
             nominaDet:`Salarios ${fCOP(costoNomina.salarios)} · Auxilio ${fCOP(costoNomina.auxilios)} · Prestaciones ${fCOP(costoNomina.prestaciones)} · Parafiscales ${fCOP(costoNomina.parafiscales)}${costoNomina.honorarios > 0 ? ` · Honorarios ${fCOP(costoNomina.honorarios)}` : ''} — no agregues salarios como ítem manual (se duplicarían)`,
             total: cifTotal },
-          { g:'administracion', icono:'🗂', titulo:'Gastos administrativos',
+          { g:'administracion', icono:Archive, titulo:'Gastos administrativos',
             desc:'Gestionar la empresa: honorarios del contador, papelería, celular, software, registro mercantil, seguros, mantenimiento del inmueble, cafetería/bienestar.',
             nomina: gastosOp.administracion.nomina, nominaLbl:'Nómina de administración (automática)', total: gastosOp.administracion.total },
-          { g:'ventas', icono:'🛒', titulo:'Gastos de ventas',
+          { g:'ventas', icono:ShoppingCart, titulo:'Gastos de ventas',
             desc:'Vender los productos: publicidad y redes, transporte de entregas de pedidos, comisiones de vendedores, ferias y eventos.',
             nomina: gastosOp.ventas.nomina, nominaLbl:'Nómina de ventas (automática)', total: gastosOp.ventas.total },
-          { g:'financiero', icono:'🏦', titulo:'Gastos financieros',
+          { g:'financiero', icono:Landmark, titulo:'Gastos financieros',
             desc:'Financiar la operación: intereses de préstamos y comisiones bancarias.', total: gastosOp.financiero.total },
-          { g:'impuesto', icono:'🧾', titulo:'Impuestos sobre ingresos',
+          { g:'impuesto', icono:Receipt, titulo:'Impuestos sobre ingresos',
             desc:'ICA y similares sobre las ventas brutas. Van en línea separada del estado de resultados — no son un gasto administrativo.', total: gastosOp.impuestos.total },
-          { g:'pasivo', icono:'📉', titulo:'Abono a deuda (salida de caja)',
+          { g:'pasivo', icono:TrendingDown, titulo:'Abono a deuda (salida de caja)',
             desc:'Capital de los préstamos. No es gasto (reduce la deuda, no la utilidad) y por eso no entra al costo del producto ni al estado de resultados — solo el interés es gasto financiero. Pero sí sale de la caja cada mes: mira abajo el punto de equilibrio de caja.', total: gastosOp.pasivo.total },
         ]
         const gastosOperTotal = gastosOp.administracion.total + gastosOp.ventas.total + gastosOp.financiero.total + gastosOp.impuestos.total
@@ -3351,44 +3351,37 @@ export default function Costos({ vista = 'productos' }) {
         <>
           <div className="card">
             <div className="card-title">
-              💰 Costos y Gastos del mes
+              <Ico as={DollarSign} size={16} />Costos y Gastos del mes
               <button className="btn btn-sm btn-dorado" style={{ marginLeft:'auto' }} disabled={recalcularTodos.isPending}
                 title="Guarda en cada ficha el costo calculado con el CIF y la nómina vigentes. Producto Terminado, Órdenes y el Tablero usan ese valor guardado."
                 onClick={() => confirmar(`Se recalcularán y guardarán los costos de ${productos.length} ficha(s) con el CIF y la nómina actuales. ¿Continuar?`).then(ok => ok && recalcularTodos.mutate())}>
                 {recalcularTodos.isPending ? 'Recalculando…' : '↻ Aplicar a las fichas'}
               </button>
             </div>
-            <div className="alert alert-info" style={{ fontSize:'0.83rem' }}>
-              ℹ Cada ítem vive en la caja de su clasificación contable. Solo los <strong>Costos de producción (CIF)</strong> se
-              reparten entre los productos y definen el costo/minuto; los demás grupos alimentan el estado de resultados del
-              Tablero pero <strong>no</strong> encarecen el producto. Con el selector "Grupo" de cada fila mueves el ítem a otra caja.
-              Tras reclasificar ítems o cambiar la nómina, usa <strong>"Aplicar a las fichas"</strong> para que el costo guardado
-              de cada producto (el que usan Producto Terminado, Órdenes y el Tablero) refleje los valores nuevos.
-            </div>
-            <div style={{ display:'flex', gap:10, flexWrap:'wrap' }}>
-              <div style={{ flex:1, minWidth:170, textAlign:'center', background:'rgba(45,90,61,0.08)', borderRadius:8, padding:'10px' }}>
-                <div style={{ fontSize:'1.15rem', fontWeight:700, color:'var(--selva)' }}>{fCOP(cifTotal)}</div>
-                <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>Costos de producción (CIF)</div>
+            <div style={{ display:'flex', gap:8, flexWrap:'wrap' }}>
+              <div style={{ flex:1, minWidth:130, textAlign:'center', background:'rgba(45,90,61,0.08)', borderRadius:8, padding:'6px 8px' }}>
+                <div style={{ fontSize:'0.95rem', fontWeight:700, color:'var(--selva)' }}>{fCOP(cifTotal)}</div>
+                <div style={{ fontSize:'0.66rem', color:'var(--texto-suave)' }}>Costos de producción (CIF)</div>
               </div>
-              <div style={{ flex:1, minWidth:170, textAlign:'center', background:'rgba(200,169,74,0.12)', borderRadius:8, padding:'10px' }}>
-                <div style={{ fontSize:'1.15rem', fontWeight:700, color:'var(--dorado)' }}>{fCOP(gastosOperTotal)}</div>
-                <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>Gastos admin + ventas + financiero + impuestos</div>
+              <div style={{ flex:1, minWidth:130, textAlign:'center', background:'rgba(200,169,74,0.12)', borderRadius:8, padding:'6px 8px' }}>
+                <div style={{ fontSize:'0.95rem', fontWeight:700, color:'var(--dorado)' }}>{fCOP(gastosOperTotal)}</div>
+                <div style={{ fontSize:'0.66rem', color:'var(--texto-suave)' }}>Gastos admin + ventas + fin. + imp.</div>
               </div>
-              <div style={{ flex:1, minWidth:170, textAlign:'center', background:'var(--crema)', borderRadius:8, padding:'10px' }}>
-                <div style={{ fontSize:'1.15rem', fontWeight:700, color:'var(--tierra)' }}>{fCOP(gastosOp.pasivo.total)}</div>
-                <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>Pasivo (solo flujo de caja)</div>
+              <div style={{ flex:1, minWidth:130, textAlign:'center', background:'var(--crema)', borderRadius:8, padding:'6px 8px' }}>
+                <div style={{ fontSize:'0.95rem', fontWeight:700, color:'var(--tierra)' }}>{fCOP(gastosOp.pasivo.total)}</div>
+                <div style={{ fontSize:'0.66rem', color:'var(--texto-suave)' }}>Pasivo (flujo de caja)</div>
               </div>
-              <div style={{ flex:1, minWidth:170, textAlign:'center', background:'#fff8e8', borderRadius:8, padding:'10px', border:'1px solid var(--dorado)' }}>
-                <div style={{ fontSize:'1.15rem', fontWeight:700, color:'var(--dorado)' }}>{fCOP(costoMin)}/min</div>
-                <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>Costo por minuto de producción</div>
+              <div style={{ flex:1, minWidth:130, textAlign:'center', background:'#fff8e8', borderRadius:8, padding:'6px 8px', border:'1px solid var(--dorado)' }}>
+                <div style={{ fontSize:'0.95rem', fontWeight:700, color:'var(--dorado)' }}>{fCOP(costoMin)}/min</div>
+                <div style={{ fontSize:'0.66rem', color:'var(--texto-suave)' }}>Costo por minuto</div>
               </div>
             </div>
           </div>
 
-          <div className="tabs" style={{ marginBottom:14 }}>
-            <button className={`tab-btn ${costosSubtab === 'costos' ? 'active' : ''}`} onClick={() => setCostosSubtab('costos')}>Costos</button>
-            <button className={`tab-btn ${costosSubtab === 'gastos' ? 'active' : ''}`} onClick={() => setCostosSubtab('gastos')}>Gastos</button>
-            <button className={`tab-btn ${costosSubtab === 'analisis' ? 'active' : ''}`} onClick={() => setCostosSubtab('analisis')}>Análisis</button>
+          <div className="tabs tabs-seg" style={{ marginBottom:14 }}>
+            <button className={`tab-btn ${costosSubtab === 'costos' ? 'active' : ''}`} onClick={() => setCostosSubtab('costos')}><Ico as={Factory} size={14} />Costos</button>
+            <button className={`tab-btn ${costosSubtab === 'gastos' ? 'active' : ''}`} onClick={() => setCostosSubtab('gastos')}><Ico as={Archive} size={14} />Gastos</button>
+            <button className={`tab-btn ${costosSubtab === 'analisis' ? 'active' : ''}`} onClick={() => setCostosSubtab('analisis')}><Ico as={BarChart3} size={14} />Análisis</button>
           </div>
 
           {CAJAS.filter(caja => costosSubtab === 'costos' ? caja.g === 'cif' : costosSubtab === 'gastos' ? caja.g !== 'cif' : false).map(caja => {
@@ -3396,7 +3389,7 @@ export default function Costos({ vista = 'productos' }) {
             return (
               <div key={caja.g} className="card" style={{ borderLeft: caja.afecta ? '4px solid var(--selva)' : '4px solid var(--crema-oscuro)' }}>
                 <div className="card-title">
-                  {caja.icono} {caja.titulo}
+                  <Ico as={caja.icono} size={15} />{caja.titulo}
                   {caja.afecta
                     ? <span className="badge badge-verde" style={{ marginLeft:8, fontSize:'0.66rem' }}>afecta el costo del producto</span>
                     : <span className="badge badge-gris" style={{ marginLeft:8, fontSize:'0.66rem' }}>no afecta el costo del producto</span>}
@@ -3420,7 +3413,7 @@ export default function Costos({ vista = 'productos' }) {
                         : items.map(filaItem)}
                       {caja.nomina > 0 && (
                         <tr style={{ background:'rgba(124,179,66,0.10)' }}>
-                          <td colSpan={3}><strong>🧑‍🤝‍🧑 {caja.nominaLbl}</strong><div style={{ fontSize:'0.72rem', color:'var(--texto-suave)' }}>{caja.nominaDet || 'Según empleados activos de esta área — el área se asigna en Nómina'}</div></td>
+                          <td colSpan={3}><strong><Ico as={Users} size={13} />{caja.nominaLbl}</strong><div style={{ fontSize:'0.72rem', color:'var(--texto-suave)' }}>{caja.nominaDet || 'Según empleados activos de esta área — el área se asigna en Nómina'}</div></td>
                           <td className="td-number"><strong>{fCOP(caja.nomina)}</strong></td>
                           <td colSpan={2} style={{ fontSize:'0.72rem', color:'var(--texto-suave)' }} title="Calculado desde Empleados">automático</td>
                         </tr>
@@ -3441,7 +3434,7 @@ export default function Costos({ vista = 'productos' }) {
 
           {costosSubtab === 'analisis' && <>
           <div className="card">
-          <div className="card-title">⏱ Cálculo y reparto del CIF</div>
+          <div className="card-title"><Ico as={Clock} size={15} />Cálculo y reparto del CIF</div>
           {/* Desglose y simulador del costo por minuto de mano de obra */}
           <div style={{ marginTop:16, padding:16, background:'#fff8e8', border:'1px solid var(--dorado)', borderRadius:'var(--radio)' }}>
             <strong style={{ color:'var(--selva)' }}><Ico as={Clock} size={14} />Costo por minuto de mano de obra (producción)</strong>
@@ -3464,22 +3457,12 @@ export default function Costos({ vista = 'productos' }) {
               <div style={{ fontSize:'1rem', marginTop:2 }}>Costo/minuto = {fCOP(cifTotal)} ÷ {fNum(Math.round(minsDisponibles))} = <strong style={{ color:'var(--dorado)' }}>{fCOP(costoMin)}/min</strong></div>
             </div>
 
-            <div className="alert alert-info" style={{ fontSize:'0.8rem', marginTop:10 }}>
-              ℹ Normalmente déjalo en <strong>"todos los de producción"</strong>: se toma solo de quienes tienen área Producción en Nómina.
-              El campo existe para cuando la <em>capacidad</em> no coincide con la <em>plantilla</em> — por ejemplo si alguien de producción es
-              supervisor y no trabaja en los baches, o si quieres calcular a capacidad normal en un mes atípico. Ojo: si eliges un número
-              distinto a {empleadosProduccion.length}, el costo/minuto usa el salario de {empleadosProduccion.length} persona(s) repartido entre la capacidad de {operariosActivos}.
-            </div>
           </div>
 
           <div style={{ marginTop:16, padding:16, background:'var(--crema)', borderRadius:'var(--radio)' }}>
             <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:12, flexWrap:'wrap', gap:8 }}>
               <strong style={{ color:'var(--selva)' }}><Ico as={BarChart3} size={14} />Absorción del CIF por producto</strong>
               <div style={{ fontSize:'1.05rem', fontWeight:600, color:'var(--selva)' }}>CIF del mes: <span style={{ color:'var(--dorado)' }}>{fCOP(cifTotal)}</span></div>
-            </div>
-            <div className="alert alert-info" style={{ fontSize:'0.85rem', marginBottom:12 }}>
-              ℹ El CIF se reparte por <strong>tiempo de proceso</strong>: cada producto absorbe los minutos que usa × {fCOP(costoMin)}/min.
-              Por eso solo se absorbe la parte del CIF correspondiente a la capacidad que realmente usas; el resto es <strong>capacidad ociosa</strong>.
             </div>
             {cifAbsorcion.items.length === 0
               ? <p style={{ color:'var(--texto-suave)', fontSize:'0.9rem' }}>Agrega fichas de costos para ver la absorción</p>
@@ -3616,11 +3599,6 @@ export default function Costos({ vista = 'productos' }) {
                       {/* Mínimo a vender de CADA producto, según su peso en el portafolio */}
                       <div style={{ marginTop:14 }}>
                         <strong style={{ color:'var(--selva)', fontSize:'0.88rem' }}>Cuánto debes vender de cada producto</strong>
-                        <div className="alert alert-info" style={{ fontSize:'0.8rem', margin:'6px 0 8px' }}>
-                          ℹ Solo productos <strong>vendibles</strong> (no incluye materias primas ni subproductos internos).
-                          El mínimo se reparte según su <strong>participación en ventas</strong> (unidades × precio mayor).
-                          Es el punto en que no ganas ni pierdes: por encima de esa cifra, cada unidad deja utilidad.
-                        </div>
                         <div className="table-wrap">
                           <table>
                             <thead><tr><th>Producto</th><th className="td-number">Produces/mes</th><th className="td-number">% ventas</th><th className="td-number">Margen/u</th><th className="td-number">Mínimo a vender</th><th className="td-number">Holgura</th></tr></thead>
@@ -3666,7 +3644,7 @@ export default function Costos({ vista = 'productos' }) {
       {/* ===== MPs ===== */}
       {tab === 'mps' && (
         <div className="card">
-          <div className="card-title">🌿 Catálogo de Materias Primas</div>
+          <div className="card-title"><Ico as={Leaf} size={15} />Catálogo de Materias Primas</div>
           <div className="table-wrap">
             <table>
               <thead><tr><th>Nombre</th><th>Categoría</th><th>Unidad</th><th>Precio</th><th>Tipo</th></tr></thead>
@@ -3745,10 +3723,6 @@ export default function Costos({ vista = 'productos' }) {
         size="modal-xl"
         footer={<button className="btn btn-secondary" onClick={closeModalEquipos}>Cerrar</button>}
       >
-        <div className="alert alert-info" style={{ fontSize:'0.8rem' }}>
-          La depreciación se calcula por línea recta: <strong>(valor − residual) ÷ vida útil ÷ 12</strong>.
-          El método general entra al CIF mensual; por categoría se asigna según las horas o días del proceso de cada ficha.
-        </div>
         <div className="form-grid-4" style={{ alignItems:'end' }}>
           <div className="form-group"><label className="form-label">Equipo *</label><input className="form-control" value={equipoForm.nombre} onChange={e => setEquipoForm(f => ({ ...f, nombre:e.target.value }))} placeholder="Horno deshidratador" /></div>
           <div className="form-group"><label className="form-label">Valor de adquisición</label><MoneyInput value={equipoForm.valor_adquisicion} onChange={v => setEquipoForm(f => ({ ...f, valor_adquisicion:v }))} /></div>
