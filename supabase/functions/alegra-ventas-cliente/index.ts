@@ -19,7 +19,11 @@ const json = (o: unknown, s = 200) => new Response(JSON.stringify(o), { status: 
 
 // Helpers incrustados (función autocontenida: se puede desplegar también desde el panel de
 // Supabase, que no sube la carpeta _shared/).
-async function requireAdmin(req: Request): Promise<{ resp?: Response }> {
+// Acepta al admin autenticado O al cron (que llama con la service key), para poder refrescar
+// las métricas automáticamente aunque nadie tenga la app abierta.
+async function requireAdminOrCron(req: Request): Promise<{ resp?: Response }> {
+  const bearer = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim()
+  if (bearer && bearer === SERVICE_KEY) return {}
   const asUser = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: req.headers.get('Authorization') || '' } } })
   const { data: { user } } = await asUser.auth.getUser()
   if (!user) return { resp: json({ error: 'No autenticado' }, 401) }
@@ -68,7 +72,7 @@ async function traerTodasLasPaginas(endpoint: string, authHeader: string, onFirs
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
-  const guard = await requireAdmin(req); if (guard.resp) return guard.resp
+  const guard = await requireAdminOrCron(req); if (guard.resp) return guard.resp
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
   const { email, token } = await getAlegraCreds(supabase)
   if (!email || !token) return json({ error: 'Configura el correo y el token de Alegra en la app.' }, 400)
@@ -109,7 +113,21 @@ Deno.serve(async (req) => {
       facturas++
     }
 
-    return json({ ok: true, facturas, porCliente })
+    // Persistir las métricas en `clients` (por alegra_id) para que la app las muestre al
+    // instante sin recalcular. Solo se tocan las columnas de métricas.
+    const { data: cls } = await supabase.from('clients').select('id, alegra_id').not('alegra_id', 'eq', '')
+    const ahora = new Date().toISOString()
+    let guardados = 0
+    for (const cl of (cls || [])) {
+      const m = porCliente[String(cl.alegra_id)]
+      const upd = m
+        ? { compras_total: Math.round(m.total), compras_num: m.count, compra_primera: m.primera || null, compra_ultima: m.ultima || null, compras_por_mes: m.porMes, metricas_sync_at: ahora }
+        : { compras_total: 0, compras_num: 0, compra_primera: null, compra_ultima: null, compras_por_mes: {}, metricas_sync_at: ahora }
+      await supabase.from('clients').update(upd).eq('id', cl.id)
+      guardados++
+    }
+
+    return json({ ok: true, facturas, guardados, porCliente })
   } catch (e) {
     return json({ error: String((e as Error)?.message || e) })
   }
