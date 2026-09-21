@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '../lib/supabase'
 import { fFecha, fCOP } from '../lib/businessLogic'
@@ -6,7 +6,7 @@ import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
 import Modal from '../components/ui/Modal'
 import * as XLSX from 'xlsx'
-import { Download, Pencil, X, DownloadCloud, BarChart3, ShoppingBag, Users, CalendarClock } from 'lucide-react'
+import { Download, Pencil, X, RefreshCw, BarChart3, ShoppingBag, Users, CalendarClock } from 'lucide-react'
 import Select from '../components/ui/Select'
 import { useAuth } from '../context/AuthContext'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
@@ -26,7 +26,6 @@ export default function Clientes() {
   const [modal, setModal] = useState(false)
   const [form, setForm] = useState(EMPTY)
   const [editId, setEditId] = useState(null)
-  const [metricas, setMetricas] = useState(null)   // { [alegra_id]: { total, count, primera, ultima, porMes } }
   const [detalle, setDetalle] = useState(null)      // cliente para ver desglose de compras
 
   const { data: clientes = [] } = useQuery({
@@ -79,33 +78,37 @@ export default function Clientes() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['clientes'] }); toast('Eliminado') },
   })
 
-  // Importa los contactos que son clientes desde Alegra (solo admin)
-  const importarAlegra = useMutation({
-    mutationFn: async () => {
-      const { data, error } = await supabase.functions.invoke('alegra-contacts', { body: {} })
-      if (error) throw error
-      if (data?.error) throw new Error(data.error)
-      return data
+  // Sincroniza con Alegra: importa contactos y recalcula/guarda las métricas por cliente.
+  // Corre automáticamente al abrir (si los datos están viejos) y también con el botón.
+  const sincronizar = useMutation({
+    mutationFn: async ({ silencioso } = {}) => {
+      const r1 = await supabase.functions.invoke('alegra-contacts', { body: {} })
+      if (r1.error || r1.data?.error) throw new Error(r1.data?.error || r1.error.message)
+      const r2 = await supabase.functions.invoke('alegra-ventas-cliente', { body: {} })
+      if (r2.error || r2.data?.error) throw new Error(r2.data?.error || r2.error.message)
+      return { imp: r1.data, met: r2.data, silencioso }
     },
-    onSuccess: (d) => {
+    onSuccess: ({ imp, silencioso }) => {
       qc.invalidateQueries({ queryKey: ['clientes'] })
-      toast(`Alegra: ${d.importados} nuevos · ${d.actualizados} actualizados · ${d.vinculados} enlazados`)
+      if (!silencioso) toast(`Alegra: ${imp.importados} nuevos · ${imp.actualizados} actualizados · métricas al día`)
     },
-    onError: (e) => toast(e.message || 'No se pudo importar de Alegra', 'error'),
+    onError: (e) => toast(e.message || 'No se pudo sincronizar con Alegra', 'error'),
   })
 
-  // Carga las métricas de compra por cliente desde las facturas de Alegra (bajo demanda)
-  const cargarMetricas = useMutation({
-    mutationFn: async () => {
-      const { data, error } = await supabase.functions.invoke('alegra-ventas-cliente', { body: {} })
-      if (error) throw error
-      if (data?.error) throw new Error(data.error)
-      return data
-    },
-    onSuccess: (d) => { setMetricas(d.porCliente || {}); toast(`Métricas actualizadas · ${d.facturas} facturas`) },
-    onError: (e) => toast(e.message || 'No se pudieron cargar las métricas', 'error'),
-  })
-  const metricaDe = (c) => (metricas && c.alegra_id) ? metricas[String(c.alegra_id)] : null
+  // Métricas persistidas en la propia fila del cliente (las guarda alegra-ventas-cliente).
+  const metricaDe = (c) => c?.metricas_sync_at
+    ? { total: Number(c.compras_total) || 0, count: Number(c.compras_num) || 0, primera: c.compra_primera, ultima: c.compra_ultima, porMes: c.compras_por_mes || {} }
+    : null
+  const hayMetricas = clientes.some(c => c.metricas_sync_at)
+  const ultimaSync = clientes.reduce((max, c) => (c.metricas_sync_at && c.metricas_sync_at > max ? c.metricas_sync_at : max), '')
+
+  // Auto-sincroniza al abrir el módulo si nunca se hizo o si pasaron más de 6 horas.
+  const autoRef = useRef(false)
+  useEffect(() => {
+    if (!esAdmin || autoRef.current || clientes.length === 0) return
+    const viejo = !ultimaSync || (Date.now() - new Date(ultimaSync).getTime()) > 6 * 3600 * 1000
+    if (viejo) { autoRef.current = true; sincronizar.mutate({ silencioso: true }) }
+  }, [esAdmin, clientes.length, ultimaSync])
 
   const filtrados = clientes.filter(c => {
     const ok = (c.nombre || '').toLowerCase().includes(buscar.toLowerCase()) ||
@@ -136,18 +139,15 @@ export default function Clientes() {
       <div className="page-header">
         <h1 className="page-title">Clientes</h1>
         <div className="page-actions">
-          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => importarAlegra.mutate()} disabled={importarAlegra.isPending} title="Trae los contactos que son clientes desde Alegra">
-            <Ico as={DownloadCloud} size={14} />{importarAlegra.isPending ? 'Importando...' : 'Importar de Alegra'}
-          </button>}
-          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => cargarMetricas.mutate()} disabled={cargarMetricas.isPending} title="Calcula cuánto ha comprado cada cliente según las facturas de Alegra">
-            <Ico as={BarChart3} size={14} />{cargarMetricas.isPending ? 'Calculando...' : 'Métricas de Alegra'}
+          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => sincronizar.mutate({})} disabled={sincronizar.isPending} title="Importa contactos y recalcula las métricas desde Alegra (también ocurre automáticamente)">
+            <Ico as={RefreshCw} size={14} />{sincronizar.isPending ? 'Sincronizando...' : 'Actualizar de Alegra'}
           </button>}
           <button className="btn btn-secondary btn-sm" onClick={exportarExcel}><Ico as={Download} size={14} />Excel</button>
           <button className="btn btn-primary btn-sm" onClick={openNew}>+ Nuevo Cliente</button>
         </div>
       </div>
 
-      {metricas && (() => {
+      {hayMetricas && (() => {
         const conCompra = clientes.filter(c => { const m = metricaDe(c); return m && m.count > 0 })
         const totalFact = conCompra.reduce((s, c) => s + (metricaDe(c)?.total || 0), 0)
         const nCompras = conCompra.reduce((s, c) => s + (metricaDe(c)?.count || 0), 0)
@@ -177,10 +177,10 @@ export default function Clientes() {
       <div className="card">
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Nombre / Empresa</th><th>Contacto</th><th className="col-opcional">Canal</th><th className="col-opcional">Ciudad</th>{metricas && <th className="td-number">Total comprado</th>}{metricas && <th className="col-opcional">Última compra</th>}<th className="col-opcional-2">Fecha Reg.</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>Nombre / Empresa</th><th>Contacto</th><th className="col-opcional">Canal</th><th className="col-opcional">Ciudad</th>{hayMetricas && <th className="td-number">Total comprado</th>}{hayMetricas && <th className="col-opcional">Última compra</th>}<th className="col-opcional-2">Fecha Reg.</th><th>Acciones</th></tr></thead>
             <tbody>
               {filtrados.length === 0
-                ? <tr><td colSpan={metricas ? 8 : 6} className="empty-table">Sin clientes registrados</td></tr>
+                ? <tr><td colSpan={hayMetricas ? 8 : 6} className="empty-table">Sin clientes registrados</td></tr>
                 : filtrados.map(c => {
                   const m = metricaDe(c)
                   return (
@@ -193,12 +193,12 @@ export default function Clientes() {
                     <td>{c.contacto || '—'}<br /><small style={{ color: 'var(--texto-suave)' }}>{c.telefono}</small></td>
                     <td className="col-opcional"><span className="badge badge-azul">{CANALES[c.canal] || c.canal}</span></td>
                     <td className="col-opcional">{c.ciudad || '—'}</td>
-                    {metricas && <td className="td-number">
+                    {hayMetricas && <td className="td-number">
                       {m && m.count > 0
                         ? <button className="btn-link-emp" onClick={() => setDetalle(c)} title="Ver desglose de compras"><strong>{fCOP(m.total)}</strong><div style={{ fontSize: '0.68rem', color: 'var(--texto-suave)', fontWeight: 400 }}>{m.count} compra(s)</div></button>
                         : <span style={{ color: 'var(--texto-suave)' }}>—</span>}
                     </td>}
-                    {metricas && <td className="col-opcional">{m?.ultima ? fFecha(m.ultima) : '—'}</td>}
+                    {hayMetricas && <td className="col-opcional">{m?.ultima ? fFecha(m.ultima) : '—'}</td>}
                     <td className="col-opcional-2">{fFecha(c.fecha_reg)}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>

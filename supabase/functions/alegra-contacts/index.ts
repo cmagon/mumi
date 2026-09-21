@@ -20,7 +20,11 @@ const json = (o: unknown, s = 200) => new Response(JSON.stringify(o), { status: 
 
 // Helpers incrustados (esta función es autocontenida para poder desplegarla también desde el
 // panel de Supabase, que no sube la carpeta _shared/).
-async function requireAdmin(req: Request): Promise<{ resp?: Response }> {
+// Acepta al admin autenticado O al cron (que llama con la service key), para importar contactos
+// automáticamente aunque nadie tenga la app abierta.
+async function requireAdminOrCron(req: Request): Promise<{ resp?: Response }> {
+  const bearer = (req.headers.get('Authorization') || '').replace(/^Bearer\s+/i, '').trim()
+  if (bearer && bearer === SERVICE_KEY) return {}
   const asUser = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: req.headers.get('Authorization') || '' } } })
   const { data: { user } } = await asUser.auth.getUser()
   if (!user) return { resp: json({ error: 'No autenticado' }, 401) }
@@ -94,7 +98,7 @@ async function traerTodasLasPaginas(authHeader: string, onFirstPageError?: (s: n
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
-  const guard = await requireAdmin(req); if (guard.resp) return guard.resp
+  const guard = await requireAdminOrCron(req); if (guard.resp) return guard.resp
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
   const { email, token } = await getAlegraCreds(supabase)
   if (!email || !token) return json({ error: 'Configura el correo y el token de Alegra en la app.' }, 400)
