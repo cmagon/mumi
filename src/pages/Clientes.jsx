@@ -6,8 +6,9 @@ import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
 import Modal from '../components/ui/Modal'
 import * as XLSX from 'xlsx'
-import { Download, Pencil, X } from 'lucide-react'
+import { Download, Pencil, X, DownloadCloud } from 'lucide-react'
 import Select from '../components/ui/Select'
+import { useAuth } from '../context/AuthContext'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const CANALES = { mayor: 'Por mayor', detal: 'Detal', feria: 'Feria/Evento', ecommerce: 'E-commerce', whatsapp: 'WhatsApp/Redes' }
@@ -18,6 +19,8 @@ export default function Clientes() {
   const toast = useToast()
   const confirmar = useConfirm()
   const qc = useQueryClient()
+  const { profile } = useAuth()
+  const esAdmin = (profile?.rol || 'admin') === 'admin'
   const [buscar, setBuscar] = useState('')
   const [filtroCanal, setFiltroCanal] = useState('')
   const [modal, setModal] = useState(false)
@@ -58,6 +61,21 @@ export default function Clientes() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['clientes'] }); toast('Eliminado') },
   })
 
+  // Importa los contactos que son clientes desde Alegra (solo admin)
+  const importarAlegra = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.functions.invoke('alegra-contacts', { body: {} })
+      if (error) throw error
+      if (data?.error) throw new Error(data.error)
+      return data
+    },
+    onSuccess: (d) => {
+      qc.invalidateQueries({ queryKey: ['clientes'] })
+      toast(`Alegra: ${d.importados} nuevos · ${d.actualizados} actualizados · ${d.vinculados} enlazados`)
+    },
+    onError: (e) => toast(e.message || 'No se pudo importar de Alegra', 'error'),
+  })
+
   const filtrados = clientes.filter(c => {
     const ok = (c.nombre || '').toLowerCase().includes(buscar.toLowerCase()) ||
                (c.contacto || '').toLowerCase().includes(buscar.toLowerCase())
@@ -87,6 +105,9 @@ export default function Clientes() {
       <div className="page-header">
         <h1 className="page-title">Clientes</h1>
         <div className="page-actions">
+          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => importarAlegra.mutate()} disabled={importarAlegra.isPending} title="Trae los contactos que son clientes desde Alegra">
+            <Ico as={DownloadCloud} size={14} />{importarAlegra.isPending ? 'Importando...' : 'Importar de Alegra'}
+          </button>}
           <button className="btn btn-secondary btn-sm" onClick={exportarExcel}><Ico as={Download} size={14} />Excel</button>
           <button className="btn btn-primary btn-sm" onClick={openNew}>+ Nuevo Cliente</button>
         </div>
@@ -109,7 +130,11 @@ export default function Clientes() {
                 ? <tr><td colSpan={6} className="empty-table">Sin clientes registrados</td></tr>
                 : filtrados.map(c => (
                   <tr key={c.id}>
-                    <td><strong>{c.nombre}</strong></td>
+                    <td>
+                      <strong>{c.nombre}</strong>
+                      {c.alegra_id ? <span className="badge badge-verde" style={{ marginLeft: 6, fontSize: '0.62rem' }}>Alegra</span> : null}
+                      {c.nit ? <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>{c.tipo_identificacion || 'ID'}: {c.nit}</div> : null}
+                    </td>
                     <td>{c.contacto || '—'}<br /><small style={{ color: 'var(--texto-suave)' }}>{c.telefono}</small></td>
                     <td className="col-opcional"><span className="badge badge-azul">{CANALES[c.canal] || c.canal}</span></td>
                     <td className="col-opcional">{c.ciudad || '—'}</td>
