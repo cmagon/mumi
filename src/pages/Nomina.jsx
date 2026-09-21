@@ -13,7 +13,7 @@ import MoneyInput from '../components/ui/MoneyInput'
 import { useConfirm } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import * as XLSX from 'xlsx'
-import { BarChart3, ClipboardList, Clock, DollarSign, Download, FolderOpen, Pencil, Pin, Settings, Users, X } from 'lucide-react'
+import { BarChart3, ClipboardList, Clock, DollarSign, Download, FolderOpen, Pencil, Pin, Settings, Users, X, Save, AlertTriangle, Ban, Scale, CheckCircle2, Building2, Plus, UserPlus, Info, Calculator, Circle } from 'lucide-react'
 import Select from '../components/ui/Select'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
@@ -370,13 +370,13 @@ export default function Nomina() {
       <div className="page-header">
         <h1 className="page-title">Asistencia & Nómina</h1>
         <div className="page-actions">
-          {puedeEmpleados && esAdmin && <button className="btn btn-primary btn-sm" onClick={() => { setFormEmp(EMPTY_EMP); setEditEmpId(null); setEmpEsUsuario(true); setModalEmp(true) }}>+ Nuevo Empleado</button>}
+          {puedeEmpleados && esAdmin && <button className="btn btn-primary btn-sm" onClick={() => { setFormEmp(EMPTY_EMP); setEditEmpId(null); setEmpEsUsuario(true); setModalEmp(true) }}><Ico as={UserPlus} size={14} />Nuevo Empleado</button>}
         </div>
       </div>
 
-      <div className="tabs">
-        {puedeEmpleados && <button className={`tab-btn ${tab === 'empleados' ? 'active' : ''}`} onClick={() => setTab('empleados')}>Empleados</button>}
-        {puedeLiquidacion && <button className={`tab-btn ${tab === 'nomina' ? 'active' : ''}`} onClick={() => setTab('nomina')}>Liquidación Nómina</button>}
+      <div className="tabs tabs-seg">
+        {puedeEmpleados && <button className={`tab-btn ${tab === 'empleados' ? 'active' : ''}`} onClick={() => setTab('empleados')}><Ico as={Users} size={14} />Empleados</button>}
+        {puedeLiquidacion && <button className={`tab-btn ${tab === 'nomina' ? 'active' : ''}`} onClick={() => setTab('nomina')}><Ico as={Calculator} size={14} />Liquidación Nómina</button>}
         {esAdmin && <button className={`tab-btn ${tab === 'parametros' ? 'active' : ''}`} onClick={() => setTab('parametros')}><Ico as={Settings} size={14} />Parámetros</button>}
       </div>
 
@@ -433,7 +433,7 @@ export default function Nomina() {
           )}
           {spanDesajustado && (
             <div className="alert alert-warning" style={{ fontSize: '0.82rem' }}>
-              ⚠ El rango <strong>{fFecha(nomDesde)} → {fFecha(nomHasta)}</strong> abarca {diasSpan} días, pero elegiste período <strong>{nomPeriodo}</strong>
+              <Ico as={AlertTriangle} size={14} />El rango <strong>{fFecha(nomDesde)} → {fFecha(nomHasta)}</strong> abarca {diasSpan} días, pero elegiste período <strong>{nomPeriodo}</strong>
               ({nomPeriodo === 'quincenal' ? '≈15' : '≈30'} días esperados). El período define si se paga el salario completo o la mitad —
               el rango de fechas solo trae la asistencia de ese lapso. Verifica que ambos coincidan o el pago quedará mal proporcionado.
             </div>
@@ -444,21 +444,21 @@ export default function Nomina() {
           )}
           {liquidacionExistente && (
             <div className="alert alert-danger" style={{ fontSize: '0.85rem' }}>
-              ⛔ Este empleado ya tiene una liquidación guardada que se cruza con el rango <strong>{fFecha(nomDesde)} → {fFecha(nomHasta)}</strong>
+              <Ico as={Ban} size={14} />Este empleado ya tiene una liquidación guardada que se cruza con el rango <strong>{fFecha(nomDesde)} → {fFecha(nomHasta)}</strong>
               (registrada del {fFecha(liquidacionExistente.fecha_desde)} al {fFecha(liquidacionExistente.fecha_hasta)}). No se puede volver a liquidar ese período.
             </div>
           )}
 
           {nomResultado && !liquidacionExistente && nomResultado.tipo === 'destajo' && !nomResultado.cumpleMinimo && (
             <div className="alert alert-danger" style={{ fontSize: '0.85rem', marginTop: 12 }}>
-              ⚖️ <strong>Por debajo del salario mínimo legal.</strong> Lo devengado por destajo ({fCOP(nomResultado.salBase)}) es menor al mínimo proporcional al tiempo trabajado
+              <Ico as={Scale} size={14} /><strong>Por debajo del salario mínimo legal.</strong> Lo devengado por destajo ({fCOP(nomResultado.salBase)}) es menor al mínimo proporcional al tiempo trabajado
               ({fCOP(nomResultado.minimoProporcional)} = SMLMV {fCOP(params.smlmv)} × {nomResultado.diasTrab > 0 ? `${nomResultado.diasTrab}/30 días` : (nomPeriodo === 'quincenal' ? '15/30' : '30/30')}).
               Debes <strong>completar {fCOP(nomResultado.faltanteMinimo)}</strong> para cumplir la ley.
             </div>
           )}
           {nomResultado && !liquidacionExistente && nomResultado.tipo === 'destajo' && nomResultado.cumpleMinimo && nomResultado.minimoProporcional > 0 && (
             <div className="alert" style={{ fontSize: '0.82rem', marginTop: 12, background: 'rgba(124,179,66,0.12)', border: '1px solid var(--lima)', borderRadius: 'var(--radio)', padding: 8 }}>
-              ✅ Cumple el mínimo legal: {fCOP(nomResultado.salBase)} ≥ mínimo proporcional {fCOP(nomResultado.minimoProporcional)}.
+              <Ico as={CheckCircle2} size={14} />Cumple el mínimo legal: {fCOP(nomResultado.salBase)} ≥ mínimo proporcional {fCOP(nomResultado.minimoProporcional)}.
             </div>
           )}
           {nomResultado && !liquidacionExistente && (
@@ -504,7 +504,7 @@ export default function Nomina() {
                 : nomResultado.esCPS
                 ? (
                   <div className="card" style={{ margin: 0 }}>
-                    <div className="card-title">ℹ Contrato Prestación de Servicios</div>
+                    <div className="card-title"><Ico as={Info} size={14} />Contrato Prestación de Servicios</div>
                     <div className="alert alert-info" style={{ fontSize: '0.83rem' }}>
                       En un CPS <strong>no hay prestaciones sociales ni aportes parafiscales del empleador</strong>.
                       El contratista cotiza su propia seguridad social sobre un IBC del {(params.cps.ibc * 100).toFixed(0)}% de los honorarios.
@@ -534,7 +534,7 @@ export default function Nomina() {
                       <tr><td>Caja de compensación</td><td className="td-number">{fCOP(nomResultado.parafiscales.caja)}</td></tr>
                       <tr><td>ICBF</td><td className="td-number">{fCOP(nomResultado.parafiscales.icbf)}</td></tr>
                       <tr><td>SENA</td><td className="td-number">{fCOP(nomResultado.parafiscales.sena)}</td></tr>
-                      <tr style={{ fontWeight: 700, borderTop: '2px solid var(--crema-oscuro)', background: 'rgba(139,94,60,0.10)' }}><td>🏢 COSTO TOTAL PARA LA EMPRESA<div style={{ fontWeight: 400, fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Salario + prestaciones + aportes</div></td><td className="td-number" style={{ color: 'var(--tierra)', fontSize: '1.05rem' }}>{fCOP(nomResultado.costoEmpleador)}</td></tr>
+                      <tr style={{ fontWeight: 700, borderTop: '2px solid var(--crema-oscuro)', background: 'rgba(139,94,60,0.10)' }}><td><Ico as={Building2} size={14} />COSTO TOTAL PARA LA EMPRESA<div style={{ fontWeight: 400, fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Salario + prestaciones + aportes</div></td><td className="td-number" style={{ color: 'var(--tierra)', fontSize: '1.05rem' }}>{fCOP(nomResultado.costoEmpleador)}</td></tr>
                     </tbody></table>
                   </div>
                 )}
@@ -545,7 +545,7 @@ export default function Nomina() {
             <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
               <button className="btn btn-primary" disabled={guardarLiquidacion.isPending || (nomDescManualNum > 0 && !nomRazonDesc.trim())}
                 onClick={() => guardarLiquidacion.mutate({ emp: nomEmpleado, periodo: nomPeriodo, desde: nomDesde, hasta: nomHasta, mes: parseInt(nomMes), anio: nomAño, resultado: nomResultado })}>
-                {guardarLiquidacion.isPending ? 'Guardando...' : '💾 Guardar registro'}
+                {guardarLiquidacion.isPending ? 'Guardando...' : <><Ico as={Save} size={14} />Guardar registro</>}
               </button>
               <button className="btn btn-secondary" onClick={() => abrirListado(nomEmpleado)}><Ico as={ClipboardList} size={14} />Ver asistencia del empleado</button>
             </div>
@@ -669,7 +669,7 @@ export default function Nomina() {
 
       {/* Modal listado de asistencia (admin edita; demás solo lectura) */}
       <Modal open={!!listadoEmp} onClose={() => setListadoEmp(null)}
-        title={`📋 Asistencia — ${listadoEmp?.nombre || ''}`}
+        title={`Asistencia — ${listadoEmp?.nombre || ''}`}
         footer={<button className="btn btn-secondary" onClick={() => setListadoEmp(null)}>Cerrar</button>}
       >
         {listadoEmp && (() => {
@@ -701,7 +701,7 @@ export default function Nomina() {
                   <label className="form-label">Año</label>
                   <input type="number" className="form-control" style={{ width: 100 }} value={lisAño} onChange={e => setLisAño(Number(e.target.value))} />
                 </div>
-                {esAdmin && <button className="btn btn-sm btn-dorado" style={{ marginLeft: 'auto' }} onClick={() => abrirLote(listadoEmp)}>➕ Registrar en lote</button>}
+                {esAdmin && <button className="btn btn-sm btn-dorado" style={{ marginLeft: 'auto' }} onClick={() => abrirLote(listadoEmp)}><Ico as={Plus} size={14} />Registrar en lote</button>}
               </div>
               {ingreso && <div style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', marginBottom: 8 }}>Vinculado desde el {fFecha(ingreso)}</div>}
 
@@ -742,10 +742,10 @@ export default function Nomina() {
                             {esAdmin && <td style={{ fontSize: '0.72rem', color: 'var(--texto-suave)', whiteSpace: 'nowrap' }}>
                               {/* Auditoría: hora/fecha EXACTA en que quedó registrado cada evento (no la hora fichada por el
                                   usuario, sino el timestamp real del servidor al guardar) */}
-                              {tsEntrada && <div>🟢 Llegada: {tsEntrada}</div>}
-                              {tsSalida && <div>🔴 Salida: {tsSalida}</div>}
+                              {tsEntrada && <div><Circle size={9} fill="var(--lima)" color="var(--lima)" style={{ display: 'inline', verticalAlign: '0', marginRight: 4 }} />Llegada: {tsEntrada}</div>}
+                              {tsSalida && <div><Circle size={9} fill="var(--rojo)" color="var(--rojo)" style={{ display: 'inline', verticalAlign: '0', marginRight: 4 }} />Salida: {tsSalida}</div>}
                               {!tsEntrada && !tsSalida && '—'}
-                              {reg.editado_por ? <div style={{ fontSize: '0.68rem' }}>✎ {reg.editado_por}</div> : null}
+                              {reg.editado_por ? <div style={{ fontSize: '0.68rem' }}><Pencil size={10} aria-hidden="true" style={{ display: 'inline', verticalAlign: '-1px', marginRight: 3 }} />{reg.editado_por}</div> : null}
                             </td>}
                             <td>
                               {ausencia && esAdmin
@@ -800,7 +800,7 @@ export default function Nomina() {
       </Modal>
 
       {/* Modal registro en lote (admin) */}
-      <Modal open={loteModal} onClose={() => setLoteModal(false)} onSave={registrarLote} title="➕ Registrar asistencia en lote"
+      <Modal open={loteModal} onClose={() => setLoteModal(false)} onSave={registrarLote} title="Registrar asistencia en lote"
         footer={<>
           <button className="btn btn-secondary" onClick={() => setLoteModal(false)}>Cancelar</button>
           <button className="btn btn-primary" onClick={registrarLote}>Guardar</button>
@@ -827,13 +827,13 @@ export default function Nomina() {
               onClick={() => eliminarFilaLote(i)} disabled={loteFilas.length === 1}><X size={13} aria-hidden="true" /></button>
           </div>
         ))}
-        <button className="btn btn-sm btn-secondary" onClick={agregarFilaLote}>➕ Agregar fecha</button>
+        <button className="btn btn-sm btn-secondary" onClick={agregarFilaLote}><Ico as={Plus} size={14} />Agregar fecha</button>
       </Modal>
 
       {/* Modal Empleado */}
       <Modal open={modalEmp} onClose={() => { setModalEmp(false); setFormEmp(EMPTY_EMP); setEditEmpId(null) }}
         onSave={guardarEmpleado}
-        title={`👤 ${editEmpId ? 'Editar' : 'Nuevo'} Empleado`}
+        title={`${editEmpId ? 'Editar' : 'Nuevo'} Empleado`}
         footer={
           <>
             <button className="btn btn-secondary" onClick={() => setModalEmp(false)}>Cancelar</button>
@@ -917,7 +917,7 @@ export default function Nomina() {
               <small style={{ color: 'var(--texto-suave)', fontSize: '0.75rem' }}>El pago = horas trabajadas (según asistencia) × este valor.</small>
             </div>
             <div className="alert alert-warning" style={{ fontSize: '0.8rem' }}>
-              ⚠ <strong>Destajo por hora sin prestaciones</strong>: esta modalidad <strong>no está contemplada en el Código Sustantivo del Trabajo</strong> para un contrato laboral (un trabajador subordinado genera prestaciones y aportes). Úsala bajo tu responsabilidad para pagos ocasionales/informales; para algo recurrente formaliza un contrato.
+              <Ico as={AlertTriangle} size={14} /><strong>Destajo por hora sin prestaciones</strong>: esta modalidad <strong>no está contemplada en el Código Sustantivo del Trabajo</strong> para un contrato laboral (un trabajador subordinado genera prestaciones y aportes). Úsala bajo tu responsabilidad para pagos ocasionales/informales; para algo recurrente formaliza un contrato.
             </div>
           </>
         )}
@@ -992,12 +992,12 @@ function ParametrosNomina({ params, empleadosActivos = 0, onSaved }) {
   return (
     <div className="card">
       <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-        ⚙ Parámetros de Liquidación (Código Sustantivo del Trabajo)
+        <Ico as={Settings} size={14} />Parámetros de Liquidación (Código Sustantivo del Trabajo)
         <button className="btn btn-secondary btn-sm" style={{ marginLeft: 'auto' }} onClick={precargar2026}><Ico as={Download} size={14} />Precargar datos 2026</button>
       </div>
       <div className="alert alert-info" style={{ fontSize: '0.83rem' }}>
         Estos valores se aplican a la liquidación según el <strong>tipo de pago</strong> de cada empleado.
-        Usa <strong>"📥 Precargar datos 2026"</strong> para cargar SMLMV, auxilio de transporte y tasas de la vigencia 2026; luego revisa y pulsa <strong>Guardar</strong>.
+        Usa <strong>"Precargar datos 2026"</strong> para cargar SMLMV, auxilio de transporte y tasas de la vigencia 2026; luego revisa y pulsa <strong>Guardar</strong>.
       </div>
 
       <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 8 }}>Valores base</div>
@@ -1097,7 +1097,7 @@ function ParametrosNomina({ params, empleadosActivos = 0, onSaved }) {
       </div>
 
       <div style={{ marginTop: 16, textAlign: 'right' }}>
-        <button className="btn btn-primary" onClick={guardar} disabled={saving}>{saving ? 'Guardando...' : '💾 Guardar parámetros'}</button>
+        <button className="btn btn-primary" onClick={guardar} disabled={saving}>{saving ? 'Guardando...' : <><Ico as={Save} size={14} />Guardar parámetros</>}</button>
       </div>
     </div>
   )
