@@ -123,7 +123,7 @@ export default function Clientes() {
   // dirección natural (nombre/ciudad ascendente, valor/última compra descendente).
   const ordenarPor = (campo) => {
     if (orden === campo) { setOrdenDir(d => (d === 'asc' ? 'desc' : 'asc')); return }
-    setOrden(campo); setOrdenDir(campo === 'nombre' || campo === 'ciudad' ? 'asc' : 'desc')
+    setOrden(campo); setOrdenDir(campo === 'valor' || campo === 'ultima' ? 'desc' : 'asc')
   }
 
   // Auto-sincroniza al abrir el módulo si nunca se hizo o si pasaron más de 6 horas.
@@ -142,6 +142,7 @@ export default function Clientes() {
     const clave = (c) => orden === 'valor' ? totalAno(metricaDe(c))
       : orden === 'ultima' ? (c.compra_ultima || '')
       : orden === 'ciudad' ? (c.ciudad || '').toLowerCase()
+      : orden === 'canal' ? (CANALES[c.canal] || c.canal || '').toLowerCase()
       : (c.nombre || '').toLowerCase()
     const x = clave(a), y = clave(b)
     if (x < y) return ordenDir === 'asc' ? -1 : 1
@@ -217,7 +218,7 @@ export default function Clientes() {
             <thead><tr>
               <ThOrd campo="nombre" orden={orden} dir={ordenDir} onSort={ordenarPor}>Nombre / Empresa</ThOrd>
               <th>Contacto</th>
-              <th className="col-opcional">Canal</th>
+              <ThOrd campo="canal" orden={orden} dir={ordenDir} onSort={ordenarPor} className="col-opcional">Canal</ThOrd>
               <ThOrd campo="ciudad" orden={orden} dir={ordenDir} onSort={ordenarPor} className="col-opcional">Ciudad</ThOrd>
               {hayMetricas && <ThOrd campo="valor" orden={orden} dir={ordenDir} onSort={ordenarPor} className="td-number">Facturado (último año)</ThOrd>}
               {hayMetricas && <ThOrd campo="ultima" orden={orden} dir={ordenDir} onSort={ordenarPor} className="col-opcional">Última compra</ThOrd>}
