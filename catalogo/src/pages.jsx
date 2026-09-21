@@ -839,11 +839,7 @@ export function Producto() {
             <div className="benes">{p.beneficios.map((b, i) => <span key={i} className="bene">{b}</span>)}</div>
           )}
           {sinHtml(p.resumen) && <div className="det-lead rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.resumen) }} />}
-          {sinHtml(p.descripcion) && (
-            <div className="det-desc-block">
-              <div className="det-desc rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.descripcion) }} />
-            </div>
-          )}
+          {/* Acciones (cantidad + agregar + pedir) justo debajo del resumen corto */}
           {agotado
             ? <div className="agotado-box">Producto agotado por ahora. Escríbenos para avisarte cuando vuelva.</div>
             : (
@@ -863,6 +859,11 @@ export function Producto() {
               </>
             )}
           <button type="button" className="btn btn-wa" onClick={pedir}><MessageCircle size={18} /> {agotado ? 'Consultar por WhatsApp' : 'Pedir este producto'}</button>
+          {sinHtml(p.descripcion) && (
+            <div className="det-desc-block">
+              <div className="det-desc rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.descripcion) }} />
+            </div>
+          )}
           {p.frutos?.length > 0 && (
             <div className="det-meta">Hecho con {p.frutos.map((f) => (
               <span key={f} className="det-meta-tag"><FrutoIcon name={iconoFruto(f)} size={13} /> {labelFruto(f)}</span>
