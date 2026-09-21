@@ -10,8 +10,6 @@
 // Respuesta:   { ok, total, importados, actualizados, vinculados }
 
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
-import { requireAdmin } from '../_shared/auth.ts'
-import { getAlegraCreds } from '../_shared/alegra.ts'
 
 const SUPABASE_URL = Deno.env.get('SUPABASE_URL')!
 const SERVICE_KEY = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!
@@ -19,6 +17,25 @@ const ALEGRA_BASE = 'https://api.alegra.com/api/v1'
 
 const cors = { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type' }
 const json = (o: unknown, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { ...cors, 'Content-Type': 'application/json' } })
+
+// Helpers incrustados (esta función es autocontenida para poder desplegarla también desde el
+// panel de Supabase, que no sube la carpeta _shared/).
+async function requireAdmin(req: Request): Promise<{ resp?: Response }> {
+  const asUser = createClient(SUPABASE_URL, Deno.env.get('SUPABASE_ANON_KEY')!, { global: { headers: { Authorization: req.headers.get('Authorization') || '' } } })
+  const { data: { user } } = await asUser.auth.getUser()
+  if (!user) return { resp: json({ error: 'No autenticado' }, 401) }
+  const admin = createClient(SUPABASE_URL, SERVICE_KEY)
+  const { data: perfil } = await admin.from('user_profiles').select('*').eq('id', user.id).single()
+  if (perfil?.rol !== 'admin') return { resp: json({ error: 'Solo administradores' }, 403) }
+  if ((perfil.estado && perfil.estado !== 'activo') || perfil.archivado === true) return { resp: json({ error: 'Usuario inactivo' }, 403) }
+  return {}
+}
+async function getAlegraCreds(supabase: any): Promise<{ email: string; token: string }> {
+  const { data } = await supabase.from('alegra_config').select('email, token').eq('id', 1).maybeSingle()
+  const email = (Deno.env.get('ALEGRA_EMAIL') || (data as any)?.email || '').trim()
+  const token = (Deno.env.get('ALEGRA_TOKEN') || (data as any)?.token || '').trim()
+  return { email, token }
+}
 
 const PAGE = 30, MAX_PAGES = 250, BATCH = 6
 
