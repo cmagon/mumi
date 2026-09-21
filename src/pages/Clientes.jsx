@@ -6,7 +6,7 @@ import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
 import Modal from '../components/ui/Modal'
 import * as XLSX from 'xlsx'
-import { Download, Pencil, X, RefreshCw, BarChart3, ShoppingBag, Users, CalendarClock } from 'lucide-react'
+import { Download, Pencil, X, RefreshCw, ShoppingBag, Users, CalendarClock, Eye, EyeOff } from 'lucide-react'
 import Select from '../components/ui/Select'
 import { useAuth } from '../context/AuthContext'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
@@ -27,6 +27,7 @@ export default function Clientes() {
   const [form, setForm] = useState(EMPTY)
   const [editId, setEditId] = useState(null)
   const [detalle, setDetalle] = useState(null)      // cliente para ver desglose de compras
+  const [verMontos, setVerMontos] = useState(false) // los montos facturados van ocultos tras un ojito
 
   const { data: clientes = [] } = useQuery({
     queryKey: ['clientes'],
@@ -102,6 +103,11 @@ export default function Clientes() {
   const hayMetricas = clientes.some(c => c.metricas_sync_at)
   const ultimaSync = clientes.reduce((max, c) => (c.metricas_sync_at && c.metricas_sync_at > max ? c.metricas_sync_at : max), '')
 
+  // Total facturado del ÚLTIMO AÑO (últimos 12 meses), sumado desde el desglose mensual.
+  const mesCutoff = (() => { const d = new Date(); d.setMonth(d.getMonth() - 11); return d.toISOString().slice(0, 7) })()
+  const totalAno = (m) => m ? Object.entries(m.porMes || {}).reduce((s, [k, v]) => (k >= mesCutoff ? s + (Number(v) || 0) : s), 0) : 0
+  const oculto = '•••••'   // marcador cuando los montos están ocultos
+
   // Auto-sincroniza al abrir el módulo si nunca se hizo o si pasaron más de 6 horas.
   const autoRef = useRef(false)
   useEffect(() => {
@@ -149,8 +155,7 @@ export default function Clientes() {
 
       {hayMetricas && (() => {
         const conCompra = clientes.filter(c => { const m = metricaDe(c); return m && m.count > 0 })
-        const totalFact = conCompra.reduce((s, c) => s + (metricaDe(c)?.total || 0), 0)
-        const nCompras = conCompra.reduce((s, c) => s + (metricaDe(c)?.count || 0), 0)
+        const factAno = conCompra.reduce((s, c) => s + totalAno(metricaDe(c)), 0)
         const tile = (icon, label, val, color) => (
           <div className="card" style={{ flex: '1 1 150px', margin: 0, padding: 12 }}>
             <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)', display: 'flex', alignItems: 'center', gap: 5 }}><Ico as={icon} size={13} />{label}</div>
@@ -158,10 +163,18 @@ export default function Clientes() {
           </div>
         )
         return (
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16 }}>
+          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16, alignItems: 'stretch' }}>
             {tile(Users, 'Clientes con compras', conCompra.length)}
-            {tile(ShoppingBag, 'Total facturado', fCOP(totalFact), 'var(--dorado)')}
-            {tile(BarChart3, 'Ticket promedio', fCOP(nCompras ? totalFact / nCompras : 0))}
+            <div className="card" style={{ flex: '1 1 200px', margin: 0, padding: 12 }}>
+              <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)', display: 'flex', alignItems: 'center', gap: 5 }}>
+                <Ico as={ShoppingBag} size={13} />Facturado (último año)
+                <button type="button" onClick={() => setVerMontos(v => !v)} title={verMontos ? 'Ocultar montos' : 'Mostrar montos'} aria-label={verMontos ? 'Ocultar montos' : 'Mostrar montos'}
+                  style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--texto-suave)', display: 'inline-flex', padding: 2 }}>
+                  {verMontos ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
+                </button>
+              </div>
+              <div style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--dorado)' }}>{verMontos ? fCOP(factAno) : oculto}</div>
+            </div>
           </div>
         )
       })()}
@@ -177,7 +190,7 @@ export default function Clientes() {
       <div className="card">
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Nombre / Empresa</th><th>Contacto</th><th className="col-opcional">Canal</th><th className="col-opcional">Ciudad</th>{hayMetricas && <th className="td-number">Total comprado</th>}{hayMetricas && <th className="col-opcional">Última compra</th>}<th className="col-opcional-2">Fecha Reg.</th><th>Acciones</th></tr></thead>
+            <thead><tr><th>Nombre / Empresa</th><th>Contacto</th><th className="col-opcional">Canal</th><th className="col-opcional">Ciudad</th>{hayMetricas && <th className="td-number">Facturado (último año)</th>}{hayMetricas && <th className="col-opcional">Última compra</th>}<th className="col-opcional-2">Fecha Reg.</th><th>Acciones</th></tr></thead>
             <tbody>
               {filtrados.length === 0
                 ? <tr><td colSpan={hayMetricas ? 8 : 6} className="empty-table">Sin clientes registrados</td></tr>
@@ -195,7 +208,7 @@ export default function Clientes() {
                     <td className="col-opcional">{c.ciudad || '—'}</td>
                     {hayMetricas && <td className="td-number">
                       {m && m.count > 0
-                        ? <button className="btn-link-emp" onClick={() => setDetalle(c)} title="Ver desglose de compras"><strong>{fCOP(m.total)}</strong><div style={{ fontSize: '0.68rem', color: 'var(--texto-suave)', fontWeight: 400 }}>{m.count} compra(s)</div></button>
+                        ? <button className="btn-link-emp" onClick={() => setDetalle(c)} title="Ver desglose de compras"><strong>{verMontos ? fCOP(totalAno(m)) : oculto}</strong><div style={{ fontSize: '0.68rem', color: 'var(--texto-suave)', fontWeight: 400 }}>{m.count} compra(s)</div></button>
                         : <span style={{ color: 'var(--texto-suave)' }}>—</span>}
                     </td>}
                     {hayMetricas && <td className="col-opcional">{m?.ultima ? fFecha(m.ultima) : '—'}</td>}
@@ -271,10 +284,15 @@ export default function Clientes() {
           const meses = Object.entries(m.porMes || {}).sort((a, b) => b[0].localeCompare(a[0]))
           return (
             <>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+                <button type="button" className="btn btn-xs btn-secondary" onClick={() => setVerMontos(v => !v)}>
+                  {verMontos ? <><Ico as={EyeOff} size={13} />Ocultar montos</> : <><Ico as={Eye} size={13} />Mostrar montos</>}
+                </button>
+              </div>
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-                <div className="card" style={{ flex: '1 1 130px', margin: 0, padding: 10 }}><div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Total comprado</div><div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--dorado)' }}>{fCOP(m.total)}</div></div>
+                <div className="card" style={{ flex: '1 1 130px', margin: 0, padding: 10 }}><div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Facturado (último año)</div><div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--dorado)' }}>{verMontos ? fCOP(totalAno(m)) : oculto}</div></div>
+                <div className="card" style={{ flex: '1 1 130px', margin: 0, padding: 10 }}><div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Total histórico</div><div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{verMontos ? fCOP(m.total) : oculto}</div></div>
                 <div className="card" style={{ flex: '1 1 100px', margin: 0, padding: 10 }}><div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Nº compras</div><div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{m.count}</div></div>
-                <div className="card" style={{ flex: '1 1 130px', margin: 0, padding: 10 }}><div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Ticket promedio</div><div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{fCOP(m.total / m.count)}</div></div>
               </div>
               <div style={{ fontSize: '0.82rem', color: 'var(--texto-suave)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 5 }}>
                 <Ico as={CalendarClock} size={13} />Primera: <strong>{m.primera ? fFecha(m.primera) : '—'}</strong> · Última: <strong>{m.ultima ? fFecha(m.ultima) : '—'}</strong>
@@ -283,7 +301,7 @@ export default function Clientes() {
                 <div className="table-wrap">
                   <table>
                     <thead><tr><th>Mes</th><th className="td-number">Comprado</th></tr></thead>
-                    <tbody>{meses.map(([mes, val]) => <tr key={mes}><td>{mes}</td><td className="td-number">{fCOP(val)}</td></tr>)}</tbody>
+                    <tbody>{meses.map(([mes, val]) => <tr key={mes}><td>{mes}</td><td className="td-number">{verMontos ? fCOP(val) : oculto}</td></tr>)}</tbody>
                   </table>
                 </div>
               )}
