@@ -444,8 +444,20 @@ export function Producto() {
   const atelier = (cfg.diseno || 'selva') === 'atelier'
   const ctaFijo = atelier && cfg.ficha_cta_fijo !== false
 
-  // Al entrar a un producto, la navegación siempre inicia desde arriba.
-  useEffect(() => { try { window.scrollTo(0, 0) } catch { /* noop */ } }, [param])
+  // Al entrar a un producto, la navegación siempre inicia desde el tope (arriba de la foto).
+  // El scroll real ocurre en el contenedor .wrap (no en window). Se hace ahora y tras el
+  // primer frame, para ganarle a cualquier reacomodo por la carga de la imagen.
+  useEffect(() => {
+    const alTope = () => {
+      try {
+        document.querySelector('.wrap')?.scrollTo({ top: 0, behavior: 'auto' })
+        window.scrollTo(0, 0)
+      } catch { /* noop */ }
+    }
+    alTope()
+    const r = requestAnimationFrame(alTope)
+    return () => cancelAnimationFrame(r)
+  }, [param])
 
   useEffect(() => {
     setImg(0)

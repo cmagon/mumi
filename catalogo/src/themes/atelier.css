@@ -128,6 +128,14 @@
     radial-gradient(ellipse at 30% 40%, color-mix(in srgb, var(--banner-bg, var(--dorado)) 55%, transparent), transparent 55%),
     linear-gradient(135deg, var(--banner-bg, var(--dorado)), var(--banner-bg-medio, var(--selva)) 60%, color-mix(in srgb, var(--banner-bg-medio, var(--selva)) 70%, #000));
 }
+/* Carga del banner: brillo (shimmer) detrás mientras carga y fundido de entrada de la
+   imagen, en vez del fondo oscuro que se veía un instante. (heroShimmer/heroFade en styles.css) */
+.dis-atelier .brand-hero-media {
+  background: linear-gradient(100deg, #e7e0d4 30%, #f4efe6 50%, #e7e0d4 70%) 0 0 / 200% 100%;
+  animation: heroShimmer 1.3s ease-in-out infinite;
+}
+.dis-atelier .brand-hero-img { animation: heroFade .5s ease both; }
+@media (prefers-reduced-motion: reduce) { .dis-atelier .brand-hero-media { animation: none; } }
 .dis-atelier .brand-hero-overlay {
   position: absolute;
   inset: 0;
