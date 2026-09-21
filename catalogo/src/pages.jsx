@@ -97,16 +97,21 @@ function RowConFlechas({ children }) {
   const onDown = (e) => {
     if (e.pointerType === 'touch') return
     const el = ref.current; if (!el) return
-    drag.current = { x: e.clientX, left: el.scrollLeft }
+    // NO capturamos el puntero aquí: si lo hiciéramos, un clic simple llegaría a la fila
+    // en vez de a la tarjeta (no abriría el producto ni el corazón). Capturamos solo
+    // cuando realmente empieza un arrastre (en onMove, al pasar el umbral).
+    drag.current = { x: e.clientX, left: el.scrollLeft, id: e.pointerId, cap: false }
     arrastro.current = false
-    try { el.setPointerCapture(e.pointerId) } catch { /* noop */ }
   }
   const onMove = (e) => {
     if (!drag.current) return
     const el = ref.current; if (!el) return
     const dx = e.clientX - drag.current.x
-    if (Math.abs(dx) > 4) arrastro.current = true
-    el.scrollLeft = drag.current.left - dx
+    if (Math.abs(dx) > 4) {
+      arrastro.current = true
+      if (!drag.current.cap) { try { el.setPointerCapture(drag.current.id) } catch { /* noop */ } drag.current.cap = true }
+    }
+    if (arrastro.current) el.scrollLeft = drag.current.left - dx
   }
   const onUp = (e) => {
     const el = ref.current
@@ -439,6 +444,9 @@ export function Producto() {
   const atelier = (cfg.diseno || 'selva') === 'atelier'
   const ctaFijo = atelier && cfg.ficha_cta_fijo !== false
 
+  // Al entrar a un producto, la navegación siempre inicia desde arriba.
+  useEffect(() => { try { window.scrollTo(0, 0) } catch { /* noop */ } }, [param])
+
   useEffect(() => {
     setImg(0)
     setCant(1)
@@ -640,6 +648,30 @@ export function Producto() {
 
             {sinHtml(p.resumen) && <div className="det-lead rich-content" dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(p.resumen) }} />}
 
+            {/* Acciones (cantidad + añadir al carrito) justo debajo del resumen corto */}
+            <div className="ficha-actions-desk">
+              {agotado
+                ? <div className="agotado-box">Producto agotado por ahora. Escríbenos para avisarte cuando vuelva.</div>
+                : (
+                  <div className="ficha-actions-row">
+                    <div className="qty qty-desk">
+                      <button type="button" onClick={() => setCant(c => Math.max(1, c - 1))} disabled={cant <= 1} aria-label="Quitar una unidad"><Minus size={18} /></button>
+                      <span aria-live="polite">{cant}</span>
+                      <button type="button" onClick={() => setCant(c => Math.min(maxCant, c + 1))} disabled={cant >= maxCant} aria-label="Agregar una unidad"><Plus size={18} /></button>
+                    </div>
+                    <button type="button" className="btn btn-selva ficha-cta-btn" onClick={() => agregar(p, cant)}>
+                      <ShoppingCart size={18} /> Añadir al carrito
+                    </button>
+                  </div>
+                )}
+              {FAVORITOS && (
+                <button type="button" className={`btn btn-ghost ficha-wish ${fav ? 'on' : ''}`} onClick={() => toggleFav(p.id)}>
+                  <Heart size={18} fill={fav ? 'currentColor' : 'none'} /> {fav ? 'En deseos' : 'Añadir a deseos'}
+                </button>
+              )}
+              {agotado && <button type="button" className="btn btn-wa" onClick={pedir}><MessageCircle size={18} /> Consultar por WhatsApp</button>}
+            </div>
+
             {sinHtml(p.descripcion) && (
               <div className="det-desc-block">
                 <h3 className="serif det-sec-title">Características</h3>
@@ -663,29 +695,6 @@ export function Producto() {
               </div>
             )}
 
-            {/* Acciones inline (desktop Stitch) */}
-            <div className="ficha-actions-desk">
-              {agotado
-                ? <div className="agotado-box">Producto agotado por ahora. Escríbenos para avisarte cuando vuelva.</div>
-                : (
-                  <div className="ficha-actions-row">
-                    <div className="qty qty-desk">
-                      <button type="button" onClick={() => setCant(c => Math.max(1, c - 1))} disabled={cant <= 1} aria-label="Quitar una unidad"><Minus size={18} /></button>
-                      <span aria-live="polite">{cant}</span>
-                      <button type="button" onClick={() => setCant(c => Math.min(maxCant, c + 1))} disabled={cant >= maxCant} aria-label="Agregar una unidad"><Plus size={18} /></button>
-                    </div>
-                    <button type="button" className="btn btn-selva ficha-cta-btn" onClick={() => agregar(p, cant)}>
-                      <ShoppingCart size={18} /> Añadir al carrito
-                    </button>
-                  </div>
-                )}
-              {FAVORITOS && (
-                <button type="button" className={`btn btn-ghost ficha-wish ${fav ? 'on' : ''}`} onClick={() => toggleFav(p.id)}>
-                  <Heart size={18} fill={fav ? 'currentColor' : 'none'} /> {fav ? 'En deseos' : 'Añadir a deseos'}
-                </button>
-              )}
-              {agotado && <button type="button" className="btn btn-wa" onClick={pedir}><MessageCircle size={18} /> Consultar por WhatsApp</button>}
-            </div>
           </div>
         </div>
 
