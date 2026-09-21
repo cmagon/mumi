@@ -13,8 +13,9 @@ import MoneyInput from '../components/ui/MoneyInput'
 import { useConfirm } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import * as XLSX from 'xlsx'
-import { BarChart3, ClipboardList, Clock, DollarSign, Download, FolderOpen, Pencil, Pin, Settings, Users, X, Save, AlertTriangle, Ban, Scale, CheckCircle2, Building2, Plus, UserPlus, Info, Calculator, Circle } from 'lucide-react'
+import { BarChart3, ClipboardList, Clock, DollarSign, Download, FolderOpen, Pencil, Pin, Settings, Users, X, Save, AlertTriangle, Ban, Scale, CheckCircle2, Building2, Plus, UserPlus, Info, Calculator, Circle, CalendarDays, Trash2 } from 'lucide-react'
 import Select from '../components/ui/Select'
+import RangeCalendar from '../components/ui/RangeCalendar'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const MESES_LABELS = ['','Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre']
@@ -43,15 +44,23 @@ export default function Nomina() {
   }, [puedeEmpleados, puedeLiquidacion, esAdmin, tab, tabInicialNomina])
   const [nomEmpId, setNomEmpId] = useState('')
   const [nomUnidades, setNomUnidades] = useState('')   // unidades producidas (para destajo por producción)
-  const [nomPeriodo, setNomPeriodo] = useState('mensual')
-  const [nomDescManual, setNomDescManual] = useState('')     // valor de descuento manual (ej. préstamo, daño, anticipo)
-  const [nomRazonDesc, setNomRazonDesc] = useState('')       // razón/motivo del descuento manual
+  // Modo de selección del período a liquidar: 'mes' (mes completo) | 'quincena' (15 días) | 'dias' (rango libre)
+  const [modoLiq, setModoLiq] = useState('mes')
+  const [nomQuincena, setNomQuincena] = useState(1)    // 1 = 1–15 · 2 = 16–fin de mes
+  // Descuentos manuales: lista de { valor, motivo } que el usuario agrega desde un modal
+  const [descuentos, setDescuentos] = useState([])
+  const [descModal, setDescModal] = useState(false)
+  const [descDraft, setDescDraft] = useState({ valor: '', motivo: '' })
   const [nomMes, setNomMes] = useState(new Date().getMonth() + 1)
   const [nomAño, setNomAño] = useState(new Date().getFullYear())
-  // Rango de fechas a liquidar (por defecto, el mes actual)
+  // Rango de fechas a liquidar (por defecto, el mes actual). En modo 'dias' lo fija el calendario.
   const _hoyD = new Date()
   const [nomDesde, setNomDesde] = useState(new Date(_hoyD.getFullYear(), _hoyD.getMonth(), 1).toISOString().split('T')[0])
   const [nomHasta, setNomHasta] = useState(new Date(_hoyD.getFullYear(), _hoyD.getMonth() + 1, 0).toISOString().split('T')[0])
+  const [calendarioAbierto, setCalendarioAbierto] = useState(false)
+  const [rangoDraft, setRangoDraft] = useState({ desde: '', hasta: '' })
+  const [resultado, setResultado] = useState(null)     // resultado del cálculo (solo tras pulsar "Calcular")
+  const [verRegistros, setVerRegistros] = useState(false)   // modal de registros guardados
   const [modalEmp, setModalEmp] = useState(false)
   const [formEmp, setFormEmp] = useState(EMPTY_EMP)
   const [editEmpId, setEditEmpId] = useState(null)
@@ -98,7 +107,7 @@ export default function Nomina() {
       })
       if (error) throw error
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['payroll_records'] }); toast('Liquidación guardada ✓'); setNomDescManual(''); setNomRazonDesc('') },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['payroll_records'] }); toast('Liquidación guardada ✓'); setDescuentos([]); setResultado(null) },
     onError: (e) => toast(e.message, 'error'),
   })
 
@@ -328,24 +337,52 @@ export default function Nomina() {
   const nomEmpleado = empleados.find(e => e.id === parseInt(nomEmpId))
   const asistEmp = nomEmpleado ? asistencia.filter(a => a.emp_id === nomEmpleado.id) : []
   const rangoValido = nomDesde && nomHasta && nomDesde <= nomHasta
-  const nomResultadoBase = (nomEmpleado && rangoValido)
-    ? calcularNomina(nomEmpleado, asistEmp, nomPeriodo, parseInt(nomMes), nomAño, params, { desde: nomDesde, hasta: nomHasta }, parseFloat(nomUnidades) || 0)
-    : null
-  // Descuento manual (préstamo, daño, anticipo, etc.) — se resta del neto final, con su razón registrada.
-  const nomDescManualNum = Math.max(0, parseFloat(nomDescManual) || 0)
-  const nomResultado = nomResultadoBase
-    ? { ...nomResultadoBase, descuentoManual: nomDescManualNum, razonDescuentoManual: nomRazonDesc, neto: Math.max(0, nomResultadoBase.neto - nomDescManualNum) }
-    : null
+  const diasSpan = rangoValido ? Math.round((new Date(nomHasta + 'T12:00:00') - new Date(nomDesde + 'T12:00:00')) / 86400000) + 1 : 0
+  // El "período" (mensual/quincenal) define si se paga salario completo o la mitad. Se deriva del modo:
+  // mes → mensual · quincena → quincenal · días → según el tamaño del rango elegido.
+  const nomPeriodo = modoLiq === 'mes' ? 'mensual' : modoLiq === 'quincena' ? 'quincenal' : (diasSpan > 0 && diasSpan <= 20 ? 'quincenal' : 'mensual')
+
+  // El rango a liquidar en modo 'mes'/'quincena' se calcula a partir del mes/año/quincena elegidos.
+  useEffect(() => {
+    if (modoLiq === 'mes') {
+      setNomDesde(new Date(nomAño, nomMes - 1, 1).toISOString().split('T')[0])
+      setNomHasta(new Date(nomAño, nomMes, 0).toISOString().split('T')[0])
+    } else if (modoLiq === 'quincena') {
+      if (nomQuincena === 1) {
+        setNomDesde(new Date(nomAño, nomMes - 1, 1).toISOString().split('T')[0])
+        setNomHasta(new Date(nomAño, nomMes - 1, 15).toISOString().split('T')[0])
+      } else {
+        setNomDesde(new Date(nomAño, nomMes - 1, 16).toISOString().split('T')[0])
+        setNomHasta(new Date(nomAño, nomMes, 0).toISOString().split('T')[0])
+      }
+    }
+  }, [modoLiq, nomMes, nomAño, nomQuincena])
+
+  // No se calcula en vivo: cualquier cambio en los datos borra el resultado hasta pulsar "Calcular".
+  useEffect(() => { setResultado(null) }, [nomEmpId, modoLiq, nomMes, nomAño, nomQuincena, nomDesde, nomHasta, nomUnidades, descuentos])
+
+  // Total de descuentos manuales y su razón combinada
+  const descTotal = descuentos.reduce((s, d) => s + (Math.max(0, parseFloat(d.valor) || 0)), 0)
+  const descRazon = descuentos.filter(d => (d.motivo || '').trim()).map(d => d.motivo.trim()).join(' · ')
+
+  // Resultado del último cálculo (alias para el JSX)
+  const nomResultado = resultado
+
   // ¿Existe un registro guardado cuyo rango se solape con el seleccionado para este empleado?
   const liquidacionExistente = nomEmpleado && rangoValido
     ? registrosNomina.find(r => r.emp_id === nomEmpleado.id && r.fecha_desde && r.fecha_hasta && r.fecha_desde <= nomHasta && r.fecha_hasta >= nomDesde)
     : null
 
-  // "Período" SÍ afecta el cálculo: para nómina fija y CPS determina si se paga el salario COMPLETO
-  // (mensual) o la MITAD (quincenal) — independiente de cuántos días abarque el rango Desde/Hasta,
-  // que solo se usa para traer la asistencia (horas, días trabajados, inasistencias) de ese lapso.
-  // Si el rango no coincide con el período elegido, el pago puede quedar mal proporcionado — se avisa.
-  const diasSpan = rangoValido ? Math.round((new Date(nomHasta + 'T12:00:00') - new Date(nomDesde + 'T12:00:00')) / 86400000) + 1 : 0
+  // Ejecuta el cálculo (solo al pulsar el botón "Calcular")
+  const calcular = () => {
+    if (!nomEmpleado) { toast('Selecciona un empleado', 'warning'); return }
+    if (!rangoValido) { toast('Selecciona un rango de fechas válido', 'warning'); return }
+    if (liquidacionExistente) { toast('Ya existe una liquidación guardada que se cruza con ese rango', 'error'); return }
+    const base = calcularNomina(nomEmpleado, asistEmp, nomPeriodo, parseInt(nomMes), nomAño, params, { desde: nomDesde, hasta: nomHasta }, parseFloat(nomUnidades) || 0)
+    setResultado({ ...base, descuentoManual: descTotal, razonDescuentoManual: descRazon, descuentos, neto: Math.max(0, base.neto - descTotal) })
+  }
+
+  // Si el rango no coincide con el período, el pago puede quedar mal proporcionado — se avisa.
   const spanDesajustado = rangoValido && nomEmpleado && nomEmpleado.tipo_pago !== 'horas' && nomEmpleado.tipo_pago !== 'destajo'
     ? (nomPeriodo === 'quincenal' ? (diasSpan < 12 || diasSpan > 18) : (diasSpan < 26 || diasSpan > 32))
     : false
@@ -387,50 +424,103 @@ export default function Nomina() {
       {/* LIQUIDACIÓN NÓMINA */}
       {tab === 'nomina' && puedeLiquidacion && (
         <div className="card">
-          <div className="card-title"><Ico as={DollarSign} size={14} />Liquidación de Nómina</div>
-          <div className="form-grid">
-            <div className="form-group">
-              <label className="form-label">Empleado</label>
-              <Select className="form-control" value={nomEmpId} onChange={e => { setNomEmpId(e.target.value); setNomDescManual(''); setNomRazonDesc('') }}>
-                <option value="">Seleccionar...</option>
-                {empsActivos.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
-              </Select>
+          <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}><Ico as={Calculator} size={14} />Liquidación de Nómina
+            <button className="btn btn-sm btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => setVerRegistros(true)}><Ico as={FolderOpen} size={14} />Registros guardados{registrosNomina.length ? ` (${registrosNomina.length})` : ''}</button>
+          </div>
+
+          {/* 1. Empleado */}
+          <div className="form-group" style={{ maxWidth: 360 }}>
+            <label className="form-label">1. Empleado</label>
+            <Select className="form-control" value={nomEmpId} onChange={e => { setNomEmpId(e.target.value); setDescuentos([]) }}>
+              <option value="">Seleccionar...</option>
+              {empsActivos.map(e => <option key={e.id} value={e.id}>{e.nombre}</option>)}
+            </Select>
+          </div>
+
+          {/* 2. Período a liquidar */}
+          <div className="form-group">
+            <label className="form-label">2. ¿Qué período liquidar?</label>
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              {[['mes', 'Mes completo'], ['quincena', 'Quincena'], ['dias', 'Rango de días']].map(([k, l]) => (
+                <button key={k} type="button" className={`btn btn-sm ${modoLiq === k ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setModoLiq(k)}>
+                  <Ico as={CalendarDays} size={14} />{l}
+                </button>
+              ))}
             </div>
-            <div className="form-group">
-              <label className="form-label">Período</label>
-              <Select className="form-control" value={nomPeriodo} onChange={e => setNomPeriodo(e.target.value)}>
-                <option value="quincenal">Quincenal</option>
-                <option value="mensual">Mensual</option>
-              </Select>
-            </div>
-            <div className="form-group">
-              <label className="form-label">Desde</label>
-              <input type="date" className="form-control" value={nomDesde} onChange={e => setNomDesde(e.target.value)} />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Hasta</label>
-              <input type="date" className="form-control" value={nomHasta} max={hoy} onChange={e => setNomHasta(e.target.value)} />
-            </div>
+          </div>
+
+          <div className="form-grid" style={{ alignItems: 'end' }}>
+            {(modoLiq === 'mes' || modoLiq === 'quincena') && (
+              <>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Mes</label>
+                  <Select className="form-control" value={nomMes} onChange={e => setNomMes(Number(e.target.value))}>
+                    {MESES_LABELS.slice(1).map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+                  </Select>
+                </div>
+                <div className="form-group" style={{ margin: 0 }}>
+                  <label className="form-label">Año</label>
+                  <input type="number" className="form-control" value={nomAño} onChange={e => setNomAño(Number(e.target.value))} />
+                </div>
+              </>
+            )}
+            {modoLiq === 'quincena' && (
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Quincena</label>
+                <Select className="form-control" value={nomQuincena} onChange={e => setNomQuincena(Number(e.target.value))}>
+                  <option value={1}>1ª (1 – 15)</option>
+                  <option value={2}>2ª (16 – fin)</option>
+                </Select>
+              </div>
+            )}
+            {modoLiq === 'dias' && (
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Rango de días</label>
+                <button type="button" className="btn btn-secondary" style={{ width: '100%', justifyContent: 'flex-start' }}
+                  onClick={() => { setRangoDraft({ desde: nomDesde, hasta: nomHasta }); setCalendarioAbierto(true) }}>
+                  <Ico as={CalendarDays} size={14} />{rangoValido ? `${fFecha(nomDesde)} → ${fFecha(nomHasta)}` : 'Elegir fechas...'}
+                </button>
+              </div>
+            )}
             {nomEmpleado?.tipo_pago === 'destajo' && (
-              <div className="form-group">
-                <label className="form-label">Unidades producidas (destajo)</label>
+              <div className="form-group" style={{ margin: 0 }}>
+                <label className="form-label">Unidades producidas</label>
                 <input type="number" className="form-control" min={0} value={nomUnidades} onChange={e => setNomUnidades(e.target.value)} placeholder="Ej: 500" />
                 <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>× tarifa {fCOP(parseFloat(nomEmpleado.tarifa_destajo) || 0)}/unidad</small>
               </div>
             )}
-            <div className="form-group">
-              <label className="form-label">Descuento manual (opcional)</label>
-              <MoneyInput value={nomDescManual} onChange={setNomDescManual} placeholder="Ej: 50000" />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Razón del descuento</label>
-              <input type="text" className="form-control" value={nomRazonDesc} onChange={e => setNomRazonDesc(e.target.value)}
-                placeholder="Ej: anticipo de quincena" disabled={nomDescManualNum <= 0} />
-            </div>
           </div>
-          {nomDescManualNum > 0 && !nomRazonDesc.trim() && (
-            <div className="alert alert-warning" style={{ fontSize: '0.82rem' }}>Indica la razón del descuento manual antes de guardar la liquidación.</div>
+          {rangoValido && (
+            <div style={{ fontSize: '0.78rem', color: 'var(--texto-suave)', marginTop: 4 }}>
+              Se liquidará <strong>{fFecha(nomDesde)} → {fFecha(nomHasta)}</strong> ({diasSpan} días · {nomPeriodo})
+            </div>
           )}
+
+          {/* 3. Descuentos */}
+          <div className="form-group" style={{ marginTop: 12 }}>
+            <label className="form-label">3. Descuentos (opcional)</label>
+            {descuentos.length === 0
+              ? <div style={{ fontSize: '0.82rem', color: 'var(--texto-suave)', marginBottom: 6 }}>Sin descuentos. Agrega préstamos, anticipos, daños, etc.</div>
+              : <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 6 }}>
+                  {descuentos.map((d, i) => (
+                    <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', background: 'var(--crema)', borderRadius: 'var(--radio)', padding: '5px 10px' }}>
+                      <strong style={{ color: 'var(--rojo)' }}>−{fCOP(Math.max(0, parseFloat(d.valor) || 0))}</strong>
+                      <span style={{ flex: 1, color: 'var(--texto-suave)' }}>{d.motivo || 'Sin motivo'}</span>
+                      <button className="btn btn-xs btn-danger" title="Quitar" onClick={() => setDescuentos(ds => ds.filter((_, idx) => idx !== i))}><X size={13} aria-hidden="true" /></button>
+                    </div>
+                  ))}
+                  <div style={{ fontSize: '0.82rem', fontWeight: 700 }}>Total descuentos: <span style={{ color: 'var(--rojo)' }}>−{fCOP(descTotal)}</span></div>
+                </div>}
+            <button className="btn btn-sm btn-secondary" onClick={() => { setDescDraft({ valor: '', motivo: '' }); setDescModal(true) }}><Ico as={Plus} size={14} />Agregar descuento</button>
+          </div>
+
+          {/* 4. Calcular */}
+          <div style={{ marginTop: 12 }}>
+            <button className="btn btn-primary" onClick={calcular} disabled={!nomEmpId || !rangoValido || !!liquidacionExistente}>
+              <Ico as={Calculator} size={14} />Calcular liquidación
+            </button>
+          </div>
+
           {spanDesajustado && (
             <div className="alert alert-warning" style={{ fontSize: '0.82rem' }}>
               <Ico as={AlertTriangle} size={14} />El rango <strong>{fFecha(nomDesde)} → {fFecha(nomHasta)}</strong> abarca {diasSpan} días, pero elegiste período <strong>{nomPeriodo}</strong>
@@ -543,62 +633,93 @@ export default function Nomina() {
 
           {nomResultado && !liquidacionExistente && (
             <div style={{ marginTop: 16, display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              <button className="btn btn-primary" disabled={guardarLiquidacion.isPending || (nomDescManualNum > 0 && !nomRazonDesc.trim())}
+              <button className="btn btn-primary" disabled={guardarLiquidacion.isPending}
                 onClick={() => guardarLiquidacion.mutate({ emp: nomEmpleado, periodo: nomPeriodo, desde: nomDesde, hasta: nomHasta, mes: parseInt(nomMes), anio: nomAño, resultado: nomResultado })}>
                 {guardarLiquidacion.isPending ? 'Guardando...' : <><Ico as={Save} size={14} />Guardar registro</>}
               </button>
               <button className="btn btn-secondary" onClick={() => abrirListado(nomEmpleado)}><Ico as={ClipboardList} size={14} />Ver asistencia del empleado</button>
             </div>
           )}
-
-          {/* Registros de nómina guardados */}
-          {registrosNomina.length > 0 && (
-            <div style={{ marginTop: 20 }}>
-              <div className="card-title" style={{ fontSize: '0.95rem' }}><Ico as={FolderOpen} size={14} />Registros guardados</div>
-              <div className="table-wrap">
-                <table>
-                  <thead><tr><th>Empleado</th><th>Período</th><th>Tipo</th><th>Horas pagadas</th><th>Devengado</th><th>Descuentos</th><th>Neto</th><th>Guardado</th></tr></thead>
-                  <tbody>
-                    {registrosNomina.slice(0, 30).map(r => {
-                      const res = r.resultado || {}
-                      // Devengado = lo que generó antes de descuentos (salario/destajo/honorarios + auxilio de transporte)
-                      const devengado = (parseFloat(res.salBase) || 0) + (parseFloat(res.auxTransp) || 0)
-                      const descItems = [
-                        res.descuentoDias > 0 && { txt: `Días no laborados (${res.diasNoLaborados})`, val: res.descuentoDias },
-                        res.descuentoHoras > 0 && { txt: `Horas faltantes (${(res.horasFaltantes || 0).toFixed(1)} h)`, val: res.descuentoHoras },
-                        res.descuentoManual > 0 && { txt: res.razonDescuentoManual ? `Manual — ${res.razonDescuentoManual}` : 'Manual', val: res.descuentoManual },
-                      ].filter(Boolean)
-                      const totalDesc = descItems.reduce((s, d) => s + (d.val || 0), 0)
-                      return (
-                      <tr key={r.id}>
-                        <td>{r.empleado}</td>
-                        <td>{r.fecha_desde && r.fecha_hasta ? `${fFecha(r.fecha_desde)} → ${fFecha(r.fecha_hasta)}` : `${MESES_LABELS[r.mes]} ${r.anio}`} · {r.periodo}</td>
-                        <td>{getTipoPagoLabel(r.tipo)}</td>
-                        <td className="td-number">
-                          {res.horas != null ? `${fmtHoras(res.horas)} h` : '—'}
-                          {res.diasTrab != null && <div style={{ fontSize: '0.68rem', color: 'var(--texto-suave)' }}>{res.diasTrab} días</div>}
-                        </td>
-                        <td className="td-number">{fCOP(devengado)}</td>
-                        <td className="td-number">
-                          {totalDesc > 0
-                            ? <>
-                                <div style={{ color: 'var(--rojo)' }}>{fCOP(totalDesc)}</div>
-                                {descItems.map((d, i) => <div key={i} style={{ fontSize: '0.68rem', color: 'var(--texto-suave)' }}>· {d.txt}: {fCOP(d.val)}</div>)}
-                              </>
-                            : '—'}
-                        </td>
-                        <td className="td-number" style={{ fontWeight: 700 }}>{fCOP(res.neto)}</td>
-                        <td style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>{r.created_at ? new Date(r.created_at).toLocaleDateString('es-CO') : ''} {r.creado_por}</td>
-                      </tr>
-                      )
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
         </div>
       )}
+
+      {/* Modal descuento manual */}
+      <Modal open={descModal} onClose={() => setDescModal(false)} guard={false} title="Agregar descuento"
+        footer={<>
+          <button className="btn btn-secondary" onClick={() => setDescModal(false)}>Cancelar</button>
+          <button className="btn btn-primary" onClick={() => {
+            const val = Math.max(0, parseFloat(descDraft.valor) || 0)
+            if (!(val > 0)) { toast('Indica un valor mayor a 0', 'warning'); return }
+            if (!descDraft.motivo.trim()) { toast('Indica el motivo del descuento', 'warning'); return }
+            setDescuentos(ds => [...ds, { valor: val, motivo: descDraft.motivo.trim() }])
+            setDescModal(false)
+          }}>Agregar</button>
+        </>}>
+        <div className="form-group"><label className="form-label">Valor del descuento</label><MoneyInput value={descDraft.valor} onChange={v => setDescDraft(d => ({ ...d, valor: v }))} placeholder="Ej: 50000" /></div>
+        <div className="form-group"><label className="form-label">Motivo</label><input className="form-control" value={descDraft.motivo} onChange={e => setDescDraft(d => ({ ...d, motivo: e.target.value }))} placeholder="Ej: anticipo de quincena, préstamo, daño..." /></div>
+      </Modal>
+
+      {/* Modal calendario de rango (estilo Meta Business) */}
+      <Modal open={calendarioAbierto} onClose={() => setCalendarioAbierto(false)} guard={false} title="Elegir rango de días"
+        footer={<>
+          <button className="btn btn-secondary" onClick={() => setCalendarioAbierto(false)}>Cancelar</button>
+          <button className="btn btn-primary" disabled={!rangoDraft.desde || !rangoDraft.hasta}
+            onClick={() => { setNomDesde(rangoDraft.desde); setNomHasta(rangoDraft.hasta); setCalendarioAbierto(false) }}>Aplicar</button>
+        </>}>
+        <RangeCalendar value={rangoDraft} onChange={setRangoDraft} max={hoy} />
+        <div style={{ textAlign: 'center', marginTop: 10, fontSize: '0.85rem', color: 'var(--texto-suave)' }}>
+          {rangoDraft.desde
+            ? (rangoDraft.hasta ? <><strong>{fFecha(rangoDraft.desde)}</strong> → <strong>{fFecha(rangoDraft.hasta)}</strong></> : <>Inicio: <strong>{fFecha(rangoDraft.desde)}</strong> — elige el día final</>)
+            : 'Toca el día inicial y luego el final'}
+        </div>
+      </Modal>
+
+      {/* Modal registros de nómina guardados */}
+      <Modal open={verRegistros} onClose={() => setVerRegistros(false)} guard={false} size="modal-lg"
+        title={`Registros guardados${registrosNomina.length ? ` (${registrosNomina.length})` : ''}`}
+        footer={<button className="btn btn-secondary" onClick={() => setVerRegistros(false)}>Cerrar</button>}>
+        {registrosNomina.length === 0
+          ? <p className="empty-table">Aún no hay liquidaciones guardadas.</p>
+          : <div className="table-wrap">
+              <table>
+                <thead><tr><th>Empleado</th><th>Período</th><th>Tipo</th><th>Horas pagadas</th><th>Devengado</th><th>Descuentos</th><th>Neto</th><th>Guardado</th></tr></thead>
+                <tbody>
+                  {registrosNomina.slice(0, 50).map(r => {
+                    const res = r.resultado || {}
+                    const devengado = (parseFloat(res.salBase) || 0) + (parseFloat(res.auxTransp) || 0)
+                    const descItems = [
+                      res.descuentoDias > 0 && { txt: `Días no laborados (${res.diasNoLaborados})`, val: res.descuentoDias },
+                      res.descuentoHoras > 0 && { txt: `Horas faltantes (${(res.horasFaltantes || 0).toFixed(1)} h)`, val: res.descuentoHoras },
+                      res.descuentoManual > 0 && { txt: res.razonDescuentoManual ? `Manual — ${res.razonDescuentoManual}` : 'Manual', val: res.descuentoManual },
+                    ].filter(Boolean)
+                    const totalDesc = descItems.reduce((s, d) => s + (d.val || 0), 0)
+                    return (
+                    <tr key={r.id}>
+                      <td>{r.empleado}</td>
+                      <td>{r.fecha_desde && r.fecha_hasta ? `${fFecha(r.fecha_desde)} → ${fFecha(r.fecha_hasta)}` : `${MESES_LABELS[r.mes]} ${r.anio}`} · {r.periodo}</td>
+                      <td>{getTipoPagoLabel(r.tipo)}</td>
+                      <td className="td-number">
+                        {res.horas != null ? `${fmtHoras(res.horas)} h` : '—'}
+                        {res.diasTrab != null && <div style={{ fontSize: '0.68rem', color: 'var(--texto-suave)' }}>{res.diasTrab} días</div>}
+                      </td>
+                      <td className="td-number">{fCOP(devengado)}</td>
+                      <td className="td-number">
+                        {totalDesc > 0
+                          ? <>
+                              <div style={{ color: 'var(--rojo)' }}>{fCOP(totalDesc)}</div>
+                              {descItems.map((d, i) => <div key={i} style={{ fontSize: '0.68rem', color: 'var(--texto-suave)' }}>· {d.txt}: {fCOP(d.val)}</div>)}
+                            </>
+                          : '—'}
+                      </td>
+                      <td className="td-number" style={{ fontWeight: 700 }}>{fCOP(res.neto)}</td>
+                      <td style={{ fontSize: '0.75rem', color: 'var(--texto-suave)' }}>{r.created_at ? new Date(r.created_at).toLocaleDateString('es-CO') : ''} {r.creado_por}</td>
+                    </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>}
+      </Modal>
 
       {/* EMPLEADOS */}
       {tab === 'empleados' && puedeEmpleados && (
