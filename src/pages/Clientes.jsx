@@ -13,7 +13,7 @@ const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline',
 
 const CANALES = { mayor: 'Por mayor', detal: 'Detal', feria: 'Feria/Evento', ecommerce: 'E-commerce', whatsapp: 'WhatsApp/Redes' }
 
-const EMPTY = { nombre: '', contacto: '', telefono: '', email: '', canal: 'mayor', ciudad: '', obs: '' }
+const EMPTY = { nombre: '', contacto: '', telefono: '', email: '', canal: 'mayor', ciudad: '', direccion: '', obs: '', alegra_id: '', nit: '', tipo_identificacion: '' }
 
 export default function Clientes() {
   const toast = useToast()
@@ -37,11 +37,27 @@ export default function Clientes() {
 
   const save = useMutation({
     mutationFn: async (datos) => {
+      // Campos que guardamos localmente. En clientes de Alegra, la identidad (nombre/razón
+      // social, NIT) es de solo lectura: no se sobreescribe aquí.
+      const esAlegra = !!datos.alegra_id
+      const local = {
+        contacto: datos.contacto, telefono: datos.telefono, email: datos.email,
+        canal: datos.canal, ciudad: datos.ciudad, direccion: datos.direccion, obs: datos.obs,
+      }
+      if (!esAlegra) local.nombre = datos.nombre   // solo los manuales editan el nombre
       if (editId) {
-        const { error } = await supabase.from('clients').update(datos).eq('id', editId)
+        const { error } = await supabase.from('clients').update(local).eq('id', editId)
         if (error) throw error
+        // Empuja a Alegra los campos editables (correo, teléfono, dirección, ciudad).
+        if (esAlegra) {
+          const { data: r, error: e2 } = await supabase.functions.invoke('alegra-update-contact', {
+            body: { alegra_id: datos.alegra_id, email: datos.email, telefono: datos.telefono, direccion: datos.direccion, ciudad: datos.ciudad },
+          })
+          if (e2) throw new Error('Se guardó local, pero Alegra no aceptó el cambio: ' + e2.message)
+          if (r?.error) throw new Error('Se guardó local, pero Alegra no aceptó el cambio: ' + r.error)
+        }
       } else {
-        const { error } = await supabase.from('clients').insert({ ...datos, fecha_reg: new Date().toISOString().split('T')[0] })
+        const { error } = await supabase.from('clients').insert({ nombre: datos.nombre, ...local, fecha_reg: new Date().toISOString().split('T')[0] })
         if (error) throw error
       }
     },
@@ -83,7 +99,7 @@ export default function Clientes() {
   })
 
   const openNew = () => { setForm(EMPTY); setEditId(null); setModal(true) }
-  const openEdit = (c) => { setForm({ nombre: c.nombre, contacto: c.contacto || '', telefono: c.telefono || '', email: c.email || '', canal: c.canal, ciudad: c.ciudad || '', obs: c.obs || '' }); setEditId(c.id); setModal(true) }
+  const openEdit = (c) => { setForm({ nombre: c.nombre, contacto: c.contacto || '', telefono: c.telefono || '', email: c.email || '', canal: c.canal, ciudad: c.ciudad || '', direccion: c.direccion || '', obs: c.obs || '', alegra_id: c.alegra_id || '', nit: c.nit || '', tipo_identificacion: c.tipo_identificacion || '' }); setEditId(c.id); setModal(true) }
 
   const handleSave = (e) => {
     e?.preventDefault?.()
@@ -156,7 +172,7 @@ export default function Clientes() {
       <Modal
         open={modal} onClose={() => { setModal(false); setForm(EMPTY); setEditId(null) }}
         onSave={() => handleSave()}
-        title={`🤝 ${editId ? 'Editar' : 'Nuevo'} Cliente`}
+        title={`${editId ? 'Editar' : 'Nuevo'} Cliente`}
         footer={
           <>
             <button className="btn btn-secondary" onClick={() => setModal(false)}>Cancelar</button>
@@ -167,8 +183,19 @@ export default function Clientes() {
         }
       >
         <form onSubmit={handleSave}>
+          {form.alegra_id && (
+            <div className="alert alert-info" style={{ fontSize: '0.8rem' }}>
+              Cliente de <strong>Alegra</strong>. La razón social y el NIT son de solo lectura (se administran en Alegra). Lo demás se guarda aquí y se actualiza también en Alegra.
+            </div>
+          )}
+          {form.alegra_id && (
+            <div className="form-grid-2">
+              <div className="form-group"><label className="form-label">Razón social <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(Alegra)</small></label><input className="form-control" value={form.nombre} disabled readOnly /></div>
+              <div className="form-group"><label className="form-label">{form.tipo_identificacion || 'NIT / ID'} <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(Alegra)</small></label><input className="form-control" value={form.nit} disabled readOnly /></div>
+            </div>
+          )}
           <div className="form-grid-2">
-            <div className="form-group"><label className="form-label">Nombre / Empresa</label><input className="form-control" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} /></div>
+            {!form.alegra_id && <div className="form-group"><label className="form-label">Nombre / Empresa</label><input className="form-control" value={form.nombre} onChange={e => setForm(f => ({ ...f, nombre: e.target.value }))} /></div>}
             <div className="form-group"><label className="form-label">Contacto</label><input className="form-control" value={form.contacto} onChange={e => setForm(f => ({ ...f, contacto: e.target.value }))} placeholder="Persona de contacto" /></div>
           </div>
           <div className="form-grid-2">
@@ -184,6 +211,7 @@ export default function Clientes() {
             </div>
             <div className="form-group"><label className="form-label">Ciudad</label><input className="form-control" value={form.ciudad} onChange={e => setForm(f => ({ ...f, ciudad: e.target.value }))} /></div>
           </div>
+          <div className="form-group"><label className="form-label">Dirección</label><input className="form-control" value={form.direccion} onChange={e => setForm(f => ({ ...f, direccion: e.target.value }))} /></div>
           <div className="form-group"><label className="form-label">Observaciones</label><textarea className="form-control" rows={2} value={form.obs} onChange={e => setForm(f => ({ ...f, obs: e.target.value }))} /></div>
         </form>
       </Modal>
