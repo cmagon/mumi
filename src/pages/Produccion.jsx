@@ -27,7 +27,7 @@ import { usePaginacion } from '../hooks/usePaginacion'
 import {
   Download, Upload, Plus, Check, Pencil, Trash2, X, BarChart3, DollarSign, Link2,
   ReceiptText, Factory, ClipboardList, Shuffle, Camera, Save, Printer, Undo2, Package,
-  CheckCircle2, AlertTriangle,
+  CheckCircle2, AlertTriangle, Search, Filter,
 } from 'lucide-react'
 
 // Icono inline alineado con el texto
@@ -72,6 +72,7 @@ export default function Produccion() {
   const [filtroCategoria, setFiltroCategoria] = useState('')
   const [filtroLote, setFiltroLote] = useState('')
   const [filtroProductoExacto, setFiltroProductoExacto] = useState('')
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false)   // panel de filtros plegable
   const [anioAnalisis, setAnioAnalisis] = useState(String(new Date().getFullYear()))
   const [modal, setModal] = useState(false)
   const [form, setForm] = useState(EMPTY)
@@ -785,33 +786,49 @@ export default function Produccion() {
               Sus cantidades aún no son definitivas; agrega las etapas restantes y marca "Lote completado".
             </div>
           )}
-          <div style={{ display: 'flex', gap: 12, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-            <Select className="form-control" value={filtroMes} onChange={e => setFiltroMes(e.target.value)} style={{ width: 'auto' }}>
-              <option value="">Todos los meses</option>
-              {MESES.slice(1).map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
-            </Select>
-            <Select className="form-control" value={filtroAño} onChange={e => setFiltroAño(e.target.value)} style={{ width: 'auto' }}>
-              {aniosRegistros.map(a => <option key={a} value={a}>{a}</option>)}
-            </Select>
-            <Select className="form-control" value={filtroCategoria} onChange={e => setFiltroCategoria(e.target.value)} style={{ width: 'auto' }}>
-              <option value="">Todas las categorías</option>
-              {categoriasFiltro.map(c => <option key={c} value={c}>{c}</option>)}
-            </Select>
-            <input
-              className="form-control"
-              type="search"
-              value={filtroLote}
-              onChange={e => setFiltroLote(e.target.value)}
-              placeholder="Buscar lote…"
-              aria-label="Buscar por lote"
-              style={{ width: 'min(100%, 220px)' }}
-            />
+          <div style={{ display: 'flex', gap: 10, marginBottom: filtrosAbiertos ? 10 : 16, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ position: 'relative', flex: '1 1 220px', maxWidth: 320, minWidth: 160 }}>
+              <Search size={15} aria-hidden="true" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--texto-suave)', pointerEvents: 'none' }} />
+              <input className="form-control" type="search" value={filtroLote} onChange={e => setFiltroLote(e.target.value)}
+                placeholder="Buscar por lote…" aria-label="Buscar por lote"
+                style={{ width: '100%', paddingLeft: 32, paddingRight: filtroLote ? 32 : 12 }} />
+              {filtroLote && (
+                <button type="button" title="Limpiar búsqueda" aria-label="Limpiar búsqueda" onClick={() => setFiltroLote('')}
+                  style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--texto-suave)', display: 'inline-flex', padding: 2 }}>
+                  <X size={15} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+            {(() => { const n = (filtroMes ? 1 : 0) + (filtroCategoria ? 1 : 0); return (
+              <button type="button" className={`btn btn-sm ${n ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFiltrosAbiertos(o => !o)}>
+                <Ico as={Filter} size={14} />Filtrar{n > 0 && <span className="badge badge-gris" style={{ marginLeft: 4 }}>{n}</span>}
+              </button>
+            ) })()}
             {filtroProductoExacto && (
               <button type="button" className="btn btn-sm btn-secondary" onClick={() => setFiltroProductoExacto('')}>
-                Producto: {filtroProductoExacto} ×
+                Producto: {filtroProductoExacto} <X size={13} aria-hidden="true" style={{ verticalAlign: '-2px' }} />
               </button>
             )}
           </div>
+          {filtrosAbiertos && (
+            <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center', padding: '10px 12px', background: 'var(--crema)', borderRadius: 'var(--radio)' }}>
+              <label className="form-label" style={{ margin: 0 }}>Mes:</label>
+              <Select className="form-control" value={filtroMes} onChange={e => setFiltroMes(e.target.value)} style={{ width: 'auto' }}>
+                <option value="">Todos los meses</option>
+                {MESES.slice(1).map((m, i) => <option key={i + 1} value={i + 1}>{m}</option>)}
+              </Select>
+              <label className="form-label" style={{ margin: 0 }}>Año:</label>
+              <Select className="form-control" value={filtroAño} onChange={e => setFiltroAño(e.target.value)} style={{ width: 'auto' }}>
+                {aniosRegistros.map(a => <option key={a} value={a}>{a}</option>)}
+              </Select>
+              <label className="form-label" style={{ margin: 0 }}>Categoría:</label>
+              <Select className="form-control" value={filtroCategoria} onChange={e => setFiltroCategoria(e.target.value)} style={{ width: 'auto' }}>
+                <option value="">Todas las categorías</option>
+                {categoriasFiltro.map(c => <option key={c} value={c}>{c}</option>)}
+              </Select>
+              {(filtroMes || filtroCategoria) && <button className="btn btn-sm btn-secondary" onClick={() => { setFiltroMes(''); setFiltroCategoria('') }}><Ico as={X} size={13} />Limpiar filtros</button>}
+            </div>
+          )}
           {/* ===== Versión móvil: acordeón ===== */}
           <div className="solo-movil">
             {pagRegistros.slice.length === 0
@@ -962,7 +979,7 @@ export default function Produccion() {
 
       {/* Modal registro */}
       <Modal open={modal} onClose={closeModalProd}
-        title={`🏭 ${editId ? 'Editar' : 'Nuevo'} Registro de Producción`} size="modal-lg"
+        title={`${editId ? 'Editar' : 'Nuevo'} Registro de Producción`} size="modal-lg"
         footer={
           <>
             {editId && autoSavedAt && <span style={{ fontSize: '0.72rem', color: 'var(--selva)', marginRight: 'auto' }}>✓ autoguardado {autoSavedAt}</span>}
