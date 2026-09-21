@@ -35,7 +35,7 @@ import {
   Recycle, ClipboardList, DollarSign, Link2, ReceiptText, Factory, Pencil, Printer, Share2,
   Undo2, Trash2, Camera, Check, X, Play, Download, Send, Package, Shuffle, Plus, Save,
   Eye, Calculator, FlaskConical, Hash, Clock, CheckCircle2, ScrollText, Image as ImageIcon,
-  AlertTriangle, FileText,
+  AlertTriangle, FileText, Search, Filter,
 } from 'lucide-react'
 
 // Icono inline para usar dentro de títulos/botones manteniendo alineación con el texto
@@ -110,6 +110,7 @@ export default function OrdenesProduccion() {
   const [filtroLote, setFiltroLote] = useState('')
   const [filtroCategoria, setFiltroCategoria] = useState('')
   const [filtroProductoExacto, setFiltroProductoExacto] = useState('')
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false)   // panel de filtros plegable
 
   const [modalNueva, setModalNueva] = useState(false)
   const [editOrdenId, setEditOrdenId] = useState(null)   // id de orden en edición (solo si está pendiente)
@@ -3701,26 +3702,38 @@ export default function OrdenesProduccion() {
 
       <div className="card">
         <div className="card-title"><Ico as={ClipboardList} size={16} />{esAdmin ? 'Todas las órdenes' : 'Mis órdenes asignadas'}</div>
-        <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
-          <input
-            className="form-control"
-            type="search"
-            value={filtroLote}
-            onChange={e => setFiltroLote(e.target.value)}
-            placeholder="Buscar lote…"
-            aria-label="Buscar órdenes por lote"
-            style={{ width: 'min(100%, 220px)' }}
-          />
-          <Select className="form-control" value={filtroCategoria} onChange={e => setFiltroCategoria(e.target.value)} style={{ width: 'auto' }}>
-            <option value="">Todas las categorías</option>
-            {categoriasOrdenes.map(c => <option key={c} value={c}>{c}</option>)}
-          </Select>
+        <div style={{ display: 'flex', gap: 10, marginBottom: filtrosAbiertos ? 10 : 16, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ position: 'relative', flex: '1 1 220px', maxWidth: 320, minWidth: 160 }}>
+            <Search size={15} aria-hidden="true" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--texto-suave)', pointerEvents: 'none' }} />
+            <input className="form-control" type="search" value={filtroLote} onChange={e => setFiltroLote(e.target.value)}
+              placeholder="Buscar por lote…" aria-label="Buscar órdenes por lote"
+              style={{ width: '100%', paddingLeft: 32, paddingRight: filtroLote ? 32 : 12 }} />
+            {filtroLote && (
+              <button type="button" title="Limpiar búsqueda" aria-label="Limpiar búsqueda" onClick={() => setFiltroLote('')}
+                style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--texto-suave)', display: 'inline-flex', padding: 2 }}>
+                <X size={15} aria-hidden="true" />
+              </button>
+            )}
+          </div>
+          <button type="button" className={`btn btn-sm ${filtroCategoria ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFiltrosAbiertos(o => !o)}>
+            <Ico as={Filter} size={14} />Filtrar{filtroCategoria && <span className="badge badge-gris" style={{ marginLeft: 4 }}>1</span>}
+          </button>
           {filtroProductoExacto && (
             <button type="button" className="btn btn-sm btn-secondary" onClick={() => setFiltroProductoExacto('')}>
-              Producto: {filtroProductoExacto} ×
+              Producto: {filtroProductoExacto} <X size={13} aria-hidden="true" style={{ verticalAlign: '-2px' }} />
             </button>
           )}
         </div>
+        {filtrosAbiertos && (
+          <div style={{ display: 'flex', gap: 10, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center', padding: '10px 12px', background: 'var(--crema)', borderRadius: 'var(--radio)' }}>
+            <label className="form-label" style={{ margin: 0 }}>Categoría:</label>
+            <Select className="form-control" value={filtroCategoria} onChange={e => setFiltroCategoria(e.target.value)} style={{ width: 'auto' }}>
+              <option value="">Todas las categorías</option>
+              {categoriasOrdenes.map(c => <option key={c} value={c}>{c}</option>)}
+            </Select>
+            {filtroCategoria && <button className="btn btn-sm btn-secondary" onClick={() => setFiltroCategoria('')}><Ico as={X} size={13} />Limpiar filtro</button>}
+          </div>
+        )}
         {cargandoOrdenes ? <Cargando texto="Cargando órdenes…" /> : (
         <div className="table-wrap">
           <table className="tabla-ordenes">
@@ -4628,7 +4641,7 @@ export default function OrdenesProduccion() {
                               </span>
                               {puedeCompartirArchivos && (
                                 <button type="button" className="btn btn-sm btn-dorado" disabled={cargando} onClick={() => compartirInsumo(d)}>
-                                  {cargando ? 'Abriendo…' : '📤 Compartir / Imprimir'}
+                                  {cargando ? 'Abriendo…' : <><Ico as={Share2} size={14} />Compartir / Imprimir</>}
                                 </button>
                               )}
                               <button type="button" className="btn btn-sm btn-secondary" disabled={cargando} onClick={() => imprimirInsumo(d)}>
@@ -5159,7 +5172,7 @@ export default function OrdenesProduccion() {
       </Modal>
 
       {/* Modal Detalles de la orden */}
-      <Modal open={!!ordenDetalle} onClose={closeDetalle} title={`📋 Orden #${ordenDetalle ? opNum(ordenDetalle.id) : ''} — ${ordenDetalle?.producto || ''}`} size="modal-lg"
+      <Modal open={!!ordenDetalle} onClose={closeDetalle} title={`Orden #${ordenDetalle ? opNum(ordenDetalle.id) : ''} — ${ordenDetalle?.producto || ''}`} size="modal-lg"
         footer={<>
           <button className="btn btn-secondary" onClick={closeDetalle}>Cerrar</button>
         </>}
