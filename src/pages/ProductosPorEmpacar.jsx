@@ -8,7 +8,7 @@ import { useAuth } from '../context/AuthContext'
 import { useNavTrail } from '../hooks/useNavTrail'
 import { registrarEmpaqueSurtido } from '../lib/empaqueSurtido'
 import Modal from '../components/ui/Modal'
-import { Recycle, Trash2, Pencil, Shuffle, Search, Filter, X, AlertTriangle, Ban } from 'lucide-react'
+import { Recycle, Trash2, Pencil, Shuffle, Search, Filter, X, AlertTriangle, Ban, PackageOpen } from 'lucide-react'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const fCant = (n) => Number(n || 0).toLocaleString('es-CO', { maximumFractionDigits: 3 })
@@ -194,9 +194,9 @@ export default function ProductosPorEmpacar() {
         </div>
       </div>
 
-      <div className="tabs" style={{ marginBottom: 12 }}>
-        {[['saldos', Recycle, 'Por empacar'], ['bajas', Trash2, 'Historial de bajas']].map(([k, icon, l]) => (
-          <button key={k} className={`tab ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}><Ico as={icon} size={14} />{l}</button>
+      <div className="tabs tabs-seg" style={{ marginBottom: 12 }}>
+        {[['saldos', PackageOpen, 'Por empacar'], ['bajas', Trash2, 'Historial de bajas']].map(([k, icon, l]) => (
+          <button key={k} className={`tab-btn ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}><Ico as={icon} size={14} />{l}</button>
         ))}
       </div>
 
