@@ -6,10 +6,20 @@ import { useToast } from '../hooks/useToast'
 import { useConfirm } from '../context/ConfirmContext'
 import Modal from '../components/ui/Modal'
 import * as XLSX from 'xlsx'
-import { Download, Pencil, X, RefreshCw, ShoppingBag, Users, CalendarClock, Eye, EyeOff } from 'lucide-react'
+import { Download, Pencil, X, RefreshCw, ShoppingBag, Users, CalendarClock, ArrowUp, ArrowDown } from 'lucide-react'
 import Select from '../components/ui/Select'
 import { useAuth } from '../context/AuthContext'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
+
+// Cabecera de tabla ordenable: al hacer clic ordena por esa columna y muestra la flecha.
+const ThOrd = ({ campo, orden, dir, onSort, className, children }) => (
+  <th className={className} style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} onClick={() => onSort(campo)} title="Ordenar">
+    {children}
+    {orden === campo
+      ? (dir === 'asc' ? <ArrowUp size={12} aria-hidden="true" style={{ display: 'inline', verticalAlign: '-2px', marginLeft: 3 }} /> : <ArrowDown size={12} aria-hidden="true" style={{ display: 'inline', verticalAlign: '-2px', marginLeft: 3 }} />)
+      : <ArrowUp size={12} aria-hidden="true" style={{ display: 'inline', verticalAlign: '-2px', marginLeft: 3, opacity: 0.25 }} />}
+  </th>
+)
 
 const CANALES = { mayor: 'Por mayor', detal: 'Detal', feria: 'Feria/Evento', ecommerce: 'E-commerce', whatsapp: 'WhatsApp/Redes' }
 
@@ -23,11 +33,13 @@ export default function Clientes() {
   const esAdmin = (profile?.rol || 'admin') === 'admin'
   const [buscar, setBuscar] = useState('')
   const [filtroCanal, setFiltroCanal] = useState('')
+  const [filtroCiudad, setFiltroCiudad] = useState('')
+  const [orden, setOrden] = useState('nombre')      // nombre | valor | ciudad | ultima
+  const [ordenDir, setOrdenDir] = useState('asc')   // asc | desc
   const [modal, setModal] = useState(false)
   const [form, setForm] = useState(EMPTY)
   const [editId, setEditId] = useState(null)
   const [detalle, setDetalle] = useState(null)      // cliente para ver desglose de compras
-  const [verMontos, setVerMontos] = useState(false) // los montos facturados van ocultos tras un ojito
 
   const { data: clientes = [] } = useQuery({
     queryKey: ['clientes'],
@@ -106,7 +118,13 @@ export default function Clientes() {
   // Total facturado del ÚLTIMO AÑO (últimos 12 meses), sumado desde el desglose mensual.
   const mesCutoff = (() => { const d = new Date(); d.setMonth(d.getMonth() - 11); return d.toISOString().slice(0, 7) })()
   const totalAno = (m) => m ? Object.entries(m.porMes || {}).reduce((s, [k, v]) => (k >= mesCutoff ? s + (Number(v) || 0) : s), 0) : 0
-  const oculto = '•••••'   // marcador cuando los montos están ocultos
+  const ciudades = [...new Set(clientes.map(c => (c.ciudad || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b))
+  // Al pulsar una cabecera: si es la misma columna alterna dirección; si es otra, arranca en la
+  // dirección natural (nombre/ciudad ascendente, valor/última compra descendente).
+  const ordenarPor = (campo) => {
+    if (orden === campo) { setOrdenDir(d => (d === 'asc' ? 'desc' : 'asc')); return }
+    setOrden(campo); setOrdenDir(campo === 'nombre' || campo === 'ciudad' ? 'asc' : 'desc')
+  }
 
   // Auto-sincroniza al abrir el módulo si nunca se hizo o si pasaron más de 6 horas.
   const autoRef = useRef(false)
@@ -119,7 +137,16 @@ export default function Clientes() {
   const filtrados = clientes.filter(c => {
     const ok = (c.nombre || '').toLowerCase().includes(buscar.toLowerCase()) ||
                (c.contacto || '').toLowerCase().includes(buscar.toLowerCase())
-    return ok && (!filtroCanal || c.canal === filtroCanal)
+    return ok && (!filtroCanal || c.canal === filtroCanal) && (!filtroCiudad || (c.ciudad || '') === filtroCiudad)
+  }).sort((a, b) => {
+    const clave = (c) => orden === 'valor' ? totalAno(metricaDe(c))
+      : orden === 'ultima' ? (c.compra_ultima || '')
+      : orden === 'ciudad' ? (c.ciudad || '').toLowerCase()
+      : (c.nombre || '').toLowerCase()
+    const x = clave(a), y = clave(b)
+    if (x < y) return ordenDir === 'asc' ? -1 : 1
+    if (x > y) return ordenDir === 'asc' ? 1 : -1
+    return 0
   })
 
   const openNew = () => { setForm(EMPTY); setEditId(null); setModal(true) }
@@ -165,16 +192,7 @@ export default function Clientes() {
         return (
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 16, alignItems: 'stretch' }}>
             {tile(Users, 'Clientes con compras', conCompra.length)}
-            <div className="card" style={{ flex: '1 1 200px', margin: 0, padding: 12 }}>
-              <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)', display: 'flex', alignItems: 'center', gap: 5 }}>
-                <Ico as={ShoppingBag} size={13} />Facturado (último año)
-                <button type="button" onClick={() => setVerMontos(v => !v)} title={verMontos ? 'Ocultar montos' : 'Mostrar montos'} aria-label={verMontos ? 'Ocultar montos' : 'Mostrar montos'}
-                  style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--texto-suave)', display: 'inline-flex', padding: 2 }}>
-                  {verMontos ? <EyeOff size={15} aria-hidden="true" /> : <Eye size={15} aria-hidden="true" />}
-                </button>
-              </div>
-              <div style={{ fontSize: '1.15rem', fontWeight: 700, color: 'var(--dorado)' }}>{verMontos ? fCOP(factAno) : oculto}</div>
-            </div>
+            {tile(ShoppingBag, 'Facturado (último año)', fCOP(factAno), 'var(--dorado)')}
           </div>
         )
       })()}
@@ -185,12 +203,26 @@ export default function Clientes() {
           <option value="">Todos los canales</option>
           {Object.entries(CANALES).map(([v, l]) => <option key={v} value={v}>{l}</option>)}
         </Select>
+        {ciudades.length > 0 && (
+          <Select className="form-control" value={filtroCiudad} onChange={e => setFiltroCiudad(e.target.value)} style={{ width: 'auto' }}>
+            <option value="">Todas las ciudades</option>
+            {ciudades.map(c => <option key={c} value={c}>{c}</option>)}
+          </Select>
+        )}
       </div>
 
       <div className="card">
         <div className="table-wrap">
           <table>
-            <thead><tr><th>Nombre / Empresa</th><th>Contacto</th><th className="col-opcional">Canal</th><th className="col-opcional">Ciudad</th>{hayMetricas && <th className="td-number">Facturado (último año)</th>}{hayMetricas && <th className="col-opcional">Última compra</th>}<th className="col-opcional-2">Fecha Reg.</th><th>Acciones</th></tr></thead>
+            <thead><tr>
+              <ThOrd campo="nombre" orden={orden} dir={ordenDir} onSort={ordenarPor}>Nombre / Empresa</ThOrd>
+              <th>Contacto</th>
+              <th className="col-opcional">Canal</th>
+              <ThOrd campo="ciudad" orden={orden} dir={ordenDir} onSort={ordenarPor} className="col-opcional">Ciudad</ThOrd>
+              {hayMetricas && <ThOrd campo="valor" orden={orden} dir={ordenDir} onSort={ordenarPor} className="td-number">Facturado (último año)</ThOrd>}
+              {hayMetricas && <ThOrd campo="ultima" orden={orden} dir={ordenDir} onSort={ordenarPor} className="col-opcional">Última compra</ThOrd>}
+              <th className="col-opcional-2">Fecha Reg.</th><th>Acciones</th>
+            </tr></thead>
             <tbody>
               {filtrados.length === 0
                 ? <tr><td colSpan={hayMetricas ? 8 : 6} className="empty-table">Sin clientes registrados</td></tr>
@@ -199,7 +231,7 @@ export default function Clientes() {
                   return (
                   <tr key={c.id}>
                     <td>
-                      <strong>{c.nombre}</strong>
+                      <button className="btn-link-emp" onClick={() => setDetalle(c)} title="Ver detalle del cliente"><strong>{c.nombre}</strong></button>
                       {c.alegra_id ? <span className="badge badge-verde" style={{ marginLeft: 6, fontSize: '0.62rem' }}>Alegra</span> : null}
                       {c.nit ? <div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>{c.tipo_identificacion || 'ID'}: {c.nit}</div> : null}
                     </td>
@@ -208,7 +240,7 @@ export default function Clientes() {
                     <td className="col-opcional">{c.ciudad || '—'}</td>
                     {hayMetricas && <td className="td-number">
                       {m && m.count > 0
-                        ? <button className="btn-link-emp" onClick={() => setDetalle(c)} title="Ver desglose de compras"><strong>{verMontos ? fCOP(totalAno(m)) : oculto}</strong><div style={{ fontSize: '0.68rem', color: 'var(--texto-suave)', fontWeight: 400 }}>{m.count} compra(s)</div></button>
+                        ? <button className="btn-link-emp" onClick={() => setDetalle(c)} title="Ver desglose de compras"><strong>{fCOP(totalAno(m))}</strong><div style={{ fontSize: '0.68rem', color: 'var(--texto-suave)', fontWeight: 400 }}>{m.count} compra(s)</div></button>
                         : <span style={{ color: 'var(--texto-suave)' }}>—</span>}
                     </td>}
                     {hayMetricas && <td className="col-opcional">{m?.ultima ? fFecha(m.ultima) : '—'}</td>}
@@ -284,14 +316,9 @@ export default function Clientes() {
           const meses = Object.entries(m.porMes || {}).sort((a, b) => b[0].localeCompare(a[0]))
           return (
             <>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-                <button type="button" className="btn btn-xs btn-secondary" onClick={() => setVerMontos(v => !v)}>
-                  {verMontos ? <><Ico as={EyeOff} size={13} />Ocultar montos</> : <><Ico as={Eye} size={13} />Mostrar montos</>}
-                </button>
-              </div>
               <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', marginBottom: 12 }}>
-                <div className="card" style={{ flex: '1 1 130px', margin: 0, padding: 10 }}><div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Facturado (último año)</div><div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--dorado)' }}>{verMontos ? fCOP(totalAno(m)) : oculto}</div></div>
-                <div className="card" style={{ flex: '1 1 130px', margin: 0, padding: 10 }}><div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Total histórico</div><div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{verMontos ? fCOP(m.total) : oculto}</div></div>
+                <div className="card" style={{ flex: '1 1 130px', margin: 0, padding: 10 }}><div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Facturado (último año)</div><div style={{ fontSize: '1.1rem', fontWeight: 700, color: 'var(--dorado)' }}>{fCOP(totalAno(m))}</div></div>
+                <div className="card" style={{ flex: '1 1 130px', margin: 0, padding: 10 }}><div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Total histórico</div><div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{fCOP(m.total)}</div></div>
                 <div className="card" style={{ flex: '1 1 100px', margin: 0, padding: 10 }}><div style={{ fontSize: '0.72rem', color: 'var(--texto-suave)' }}>Nº compras</div><div style={{ fontSize: '1.1rem', fontWeight: 700 }}>{m.count}</div></div>
               </div>
               <div style={{ fontSize: '0.82rem', color: 'var(--texto-suave)', marginBottom: 10, display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -301,7 +328,7 @@ export default function Clientes() {
                 <div className="table-wrap">
                   <table>
                     <thead><tr><th>Mes</th><th className="td-number">Comprado</th></tr></thead>
-                    <tbody>{meses.map(([mes, val]) => <tr key={mes}><td>{mes}</td><td className="td-number">{verMontos ? fCOP(val) : oculto}</td></tr>)}</tbody>
+                    <tbody>{meses.map(([mes, val]) => <tr key={mes}><td>{mes}</td><td className="td-number">{fCOP(val)}</td></tr>)}</tbody>
                   </table>
                 </div>
               )}
