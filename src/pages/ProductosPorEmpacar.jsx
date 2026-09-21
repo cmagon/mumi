@@ -8,7 +8,7 @@ import { useAuth } from '../context/AuthContext'
 import { useNavTrail } from '../hooks/useNavTrail'
 import { registrarEmpaqueSurtido } from '../lib/empaqueSurtido'
 import Modal from '../components/ui/Modal'
-import { Recycle, Trash2, Pencil, Shuffle } from 'lucide-react'
+import { Recycle, Trash2, Pencil, Shuffle, Search, Filter, X, AlertTriangle, Ban } from 'lucide-react'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 const fCant = (n) => Number(n || 0).toLocaleString('es-CO', { maximumFractionDigits: 3 })
@@ -21,6 +21,8 @@ export default function ProductosPorEmpacar() {
   const { pushTo } = useNavTrail()
   const [tab, setTab] = useState('saldos')
   const [buscar, setBuscar] = useState('')
+  const [filtroEstado, setFiltroEstado] = useState('')   // '' | 'por_vencer' | 'vencido'
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false)   // panel de filtros plegable
   const [modalBaja, setModalBaja] = useState(null)   // saldo a dar de baja
   const [bForm, setBForm] = useState({ cantidad: '', motivo: '' })
   const [modalEditar, setModalEditar] = useState(null)   // saldo a editar cantidad
@@ -53,8 +55,16 @@ export default function ProductosPorEmpacar() {
 
   const filtrados = useMemo(() => {
     const q = buscar.trim().toLowerCase()
-    return saldos.filter(s => !q || (s.producto || '').toLowerCase().includes(q) || (s.lote || '').toLowerCase().includes(q))
-  }, [saldos, buscar])
+    return saldos.filter(s => {
+      if (q && !((s.producto || '').toLowerCase().includes(q) || (s.lote || '').toLowerCase().includes(q))) return false
+      if (filtroEstado) {
+        const est = estadoLote(s.vencimiento)
+        if (filtroEstado === 'por_vencer' && est === 'ok') return false
+        if (filtroEstado === 'vencido' && est !== 'vencido') return false
+      }
+      return true
+    })
+  }, [saldos, buscar, filtroEstado])
 
   const totalItems = saldos.length
   const porVencer = saldos.filter(s => estadoLote(s.vencimiento) !== 'ok').length
@@ -185,8 +195,8 @@ export default function ProductosPorEmpacar() {
       </div>
 
       <div className="tabs" style={{ marginBottom: 12 }}>
-        {[['saldos', '♻ Por empacar'], ['bajas', '🗑 Historial de bajas']].map(([k, l]) => (
-          <button key={k} className={`tab ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}>{l}</button>
+        {[['saldos', Recycle, 'Por empacar'], ['bajas', Trash2, 'Historial de bajas']].map(([k, icon, l]) => (
+          <button key={k} className={`tab ${tab === k ? 'active' : ''}`} onClick={() => setTab(k)}><Ico as={icon} size={14} />{l}</button>
         ))}
       </div>
 
@@ -197,11 +207,33 @@ export default function ProductosPorEmpacar() {
               onClick={abrirMezcla} disabled={saldosMezcla.length < 2}>
               <Ico as={Shuffle} size={14} />Empacar mezclado{saldosMezcla.length >= 2 ? ` (${saldosMezcla.length})` : ''}
             </button>
-            <input className="form-control" style={{ maxWidth: 240 }} placeholder="Buscar producto o lote..." value={buscar} onChange={e => setBuscar(e.target.value)} />
           </div>
-          <div className="alert alert-info" style={{ fontSize: '0.78rem', marginBottom: 8 }}>
-            💡 ¿Empacas <strong>dos sabores en una sola caja</strong>? Marca los lotes con la casilla ◻ y usa <strong>Empacar mezclado</strong>: se crea <strong>una</strong> orden que los combina y suma las cajas correctas (no los cuenta dos veces).
+          <div style={{ display: 'flex', gap: 10, marginBottom: filtrosAbiertos ? 10 : 12, flexWrap: 'wrap', alignItems: 'center' }}>
+            <div style={{ position: 'relative', flex: '1 1 240px', maxWidth: 340, minWidth: 180 }}>
+              <Search size={15} aria-hidden="true" style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--texto-suave)', pointerEvents: 'none' }} />
+              <input className="form-control" style={{ width: '100%', paddingLeft: 32, paddingRight: buscar ? 32 : 12 }} placeholder="Buscar producto o lote…" value={buscar} onChange={e => setBuscar(e.target.value)} />
+              {buscar && (
+                <button type="button" title="Limpiar búsqueda" aria-label="Limpiar búsqueda" onClick={() => setBuscar('')}
+                  style={{ position: 'absolute', right: 6, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--texto-suave)', display: 'inline-flex', padding: 2 }}>
+                  <X size={15} aria-hidden="true" />
+                </button>
+              )}
+            </div>
+            <button type="button" className={`btn btn-sm ${filtroEstado ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setFiltrosAbiertos(o => !o)}>
+              <Ico as={Filter} size={14} />Filtrar{filtroEstado && <span className="badge badge-gris" style={{ marginLeft: 4 }}>1</span>}
+            </button>
           </div>
+          {filtrosAbiertos && (
+            <div style={{ display: 'flex', gap: 10, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center', padding: '10px 12px', background: 'var(--crema)', borderRadius: 'var(--radio)' }}>
+              <label className="form-label" style={{ margin: 0 }}>Vencimiento:</label>
+              <select className="form-control" value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} style={{ width: 'auto' }}>
+                <option value="">Todos</option>
+                <option value="por_vencer">Por vencer / vencidos</option>
+                <option value="vencido">Solo vencidos</option>
+              </select>
+              {filtroEstado && <button className="btn btn-sm btn-secondary" onClick={() => setFiltroEstado('')}><Ico as={X} size={13} />Limpiar filtros</button>}
+            </div>
+          )}
           <div className="table-wrap">
             <table>
               <thead><tr><th style={{ width: 28 }} title="Marcar para empacar mezclado"><Shuffle size={13} aria-hidden="true" /></th><th>Producto</th><th>Lote</th><th className="td-number">Disponible</th><th className="td-number">Valor</th><th className="col-opcional">Vence</th><th className="col-opcional-2">Origen</th><th></th></tr></thead>
@@ -219,7 +251,7 @@ export default function ProductosPorEmpacar() {
                           <td className="td-number" title={Number(s.costo_unitario) > 0 ? `${fCOP(s.costo_unitario)} por ${s.unidad}` : 'Saldo creado antes de valorar el producto en proceso'}>
                             {Number(s.costo_unitario) > 0 ? fCOP(valorSaldo(s)) : '—'}
                           </td>
-                          <td className="col-opcional" style={{ color: est === 'vencido' ? 'var(--rojo)' : est === 'por_vencer' ? 'var(--tierra)' : undefined }}>{fmtV(s.vencimiento)} {est === 'vencido' ? '⛔' : est === 'por_vencer' ? '⚠' : ''}</td>
+                          <td className="col-opcional" style={{ color: est === 'vencido' ? 'var(--rojo)' : est === 'por_vencer' ? 'var(--tierra)' : undefined }}>{fmtV(s.vencimiento)} {est === 'vencido' ? <Ban size={13} aria-hidden="true" style={{ display: 'inline', verticalAlign: '-2px' }} /> : est === 'por_vencer' ? <AlertTriangle size={13} aria-hidden="true" style={{ display: 'inline', verticalAlign: '-2px' }} /> : ''}</td>
                           <td className="col-opcional-2" style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>{s.created_at ? fFecha(s.created_at.slice(0, 10)) : '—'}</td>
                           <td style={{ whiteSpace: 'nowrap' }}>
                             <button className="btn btn-xs btn-primary" title="Crear orden solo para empacar este saldo"
@@ -274,7 +306,7 @@ export default function ProductosPorEmpacar() {
       )}
 
       {/* Modal editar cantidad */}
-      <Modal open={!!modalEditar} onClose={() => setModalEditar(null)} title={`✏ Editar cantidad — ${modalEditar?.producto || ''}`}
+      <Modal open={!!modalEditar} onClose={() => setModalEditar(null)} title={`Editar cantidad — ${modalEditar?.producto || ''}`}
         footer={<>
           <button className="btn btn-secondary" onClick={() => setModalEditar(null)}>Cancelar</button>
           <button className="btn btn-primary" onClick={() => editarSaldo.mutate()} disabled={editarSaldo.isPending}>{editarSaldo.isPending ? 'Guardando...' : 'Guardar cantidad'}</button>
@@ -290,7 +322,7 @@ export default function ProductosPorEmpacar() {
       </Modal>
 
       {/* Modal dar de baja */}
-      <Modal open={!!modalBaja} onClose={() => setModalBaja(null)} title={`🗑 Dar de baja — ${modalBaja?.producto || ''}`}
+      <Modal open={!!modalBaja} onClose={() => setModalBaja(null)} title={`Dar de baja — ${modalBaja?.producto || ''}`}
         footer={<>
           <button className="btn btn-secondary" onClick={() => setModalBaja(null)}>Cancelar</button>
           <button className="btn btn-danger" onClick={() => darDeBaja.mutate()} disabled={darDeBaja.isPending}>{darDeBaja.isPending ? 'Guardando...' : 'Dar de baja'}</button>
@@ -302,7 +334,7 @@ export default function ProductosPorEmpacar() {
             <div className="form-group"><label className="form-label">Motivo</label><input className="form-control" value={bForm.motivo} onChange={e => setBForm(f => ({ ...f, motivo: e.target.value }))} placeholder="Ej: vencido, dañado, no se empacó..." /></div>
             {Number(modalBaja.costo_unitario) > 0 && (parseFloat(bForm.cantidad) || 0) > 0 && (
               <div className="alert alert-warning" style={{ fontSize: '0.82rem' }}>
-                ⚠ Esta baja es una <strong>pérdida real de {fCOP((parseFloat(bForm.cantidad) || 0) * Number(modalBaja.costo_unitario))}</strong>:
+                <Ico as={AlertTriangle} size={14} />Esta baja es una <strong>pérdida real de {fCOP((parseFloat(bForm.cantidad) || 0) * Number(modalBaja.costo_unitario))}</strong>:
                 esa mezcla ya consumió materia prima, mano de obra y CIF que no vas a recuperar.
               </div>
             )}
@@ -313,11 +345,11 @@ export default function ProductosPorEmpacar() {
 
       {/* Modal empacar SURTIDO — autocontenido: formulario → confirmación → registrar */}
       <Modal open={modalMezcla} onClose={() => setModalMezcla(false)}
-        title={mezStep === 'confirm' ? '🔀 Confirmar empaque surtido' : '🔀 Empacar surtido (mezclado)'}
+        title={mezStep === 'confirm' ? 'Confirmar empaque surtido' : 'Empacar surtido (mezclado)'}
         footer={mezStep === 'confirm'
           ? <>
               <button className="btn btn-secondary" onClick={() => setMezStep('form')} disabled={ejecutarMezcla.isPending}>← Volver</button>
-              <button className="btn btn-success" onClick={() => ejecutarMezcla.mutate()} disabled={ejecutarMezcla.isPending}>{ejecutarMezcla.isPending ? 'Enviando...' : '✓ Enviar'}</button>
+              <button className="btn btn-success" onClick={() => ejecutarMezcla.mutate()} disabled={ejecutarMezcla.isPending}>{ejecutarMezcla.isPending ? 'Enviando...' : 'Enviar'}</button>
             </>
           : <>
               <button className="btn btn-secondary" onClick={() => setModalMezcla(false)}>Cancelar</button>
@@ -356,7 +388,7 @@ export default function ProductosPorEmpacar() {
               <label className="form-label">Producto surtido resultante</label>
               <select className="form-control" value={mForm.producto} onChange={e => setMForm(f => ({ ...f, producto: e.target.value }))}>
                 <option value="">Seleccionar producto terminado...</option>
-                {terminados.map(t => <option key={t.id} value={t.nombre}>{t.tipo === 'surtido' ? '🔀 ' : ''}{t.nombre}</option>)}
+                {terminados.map(t => <option key={t.id} value={t.nombre}>{t.tipo === 'surtido' ? 'Surtido · ' : ''}{t.nombre}</option>)}
               </select>
               <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Del catálogo de Producto Terminado. Si no existe, créalo primero para que sume al stock correcto.</small>
             </div>
@@ -412,7 +444,7 @@ export default function ProductosPorEmpacar() {
                 <tr><td style={{ fontWeight: 600 }}>Cajas empacadas</td><td><strong>{fCant(cajasNum)}</strong></td></tr>
                 <tr><td style={{ fontWeight: 600 }}>Lote de la caja</td><td>{mForm.lote}</td></tr>
                 <tr><td style={{ fontWeight: 600 }}>Fecha</td><td>{fmtV(mForm.fecha)}{(mForm.horaInicio || mForm.horaFin) ? ` · ${mForm.horaInicio || '—'} a ${mForm.horaFin || '—'}` : ''}</td></tr>
-                <tr><td style={{ fontWeight: 600 }}>Conforme</td><td>{mForm.conforme ? 'Sí ✓' : 'No ✗'}</td></tr>
+                <tr><td style={{ fontWeight: 600 }}>Conforme</td><td>{mForm.conforme ? 'Sí' : 'No'}</td></tr>
               </tbody>
             </table>
             <div style={{ fontWeight: 600, margin: '10px 0 4px' }}>Consumo de saldos</div>
