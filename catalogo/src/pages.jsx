@@ -444,6 +444,24 @@ export function Producto() {
   const atelier = (cfg.diseno || 'selva') === 'atelier'
   const ctaFijo = atelier && cfg.ficha_cta_fijo !== false
 
+  // "También te puede gustar": el 1.º de la misma categoría (más afín) y del 2.º en adelante
+  // productos de OTRAS categorías, en orden aleatorio. Se recalcula al cambiar de producto.
+  const relacionados = useMemo(() => {
+    const todos = (productos || []).filter(x => String(x.id) !== String(p?.id))
+    const revuelto = (arr) => {
+      const r = [...arr]
+      for (let i = r.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[r[i], r[j]] = [r[j], r[i]] }
+      return r
+    }
+    const mismaCat = todos.filter(x => x.categoria === p?.categoria)
+    const otraCat = todos.filter(x => x.categoria !== p?.categoria)
+    const primero = mismaCat.length ? [revuelto(mismaCat)[0]] : []
+    const usados = new Set(primero.map(x => String(x.id)))
+    // 2.º en adelante: otras categorías (aleatorio); si faltan, completa con la misma categoría.
+    const resto = [...revuelto(otraCat), ...revuelto(mismaCat)].filter(x => !usados.has(String(x.id)))
+    return [...primero, ...resto].slice(0, 8)
+  }, [productos, p?.id, p?.categoria])
+
   // Al entrar a un producto, la navegación siempre inicia desde el tope (arriba de la foto).
   // El scroll real ocurre en el contenedor .wrap (no en window). Se hace ahora y tras el
   // primer frame, para ganarle a cualquier reacomodo por la carga de la imagen.
@@ -530,7 +548,6 @@ export function Producto() {
   const n = enCarrito(p.id)
   const agotado = (p.stock ?? 0) <= 0
   const st = stockLabel(p.stock, cfg)
-  const relacionados = (productos || []).filter(x => x.id !== p.id && x.categoria === p.categoria).slice(0, 8)
   const maxCant = Math.max(1, Number(p.stock) || 1)
   const introWA = agotado ? cfg.wa_texto_sin_stock : (mayorista ? (cfg.wa_texto_mayorista || cfg.wa_texto_stock) : cfg.wa_texto_stock)
   const itemsPedido = () => [{ ...p, cantidad: n > 0 ? n : cant }]
