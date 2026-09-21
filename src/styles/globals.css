@@ -416,8 +416,10 @@ body {
 .form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
 .form-grid-3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; }
 .form-grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 16px; }
+/* Rejilla compacta: encaja más campos pequeños (ej. parámetros de nómina) para aprovechar el espacio */
+.form-grid-4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px 14px; }
 /* Permite que los campos se encojan dentro de rejillas/flex (sin esto desbordan por su min-content) */
-.form-grid > *, .form-grid-2 > *, .form-grid-3 > * { min-width: 0; }
+.form-grid > *, .form-grid-2 > *, .form-grid-3 > *, .form-grid-4 > * { min-width: 0; }
 input, select, textarea, .form-control { min-width: 0; max-width: 100%; }
 
 /* ==================== TABLAS ==================== */

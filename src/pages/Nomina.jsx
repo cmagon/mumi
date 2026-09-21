@@ -13,7 +13,7 @@ import MoneyInput from '../components/ui/MoneyInput'
 import { useConfirm } from '../context/ConfirmContext'
 import { AccordionItem, Fila } from '../components/ui/Acordeon'
 import * as XLSX from 'xlsx'
-import { BarChart3, ClipboardList, Clock, DollarSign, Download, FolderOpen, Pencil, Pin, Settings, Users, X, Save, AlertTriangle, Ban, Scale, CheckCircle2, Building2, Plus, UserPlus, Info, Calculator, Circle, CalendarDays, Trash2 } from 'lucide-react'
+import { BarChart3, ClipboardList, Clock, DollarSign, FolderOpen, Pencil, Pin, Settings, Users, X, Save, AlertTriangle, Ban, Scale, CheckCircle2, Building2, Plus, UserPlus, Info, Calculator, Circle, CalendarDays } from 'lucide-react'
 import Select from '../components/ui/Select'
 import RangeCalendar from '../components/ui/RangeCalendar'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
@@ -1105,24 +1105,17 @@ function ParametrosNomina({ params, empleadosActivos = 0, onSaved }) {
     finally { setSaving(false) }
   }
 
-  const precargar2026 = () => {
-    setP(JSON.parse(JSON.stringify(PARAMS_NOMINA_DEFAULT)))
-    toast('Datos de vigencia 2026 precargados — revisa y pulsa Guardar', 'info')
-  }
-
   return (
     <div className="card">
       <div className="card-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <Ico as={Settings} size={14} />Parámetros de Liquidación (Código Sustantivo del Trabajo)
-        <button className="btn btn-secondary btn-sm" style={{ marginLeft: 'auto' }} onClick={precargar2026}><Ico as={Download} size={14} />Precargar datos 2026</button>
       </div>
       <div className="alert alert-info" style={{ fontSize: '0.83rem' }}>
-        Estos valores se aplican a la liquidación según el <strong>tipo de pago</strong> de cada empleado.
-        Usa <strong>"Precargar datos 2026"</strong> para cargar SMLMV, auxilio de transporte y tasas de la vigencia 2026; luego revisa y pulsa <strong>Guardar</strong>.
+        Estos valores se aplican a la liquidación según el <strong>tipo de pago</strong> de cada empleado. Revisa y pulsa <strong>Guardar</strong>.
       </div>
 
       <div className="card-title" style={{ fontSize: '0.95rem', marginTop: 8 }}>Valores base</div>
-      <div className="form-grid-2">
+      <div className="form-grid-4">
         <NumField label="Salario mínimo (SMLMV)" value={p.smlmv} onChange={v => setBase('smlmv', v)} />
         <NumField label="Auxilio de transporte" value={p.auxTransporte} onChange={v => setBase('auxTransporte', v)} />
         <NumField label="Tope auxilio (× SMLMV)" value={p.topeAuxSMLMV} onChange={v => setBase('topeAuxSMLMV', v)} hint="Se paga si el salario ≤ este múltiplo del SMLMV" />
@@ -1132,7 +1125,7 @@ function ParametrosNomina({ params, empleadosActivos = 0, onSaved }) {
       </div>
 
       <div className="card-title" style={{ fontSize: '0.95rem' }}>Tiempo de operación <small style={{ fontWeight: 400, color: 'var(--texto-suave)' }}>— para el costo fijo por minuto del costeo de productos</small></div>
-      <div className="form-grid-2">
+      <div className="form-grid-4">
         <div className="form-group">
           <label className="form-label">N° de operarios (capacidad)</label>
           <input className="form-control" value={(p.operacion?.numOperarios ?? 0) === 0 ? `Todos los de producción (${empleadosActivos})` : `${p.operacion?.numOperarios}`} disabled readOnly />
@@ -1182,13 +1175,13 @@ function ParametrosNomina({ params, empleadosActivos = 0, onSaved }) {
       </div>
 
       <div className="card-title" style={{ fontSize: '0.95rem' }}>Deducciones del empleado</div>
-      <div className="form-grid-2">
+      <div className="form-grid-4">
         <NumField label="Salud empleado" pct value={p.empleado.salud} onChange={v => setSub('empleado', 'salud', v)} />
         <NumField label="Pensión empleado" pct value={p.empleado.pension} onChange={v => setSub('empleado', 'pension', v)} />
       </div>
 
       <div className="card-title" style={{ fontSize: '0.95rem' }}>Prestaciones sociales</div>
-      <div className="form-grid-2">
+      <div className="form-grid-4">
         <NumField label="Cesantías" pct value={p.prestaciones.cesantias} onChange={v => setSub('prestaciones', 'cesantias', v)} />
         <NumField label="Intereses cesantías (% mensual sobre salario — 12% anual s/ cesantías ≈ 1%)" pct value={p.prestaciones.intCesantias} onChange={v => setSub('prestaciones', 'intCesantias', v)} />
         <NumField label="Prima de servicios" pct value={p.prestaciones.prima} onChange={v => setSub('prestaciones', 'prima', v)} />
@@ -1196,7 +1189,7 @@ function ParametrosNomina({ params, empleadosActivos = 0, onSaved }) {
       </div>
 
       <div className="card-title" style={{ fontSize: '0.95rem' }}>Aportes del empleador (parafiscales)</div>
-      <div className="form-grid-2">
+      <div className="form-grid-4">
         <NumField label="Salud empleador" pct value={p.empleador.salud} onChange={v => setSub('empleador', 'salud', v)} />
         <NumField label="Pensión empleador" pct value={p.empleador.pension} onChange={v => setSub('empleador', 'pension', v)} />
         <NumField label="ARL" pct value={p.empleador.arl} onChange={v => setSub('empleador', 'arl', v)} hint="Según clase de riesgo" />
@@ -1210,7 +1203,7 @@ function ParametrosNomina({ params, empleadosActivos = 0, onSaved }) {
       </label>
 
       <div className="card-title" style={{ fontSize: '0.95rem' }}>Contrato Prestación de Servicios (CPS)</div>
-      <div className="form-grid-2">
+      <div className="form-grid-4">
         <NumField label="IBC (base de cotización)" pct value={p.cps.ibc} onChange={v => setSub('cps', 'ibc', v)} hint="% de los honorarios" />
         <NumField label="Salud (sobre IBC)" pct value={p.cps.salud} onChange={v => setSub('cps', 'salud', v)} />
         <NumField label="Pensión (sobre IBC)" pct value={p.cps.pension} onChange={v => setSub('cps', 'pension', v)} />
