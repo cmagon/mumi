@@ -246,7 +246,7 @@ export function Home() {
       {/* Atelier: hero de marca (Munay). Selva: slider productos/banners */}
       {heroOn && (atelier
         ? <BrandHero cfg={cfg} banner={bannersPrincipales[0] || null} />
-        : (heroSlides.length > 0 && <HeroSlider slides={heroSlides} onOpen={abrir} />))}
+        : (heroSlides.length > 0 && <HeroSlider slides={heroSlides} onOpen={abrir} estilo={cfg.hero_estilo || 'clasico'} />))}
 
       {/* En móvil: toolbar (relevancia) arriba, frutos debajo — CSS order */}
       <div className="home-filters">

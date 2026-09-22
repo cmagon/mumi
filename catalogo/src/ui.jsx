@@ -352,7 +352,7 @@ export function irEnlace(nav, link) {
   else nav(l.startsWith('/') ? l : `/${l}`)
 }
 
-export function HeroSlider({ slides, onOpen }) {
+export function HeroSlider({ slides, onOpen, estilo = 'clasico' }) {
   const { precio } = useStore()
   const nav = useNavigate()
   const [i, setI] = useState(0)
@@ -399,7 +399,7 @@ export function HeroSlider({ slides, onOpen }) {
 
   return (
     <div
-      className={`hero${limpio ? ' hero-limpio' : ''}${conTexto ? ' hero-con-texto' : ''}`}
+      className={`hero hero-est-${estilo || 'clasico'}${limpio ? ' hero-limpio' : ''}${conTexto ? ' hero-con-texto' : ''}`}
       {...swipe}
       onClick={onClick}
       style={{
