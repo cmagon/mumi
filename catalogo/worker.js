@@ -280,7 +280,7 @@ function jsonLdProducto(cfg, p, url) {
 
 function inyectarMeta(html, {
   title, desc, url, image, type = 'website', siteName = 'Mumi Amazonia',
-  noindex = false, keywords = '', verification = '', jsonLd = null,
+  noindex = false, keywords = '', verification = '', jsonLd = null, extra = [],
 }) {
   const tags = [
     `<link rel="canonical" href="${esc(url)}">`,
@@ -294,10 +294,14 @@ function inyectarMeta(html, {
     `<meta property="og:description" content="${esc(desc)}">`,
     `<meta property="og:url" content="${esc(url)}">`,
     image ? `<meta property="og:image" content="${esc(image)}">` : '',
+    image ? `<meta property="og:image:secure_url" content="${esc(image)}">` : '',
+    image ? `<meta property="og:image:alt" content="${esc(title)}">` : '',
     `<meta name="twitter:card" content="${image ? 'summary_large_image' : 'summary'}">`,
     `<meta name="twitter:title" content="${esc(title)}">`,
     `<meta name="twitter:description" content="${esc(desc)}">`,
     image ? `<meta name="twitter:image" content="${esc(image)}">` : '',
+    image ? `<meta name="twitter:image:alt" content="${esc(title)}">` : '',
+    ...(Array.isArray(extra) ? extra : []),
     jsonLd ? `<script type="application/ld+json">${JSON.stringify(jsonLd)}</script>` : '',
   ].filter(Boolean).join('\n    ')
 
@@ -316,11 +320,23 @@ function inyectarProducto(html, p, url, cfg) {
   const title = `${p.seo_titulo || p.nombre} · ${marca}`
   const desc = (sinHtml(p.seo_desc || p.descripcion) || 'Producto natural de la selva del Guaviare.').slice(0, 180)
   const img = p.imagen_url || cfg?.seo_imagen || cfg?.logo_url || ''
+  // Open Graph de producto (precio + disponibilidad): vista previa de compra en Facebook/WhatsApp
+  const precio = p.precio_oferta > 0 && p.precio_oferta < (p.precio_detal || 0) ? p.precio_oferta : (p.precio_detal || 0)
+  const disponible = (p.stock ?? 1) > 0
+  const extra = []
+  if (precio > 0) {
+    extra.push(`<meta property="product:price:amount" content="${esc(Number(precio).toFixed(0))}">`)
+    extra.push(`<meta property="product:price:currency" content="COP">`)
+    extra.push(`<meta property="og:price:amount" content="${esc(Number(precio).toFixed(0))}">`)
+    extra.push(`<meta property="og:price:currency" content="COP">`)
+  }
+  extra.push(`<meta property="product:availability" content="${disponible ? 'in stock' : 'out of stock'}">`)
+  extra.push(`<meta property="og:availability" content="${disponible ? 'instock' : 'oos'}">`)
   return inyectarMeta(html, {
     title, desc, url: url.href, image: img, type: 'product', siteName: marca,
     keywords: cfg?.seo_keywords || '', verification: cfg?.seo_verificacion || '',
     noindex: cfg?.seo_indexar === false || !!cfg?.mantenimiento_activo,
-    jsonLd: jsonLdProducto(cfg, p, url),
+    jsonLd: jsonLdProducto(cfg, p, url), extra,
   })
 }
 
