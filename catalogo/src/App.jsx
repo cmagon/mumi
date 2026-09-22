@@ -5,7 +5,7 @@ import { useStore } from './store'
 import { Home, Producto, Nosotros, Contacto, Favoritos, Mayorista, Pagina, Galeria, NoEncontrado, Desuscribir } from './pages'
 import { IngresarPage, CuentaPage, MisPedidosPage } from './cuenta'
 import { fCOP, iconoDe, confirmarPedidoWA, suscribir, abrirWA, FAVORITOS, cargarGoogleFonts, getCliente, setCliente, getEmail, setEmail, getTelefono, setTelefono, emailValido, telefonoValido, buscarClientePorEmail, mensajeSolicitudMayorista, textoEnvio, barraPedidoMinimoEstado, barraEnvioGratisEstado, setFavicon, guardarCarritoParaDespues } from './utils'
-import { ModalNombre, ModalSesionCliente } from './ui'
+import { ModalNombre, ModalSesionCliente, WhatsAppFab } from './ui'
 import DOMPurify from 'dompurify'
 import FrutoIcon from './FrutoIcon'
 import BenefitIcon from './BenefitIcon'
@@ -407,6 +407,9 @@ export default function App() {
         </button>
       )}
       {verCarrito && <CartDrawer onClose={() => setVerCarrito(false)} />}
+
+      {/* Botón flotante de WhatsApp: en todas las páginas; sube si la barra del carrito está visible */}
+      <WhatsAppFab cfg={cfg} subir={nItems > 0 && !verCarrito && !fichaAtelier} />
     </div>
   )
 }

@@ -578,6 +578,33 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 .cartbar-wrap .cartbar { position: static; left: auto; right: auto; bottom: auto; margin: 0; max-width: none; animation: none; width: 100%; }
 .cartbar { position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 40; background: var(--selva); color: var(--on-primario, #fff); border-radius: 16px; box-shadow: var(--sombra-lg); display: flex; align-items: center; gap: 12px; padding: 13px 18px; max-width: 696px; margin: 0 auto; font-weight: 700; animation: up .2s ease; }
 .btn-seguir-compra { flex: 1; justify-content: center; min-width: 0; }
+
+/* ---- Botón flotante de WhatsApp (fijo, todas las páginas) ---- */
+.wa-fab {
+  position: fixed;
+  right: 18px;
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  z-index: 45;               /* sobre el contenido y la barra del carrito, pero bajo modales/overlays (z 55+) */
+  width: 56px; height: 56px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--selva, #1A3A2A);
+  color: #fff;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28);
+  transition: transform .18s ease, bottom .2s ease, box-shadow .18s ease;
+  -webkit-tap-highlight-color: transparent;
+}
+.wa-fab:hover { transform: scale(1.06); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.34); }
+.wa-fab:active { transform: scale(0.96); }
+.wa-fab:focus-visible { outline: 3px solid var(--dorado, #C8A94A); outline-offset: 3px; }
+.wa-fab svg { display: block; }
+/* Cuando la barra del carrito está visible, sube para no taparla */
+.wa-fab-subir { bottom: calc(84px + env(safe-area-inset-bottom, 0px)); }
+@media (max-width: 520px) {
+  .wa-fab { right: 14px; bottom: calc(14px + env(safe-area-inset-bottom, 0px)); width: 52px; height: 52px; }
+  .wa-fab-subir { bottom: calc(80px + env(safe-area-inset-bottom, 0px)); }
+}
+@media (prefers-reduced-motion: reduce) { .wa-fab { transition: none; } }
 .cart-acciones {
   padding: 4px 16px 16px;
   display: flex;

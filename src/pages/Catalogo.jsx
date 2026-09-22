@@ -1355,6 +1355,17 @@ function TabConfig({ toast, onDirtyChange }) {
             <div className="form-group"><label className="form-label">WhatsApp (con indicativo)</label><input className="form-control" value={cfg.whatsapp || ''} onChange={e => set('whatsapp', e.target.value)} placeholder="+573157702180" /></div>
             <div className="form-group"><label className="form-label">País <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(para el copyright)</small></label><input className="form-control" value={cfg.pais || ''} onChange={e => set('pais', e.target.value)} placeholder="Colombia" /></div>
           </div>
+          <div style={{ marginTop: 6, padding: 12, borderRadius: 10, border: '1px solid var(--crema-oscuro)', background: '#fff' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontWeight: 700, color: 'var(--selva)', cursor: 'pointer', marginBottom: 8 }}>
+              <input type="checkbox" checked={cfg.wa_flotante_activo !== false} onChange={e => set('wa_flotante_activo', e.target.checked)} />
+              💬 Botón flotante de WhatsApp (en todas las páginas)
+            </label>
+            <div className="form-group" style={{ marginBottom: 0 }}>
+              <label className="form-label">Mensaje precargado <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(opcional)</small></label>
+              <input className="form-control" value={cfg.wa_flotante_mensaje || ''} onChange={e => set('wa_flotante_mensaje', e.target.value)} placeholder="Hola, quiero más información sobre sus productos" disabled={cfg.wa_flotante_activo === false} />
+              <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Usa el número de <strong>WhatsApp</strong> de arriba. Aparece fijo en la esquina inferior derecha y sube automáticamente cuando se ve la barra del carrito.</small>
+            </div>
+          </div>
           <div className="form-group">
             <label className="form-label">🛡️ Turnstile Site Key <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(captcha en formularios públicos)</small></label>
             <input className="form-control" value={cfg.turnstile_site_key || ''} onChange={e => set('turnstile_site_key', e.target.value)} placeholder="0x4AAAAAAA…" />
