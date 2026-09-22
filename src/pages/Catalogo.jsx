@@ -3178,6 +3178,17 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
               ? <>En <strong>Atelier</strong>, el <strong>primer banner principal</strong> (por orden ↑↓) es la <strong>portada</strong> (imagen/video y textos si los tiene). No hay carrusel de principales. Los <strong>secundarios</strong> se colocan desde “Secciones del inicio”.</>
               : <>Los banners <strong>principales</strong> forman el carrusel de arriba. Los <strong>secundarios</strong> se colocan donde quieras desde “Secciones del inicio”.</>}
           </small>
+          {familiaActiva !== 'atelier' && (
+            <div className="form-group" style={{ marginBottom: 10 }}>
+              <label className="form-label">Estilo del banner principal (hero)</label>
+              <select className="form-control" value={cfg.hero_estilo || 'clasico'} onChange={e => set('hero_estilo', e.target.value)}>
+                <option value="clasico">Clásico — texto abajo sobre la imagen</option>
+                <option value="centrado">Centrado — imagen completa con texto centrado grande</option>
+                <option value="split">Dividido — imagen a un lado y texto en bloque de color</option>
+              </select>
+              <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Cambia cómo se ve el carrusel principal. Aplica a todos los banners principales.</small>
+            </div>
+          )}
           <TabBanners toast={toast} qc={qc} embed modoAtelier={familiaActiva === 'atelier'} />
         </PzSec>
 
