@@ -91,19 +91,24 @@ export default function Clientes() {
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['clientes'] }); toast('Eliminado') },
   })
 
-  // Sincroniza con Alegra: importa contactos y recalcula/guarda las métricas por cliente.
-  // Corre automáticamente al abrir (si los datos están viejos) y también con el botón.
+  // Sincroniza con Alegra en SEGUNDO PLANO (nunca bloquea la lista, que ya se muestra desde la BD).
+  // - soloMetricas: recalcula solo las métricas (botón).
+  // - completa: importa contactos + métricas (auto una vez al día).
   const sincronizar = useMutation({
-    mutationFn: async ({ silencioso } = {}) => {
-      const r1 = await supabase.functions.invoke('alegra-contacts', { body: {} })
-      if (r1.error || r1.data?.error) throw new Error(r1.data?.error || r1.error.message)
+    mutationFn: async ({ silencioso, soloMetricas } = {}) => {
+      let imp = null
+      if (!soloMetricas) {
+        const r1 = await supabase.functions.invoke('alegra-contacts', { body: {} })
+        if (r1.error || r1.data?.error) throw new Error(r1.data?.error || r1.error.message)
+        imp = r1.data
+      }
       const r2 = await supabase.functions.invoke('alegra-ventas-cliente', { body: {} })
       if (r2.error || r2.data?.error) throw new Error(r2.data?.error || r2.error.message)
-      return { imp: r1.data, met: r2.data, silencioso }
+      return { imp, met: r2.data, silencioso }
     },
     onSuccess: ({ imp, silencioso }) => {
       qc.invalidateQueries({ queryKey: ['clientes'] })
-      if (!silencioso) toast(`Alegra: ${imp.importados} nuevos · ${imp.actualizados} actualizados · métricas al día`)
+      if (!silencioso) toast(imp ? `Alegra: ${imp.importados} nuevos · ${imp.actualizados} actualizados · métricas al día` : 'Métricas actualizadas ✓')
     },
     onError: (e) => toast(e.message || 'No se pudo sincronizar con Alegra', 'error'),
   })
@@ -126,12 +131,14 @@ export default function Clientes() {
     setOrden(campo); setOrdenDir(campo === 'valor' || campo === 'ultima' ? 'desc' : 'asc')
   }
 
-  // Auto-sincroniza al abrir el módulo si nunca se hizo o si pasaron más de 6 horas.
+  // Auto-sincroniza en segundo plano SOLO UNA VEZ AL DÍA (si la última sync fue en otro día).
+  // La lista nunca espera por esto: se muestra de inmediato desde la BD.
   const autoRef = useRef(false)
   useEffect(() => {
     if (!esAdmin || autoRef.current || clientes.length === 0) return
-    const viejo = !ultimaSync || (Date.now() - new Date(ultimaSync).getTime()) > 6 * 3600 * 1000
-    if (viejo) { autoRef.current = true; sincronizar.mutate({ silencioso: true }) }
+    const hoy = new Date().toISOString().slice(0, 10)
+    const syncHoy = ultimaSync && ultimaSync.slice(0, 10) === hoy
+    if (!syncHoy) { autoRef.current = true; sincronizar.mutate({ silencioso: true }) }
   }, [esAdmin, clientes.length, ultimaSync])
 
   const filtrados = clientes.filter(c => {
@@ -173,8 +180,8 @@ export default function Clientes() {
       <div className="page-header">
         <h1 className="page-title">Clientes</h1>
         <div className="page-actions">
-          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => sincronizar.mutate({})} disabled={sincronizar.isPending} title="Importa contactos y recalcula las métricas desde Alegra (también ocurre automáticamente)">
-            <Ico as={RefreshCw} size={14} />{sincronizar.isPending ? 'Sincronizando...' : 'Actualizar de Alegra'}
+          {esAdmin && <button className="btn btn-secondary btn-sm" onClick={() => sincronizar.mutate({ soloMetricas: true })} disabled={sincronizar.isPending} title="Recalcula las métricas de compra desde Alegra (la importación ocurre sola una vez al día)">
+            <Ico as={RefreshCw} size={14} />{sincronizar.isPending ? 'Sincronizando...' : 'Sincronizar métricas'}
           </button>}
           <button className="btn btn-secondary btn-sm" onClick={exportarExcel}><Ico as={Download} size={14} />Excel</button>
           <button className="btn btn-primary btn-sm" onClick={openNew}>+ Nuevo Cliente</button>
