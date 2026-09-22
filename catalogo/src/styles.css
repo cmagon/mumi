@@ -371,10 +371,10 @@ a.miga:hover { color: var(--selva); text-decoration: underline; }
 /* Carga del banner: fondo neutro + spinner centrado mientras carga la imagen (en vez del
    flash negro). La imagen (z-index 1) queda por encima y lo cubre al pintar. */
 @keyframes heroShimmer { to { background-position: -200% 0; } }
-.hero.hero-limpio { background: #14110d; position: relative; }
+.hero.hero-limpio { background: var(--crema, #efe9de); position: relative; }
 .hero.hero-limpio::after {
   content: ''; position: absolute; top: 50%; left: 50%; width: 40px; height: 40px; margin: -20px 0 0 -20px;
-  border: 4px solid rgba(255,255,255,0.18); border-top-color: rgba(255,255,255,0.7); border-radius: 50%;
+  border: 4px solid rgba(0,0,0,0.14); border-top-color: rgba(0,0,0,0.42); border-radius: 50%;
   animation: sp .8s linear infinite; z-index: 0; pointer-events: none;
 }
 @media (prefers-reduced-motion: reduce) { .hero.hero-limpio::after { animation: none; } }

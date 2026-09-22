@@ -453,13 +453,10 @@ export function Producto() {
       for (let i = r.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1));[r[i], r[j]] = [r[j], r[i]] }
       return r
     }
-    const mismaCat = todos.filter(x => x.categoria === p?.categoria)
-    const otraCat = todos.filter(x => x.categoria !== p?.categoria)
-    const primero = mismaCat.length ? [revuelto(mismaCat)[0]] : []
-    const usados = new Set(primero.map(x => String(x.id)))
-    // 2.º en adelante: otras categorías (aleatorio); si faltan, completa con la misma categoría.
-    const resto = [...revuelto(otraCat), ...revuelto(mismaCat)].filter(x => !usados.has(String(x.id)))
-    return [...primero, ...resto].slice(0, 8)
+    const mismaCat = revuelto(todos.filter(x => x.categoria === p?.categoria))
+    const otraCat = revuelto(todos.filter(x => x.categoria !== p?.categoria))
+    // Prioriza los de la MISMA categoría (aleatorios) y completa con otras categorías (aleatorias).
+    return [...mismaCat, ...otraCat].slice(0, 8)
   }, [productos, p?.id, p?.categoria])
 
   // Al entrar a un producto, la navegación siempre inicia desde el tope (arriba de la foto).
