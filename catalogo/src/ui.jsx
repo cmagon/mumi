@@ -366,6 +366,8 @@ export function HeroSlider({ slides, onOpen, estilo = 'clasico' }) {
   // Banner sin título/subtítulo/botón → solo media (sin panel/capa de texto en móvil ni PC)
   const conTexto = esBanner ? bannerConTexto(s) : true
   const limpio = esBanner && !conTexto && tieneMedia
+  // Estilo por banner (Selva): cada slide puede traer su propio hero_estilo; si no, usa el global
+  const est = (esBanner && ['clasico', 'centrado', 'split'].includes(s.hero_estilo)) ? s.hero_estilo : (estilo || 'clasico')
 
   const media = esBanner
     ? (yt
@@ -399,7 +401,7 @@ export function HeroSlider({ slides, onOpen, estilo = 'clasico' }) {
 
   return (
     <div
-      className={`hero hero-est-${estilo || 'clasico'}${limpio ? ' hero-limpio' : ''}${conTexto ? ' hero-con-texto' : ''}`}
+      className={`hero hero-est-${est}${limpio ? ' hero-limpio' : ''}${conTexto ? ' hero-con-texto' : ''}`}
       {...swipe}
       onClick={onClick}
       style={{

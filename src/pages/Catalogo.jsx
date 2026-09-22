@@ -533,44 +533,6 @@ function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
 }
 
 // ---- Reordenar categorías del catálogo público ----
-function OrdenCategorias({ categorias, toast }) {
-  const [orden, setOrden] = useState(null)   // array de categorías ordenadas
-  const [saving, setSaving] = useState(false)
-  useEffect(() => {
-    supabase.from('config_catalogo').select('categorias_orden').eq('id', 1).maybeSingle()
-      .then(({ data }) => {
-        const guardado = (data?.categorias_orden || []).filter(c => categorias.includes(c))
-        const resto = categorias.filter(c => !guardado.includes(c))
-        setOrden([...guardado, ...resto])
-      })
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [categorias.join('|')])
-
-  const mover = (i, d) => setOrden(o => { const a = [...o]; const j = i + d; if (j < 0 || j >= a.length) return o;[a[i], a[j]] = [a[j], a[i]]; return a })
-  const guardar = async () => {
-    setSaving(true)
-    try { await supabase.from('config_catalogo').update({ categorias_orden: orden }).eq('id', 1); toast('Orden de categorías guardado ✓') }
-    catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
-  }
-  if (!orden || orden.length <= 1) return null
-  return (
-    <div className="card">
-      <div className="card-title" style={{ fontSize: '0.95rem' }}><GripVertical size={15} style={{ verticalAlign: '-2px' }} /> Orden de las categorías en el catálogo</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: 420 }}>
-        {orden.map((c, i) => (
-          <div key={c} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: 'var(--crema)', borderRadius: 8 }}>
-            <span style={{ fontWeight: 700, color: 'var(--texto-suave)', width: 20 }}>{i + 1}</span>
-            <strong style={{ flex: 1, textTransform: 'capitalize' }}>{c}</strong>
-            <button className="btn btn-xs btn-secondary" disabled={i === 0} onClick={() => mover(i, -1)}><ChevronUp size={14} /></button>
-            <button className="btn btn-xs btn-secondary" disabled={i === orden.length - 1} onClick={() => mover(i, 1)}><ChevronDown size={14} /></button>
-          </div>
-        ))}
-      </div>
-      <button className="btn btn-primary btn-sm" style={{ marginTop: 10 }} onClick={guardar} disabled={saving}><Ico as={Save} size={13} />{saving ? 'Guardando…' : 'Guardar orden'}</button>
-    </div>
-  )
-}
-
 // Textarea que se ajusta a la cantidad de texto escrito (crece de alto, sin scroll interno).
 function AutoTextarea({ value, onChange, maxLength, placeholder, className = 'form-control', minRows = 1 }) {
   const ref = useRef(null)
@@ -2342,11 +2304,19 @@ const SEC_TIPOS = [
 function SeccionesEditor({ secciones = [], onChange, categorias = [], banners = [] }) {
   const [nuevo, setNuevo] = useState('categoria')
   const [abierto, setAbierto] = useState(null)   // índice de la sección expandida
+  const [dragI, setDragI] = useState(null)       // índice que se está arrastrando
+  const [sobreI, setSobreI] = useState(null)     // índice sobre el que se suelta
   const norm = secciones.map((s, i) => ({ key: s.key || s.id || 'k' + i, tipo: s.tipo || s.id, on: s.on !== false, ...s }))
   const tieneConfig = (t) => ['categoria', 'banner', 'mosaico', 'frutos', 'novedades', 'combos'].includes(t)
   const upd = (i, campo, val) => onChange(norm.map((s, k) => k === i ? { ...s, [campo]: val } : s))
   const del = (i) => onChange(norm.filter((_, k) => k !== i))
-  const mover = (i, d) => { const a = [...norm]; const j = i + d; if (j < 0 || j >= a.length) return;[a[i], a[j]] = [a[j], a[i]]; onChange(a) }
+  const reordenar = (from, to) => {
+    if (from == null || to == null || from === to) return
+    const a = [...norm]
+    const [it] = a.splice(from, 1)
+    a.splice(to, 0, it)
+    onChange(a)
+  }
   const add = () => {
     const base = { key: 's' + Date.now(), tipo: nuevo, on: true }
     if (nuevo === 'categoria') base.categoria = categorias[0] || ''
@@ -2370,19 +2340,30 @@ function SeccionesEditor({ secciones = [], onChange, categorias = [], banners = 
   }
   return (
     <div>
-      <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Arma el inicio: pon cada categoría donde quieras, banners en cualquier posición, combos, y crea mosaicos de tarjetas personalizables (icono, título, color, enlace).</small>
+      <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Arma el inicio: <strong>arrastra desde el asa ⠿</strong> para reordenar. Pon cada categoría donde quieras, banners en cualquier posición, combos, y crea mosaicos de tarjetas personalizables (icono, título, color, enlace).</small>
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, margin: '10px 0' }}>
         {norm.map((s, i) => (
-          <div key={s.key} style={{ border: '1px solid var(--crema-oscuro)', borderRadius: 8, padding: 8 }}>
+          <div key={s.key}
+            onDragOver={e => { if (dragI != null) { e.preventDefault(); if (sobreI !== i) setSobreI(i) } }}
+            onDrop={e => { e.preventDefault(); reordenar(dragI, i); setDragI(null); setSobreI(null) }}
+            style={{
+              border: sobreI === i && dragI != null && dragI !== i ? '1.5px dashed var(--selva)' : '1px solid var(--crema-oscuro)',
+              borderRadius: 8, padding: 8, background: dragI === i ? 'color-mix(in srgb, var(--selva) 6%, #fff)' : '#fff',
+              opacity: dragI === i ? 0.6 : 1,
+            }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <span
+                draggable
+                onDragStart={e => { setDragI(i); try { e.dataTransfer.effectAllowed = 'move' } catch { /* noop */ } }}
+                onDragEnd={() => { setDragI(null); setSobreI(null) }}
+                title="Arrastra para reordenar"
+                style={{ cursor: 'grab', color: 'var(--texto-suave)', display: 'inline-flex', touchAction: 'none' }}><GripVertical size={16} /></span>
               <input type="checkbox" checked={s.on} onChange={e => upd(i, 'on', e.target.checked)} title="Mostrar" />
               <button type="button" onClick={() => tieneConfig(s.tipo) && setAbierto(abierto === i ? null : i)}
                 style={{ flex: 1, textAlign: 'left', background: 'none', border: 'none', cursor: tieneConfig(s.tipo) ? 'pointer' : 'default', fontWeight: 700, fontSize: '0.84rem', color: 'var(--texto)', display: 'flex', alignItems: 'center', gap: 6 }}>
                 <span style={{ flex: 1 }}>{etiqueta(s)}</span>
                 {tieneConfig(s.tipo) && <ChevronDown size={14} style={{ transform: abierto === i ? 'rotate(180deg)' : 'none', transition: 'transform .2s', color: 'var(--texto-suave)' }} />}
               </button>
-              <button type="button" className="btn btn-xs btn-secondary" disabled={i === 0} onClick={() => mover(i, -1)}><ChevronUp size={12} /></button>
-              <button type="button" className="btn btn-xs btn-secondary" disabled={i === norm.length - 1} onClick={() => mover(i, 1)}><ChevronDown size={12} /></button>
               {s.tipo !== 'hero' && <button type="button" className="btn btn-xs btn-danger" onClick={() => del(i)}><X size={12} /></button>}
             </div>
             {abierto === i && <div style={{ marginTop: 8 }}>
@@ -2569,14 +2550,21 @@ function ModalBloque({ bloque, paginas = [], toast, onGuardar, onClose }) {
 }
 
 // Sección de acordeón del panel Personalizar (a nivel de módulo para no perder el foco al escribir)
-function PzSec({ id, titulo, abierto, setAbierto, children }) {
+function PzSec({ id, titulo, abierto, setAbierto, children, onSave, saving }) {
   const open = abierto === id
   return (
     <div className="pz-sec">
       <button type="button" className={`pz-sec-hd ${open ? 'open' : ''}`} onClick={() => setAbierto(open ? '' : id)}>
         <span>{titulo}</span><ChevronDown size={16} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
       </button>
-      {open && <div className="pz-sec-body">{children}</div>}
+      {open && <div className="pz-sec-body">
+        {children}
+        {onSave && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--crema-oscuro)' }}>
+            <button type="button" className="btn btn-primary btn-sm" onClick={onSave} disabled={saving}><Ico as={Save} size={13} />{saving ? 'Guardando…' : 'Guardar'}</button>
+          </div>
+        )}
+      </div>}
     </div>
   )
 }
@@ -2844,7 +2832,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
           <button className="btn btn-primary btn-sm" onClick={guardar} disabled={saving}><Ico as={Save} size={13} />{saving ? 'Guardando…' : 'Guardar cambios'}</button>{savedSnap != null && cfg && snapConfig(cfg) !== savedSnap && <span className="badge badge-dorado" style={{ marginLeft: 8 }}>Sin guardar</span>}
         </div>
 
-        <PzSec abierto={abierto} setAbierto={setAbierto} id="marca" titulo={<><ImageIcon size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Marca (logo, favicon, nombre, slogan)</>}>
+        <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="marca" titulo={<><ImageIcon size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Marca (logo, favicon, nombre, slogan)</>}>
           <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
             <div style={{ textAlign: 'center' }}>
               <div style={{ width: 72, height: 72, borderRadius: 14, overflow: 'hidden', background: 'var(--crema)', border: '1px solid var(--crema-oscuro)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
@@ -2883,7 +2871,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
           <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Si dejas el nombre o el slogan vacíos, se usa el valor por defecto de la app. Logo 400×400; favicon cuadrado 192×192 (vacío hasta que lo subas).</small>
         </PzSec>
 
-        <PzSec abierto={abierto} setAbierto={setAbierto} id="colores" titulo={<><Palette size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Plantilla web y colores</>}>
+        <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="colores" titulo={<><Palette size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Plantilla web y colores</>}>
           <small style={{ display: 'block', color: 'var(--texto-suave)', fontSize: '0.72rem', marginBottom: 12 }}>
             La <strong>plantilla web</strong> define la estructura (inicio, ficha, menú). Los <strong>colores</strong> son independientes: puedes cambiar la paleta sin cambiar de plantilla.
           </small>
@@ -3028,7 +3016,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
           <button type="button" className="btn btn-secondary btn-sm" onClick={guardarDiseñoActual}>💾 Guardar combinación actual</button>
         </PzSec>
 
-        <PzSec abierto={abierto} setAbierto={setAbierto} id="fuentes" titulo={<>🔤 Tipografía (Google Fonts)</>}>
+        <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="fuentes" titulo={<>🔤 Tipografía (Google Fonts)</>}>
           <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Por defecto se usan las mismas fuentes que configuraste en la app. Aquí puedes cambiarlas solo para el catálogo.</small>
           <div className="form-group" style={{ marginTop: 8 }}><label className="form-label">Títulos</label>
             <Select className="form-control" value={cfg.fuente_titulos || ''} onChange={e => set('fuente_titulos', e.target.value)} style={{ fontFamily: `'${cfg.fuente_titulos}'` }}>
@@ -3047,7 +3035,35 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
           </div>
         </PzSec>
 
-        <PzSec abierto={abierto} setAbierto={setAbierto} id="secciones" titulo={<><Layout size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Secciones del inicio</>}>
+        <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="aviso" titulo={<><Megaphone size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Aviso superior</>}>
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
+            Franja sobre el encabezado para anuncios breves (ej. <em>“🎉 10% de descuento por temporada”</em>). Puedes poner hasta <strong>3</strong> mensajes que van rotando. Si no configuras ninguno, no se muestra.
+          </small>
+          <AvisosEditor
+            avisos={Array.isArray(cfg.avisos) ? cfg.avisos : []}
+            onChange={v => set('avisos', v)}
+            colorBg={cfg.aviso_color_bg || ''}
+            colorTexto={cfg.aviso_color_texto || ''}
+            onColorBg={v => set('aviso_color_bg', v || null)}
+            onColorTexto={v => set('aviso_color_texto', v || null)}
+          />
+        </PzSec>
+
+        <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="banners" titulo={<>🖼️ Banners</>}>
+          <small style={{ display: 'block', color: 'var(--texto-suave)', fontSize: '0.72rem', marginBottom: 8 }}>
+            {familiaActiva === 'atelier'
+              ? <>En <strong>Atelier</strong>, el <strong>primer banner principal</strong> (por orden ↑↓) es la <strong>portada</strong> (imagen/video y textos si los tiene). No hay carrusel de principales. Los <strong>secundarios</strong> se colocan desde “Secciones del inicio”.</>
+              : <>Los banners <strong>principales</strong> forman el carrusel de arriba. Los <strong>secundarios</strong> se colocan donde quieras desde “Secciones del inicio”.</>}
+          </small>
+          {familiaActiva !== 'atelier' && (
+            <small style={{ display: 'block', color: 'var(--texto-suave)', fontSize: '0.72rem', marginBottom: 8 }}>
+              El <strong>estilo del Hero</strong> (Clásico / Centrado / Dividido) ahora se elige <strong>en cada banner</strong> al crearlo o editarlo, con una miniatura de cómo se ve.
+            </small>
+          )}
+          <TabBanners toast={toast} qc={qc} embed modoAtelier={familiaActiva === 'atelier'} />
+        </PzSec>
+
+        <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="secciones" titulo={<><Layout size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Secciones del inicio</>}>
           <SeccionesEditor secciones={Array.isArray(cfg.secciones) ? cfg.secciones : SECCIONES_DEFAULT} onChange={(sx) => set('secciones', sx)} categorias={[...new Set([...categorias, ...(cfg.categorias_extra || []), ...(cfg.productos_extra || []).map(p => p.categoria).filter(Boolean)])]} banners={bannersLista} />
           {familiaActiva !== 'atelier' && (
             <div style={{ marginTop: 12, padding: 12, borderRadius: 10, border: '1px solid var(--crema-oscuro)', background: '#fff' }}>
@@ -3081,7 +3097,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
         </PzSec>
 
         {familiaActiva === 'atelier' && (
-          <PzSec abierto={abierto} setAbierto={setAbierto} id="impacto" titulo={<>🌍 Bloque Impacto (Atelier)</>}>
+          <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="impacto" titulo={<>🌍 Bloque Impacto (Atelier)</>}>
             <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.85rem', cursor: 'pointer', marginBottom: 8 }}>
               <input type="checkbox" checked={cfg.impacto_activo !== false} onChange={e => set('impacto_activo', e.target.checked)} /> Mostrar bloque de impacto
             </label>
@@ -3125,21 +3141,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
           </PzSec>
         )}
 
-        <PzSec abierto={abierto} setAbierto={setAbierto} id="aviso" titulo={<><Megaphone size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Aviso superior</>}>
-          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
-            Franja sobre el encabezado para anuncios breves (ej. <em>“🎉 10% de descuento por temporada”</em>). Puedes poner hasta <strong>3</strong> mensajes que van rotando. Si no configuras ninguno, no se muestra.
-          </small>
-          <AvisosEditor
-            avisos={Array.isArray(cfg.avisos) ? cfg.avisos : []}
-            onChange={v => set('avisos', v)}
-            colorBg={cfg.aviso_color_bg || ''}
-            colorTexto={cfg.aviso_color_texto || ''}
-            onColorBg={v => set('aviso_color_bg', v || null)}
-            onColorTexto={v => set('aviso_color_texto', v || null)}
-          />
-        </PzSec>
-
-        <PzSec abierto={abierto} setAbierto={setAbierto} id="barra" titulo={<>📣 Barra de beneficios</>}>
+        <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="barra" titulo={<>📣 Barra de beneficios</>}>
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.86rem', cursor: 'pointer', marginBottom: 8 }}>
             <input type="checkbox" checked={cfg.barra_activa !== false} onChange={e => set('barra_activa', e.target.checked)} /> Mostrar la barra
           </label>
@@ -3154,7 +3156,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
           <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Con <strong>Auto</strong> usa la paleta (primario). Personaliza fondo y texto si quieres otro contraste.</small>
         </PzSec>
 
-        <PzSec abierto={abierto} setAbierto={setAbierto} id="footer" titulo={<>🔻 Pie de página (footer)</>}>
+        <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="footer" titulo={<>🔻 Pie de página (footer)</>}>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 10 }}>
             <ColorPick label="Fondo del footer" value={cfg.footer_color_bg || ''} fallback="#1a3a2a" onChange={v => set('footer_color_bg', v)} onClear={() => set('footer_color_bg', null)} />
             <ColorPick label="Texto del footer" value={cfg.footer_color_texto || ''} fallback="#F5F0E6" onChange={v => set('footer_color_texto', v)} onClear={() => set('footer_color_texto', null)} />
@@ -3166,33 +3168,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
           <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Las redes sociales del footer se toman de <strong>Configuración</strong>.</small>
         </PzSec>
 
-        <PzSec abierto={abierto} setAbierto={setAbierto} id="categorias" titulo={<><GripVertical size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Orden de categorías</>}>
-          {categorias.length > 1
-            ? <OrdenCategorias categorias={categorias} toast={toast} />
-            : <small style={{ color: 'var(--texto-suave)' }}>Necesitas al menos 2 categorías con productos publicados.</small>}
-        </PzSec>
-
-        <PzSec abierto={abierto} setAbierto={setAbierto} id="banners" titulo={<>🖼️ Banners</>}>
-          <small style={{ display: 'block', color: 'var(--texto-suave)', fontSize: '0.72rem', marginBottom: 8 }}>
-            {familiaActiva === 'atelier'
-              ? <>En <strong>Atelier</strong>, el <strong>primer banner principal</strong> (por orden ↑↓) es la <strong>portada</strong> (imagen/video y textos si los tiene). No hay carrusel de principales. Los <strong>secundarios</strong> se colocan desde “Secciones del inicio”.</>
-              : <>Los banners <strong>principales</strong> forman el carrusel de arriba. Los <strong>secundarios</strong> se colocan donde quieras desde “Secciones del inicio”.</>}
-          </small>
-          {familiaActiva !== 'atelier' && (
-            <div className="form-group" style={{ marginBottom: 10 }}>
-              <label className="form-label">Estilo del banner principal (hero)</label>
-              <select className="form-control" value={cfg.hero_estilo || 'clasico'} onChange={e => set('hero_estilo', e.target.value)}>
-                <option value="clasico">Clásico — texto abajo sobre la imagen</option>
-                <option value="centrado">Centrado — imagen completa con texto centrado grande</option>
-                <option value="split">Dividido — imagen a un lado y texto en bloque de color</option>
-              </select>
-              <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Cambia cómo se ve el carrusel principal. Aplica a todos los banners principales.</small>
-            </div>
-          )}
-          <TabBanners toast={toast} qc={qc} embed modoAtelier={familiaActiva === 'atelier'} />
-        </PzSec>
-
-        <PzSec abierto={abierto} setAbierto={setAbierto} id="nosotros" titulo={<>📖 Página "Nosotros" (bloques)</>}>
+        <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="nosotros" titulo={<>📖 Página "Nosotros" (bloques)</>}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
             <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', flex: 1 }}>Arma la página con bloques. También puedes <strong>editar el texto directamente sobre el diseño</strong> con el editor en el lienzo.</small>
             {cfgUrl && <button className={`btn btn-sm pz-solo-pc ${lienzo === 'nosotros' ? 'btn-danger' : 'btn-primary'}`} onClick={() => entrarLienzo('nosotros')}>{lienzo === 'nosotros' ? <>✕ Salir del lienzo</> : <><Ico as={Pencil} size={13} />Editar en el lienzo</>}</button>}
@@ -3203,7 +3179,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
             : <EditorNosotros bloques={Array.isArray(cfg.nosotros_bloques) ? cfg.nosotros_bloques : []} onChange={(bl) => set('nosotros_bloques', bl)} toast={toast} paginas={cfg.paginas || []} />}
         </PzSec>
 
-        <PzSec abierto={abierto} setAbierto={setAbierto} id="galeria" titulo={<>🖼️ Galería (álbumes)</>}>
+        <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="galeria" titulo={<>🖼️ Galería (álbumes)</>}>
           <div className="form-grid-2">
             <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Título de la galería</label><input className="form-control" value={cfg.galeria_titulo || ''} onChange={e => set('galeria_titulo', e.target.value)} placeholder="Galería" /></div>
             <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Subtítulo</label><input className="form-control" value={cfg.galeria_subtitulo || ''} onChange={e => set('galeria_subtitulo', e.target.value)} /></div>
@@ -3211,7 +3187,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
           <GaleriaEditor albumes={Array.isArray(cfg.galeria_albumes) ? cfg.galeria_albumes : []} onChange={(al) => set('galeria_albumes', al)} toast={toast} />
         </PzSec>
 
-        <PzSec abierto={abierto} setAbierto={setAbierto} id="paginas" titulo={<>📄 Páginas personalizadas</>}>
+        <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="paginas" titulo={<>📄 Páginas personalizadas</>}>
           <PaginasEditor paginas={Array.isArray(cfg.paginas) ? cfg.paginas : []} onChange={(pgs) => set('paginas', pgs)} toast={toast} lienzo={lienzo} onLienzo={cfgUrl ? entrarLienzo : null} />
         </PzSec>
 
@@ -3285,7 +3261,46 @@ const BANNER_VACIO = {
   nombre: '', tipo: 'imagen', imagen_url: '', imagen_tablet: '', imagen_mobile: '',
   youtube: '', titulo: '', subtitulo: '', boton_texto: '', boton_link: '',
   color_overlay: '', overlay_opacidad: 72, overlay_fade: 48, color_texto: '', color_boton: '',
-  orden: 0, activo: true, es_secundario: false, grupo: '',
+  orden: 0, activo: true, es_secundario: false, grupo: '', hero_estilo: 'clasico',
+}
+
+/** Estilos de Hero disponibles para banners principales (diseño Selva). */
+const HERO_ESTILOS = [
+  { id: 'clasico', label: 'Clásico', desc: 'Texto abajo sobre la imagen' },
+  { id: 'centrado', label: 'Centrado', desc: 'Imagen completa y texto centrado grande' },
+  { id: 'split', label: 'Dividido', desc: 'Imagen a un lado y texto en bloque de color' },
+]
+
+/** Miniatura visual (dibujada con CSS) de cómo se ve cada estilo de Hero. */
+function MiniHero({ estilo }) {
+  const marco = { width: '100%', aspectRatio: '16 / 9', borderRadius: 6, overflow: 'hidden', position: 'relative', background: 'linear-gradient(135deg, #cdbfa6, #a98d63)' }
+  const barra = (w, dark) => ({ height: 4, width: w, borderRadius: 2, background: dark ? 'rgba(255,255,255,0.9)' : 'rgba(255,255,255,0.75)' })
+  if (estilo === 'centrado') {
+    return (
+      <div style={marco}>
+        <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.32)', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 4 }}>
+          <div style={barra(34, true)} /><div style={{ ...barra(22, true), height: 3 }} />
+        </div>
+      </div>
+    )
+  }
+  if (estilo === 'split') {
+    return (
+      <div style={{ ...marco, background: 'none', display: 'flex' }}>
+        <div style={{ width: '52%', background: 'linear-gradient(135deg, #cdbfa6, #a98d63)' }} />
+        <div style={{ width: '48%', background: 'var(--selva)', display: 'flex', flexDirection: 'column', justifyContent: 'center', gap: 4, padding: 6 }}>
+          <div style={barra(24, true)} /><div style={{ ...barra(16, true), height: 3 }} />
+        </div>
+      </div>
+    )
+  }
+  return (
+    <div style={marco}>
+      <div style={{ position: 'absolute', left: 0, right: 0, bottom: 0, padding: 6, display: 'flex', flexDirection: 'column', gap: 4, background: 'linear-gradient(0deg, rgba(0,0,0,0.55), transparent)' }}>
+        <div style={barra(30, true)} /><div style={{ ...barra(18, true), height: 3 }} />
+      </div>
+    </div>
+  )
 }
 
 const OVERLAY_PRESETS = [
@@ -3336,6 +3351,7 @@ function normalizarBanner(raw = {}) {
   }
   n.activo = n.activo !== false
   n.es_secundario = !!n.es_secundario
+  n.hero_estilo = ['clasico', 'centrado', 'split'].includes(raw.hero_estilo) ? raw.hero_estilo : 'clasico'
   n.tipo = n.tipo === 'youtube' ? 'youtube' : 'imagen'
   n.orden = parseInt(n.orden, 10) || 0
   n._nuevo = !!raw._nuevo
@@ -3570,16 +3586,17 @@ function EditorBanner({ banner, toast, qc, onClose, modoAtelier = false }) {
         overlay_fade: b.overlay_fade == null || b.overlay_fade === '' ? null : Math.min(100, Math.max(0, Number(b.overlay_fade) || 0)),
         color_texto: vacio(b.color_texto),
         color_boton: vacio(b.color_boton),
+        hero_estilo: ['clasico', 'centrado', 'split'].includes(b.hero_estilo) ? b.hero_estilo : 'clasico',
       }
       const { error: eEstilo } = await supabase.from('banners_catalogo').update(estilo).eq('id', id)
       if (eEstilo) {
-        // Sin migración v159: reintentar sin overlay_fade
-        const { overlay_fade: _omit, ...estiloSinFade } = estilo
-        const { error: e2 } = await supabase.from('banners_catalogo').update(estiloSinFade).eq('id', id)
+        // Sin migración v159/v180: reintentar sin las columnas nuevas
+        const { overlay_fade: _omitFade, hero_estilo: _omitHero, ...estiloBase } = estilo
+        const { error: e2 } = await supabase.from('banners_catalogo').update(estiloBase).eq('id', id)
         if (e2) {
           toast('Imágenes guardadas. Para colores/opacidad ejecuta migration_v148 en Supabase.', 'error')
         } else {
-          toast('Banner guardado ✓ (aplica migration_v159 para guardar el alcance vertical de la capa)')
+          toast('Banner guardado ✓ (aplica migration_v159 y v180 para el alcance vertical de la capa y el estilo por banner)')
         }
       } else {
         toast('Banner guardado ✓')
@@ -3609,6 +3626,49 @@ function EditorBanner({ banner, toast, qc, onClose, modoAtelier = false }) {
           <Select className="form-control" value={b.tipo} onChange={e => set('tipo', e.target.value)}><option value="imagen">Imagen</option><option value="youtube">Video de YouTube</option></Select>
         </div>
       </div>
+
+      {/* Ubicación y estilo — se eligen al crear el banner, antes de subir las imágenes */}
+      <div className="form-group">
+        <label className="form-label">Ubicación</label>
+        <Select className="form-control" value={b.es_secundario ? 'sec' : 'prin'} onChange={e => set('es_secundario', e.target.value === 'sec')}>
+          <option value="prin">{modoAtelier ? 'Banner principal (portada Atelier si es el 1º)' : 'Banner principal (slide de arriba)'}</option>
+          <option value="sec">Banner secundario (dentro del inicio)</option>
+        </Select>
+        {!b.es_secundario && (
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
+            {modoAtelier
+              ? <>En Atelier, el <strong>primer principal activo</strong> (orden ↑↓) es la portada del catálogo.</>
+              : <>Los banners principales forman el carrusel de arriba.</>}
+          </small>
+        )}
+      </div>
+      {b.es_secundario && (
+        <div className="form-group">
+          <label className="form-label">Grupo del banner secundario</label>
+          <input className="form-control" value={b.grupo || ''} onChange={e => set('grupo', e.target.value)} placeholder="Ej: Promociones" />
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Los banners con el <strong>mismo grupo</strong> forman un solo banner. Con <strong>varias imágenes</strong> se vuelve slide; con una sola es estático.</small>
+        </div>
+      )}
+      {!b.es_secundario && !modoAtelier && (
+        <div className="form-group">
+          <label className="form-label">Estilo del banner (Hero)</label>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+            {HERO_ESTILOS.map(op => {
+              const sel = (b.hero_estilo || 'clasico') === op.id
+              return (
+                <button type="button" key={op.id} onClick={() => set('hero_estilo', op.id)}
+                  style={{ textAlign: 'left', border: sel ? '2px solid var(--selva)' : '1px solid var(--crema-oscuro)', borderRadius: 10, padding: 6, background: sel ? 'color-mix(in srgb, var(--selva) 6%, #fff)' : '#fff', cursor: 'pointer' }}>
+                  <MiniHero estilo={op.id} />
+                  <div style={{ fontWeight: 700, fontSize: '0.78rem', color: 'var(--selva)', marginTop: 6 }}>{op.label}</div>
+                  <div style={{ fontSize: '0.68rem', color: 'var(--texto-suave)', lineHeight: 1.3 }}>{op.desc}</div>
+                </button>
+              )
+            })}
+          </div>
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Cada banner principal puede tener su propio estilo. Mira el resultado en la <strong>vista previa</strong>.</small>
+        </div>
+      )}
+
       {b.tipo === 'youtube'
         ? <div className="form-group"><label className="form-label">URL de YouTube</label><input className="form-control" value={b.youtube || ''} onChange={e => set('youtube', e.target.value)} placeholder="https://youtu.be/XXXXXXXXXXX" /></div>
         : (
@@ -3739,27 +3799,6 @@ function EditorBanner({ banner, toast, qc, onClose, modoAtelier = false }) {
 
       <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem', display: 'block', marginBottom: 8 }}>El <strong>orden</strong> se ajusta con las flechas ↑↓ de la lista de banners.</small>
       <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontWeight: 600, color: 'var(--selva)' }}><input type="checkbox" checked={!!b.activo} onChange={e => set('activo', e.target.checked)} /> Activo (visible en el catálogo)</label>
-      <div className="form-group" style={{ marginTop: 10 }}>
-        <label className="form-label">Ubicación</label>
-        <Select className="form-control" value={b.es_secundario ? 'sec' : 'prin'} onChange={e => set('es_secundario', e.target.value === 'sec')}>
-          <option value="prin">{modoAtelier ? 'Banner principal (portada Atelier si es el 1º)' : 'Banner principal (slide de arriba)'}</option>
-          <option value="sec">Banner secundario (dentro del inicio)</option>
-        </Select>
-      </div>
-      {b.es_secundario && (
-        <div className="form-group">
-          <label className="form-label">Grupo del banner secundario</label>
-          <input className="form-control" value={b.grupo || ''} onChange={e => set('grupo', e.target.value)} placeholder="Ej: Promociones" />
-          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Los banners con el <strong>mismo grupo</strong> forman un solo banner. Con <strong>varias imágenes</strong> se vuelve slide; con una sola es estático.</small>
-        </div>
-      )}
-      {!b.es_secundario && (
-        <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>
-          {modoAtelier
-            ? <>En Atelier, el <strong>primer principal activo</strong> (orden ↑↓) es la portada del catálogo.</>
-            : <>Los banners principales forman el carrusel de arriba.</>}
-        </small>
-      )}
       </>
       )}
     </Modal>
