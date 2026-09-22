@@ -33,6 +33,8 @@ export const CFG_DEFAULT = {
   hero_cta_texto: 'Explorar catálogo', hero_cta_link: '/tienda', hero_cta2_texto: 'Nuestra historia',
   hero_mostrar_cta2: true, hero_imagen: '',
   hero_estilo: 'clasico',   // estilo del banner principal en diseño Selva: clasico | centrado | split
+  wa_flotante_activo: true,   // botón flotante de WhatsApp visible en todo el sitio
+  wa_flotante_mensaje: '',    // mensaje precargado opcional del botón flotante
   impacto_activo: true, impacto_titulo: 'Impacto que florece',
   impacto_texto: 'Cada producto apoya a comunidades recolectoras de la Amazonía colombiana: comercio justo y conservación de la biodiversidad.',
   impacto_stat1_n: '45+', impacto_stat1_l: 'Productores', impacto_stat2_n: '10', impacto_stat2_l: 'Departamentos',
