@@ -253,7 +253,7 @@ export default function Costos({ vista = 'productos' }) {
   // recargar todo el módulo. Se cruzan ficha → finished_products.product_id → alegra_item_id.
   const { data: finishedProducts = [] } = useQuery({
     queryKey: ['finished_products', 'costos-ventas'],
-    queryFn: async () => { const { data } = await supabase.from('finished_products').select('id, alegra_item_id, product_id, activo'); return data || [] },
+    queryFn: async () => { const { data } = await supabase.from('finished_products').select('id, alegra_item_id, product_id, activo, tipo'); return data || [] },
     enabled: costosSubtab === 'analisis',
   })
   const { data: alegraVentas } = useQuery({
@@ -648,6 +648,35 @@ export default function Costos({ vista = 'productos' }) {
     }
     return m
   }, [finishedProducts, alegraVentas, mesAnterior.periodo])
+
+  // Fichas que son producto SURTIDO (se arman mezclando saldos). Para ellas la "producción" real
+  // son las cajas del empaque surtido, no la mezcla intermedia (que va a "por empacar").
+  const surtidoProductIds = useMemo(
+    () => new Set(finishedProducts.filter(fp => String(fp.tipo || '').toLowerCase() === 'surtido' && fp.product_id != null).map(fp => String(fp.product_id))),
+    [finishedProducts]
+  )
+  // Producido real del mes anterior para el ANÁLISIS, sin doble conteo del surtido:
+  //  · producto surtido → solo cuenta las órdenes de empaque surtido (cajas terminadas).
+  //  · producto normal   → cuenta su producción normal (ignora órdenes surtido, que no son suyas).
+  const producidoAnalisis = useMemo(() => {
+    const norm = (v) => String(v || '').trim().toLocaleLowerCase('es')
+    const porId = new Map(productos.map(p => [String(p.id), p]))
+    const porNombre = new Map(productos.map(p => [norm(p.nombre), p]))
+    const resolver = (o) => (o.origen === 'producto' && o.origen_id != null && porId.get(String(o.origen_id))) || porNombre.get(norm(o.producto))
+    const m = new Map()
+    for (const o of ordenesProduccionAnalisis) {
+      if (o.es_prueba || !['ejecutada', 'aprobada'].includes(o.estado)) continue
+      const f = String(o.fecha_prod || o.fecha_envio || o.created_at || '').slice(0, 10)
+      if (f < mesAnterior.desde || f >= mesAnterior.hasta) continue
+      const p = resolver(o); if (!p) continue
+      const esSurt = surtidoProductIds.has(String(p.id))
+      if (esSurt && o.surtido !== true) continue   // la mezcla intermedia no cuenta como producción del surtido
+      if (!esSurt && o.surtido === true) continue   // una orden surtido no es producción de un no-surtido
+      const u = Number(o.cantidad_result) || Number(o.cantidad_plan) || 0
+      m.set(String(p.id), (m.get(String(p.id)) || 0) + u)
+    }
+    return m
+  }, [ordenesProduccionAnalisis, productos, surtidoProductIds, mesAnterior.desde, mesAnterior.hasta])
 
   const costosRecientesPorProducto = useMemo(() => {
     const porProducto = new Map()
@@ -3696,7 +3725,7 @@ export default function Costos({ vista = 'productos' }) {
             const peContable = getPEqCaja(fijosTot, 0, mcuProm)
             const peCaja = getPEqCaja(fijosTot, gastosOp.pasivo.total, mcuProm)
             // Totales reales del mes anterior (producción y ventas)
-            const producidoRealTot = peqMultiproducto.reduce((s, i) => s + (produccionMesPorProducto.get(String(i.id))?.unidades || 0), 0)
+            const producidoRealTot = peqMultiproducto.reduce((s, i) => s + (producidoAnalisis.get(String(i.id)) || 0), 0)
             const vendidoRealTot = peqMultiproducto.reduce((s, i) => s + (ventasRealesPorProducto.get(String(i.id)) || 0), 0)
             const hayVentasReales = ventasRealesPorProducto.size > 0
             return (
@@ -3740,7 +3769,7 @@ export default function Costos({ vista = 'productos' }) {
                               {peqMultiproducto.length === 0
                                 ? <tr><td colSpan={hayVentasReales ? 7 : 6} className="empty-table">No hay fichas vendibles activas para calcular el mínimo de venta.</td></tr>
                                 : peqMultiproducto.map((i, idx) => {
-                                const producido = produccionMesPorProducto.get(String(i.id))?.unidades
+                                const producido = producidoAnalisis.get(String(i.id))
                                 const vendido = ventasRealesPorProducto.has(String(i.id)) ? ventasRealesPorProducto.get(String(i.id)) : null
                                 // El semáforo compara la venta REAL contra el mínimo; si no hay venta real, cae a producción vs mínimo.
                                 const refReal = hayVentasReales ? vendido : producido
