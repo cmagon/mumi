@@ -102,6 +102,7 @@ export default function Costos({ vista = 'productos' }) {
   // ---- Tabs y modo ----
   const [tab, setTab] = useState(tabInicial)
   const [costosSubtab, setCostosSubtab] = useState('costos')
+  const [periodoSel, setPeriodoSel] = useState('')   // mes del ANÁLISIS (historial); '' = mes anterior
   // Si el admin quita una sección, no dejar al usuario atrapado en una pestaña prohibida
   useEffect(() => {
     const ok = { lista: puedeFicha, nuevo: puedeFicha, cif: puedeCif }
@@ -235,6 +236,25 @@ export default function Costos({ vista = 'productos' }) {
       label: inicioAnterior.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' }),
     }
   }, [])
+
+  // Rango del mes seleccionado en el ANÁLISIS (historial). '' → mes anterior (por defecto).
+  const rangoDeMes = (periodo) => {
+    const [y, m] = periodo.split('-').map(Number)
+    const ini = new Date(y, m - 1, 1), fin = new Date(y, m, 1)
+    const fecha = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+    return { desde: fecha(ini), hasta: fecha(fin), periodo, label: ini.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' }) }
+  }
+  const rangoSel = useMemo(() => (periodoSel ? rangoDeMes(periodoSel) : mesAnterior), [periodoSel, mesAnterior])
+  // Últimos 12 meses para el selector de historial
+  const mesesHistorial = useMemo(() => {
+    const out = []; const hoy = new Date()
+    for (let i = 1; i <= 12; i++) {
+      const d = new Date(hoy.getFullYear(), hoy.getMonth() - i, 1)
+      out.push({ value: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`, label: d.toLocaleDateString('es-CO', { month: 'long', year: 'numeric' }) })
+    }
+    return out
+  }, [])
+
   const { data: ordenesProduccionAnalisis = [], isPending: cargandoProduccionMes } = useQuery({
     queryKey: ['production_orders', 'costos-analisis'],
     queryFn: async () => {
@@ -632,7 +652,7 @@ export default function Costos({ vista = 'productos' }) {
       if (String(fp.tipo || '').toLowerCase() !== 'surtido' || fp.activo === false) continue
       if (!String(fp.nombre || '').trim()) continue                         // sin nombre → placeholder, no mostrar
       if (fp.product_id != null && fichaIds.has(String(fp.product_id))) continue   // ya tiene ficha
-      const vendidos = fp.alegra_item_id ? Number(alegraVentas?.ventas?.[String(fp.alegra_item_id)]?.[mesAnterior.periodo] || 0) : 0
+      const vendidos = fp.alegra_item_id ? Number(alegraVentas?.ventas?.[String(fp.alegra_item_id)]?.[rangoSel.periodo] || 0) : 0
       const costoOrden = costoSurtidoPorNombre.get(norm(fp.nombre))
       const cvu = (costoOrden && costoOrden > 0) ? costoOrden : (parseFloat(fp.costo_unitario) || 0)
       items.push({
@@ -645,7 +665,7 @@ export default function Costos({ vista = 'productos' }) {
     // realidad deja pérdida.
     return getPEqMultiproducto(items, cifTotal + gastosFijosOper)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productos, cifTotal, mps, gastosFijosOper, finishedProducts, alegraVentas, costoSurtidoPorNombre, mesAnterior.periodo])
+  }, [productos, cifTotal, mps, gastosFijosOper, finishedProducts, alegraVentas, costoSurtidoPorNombre, rangoSel.periodo])
 
   const produccionMesPorProducto = useMemo(() => {
     const normalizar = (v) => String(v || '').trim().toLocaleLowerCase('es')
@@ -692,11 +712,11 @@ export default function Costos({ vista = 'productos' }) {
     const m = new Map()
     for (const fp of finishedProducts) {
       if (fp.product_id == null || !fp.alegra_item_id) continue
-      const u = alegraVentas?.ventas?.[String(fp.alegra_item_id)]?.[mesAnterior.periodo]
+      const u = alegraVentas?.ventas?.[String(fp.alegra_item_id)]?.[rangoSel.periodo]
       if (u != null) m.set(String(fp.product_id), Number(u) || 0)
     }
     return m
-  }, [finishedProducts, alegraVentas, mesAnterior.periodo])
+  }, [finishedProducts, alegraVentas, rangoSel.periodo])
 
   // Fichas que son producto SURTIDO (se arman mezclando saldos). Para ellas la "producción" real
   // son las cajas del empaque surtido, no la mezcla intermedia (que va a "por empacar").
@@ -720,7 +740,7 @@ export default function Costos({ vista = 'productos' }) {
     for (const o of ordenesProduccionAnalisis) {
       if (o.es_prueba || !['ejecutada', 'aprobada'].includes(o.estado)) continue
       const f = String(o.fecha_prod || o.fecha_envio || o.created_at || '').slice(0, 10)
-      if (f < mesAnterior.desde || f >= mesAnterior.hasta) continue
+      if (f < rangoSel.desde || f >= rangoSel.hasta) continue
       const p = resolver(o); if (!p) continue
       const esSurt = surtidoProductIds.has(String(p.id))
       if (esSurt && o.surtido !== true) continue   // la mezcla intermedia no cuenta como producción del surtido
@@ -729,7 +749,7 @@ export default function Costos({ vista = 'productos' }) {
       m.set(String(p.id), (m.get(String(p.id)) || 0) + u)
     }
     return m
-  }, [ordenesProduccionAnalisis, productos, surtidoProductIds, mesAnterior.desde, mesAnterior.hasta])
+  }, [ordenesProduccionAnalisis, productos, surtidoProductIds, rangoSel.desde, rangoSel.hasta])
 
   // Producido (cajas) de surtidos SIN ficha, por nombre del producto surtido (órdenes de empaque surtido).
   const producidoSurtidoTerminado = useMemo(() => {
@@ -738,13 +758,13 @@ export default function Costos({ vista = 'productos' }) {
     for (const o of ordenesProduccionAnalisis) {
       if (o.es_prueba || o.surtido !== true || !['ejecutada', 'aprobada'].includes(o.estado)) continue
       const f = String(o.fecha_prod || o.fecha_envio || o.created_at || '').slice(0, 10)
-      if (f < mesAnterior.desde || f >= mesAnterior.hasta) continue
+      if (f < rangoSel.desde || f >= rangoSel.hasta) continue
       const nom = norm(o.producto_surtido); if (!nom) continue
       const u = Number(o.surtido_cantidad) || Number(o.cantidad_result) || Number(o.cantidad_plan) || 0
       m.set(nom, (m.get(nom) || 0) + u)
     }
     return m
-  }, [ordenesProduccionAnalisis, mesAnterior.desde, mesAnterior.hasta])
+  }, [ordenesProduccionAnalisis, rangoSel.desde, rangoSel.hasta])
 
   const costosRecientesPorProducto = useMemo(() => {
     const porProducto = new Map()
@@ -3782,6 +3802,14 @@ export default function Costos({ vista = 'productos' }) {
           <details className="card">
             <summary className="card-title"><Ico as={DollarSign} size={15} />Punto de equilibrio (contable vs. de caja)</summary>
             <div className="card-acc-body">
+          <div style={{ display:'flex', alignItems:'center', gap:8, flexWrap:'wrap', marginBottom:4 }}>
+            <label className="form-label" style={{ margin:0, display:'inline-flex', alignItems:'center', gap:5 }}><Ico as={Clock} size={13} />Mes</label>
+            <Select className="form-control" style={{ width:'auto' }} value={periodoSel || mesAnterior.periodo}
+              onClick={e => e.stopPropagation()} onChange={e => setPeriodoSel(e.target.value === mesAnterior.periodo ? '' : e.target.value)}>
+              {mesesHistorial.map(m => <option key={m.value} value={m.value}>{m.label}{m.value === mesAnterior.periodo ? ' (mes anterior)' : ''}</option>)}
+            </Select>
+            <small style={{ color:'var(--texto-suave)' }}>Producido y vendido del mes elegido</small>
+          </div>
           {/* Punto de equilibrio de CAJA: el abono a deuda no es gasto pero sí hay que generarlo */}
           {(() => {
             const unidsMesTot = peqMultiproducto.reduce((s, i) => s + i.q, 0)
@@ -3799,7 +3827,7 @@ export default function Costos({ vista = 'productos' }) {
             const normNom = (v) => String(v || '').trim().toLocaleLowerCase('es')
             const producidoDe = (i) => i._surtidoTerminado ? (producidoSurtidoTerminado.get(normNom(i.nombre)) || 0) : (producidoAnalisis.get(String(i.id)) || 0)
             const vendidoDe = (i) => i._surtidoTerminado
-              ? (i._alegraId ? Number(alegraVentas?.ventas?.[String(i._alegraId)]?.[mesAnterior.periodo] || 0) : null)
+              ? (i._alegraId ? Number(alegraVentas?.ventas?.[String(i._alegraId)]?.[rangoSel.periodo] || 0) : null)
               : (ventasRealesPorProducto.has(String(i.id)) ? ventasRealesPorProducto.get(String(i.id)) : null)
             const producidoRealTot = peqMultiproducto.reduce((s, i) => s + producidoDe(i), 0)
             const vendidoRealTot = peqMultiproducto.reduce((s, i) => s + (vendidoDe(i) || 0), 0)
@@ -3820,12 +3848,12 @@ export default function Costos({ vista = 'productos' }) {
                         </div>
                         <div style={{ flex:1, minWidth:150, textAlign:'center', background:'#fff', borderRadius:8, padding:'10px', border:'1px solid var(--crema-oscuro)' }}>
                           <div style={{ fontSize:'1.15rem', fontWeight:700, color:'var(--tierra)' }}>{producidoRealTot > 0 ? fNum(producidoRealTot) : fNum(unidsMesTot)}</div>
-                          <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>{producidoRealTot > 0 ? `unid producidas (${mesAnterior.label})` : 'unid/mes que planeas producir'}</div>
+                          <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>{producidoRealTot > 0 ? `unid producidas (${rangoSel.label})` : 'unid/mes que planeas producir'}</div>
                         </div>
                         {hayVentasReales && (
                           <div style={{ flex:1, minWidth:150, textAlign:'center', background:'#fff', borderRadius:8, padding:'10px', border:`1px solid ${vendidoRealTot >= peContable ? 'var(--selva)' : 'var(--rojo)'}` }}>
                             <div style={{ fontSize:'1.15rem', fontWeight:700, color: vendidoRealTot >= peContable ? 'var(--selva)' : 'var(--rojo)' }}>{fNum(vendidoRealTot)}</div>
-                            <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>unid vendidas ({mesAnterior.label}) · {vendidoRealTot >= peContable ? 'vas bien ✓' : 'bajo el equilibrio'}</div>
+                            <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>unid vendidas ({rangoSel.label}) · {vendidoRealTot >= peContable ? 'vas bien ✓' : 'bajo el equilibrio'}</div>
                           </div>
                         )}
                       </div>
