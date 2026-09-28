@@ -4127,6 +4127,12 @@ export default function Costos({ vista = 'productos' }) {
           const cifAsigProd = cifAbsorcion.items.find(x => x.nombre === verProd.nombre)?.absorbido || 0
           const pctComponente = (v) => (rc.costoTotalUnit > 0 ? (v / rc.costoTotalUnit * 100).toFixed(1) + '%' : '—')
           const rentabilidadSobreCosto = rc.costoTotalUnit > 0 ? (rc.utilMayor / rc.costoTotalUnit * 100) : 0
+          // Punto de equilibrio del producto POR SÍ SOLO: cuántas unidades de ESTE producto
+          // cubrirían todos los costos fijos, si solo se vendiera este (CF ÷ margen de contribución).
+          // Margen de contribución = precio mayor − costo variable (MP + empaque), no el costo total.
+          const cfTotalPE = cifTotal + gastosFijosOper
+          const mcuProd = (parseFloat(verProd.precio_mayor) || 0) - (rc.cvu || 0)
+          const peIndividual = mcuProd > 0 ? cfTotalPE / mcuProd : 0
           const vIngs = parseJSON(verProd.ingredientes, [])
           const vProcs = parseJSON(verProd.procesos, [])
           const vEmps = parseJSON(verProd.empaque, [])
@@ -4272,7 +4278,8 @@ export default function Costos({ vista = 'productos' }) {
                 <tr style={{ color:'var(--selva-claro)' }}><td>Precio Mayor → Ganancia/u</td><td className="td-number">{fCOP(verProd.precio_mayor)} → {fCOP(rc.utilMayor)}</td></tr>
                 {(rc.comUnit || 0) > 0 && <tr style={{ color:'var(--tierra)' }}><td>(−) Comisión distribuidor → Ganancia neta/u</td><td className="td-number">{fCOP(rc.comUnit)} → {fCOP(rc.utilMayorNeto)}</td></tr>}
                 <tr style={{ color:'var(--selva)' }}><td>Precio Detal → Ganancia/u</td><td className="td-number">{fCOP(verProd.precio_detal)} → {fCOP(rc.utilDetal)}</td></tr>
-                <tr style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}><td>Punto de equilibrio (calculado)</td><td className="td-number">{peq && peq.pe>0 ? fNum(peq.pe)+' unid/mes' : '—'}</td></tr>
+                <tr style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}><td>Punto de equilibrio del portafolio (parte de este producto)</td><td className="td-number">{peq && peq.pe>0 ? fNum(peq.pe)+' unid/mes' : '—'}</td></tr>
+                <tr style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}><td>Punto de equilibrio si solo se vendiera este <small>(CF ÷ margen de contribución)</small></td><td className="td-number">{peIndividual>0 ? fNum(peIndividual)+' unid/mes' : '—'}</td></tr>
                 <tr style={{ fontSize:'0.82rem', color:'var(--texto-suave)' }}><td>% participación CIF (ventas del portafolio)</td><td className="td-number">{pctCIF > 0 ? pctCIF.toFixed(1) + '%' : '—'}</td></tr>
               </tbody>
             </table>
