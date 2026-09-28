@@ -282,7 +282,7 @@ export const getPEqMultiproducto = (productos = [], cifTotal = 0) => {
     const pvu = parseFloat(p.precio_mayor) || 0
     const cvu = p.cvu != null ? p.cvu : (p.costo_variable != null ? p.costo_variable : (p.costo_final || 0))
     const ventas = q * pvu
-    return { nombre: p.nombre, q, pvu, cvu, mcu: pvu - cvu, ventas }
+    return { id: p.id, nombre: p.nombre, q, pvu, cvu, mcu: pvu - cvu, ventas }
   })
   const vTotal = items.reduce((s, i) => s + i.ventas, 0)
   const qTotal = items.reduce((s, i) => s + i.q, 0)
