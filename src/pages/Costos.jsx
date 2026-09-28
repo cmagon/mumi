@@ -249,6 +249,19 @@ export default function Costos({ vista = 'productos' }) {
       return r.data || []
     },
   })
+  // Ventas reales por producto (Alegra) — solo se piden al abrir la pestaña Análisis, para no
+  // recargar todo el módulo. Se cruzan ficha → finished_products.product_id → alegra_item_id.
+  const { data: finishedProducts = [] } = useQuery({
+    queryKey: ['finished_products', 'costos-ventas'],
+    queryFn: async () => { const { data } = await supabase.from('finished_products').select('id, alegra_item_id, product_id, activo'); return data || [] },
+    enabled: costosSubtab === 'analisis',
+  })
+  const { data: alegraVentas } = useQuery({
+    queryKey: ['alegra-ventas', 'costos-analisis'],
+    queryFn: async () => { const { data } = await supabase.functions.invoke('alegra-ventas', { body: {} }); return data || { ventas: {} } },
+    enabled: costosSubtab === 'analisis',
+    staleTime: 30 * 60 * 1000,
+  })
   // Numeración visible OP-N (misma lógica que Órdenes / Producción)
   const { data: ordenIdsData = [] } = useQuery({
     queryKey: ['orden_ids'],
@@ -571,7 +584,7 @@ export default function Costos({ vista = 'productos' }) {
   // Punto de equilibrio multiproducto (CF / MCPT × participación) sobre el portafolio vendible activo
   const peqMultiproducto = useMemo(() => {
     const items = productosActivos.filter(esProductoVendible).map(p => ({
-      nombre: p.nombre, precio_mayor: parseFloat(p.precio_mayor) || 0,
+      id: p.id, nombre: p.nombre, precio_mayor: parseFloat(p.precio_mayor) || 0,
       // Margen de contribución = precio − costo VARIABLE (MP + empaque). Usar el costo total
       // (que ya incluye los fijos repartidos) descontaría los costos fijos dos veces y
       // sobreestimaría el punto de equilibrio.
@@ -623,6 +636,18 @@ export default function Costos({ vista = 'productos' }) {
     }
     return acumulado
   }, [mesAnterior.desde, mesAnterior.hasta, ordenesProduccionAnalisis, productos])
+
+  // Unidades REALES vendidas por ficha en el mes anterior (Alegra). null = producto sin enlazar
+  // a Alegra (no se puede saber su venta); un número (incluido 0) = dato real.
+  const ventasRealesPorProducto = useMemo(() => {
+    const m = new Map()
+    for (const fp of finishedProducts) {
+      if (fp.product_id == null || !fp.alegra_item_id) continue
+      const u = alegraVentas?.ventas?.[String(fp.alegra_item_id)]?.[mesAnterior.periodo]
+      if (u != null) m.set(String(fp.product_id), Number(u) || 0)
+    }
+    return m
+  }, [finishedProducts, alegraVentas, mesAnterior.periodo])
 
   const costosRecientesPorProducto = useMemo(() => {
     const porProducto = new Map()
@@ -3660,14 +3685,20 @@ export default function Costos({ vista = 'productos' }) {
             <div className="card-acc-body">
           {/* Punto de equilibrio de CAJA: el abono a deuda no es gasto pero sí hay que generarlo */}
           {(() => {
-            const mcTotalMes = peqMultiproducto.reduce((s, i) => s + i.mcu * i.q, 0)
             const unidsMesTot = peqMultiproducto.reduce((s, i) => s + i.q, 0)
-            const mcuProm = unidsMesTot > 0 ? mcTotalMes / unidsMesTot : 0
+            // Margen de contribución promedio PONDERADO POR VENTAS — el mismo criterio que usa la
+            // tabla de abajo para repartir el mínimo por producto; así la suma de la columna
+            // "mínimo a vender" cuadra con este total (antes se ponderaba por unidades y no cuadraba).
+            const mcuProm = peqMultiproducto.reduce((s, i) => s + (i.participacion || 0) * i.mcu, 0)
             // Fijos = CIF + gastos de administración, ventas y financieros. El ICA no entra:
             // es un porcentaje de la venta (variable), no un costo fijo del mes.
             const fijosTot = cifTotal + gastosFijosOper
             const peContable = getPEqCaja(fijosTot, 0, mcuProm)
             const peCaja = getPEqCaja(fijosTot, gastosOp.pasivo.total, mcuProm)
+            // Totales reales del mes anterior (producción y ventas)
+            const producidoRealTot = peqMultiproducto.reduce((s, i) => s + (produccionMesPorProducto.get(String(i.id))?.unidades || 0), 0)
+            const vendidoRealTot = peqMultiproducto.reduce((s, i) => s + (ventasRealesPorProducto.get(String(i.id)) || 0), 0)
+            const hayVentasReales = ventasRealesPorProducto.size > 0
             return (
               <>
                 {mcuProm <= 0
@@ -3682,14 +3713,21 @@ export default function Costos({ vista = 'productos' }) {
                           <div style={{ fontSize:'1.15rem', fontWeight:700, color:'var(--dorado)' }}>{fNum(peCaja)}</div>
                           <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>unid/mes para además pagar la deuda</div>
                         </div>
-                        <div style={{ flex:1, minWidth:180, textAlign:'center', background:'#fff', borderRadius:8, padding:'10px', border:'1px solid var(--crema-oscuro)' }}>
-                          <div style={{ fontSize:'1.15rem', fontWeight:700, color:'var(--tierra)' }}>{fNum(unidsMesTot)}</div>
-                          <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>unid/mes que produces hoy</div>
+                        <div style={{ flex:1, minWidth:150, textAlign:'center', background:'#fff', borderRadius:8, padding:'10px', border:'1px solid var(--crema-oscuro)' }}>
+                          <div style={{ fontSize:'1.15rem', fontWeight:700, color:'var(--tierra)' }}>{producidoRealTot > 0 ? fNum(producidoRealTot) : fNum(unidsMesTot)}</div>
+                          <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>{producidoRealTot > 0 ? `unid producidas (${mesAnterior.label})` : 'unid/mes que planeas producir'}</div>
                         </div>
+                        {hayVentasReales && (
+                          <div style={{ flex:1, minWidth:150, textAlign:'center', background:'#fff', borderRadius:8, padding:'10px', border:`1px solid ${vendidoRealTot >= peContable ? 'var(--selva)' : 'var(--rojo)'}` }}>
+                            <div style={{ fontSize:'1.15rem', fontWeight:700, color: vendidoRealTot >= peContable ? 'var(--selva)' : 'var(--rojo)' }}>{fNum(vendidoRealTot)}</div>
+                            <div style={{ fontSize:'0.75rem', color:'var(--texto-suave)' }}>unid vendidas ({mesAnterior.label}) · {vendidoRealTot >= peContable ? 'vas bien ✓' : 'bajo el equilibrio'}</div>
+                          </div>
+                        )}
                       </div>
                       <div style={{ fontSize:'0.78rem', color:'var(--texto-suave)', marginTop:10 }}>
                         Costos fijos {fCOP(fijosTot)} (producción {fCOP(cifTotal)} + gastos {fCOP(gastosFijosOper)}) ÷ margen de contribución promedio {fCOP(mcuProm)}/u.
                         {gastosOp.pasivo.total > 0 && <> El abono a deuda de {fCOP(gastosOp.pasivo.total)}/mes no es gasto, pero exige vender <strong>{fNum(peCaja - peContable)} unidades más</strong> para no quedarte sin caja.</>}
+                        {!hayVentasReales && <> · <em>Enlaza los productos con Alegra para ver aquí lo realmente vendido y si vas bien o mal.</em></>}
                       </div>
 
                       {/* Mínimo a vender de CADA producto, según su peso en el portafolio */}
@@ -3697,22 +3735,27 @@ export default function Costos({ vista = 'productos' }) {
                         <strong style={{ color:'var(--selva)', fontSize:'0.88rem' }}>Cuánto debes vender de cada producto</strong>
                         <div className="table-wrap">
                           <table>
-                            <thead><tr><th>Producto</th><th className="td-number">Produces/mes</th><th className="td-number">% ventas</th><th className="td-number">Margen/u</th><th className="td-number">Mínimo a vender</th><th className="td-number">Holgura</th></tr></thead>
+                            <thead><tr><th>Producto</th><th className="td-number">Producido</th>{hayVentasReales && <th className="td-number">Vendido</th>}<th className="td-number">% ventas</th><th className="td-number">Margen/u</th><th className="td-number">Mínimo a vender</th><th className="td-number">{hayVentasReales ? '¿Voy bien?' : 'Holgura'}</th></tr></thead>
                             <tbody>
                               {peqMultiproducto.length === 0
-                                ? <tr><td colSpan={6} className="empty-table">No hay fichas vendibles activas para calcular el mínimo de venta.</td></tr>
+                                ? <tr><td colSpan={hayVentasReales ? 7 : 6} className="empty-table">No hay fichas vendibles activas para calcular el mínimo de venta.</td></tr>
                                 : peqMultiproducto.map((i, idx) => {
-                                const holgura = i.q - i.pe
-                                const ok = holgura >= 0
+                                const producido = produccionMesPorProducto.get(String(i.id))?.unidades
+                                const vendido = ventasRealesPorProducto.has(String(i.id)) ? ventasRealesPorProducto.get(String(i.id)) : null
+                                // El semáforo compara la venta REAL contra el mínimo; si no hay venta real, cae a producción vs mínimo.
+                                const refReal = hayVentasReales ? vendido : producido
+                                const diff = (refReal != null && i.mcu > 0) ? refReal - i.pe : null
+                                const ok = diff != null && diff >= 0
                                 return (
                                   <tr key={idx}>
                                     <td><strong>{i.nombre}</strong></td>
-                                    <td className="td-number">{fNum(i.q)}</td>
+                                    <td className="td-number">{producido != null ? fNum(producido) : '—'}</td>
+                                    {hayVentasReales && <td className="td-number">{vendido != null ? fNum(vendido) : <span title="Producto no enlazado con Alegra" style={{ color:'var(--texto-suave)' }}>—</span>}</td>}
                                     <td className="td-number">{((i.participacion || 0) * 100).toFixed(1)}%</td>
                                     <td className="td-number" style={{ color: i.mcu > 0 ? 'var(--selva)' : 'var(--rojo)' }}>{fCOP(i.mcu)}</td>
                                     <td className="td-number"><strong>{i.mcu > 0 ? fNum(i.pe) : '—'}</strong></td>
-                                    <td className="td-number" style={{ color: ok ? 'var(--selva)' : 'var(--rojo)', fontWeight:600 }}>
-                                      {i.mcu > 0 ? (ok ? `+${fNum(holgura)}` : `${fNum(holgura)}`) : 'sin margen'}
+                                    <td className="td-number" style={{ color: diff == null ? 'var(--texto-suave)' : (ok ? 'var(--selva)' : 'var(--rojo)'), fontWeight:600 }}>
+                                      {i.mcu <= 0 ? 'sin margen' : diff == null ? '—' : (ok ? `+${fNum(diff)}` : `${fNum(diff)}`)}
                                     </td>
                                   </tr>
                                 )
@@ -3721,10 +3764,9 @@ export default function Costos({ vista = 'productos' }) {
                           </table>
                         </div>
                         <div style={{ fontSize:'0.76rem', color:'var(--texto-suave)', marginTop:6 }}>
-                          <strong>Holgura</strong> = lo que produces al mes menos el mínimo. En verde te sobra colchón; en rojo
-                          ese producto no alcanza a cubrir la parte de costos fijos que le corresponde, aunque el portafolio
-                          completo sí lo haga. Si un producto queda con <em>margen/u</em> negativo, su precio está por debajo
-                          de su costo variable: ahí no hay volumen que lo salve, hay que subir el precio o bajar el costo.
+                          <strong>Producido</strong> = unidades realmente fabricadas el mes anterior (órdenes cerradas){hayVentasReales ? <>; <strong>Vendido</strong> = unidades facturadas en Alegra ese mes.</> : ' (planeadas si aún no hay producción real).'}
+                          {' '}<strong>{hayVentasReales ? '¿Voy bien?' : 'Holgura'}</strong> = {hayVentasReales ? 'vendido' : 'producido'} − mínimo a vender: en verde cubres tu parte de los costos fijos, en rojo te quedas corto.
+                          Si un producto queda con <em>margen/u</em> negativo, su precio está por debajo de su costo variable: ahí no hay volumen que lo salve, hay que subir el precio o bajar el costo.
                         </div>
                       </div>
                     </>}
