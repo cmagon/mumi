@@ -273,7 +273,14 @@ export default function Costos({ vista = 'productos' }) {
   // recargar todo el módulo. Se cruzan ficha → finished_products.product_id → alegra_item_id.
   const { data: finishedProducts = [] } = useQuery({
     queryKey: ['finished_products', 'costos-ventas'],
-    queryFn: async () => { const { data } = await supabase.from('finished_products').select('id, nombre, alegra_item_id, product_id, activo, tipo, precio_mayor, precio_detal, costo_unitario'); return data || [] },
+    queryFn: async () => { const { data } = await supabase.from('finished_products').select('id, nombre, alegra_item_id, product_id, activo, tipo, precio_mayor, precio_detal, costo_unitario, surtido_a, surtido_b'); return data || [] },
+    enabled: costosSubtab === 'analisis',
+  })
+  // Movimientos de entrada por producción (stock de producto terminado producido) — para el
+  // "Producido" real del surtido por mes (lo que entró al stock, no la orden).
+  const { data: finishedMovs = [] } = useQuery({
+    queryKey: ['finished_movements', 'costos-analisis'],
+    queryFn: async () => { const { data } = await supabase.from('finished_movements').select('finished_id, cantidad, fecha, tipo, origen').eq('tipo', 'entrada'); return data || [] },
     enabled: costosSubtab === 'analisis',
   })
   const { data: alegraVentas } = useQuery({
@@ -632,19 +639,32 @@ export default function Costos({ vista = 'productos' }) {
 
   // Punto de equilibrio multiproducto (CF / MCPT × participación) sobre el portafolio vendible activo
   const peqMultiproducto = useMemo(() => {
-    const items = productosActivos.filter(esProductoVendible).map(p => ({
-      id: p.id, nombre: p.nombre, precio_mayor: parseFloat(p.precio_mayor) || 0,
-      // Margen de contribución = precio − costo VARIABLE (MP + empaque). Usar el costo total
-      // (que ya incluye los fijos repartidos) descontaría los costos fijos dos veces y
-      // sobreestimaría el punto de equilibrio.
-      cvu: recomputeProducto(p).cvu,
-      bache: parseFloat(p.bache) || 0, baches_mes: parseFloat(p.baches_mes) || 0, merma: parseFloat(p.merma) || 0,
-    }))
+    // Costo variable por ficha (para promediar los sabores de un surtido).
+    const cvuFicha = new Map(productosActivos.map(p => [String(p.id), recomputeProducto(p).cvu]))
+    // Sabores BASE que solo se venden dentro de un surtido → se ocultan de la tabla:
+    //  · fichas referenciadas como surtido_a / surtido_b de algún surtido, y
+    //  · fichas marcadas "se empaca surtido con otro producto".
+    const saboresBase = new Set()
+    for (const fp of finishedProducts) {
+      if (fp.surtido_a != null) saboresBase.add(String(fp.surtido_a))
+      if (fp.surtido_b != null) saboresBase.add(String(fp.surtido_b))
+    }
+    for (const p of productos) if (p.empaca_surtido) saboresBase.add(String(p.id))
+
+    const items = productosActivos
+      .filter(esProductoVendible)
+      .filter(p => !saboresBase.has(String(p.id)))   // ocultar bocadillos base (no surtidos)
+      .map(p => ({
+        id: p.id, nombre: p.nombre, precio_mayor: parseFloat(p.precio_mayor) || 0,
+        // Margen de contribución = precio − costo VARIABLE (MP + empaque). Usar el costo total
+        // (que ya incluye los fijos repartidos) descontaría los costos fijos dos veces.
+        cvu: recomputeProducto(p).cvu,
+        bache: parseFloat(p.bache) || 0, baches_mes: parseFloat(p.baches_mes) || 0, merma: parseFloat(p.merma) || 0,
+      }))
     // Surtidos que solo existen como PRODUCTO TERMINADO (no tienen ficha). Se incluyen usando:
-    //  · costo = promedio real de la mezcla desde sus órdenes de empaque surtido (no de una ficha),
-    //    con respaldo al costo del terminado si aún no hay órdenes.
-    //  · precio = precio mayor del terminado.
-    //  · volumen = venta real de Alegra del mes anterior (no tienen plan de baches).
+    //  · costo = PROMEDIO del costo variable de sus sabores relacionados (surtido_a / surtido_b);
+    //    respaldo: costo real de la mezcla desde las órdenes, y luego el costo del terminado.
+    //  · precio = precio mayor del terminado · volumen/venta = Alegra del mes elegido.
     // id sintético 'fp:<id>'. Se omiten los surtidos sin nombre (placeholders vacíos).
     const norm = (v) => String(v || '').trim().toLocaleLowerCase('es')
     const fichaIds = new Set(productos.map(p => String(p.id)))
@@ -653,16 +673,17 @@ export default function Costos({ vista = 'productos' }) {
       if (!String(fp.nombre || '').trim()) continue                         // sin nombre → placeholder, no mostrar
       if (fp.product_id != null && fichaIds.has(String(fp.product_id))) continue   // ya tiene ficha
       const vendidos = fp.alegra_item_id ? Number(alegraVentas?.ventas?.[String(fp.alegra_item_id)]?.[rangoSel.periodo] || 0) : 0
+      // Promedio del costo variable de los sabores relacionados
+      const sab = [fp.surtido_a, fp.surtido_b].map(x => (x != null ? cvuFicha.get(String(x)) : undefined)).filter(v => v != null && v > 0)
+      const costoProm = sab.length ? sab.reduce((s, v) => s + v, 0) / sab.length : 0
       const costoOrden = costoSurtidoPorNombre.get(norm(fp.nombre))
-      const cvu = (costoOrden && costoOrden > 0) ? costoOrden : (parseFloat(fp.costo_unitario) || 0)
+      const cvu = costoProm > 0 ? costoProm : (costoOrden && costoOrden > 0 ? costoOrden : (parseFloat(fp.costo_unitario) || 0))
       items.push({
         id: 'fp:' + fp.id, nombre: fp.nombre, precio_mayor: parseFloat(fp.precio_mayor) || 0,
-        cvu, q: vendidos, _surtidoTerminado: true, _alegraId: fp.alegra_item_id || null,
+        cvu, q: vendidos, _surtidoTerminado: true, _alegraId: fp.alegra_item_id || null, _fpId: fp.id,
       })
     }
-    // El punto de equilibrio debe cubrir TODOS los costos fijos, no solo el CIF: si se omiten
-    // los gastos de administración, ventas y financieros, sale un mínimo de venta que en
-    // realidad deja pérdida.
+    // El punto de equilibrio debe cubrir TODOS los costos fijos, no solo el CIF.
     return getPEqMultiproducto(items, cifTotal + gastosFijosOper)
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productos, cifTotal, mps, gastosFijosOper, finishedProducts, alegraVentas, costoSurtidoPorNombre, rangoSel.periodo])
@@ -765,6 +786,21 @@ export default function Costos({ vista = 'productos' }) {
     }
     return m
   }, [ordenesProduccionAnalisis, rangoSel.desde, rangoSel.hasta])
+
+  // Producido REAL del surtido = lo que ENTRÓ AL STOCK del producto terminado ese mes
+  // (movimientos de entrada por producción), por finished_id. Es la fuente más fiable de "producido".
+  const producidoStockPorFinished = useMemo(() => {
+    const m = new Map()
+    for (const mv of finishedMovs) {
+      if (mv.tipo !== 'entrada') continue
+      if (mv.origen && mv.origen !== 'produccion') continue   // solo producción (no entradas manuales/alegra)
+      const f = String(mv.fecha || '').slice(0, 10)
+      if (f < rangoSel.desde || f >= rangoSel.hasta) continue
+      if (mv.finished_id == null) continue
+      m.set(String(mv.finished_id), (m.get(String(mv.finished_id)) || 0) + (Number(mv.cantidad) || 0))
+    }
+    return m
+  }, [finishedMovs, rangoSel.desde, rangoSel.hasta])
 
   const costosRecientesPorProducto = useMemo(() => {
     const porProducto = new Map()
@@ -3825,7 +3861,11 @@ export default function Costos({ vista = 'productos' }) {
             // Totales reales del mes anterior (producción y ventas)
             // Producido y vendido reales por fila — soporta fichas y surtidos-terminados (sin ficha).
             const normNom = (v) => String(v || '').trim().toLocaleLowerCase('es')
-            const producidoDe = (i) => i._surtidoTerminado ? (producidoSurtidoTerminado.get(normNom(i.nombre)) || 0) : (producidoAnalisis.get(String(i.id)) || 0)
+            // Surtido: producido = lo que entró al stock del terminado ese mes (movimientos);
+            // respaldo a las cajas de las órdenes de empaque si no hay movimientos.
+            const producidoDe = (i) => i._surtidoTerminado
+              ? ((i._fpId != null && producidoStockPorFinished.get(String(i._fpId))) || producidoSurtidoTerminado.get(normNom(i.nombre)) || 0)
+              : (producidoAnalisis.get(String(i.id)) || 0)
             const vendidoDe = (i) => i._surtidoTerminado
               ? (i._alegraId ? Number(alegraVentas?.ventas?.[String(i._alegraId)]?.[rangoSel.periodo] || 0) : null)
               : (ventasRealesPorProducto.has(String(i.id)) ? ventasRealesPorProducto.get(String(i.id)) : null)
