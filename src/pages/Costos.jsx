@@ -3582,8 +3582,8 @@ export default function Costos({ vista = 'productos' }) {
             })()}
           </Modal>
 
-          {costosSubtab === 'analisis' && <>
-          <details className="card" open>
+          {costosSubtab === 'costos' && (
+          <details className="card">
             <summary className="card-title"><Ico as={Clock} size={15} />Costo por minuto de mano de obra<span className="card-hint">{fCOP(costoMin)}/min</span></summary>
             <div className="card-acc-body">
             <div style={{ fontSize:'0.85rem', marginTop:8, display:'grid', gap:4 }}>
@@ -3607,8 +3607,10 @@ export default function Costos({ vista = 'productos' }) {
 
             </div>
           </details>
+          )}
 
-          <details className="card">
+          {costosSubtab === 'analisis' && <>
+          <details className="card" open>
             <summary className="card-title"><Ico as={BarChart3} size={15} />Absorción del CIF por producto<span className="card-hint">CIF {fCOP(cifTotal)}/mes</span></summary>
             <div className="card-acc-body">
             {cifAbsorcion.items.length === 0
