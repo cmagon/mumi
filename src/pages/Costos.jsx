@@ -591,12 +591,25 @@ export default function Costos({ vista = 'productos' }) {
       cvu: recomputeProducto(p).cvu,
       bache: parseFloat(p.bache) || 0, baches_mes: parseFloat(p.baches_mes) || 0, merma: parseFloat(p.merma) || 0,
     }))
+    // Surtidos que solo existen como PRODUCTO TERMINADO (no tienen ficha): se arman mezclando
+    // saldos. Se incluyen con su precio/costo del terminado y, como volumen, su venta real de
+    // Alegra del mes anterior (no tienen plan de baches). id sintético 'fp:<id>' para no chocar.
+    const fichaIds = new Set(productos.map(p => String(p.id)))
+    for (const fp of finishedProducts) {
+      if (String(fp.tipo || '').toLowerCase() !== 'surtido' || fp.activo === false) continue
+      if (fp.product_id != null && fichaIds.has(String(fp.product_id))) continue   // ya tiene ficha
+      const vendidos = fp.alegra_item_id ? Number(alegraVentas?.ventas?.[String(fp.alegra_item_id)]?.[mesAnterior.periodo] || 0) : 0
+      items.push({
+        id: 'fp:' + fp.id, nombre: fp.nombre, precio_mayor: parseFloat(fp.precio_mayor) || 0,
+        cvu: parseFloat(fp.costo_unitario) || 0, q: vendidos, _surtidoTerminado: true, _alegraId: fp.alegra_item_id || null,
+      })
+    }
     // El punto de equilibrio debe cubrir TODOS los costos fijos, no solo el CIF: si se omiten
     // los gastos de administración, ventas y financieros, sale un mínimo de venta que en
     // realidad deja pérdida.
     return getPEqMultiproducto(items, cifTotal + gastosFijosOper)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productos, cifTotal, mps, gastosFijosOper])
+  }, [productos, cifTotal, mps, gastosFijosOper, finishedProducts, alegraVentas, mesAnterior.periodo])
 
   const produccionMesPorProducto = useMemo(() => {
     const normalizar = (v) => String(v || '').trim().toLocaleLowerCase('es')
@@ -681,6 +694,21 @@ export default function Costos({ vista = 'productos' }) {
     }
     return m
   }, [ordenesProduccionAnalisis, productos, surtidoProductIds, mesAnterior.desde, mesAnterior.hasta])
+
+  // Producido (cajas) de surtidos SIN ficha, por nombre del producto surtido (órdenes de empaque surtido).
+  const producidoSurtidoTerminado = useMemo(() => {
+    const norm = (v) => String(v || '').trim().toLocaleLowerCase('es')
+    const m = new Map()
+    for (const o of ordenesProduccionAnalisis) {
+      if (o.es_prueba || o.surtido !== true || !['ejecutada', 'aprobada'].includes(o.estado)) continue
+      const f = String(o.fecha_prod || o.fecha_envio || o.created_at || '').slice(0, 10)
+      if (f < mesAnterior.desde || f >= mesAnterior.hasta) continue
+      const nom = norm(o.producto_surtido); if (!nom) continue
+      const u = Number(o.surtido_cantidad) || Number(o.cantidad_result) || Number(o.cantidad_plan) || 0
+      m.set(nom, (m.get(nom) || 0) + u)
+    }
+    return m
+  }, [ordenesProduccionAnalisis, mesAnterior.desde, mesAnterior.hasta])
 
   const costosRecientesPorProducto = useMemo(() => {
     const porProducto = new Map()
@@ -3730,10 +3758,16 @@ export default function Costos({ vista = 'productos' }) {
             const fijosTot = cifTotal + gastosFijosOper
             const peContable = getPEqCaja(fijosTot, 0, mcuProm)
             const peCaja = getPEqCaja(fijosTot, gastosOp.pasivo.total, mcuProm)
+            // Producido y vendido reales por fila — soporta fichas y surtidos-terminados (sin ficha).
+            const normNom = (v) => String(v || '').trim().toLocaleLowerCase('es')
+            const producidoDe = (i) => i._surtidoTerminado ? (producidoSurtidoTerminado.get(normNom(i.nombre)) || 0) : (producidoAnalisis.get(String(i.id)) || 0)
+            const vendidoDe = (i) => i._surtidoTerminado
+              ? (i._alegraId ? Number(alegraVentas?.ventas?.[String(i._alegraId)]?.[mesAnterior.periodo] || 0) : null)
+              : (ventasRealesPorProducto.has(String(i.id)) ? ventasRealesPorProducto.get(String(i.id)) : null)
             // Totales reales del mes anterior (producción y ventas)
-            const producidoRealTot = peqMultiproducto.reduce((s, i) => s + (producidoAnalisis.get(String(i.id)) || 0), 0)
-            const vendidoRealTot = peqMultiproducto.reduce((s, i) => s + (ventasRealesPorProducto.get(String(i.id)) || 0), 0)
-            const hayVentasReales = ventasRealesPorProducto.size > 0
+            const producidoRealTot = peqMultiproducto.reduce((s, i) => s + producidoDe(i), 0)
+            const vendidoRealTot = peqMultiproducto.reduce((s, i) => s + (vendidoDe(i) || 0), 0)
+            const hayVentasReales = ventasRealesPorProducto.size > 0 || peqMultiproducto.some(i => i._surtidoTerminado && i._alegraId)
             return (
               <>
                 {mcuProm <= 0
@@ -3775,8 +3809,8 @@ export default function Costos({ vista = 'productos' }) {
                               {peqMultiproducto.length === 0
                                 ? <tr><td colSpan={hayVentasReales ? 7 : 6} className="empty-table">No hay fichas vendibles activas para calcular el mínimo de venta.</td></tr>
                                 : peqMultiproducto.map((i, idx) => {
-                                const producido = producidoAnalisis.get(String(i.id))
-                                const vendido = ventasRealesPorProducto.has(String(i.id)) ? ventasRealesPorProducto.get(String(i.id)) : null
+                                const producido = producidoDe(i)
+                                const vendido = vendidoDe(i)
                                 // El semáforo compara la venta REAL contra el mínimo; si no hay venta real, cae a producción vs mínimo.
                                 const refReal = hayVentasReales ? vendido : producido
                                 const diff = (refReal != null && i.mcu > 0) ? refReal - i.pe : null

@@ -278,7 +278,9 @@ export const calcularCostosProducto = ({
 // productos: [{ nombre, precio_mayor, cvu (o costo_variable), bache, baches_mes, merma }]
 export const getPEqMultiproducto = (productos = [], cifTotal = 0) => {
   const items = productos.map(p => {
-    const q   = unidsMesFicha(p)
+    // q: unidades/mes de la ficha, o un override explícito (p.q) para productos sin ficha
+    // (ej. surtidos que solo existen como Producto Terminado, cuyo volumen es su venta real).
+    const q   = p.q != null ? (parseFloat(p.q) || 0) : unidsMesFicha(p)
     const pvu = parseFloat(p.precio_mayor) || 0
     const cvu = p.cvu != null ? p.cvu : (p.costo_variable != null ? p.costo_variable : (p.costo_final || 0))
     const ventas = q * pvu
