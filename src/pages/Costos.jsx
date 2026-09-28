@@ -651,10 +651,14 @@ export default function Costos({ vista = 'productos' }) {
 
   // Fichas que son producto SURTIDO (se arman mezclando saldos). Para ellas la "producción" real
   // son las cajas del empaque surtido, no la mezcla intermedia (que va a "por empacar").
-  const surtidoProductIds = useMemo(
-    () => new Set(finishedProducts.filter(fp => String(fp.tipo || '').toLowerCase() === 'surtido' && fp.product_id != null).map(fp => String(fp.product_id))),
-    [finishedProducts]
-  )
+  // Se reconoce el surtido por cualquiera de las dos señales: el terminado marcado tipo 'surtido',
+  // o la ficha con "Se empaca surtido con otro producto" (empaca_surtido) — que es como se configura hoy.
+  const surtidoProductIds = useMemo(() => {
+    const s = new Set()
+    for (const fp of finishedProducts) if (String(fp.tipo || '').toLowerCase() === 'surtido' && fp.product_id != null) s.add(String(fp.product_id))
+    for (const p of productos) if (p.empaca_surtido) s.add(String(p.id))
+    return s
+  }, [finishedProducts, productos])
   // Producido real del mes anterior para el ANÁLISIS, sin doble conteo del surtido:
   //  · producto surtido → solo cuenta las órdenes de empaque surtido (cajas terminadas).
   //  · producto normal   → cuenta su producción normal (ignora órdenes surtido, que no son suyas).
