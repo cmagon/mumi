@@ -48,14 +48,16 @@ serve(async (req) => {
     if (!ok) return json({ error: 'La verificación de seguridad falló. Recarga e inténtalo de nuevo.' }, 403)
 
     const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
-    const email = String(body.email || '').trim().toLowerCase()
-    const nombre = (String(body.nombre || '').trim()) || null
-    const telefono = (String(body.telefono || '').trim()) || null
+    const email = String(body.email || '').trim().toLowerCase().slice(0, 254)
+    // Topes de longitud: el insert usa la service key (salta RLS), así que sin límite un
+    // cliente podría guardar cadenas enormes aun con captcha válido.
+    const nombre = (String(body.nombre || '').trim().slice(0, 200)) || null
+    const telefono = (String(body.telefono || '').trim().slice(0, 40)) || null
 
     if (accion === 'suscribir') {
       if (!EMAIL_RE.test(email)) return json({ error: 'Correo inválido.' }, 400)
       await admin.rpc('catalogo_upsert_suscriptor', {
-        p_email: email, p_nombre: nombre, p_origen: String(body.origen || 'newsletter'), p_telefono: telefono,
+        p_email: email, p_nombre: nombre, p_origen: String(body.origen || 'newsletter').slice(0, 60), p_telefono: telefono,
       })
       return json({ ok: true })
     }
@@ -74,6 +76,7 @@ serve(async (req) => {
 
     return json({ error: 'Acción no soportada.' }, 400)
   } catch (e) {
-    return json({ error: String(e) }, 500)
+    console.error('catalogo-form:', String((e as Error)?.message || e))
+    return json({ error: 'No se pudo procesar el envío. Intenta más tarde.' }, 500)
   }
 })

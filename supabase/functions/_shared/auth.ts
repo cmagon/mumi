@@ -1,6 +1,6 @@
 // Guard de autenticación/rol reutilizable para las Edge Functions.
 // Valida el JWT del usuario que llama (cabecera Authorization) contra Supabase Auth.
-//   requireUser(req)  -> exige sesión válida (cualquier usuario autenticado).
+//   requireUser(req)  -> exige sesión válida de PERSONAL (perfil activo y no archivado).
 //   requireAdmin(req) -> exige además rol = 'admin' y perfil habilitado
 //                        (estado activo y sin archivar).
 // Devuelve { user } si pasa, o { resp } con la respuesta de error lista para retornar.
@@ -25,6 +25,13 @@ function userClient(req: Request) {
 export async function requireUser(req: Request): Promise<{ user?: any; resp?: Response }> {
   const { data: { user } } = await userClient(req).auth.getUser()
   if (!user) return { resp: err('No autenticado', 401) }
+  // Un JWT "authenticated" NO basta: el alta pública (signUp con la anon key) y los invitados
+  // externos por OTP también lo obtienen. Se exige un perfil de personal activo y no archivado.
+  const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+  const { data: perfil } = await admin.from('user_profiles').select('*').eq('id', user.id).maybeSingle()
+  if (!perfil || (perfil.estado && perfil.estado !== 'activo') || perfil.archivado === true) {
+    return { resp: err('Usuario sin acceso', 403) }
+  }
   return { user }
 }
 

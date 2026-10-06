@@ -4,6 +4,24 @@
 
 export default {
   async fetch(request, env) {
+    return conSeguridad(await manejar(request, env))
+  },
+}
+
+// Cabeceras de seguridad para TODA respuesta del catálogo (HTML, assets, sitemap…).
+// Solo el subconjunto que no puede romper embeds (YouTube/Vimeo/Turnstile/redes): sin CSP de scripts.
+function conSeguridad(res) {
+  const r = new Response(res.body, res)
+  r.headers.set('X-Content-Type-Options', 'nosniff')
+  r.headers.set('X-Frame-Options', 'SAMEORIGIN')
+  r.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
+  r.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()')
+  r.headers.set('Strict-Transport-Security', 'max-age=31536000')
+  r.headers.set('Content-Security-Policy', "object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'")
+  return r
+}
+
+async function manejar(request, env) {
     const url = new URL(request.url)
     const path = (url.pathname.replace(/\/+$/, '') || '/')
     const method = request.method
@@ -32,7 +50,6 @@ export default {
     }
 
     return env.ASSETS.fetch(request)
-  },
 }
 
 const esc = (s) => String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')

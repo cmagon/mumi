@@ -33,7 +33,8 @@ Deno.serve(async (req) => {
 
     return json({ ok: true })
   } catch (e) {
-    return json({ error: String(e?.message || e) }, 500)
+    console.error('admin-set-password:', String(e?.message || e))
+    return json({ error: 'No se pudo cambiar la contraseña.' }, 500)
   }
 })
 
