@@ -2070,9 +2070,10 @@ export default function Costos({ vista = 'productos' }) {
                   </Select>
                 </div>
                 <div className="form-group">
-                  <label className="form-label">Presentación <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(elige o escribe una)</small></label>
-                  <input className="form-control" list="dl-presentaciones" value={formProd.presentacion || ''} onChange={e => setFormProd(f=>({...f,presentacion:e.target.value}))} placeholder="Ej: Caja, Unidad, Kilo..." />
-                  <datalist id="dl-presentaciones">{PRESENTACIONES.map(p => <option key={p} value={p} />)}</datalist>
+                  <label className="form-label">Presentación <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(elige de la lista)</small></label>
+                  <Select className="form-control" value={formProd.presentacion || 'Unidad'} onChange={e => setFormProd(f=>({...f,presentacion:e.target.value}))}>
+                    {[...new Set([...PRESENTACIONES, ...(formProd.presentacion && !PRESENTACIONES.includes(formProd.presentacion) ? [formProd.presentacion] : [])])].map(p => <option key={p} value={p}>{p}</option>)}
+                  </Select>
                 </div>
                 <div className="form-group">
                   <label className="form-label" title='"Activo" = se fabrica hoy (no que se venda). Los productos internos (mermelada, pulpa) van activos: consumen planta y absorben CIF. Inactiva solo lo que dejaste de producir; sus minutos salen del reparto y aparecen como capacidad ociosa.'>Estado del producto <Info size={12} style={{ verticalAlign:'-2px', marginLeft:2 }} aria-hidden="true" /></label>
@@ -2086,21 +2087,31 @@ export default function Costos({ vista = 'productos' }) {
                   <label className="form-label">Descripción del producto <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(opcional)</small></label>
                   <textarea className="form-control" rows={2} maxLength={500} value={formProd.descripcion || ''} onChange={e => setFormProd(f=>({...f,descripcion:e.target.value}))} />
                 </div>
-                {/* Categorías adicionales — sobre todo para MP vendibles que caben en varias categorías */}
-                {formProd.tipo === 'mp' && (
+                {/* Relación del producto INTERNO: con qué MP interna se relaciona / cuál alimenta su
+                    producción. Informativo (no obligatorio al crear órdenes). */}
+                {formProd.tipo === 'subproducto' && (
                   <div className="form-group" style={{ gridColumn:'1 / -1' }}>
-                    <label className="form-label">Categorías adicionales <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(la MP vendible puede pertenecer a varias)</small></label>
-                    <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
-                      {opcionesTipo.filter(t => t !== formProd.tipo).map(t => { const on = categorias.includes(t); return (
-                        <button type="button" key={t} className={`btn btn-xs ${on ? 'btn-primary' : 'btn-secondary'}`}
-                          onClick={() => setCategorias(cs => on ? cs.filter(x => x !== t) : [...cs, t])}>
-                          <Ico as={on ? Check : Plus} size={12} />{tipoLabel(t)}
-                        </button>
-                      ) })}
-                    </div>
-                    {categorias.length > 0 && <small style={{ display:'block', marginTop:4, color:'var(--selva)' }}>Categorías: {[formProd.tipo, ...categorias].map(tipoLabel).join(', ')}</small>}
+                    <label className="form-label">Alimenta / se relaciona con <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(materia prima interna que surte — opcional)</small></label>
+                    <Select className="form-control" value={formProd.mp_id || ''} onChange={e => setFormProd(f=>({...f, mp_id: e.target.value}))}>
+                      <option value="">— Ninguna —</option>
+                      {mps.filter(m => m.tipo === 'interno' || m.vendible).map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
+                    </Select>
+                    <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Indica a qué materia prima interna surte este producto cuando se fabrica. No es necesario al crear órdenes de producción.</small>
                   </div>
                 )}
+                {/* Categorías adicionales — cualquier producto puede pertenecer a varias */}
+                <div className="form-group" style={{ gridColumn:'1 / -1' }}>
+                  <label className="form-label">Categorías adicionales <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(además del tipo principal, puede pertenecer a varias)</small></label>
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+                    {opcionesTipo.filter(t => t !== formProd.tipo).map(t => { const on = categorias.includes(t); return (
+                      <button type="button" key={t} className={`btn btn-xs ${on ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setCategorias(cs => on ? cs.filter(x => x !== t) : [...cs, t])}>
+                        <Ico as={on ? Check : Plus} size={12} />{tipoLabel(t)}
+                      </button>
+                    ) })}
+                  </div>
+                  {categorias.length > 0 && <small style={{ display:'block', marginTop:4, color:'var(--selva)' }}>Categorías: {[formProd.tipo, ...categorias].map(tipoLabel).join(', ')}</small>}
+                </div>
             </div>
 
             {/* Campos personalizados */}
@@ -2483,19 +2494,28 @@ export default function Costos({ vista = 'productos' }) {
 
                 return (
                   <>
+                    <p style={{ fontSize:'0.78rem', color:'var(--texto-suave)', margin:'0 0 6px' }}>Elige un método rápido (lo más fácil) o ármalo abajo con las fichas:</p>
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 10 }}>
-                      {ATAJOS_LOTEO.map(a => (
+                      {ATAJOS_LOTEO.map(a => {
+                        const activo = cfg && describirPlantilla(cfg) === describirPlantilla(normalizarMetodoLoteo(a.config))
+                        return (
                         <button
                           key={a.id}
                           type="button"
-                          className="btn btn-sm btn-secondary"
+                          className={`btn btn-sm ${activo ? 'btn-primary' : 'btn-secondary'}`}
                           onClick={() => setFormProd(f => ({ ...f, metodo_loteo: normalizarMetodoLoteo(a.config) }))}
                           title={a.desc}
                         >
-                          {a.label}
+                          {activo && <Ico as={Check} size={12} />}{a.label} <small style={{ fontWeight:400, opacity:0.75 }}>· {a.desc}</small>
                         </button>
-                      ))}
+                        )
+                      })}
+                      <button type="button" className={`btn btn-sm ${!cfg ? 'btn-primary' : 'btn-secondary'}`}
+                        onClick={() => setFormProd(f => ({ ...f, metodo_loteo: null }))} title="No autosugerir lote al crear órdenes">
+                        {!cfg && <Ico as={Check} size={12} />}Sin autosugerencia
+                      </button>
                     </div>
+                    {cfg && <div style={{ fontSize:'0.8rem', color:'var(--selva)', marginBottom:8 }}>Ejemplo: <strong>{ej}</strong>{sig !== '—' && sig !== ej ? <> · siguiente: <strong>{sig}</strong></> : ''}</div>}
                     <label className="form-label">Plantilla del lote</label>
                     <div
                       style={{
