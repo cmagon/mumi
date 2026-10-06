@@ -41,8 +41,20 @@ export const ATAJOS_LOTEO = [
   {
     id: 'fecha',
     label: 'Fecha del día',
-    desc: 'ddmmaa → 260826',
+    desc: 'ddmmaa → 061025',
     config: { metodo: 'patron', partes: [{ tipo: 'dd' }, { tipo: 'mm' }, { tipo: 'aa' }], reinicio: 'nunca' },
+  },
+  {
+    id: 'fecha_iso',
+    label: 'Fecha en texto (aaaa-mm-dd)',
+    desc: '2026-10-06',
+    config: { metodo: 'patron', partes: [{ tipo: 'aaaa' }, { tipo: 'sep', valor: '-' }, { tipo: 'mm' }, { tipo: 'sep', valor: '-' }, { tipo: 'dd' }], reinicio: 'nunca' },
+  },
+  {
+    id: 'fecha_texto_larga',
+    label: 'Fecha en texto (dd/mm/aaaa)',
+    desc: '06/10/2026',
+    config: { metodo: 'patron', partes: [{ tipo: 'dd' }, { tipo: 'sep', valor: '/' }, { tipo: 'mm' }, { tipo: 'sep', valor: '/' }, { tipo: 'aaaa' }], reinicio: 'nunca' },
   },
 ]
 
