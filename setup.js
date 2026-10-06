@@ -5,16 +5,33 @@
  */
 
 import { createClient } from '@supabase/supabase-js'
+import { randomBytes } from 'node:crypto'
 
-const SUPABASE_URL = 'https://awjvggpeuxayvnreldvw.supabase.co'
-const SUPABASE_ANON_KEY = 'sb_publishable_dSxnLZKF7Ji7vRPFRXQQdg__8kwhoeR'
+// Sin credenciales en el código. Se leen del entorno:
+//   SUPABASE_URL=https://XXXX.supabase.co SUPABASE_ANON_KEY=sb_publishable_... \
+//   SETUP_ADMIN_PASSWORD='una-clave-larga' node setup.js
+// Si no defines SETUP_ADMIN_PASSWORD se genera una aleatoria y se muestra UNA vez al final.
+const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_ANON_KEY
+if (!SUPABASE_URL || !SUPABASE_ANON_KEY) {
+  console.error('Falta SUPABASE_URL y/o SUPABASE_ANON_KEY (o VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY) en el entorno.')
+  process.exit(1)
+}
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY)
 
+const claveAleatoria = () => randomBytes(12).toString('base64url')
+const CLAVE_ADMIN = process.env.SETUP_ADMIN_PASSWORD || claveAleatoria()
+if (CLAVE_ADMIN.length < 12) {
+  console.error('SETUP_ADMIN_PASSWORD debe tener al menos 12 caracteres.')
+  process.exit(1)
+}
+const clavesGeneradas = []
+
 const USUARIOS_INICIALES = [
-  { login: 'admin',     password: 'mumi2024',  nombre: 'Administrador', rol: 'admin' },
-  { login: 'operario1', password: 'op1mumi',   nombre: 'Operario 1',    rol: 'operario' },
-  { login: 'operario2', password: 'op2mumi',   nombre: 'Operario 2',    rol: 'operario' },
+  { login: 'admin',     password: CLAVE_ADMIN,        nombre: 'Administrador', rol: 'admin' },
+  { login: 'operario1', password: claveAleatoria(),   nombre: 'Operario 1',    rol: 'operario' },
+  { login: 'operario2', password: claveAleatoria(),   nombre: 'Operario 2',    rol: 'operario' },
 ]
 
 async function crearUsuarios() {
@@ -32,6 +49,7 @@ async function crearUsuarios() {
       continue
     }
     if (data.user) {
+      clavesGeneradas.push(`${u.login} / ${u.password}`)
       // Insertar perfil
       const { error: profError } = await supabase.from('user_profiles').upsert({
         id: data.user.id, nombre: u.nombre, login: u.login, rol: u.rol, estado: 'activo'
@@ -100,7 +118,10 @@ async function main() {
   console.log('      → Desactiva "Enable email confirmations"')
   console.log('   2. npm run dev')
   console.log('   3. Ingresa en http://localhost:5173')
-  console.log('      Usuario: admin | Contraseña: mumi2024')
+  if (clavesGeneradas.length) {
+    console.log('\n🔑 Credenciales creadas (guárdalas ahora, no se vuelven a mostrar; cámbialas al primer ingreso):')
+    clavesGeneradas.forEach(c => console.log('      ' + c))
+  }
 }
 
 main().catch(err => {

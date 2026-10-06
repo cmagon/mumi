@@ -34,6 +34,15 @@ serve(async (req) => {
     const { data: { user } } = await asUser.auth.getUser()
     if (!user) return err('No autenticado', 401)
 
+    // Solo personal con perfil activo. Un JWT cualquiera (auto-registro o invitado OTP) no puede
+    // usar la función: de lo contrario, con cuentas desechables se evade el cupo por usuario y
+    // se envía spam desde el dominio de la empresa.
+    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
+    const { data: perfil } = await admin.from('user_profiles').select('*').eq('id', user.id).maybeSingle()
+    if (!perfil || (perfil.estado && perfil.estado !== 'activo') || perfil.archivado === true) {
+      return err('Usuario sin acceso', 403)
+    }
+
     const { to, subject, html } = await req.json().catch(() => ({}))
 
     // Un solo destinatario y con forma de correo: sin esto se puede pasar
@@ -52,7 +61,6 @@ serve(async (req) => {
     // Cupo por usuario. Se cuenta y se registra en la misma función de base de
     // datos, así dos peticiones simultáneas no pueden colarse por el hueco entre
     // "conté" y "envié".
-    const admin = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!)
     const { data: permitido, error: rlErr } = await admin.rpc('registrar_envio_correo', {
       p_user_id: user.id, p_destino: destino, p_asunto: asunto, p_max: MAX_POR_HORA,
     })
@@ -72,6 +80,7 @@ serve(async (req) => {
     const data = await r.json()
     return json(data, r.ok ? 200 : 500)
   } catch (e) {
-    return json({ error: String(e) }, 500)
+    console.error('enviar-correo:', String((e as Error)?.message || e))
+    return json({ error: 'No se pudo enviar el correo.' }, 500)
   }
 })

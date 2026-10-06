@@ -28,13 +28,22 @@ const cors = {
 }
 const json = (o: unknown, s = 200) => new Response(JSON.stringify(o), { status: s, headers: { ...cors, 'Content-Type': 'application/json' } })
 
+// Comparación a tiempo constante: evita adivinar el secreto midiendo cuánto tarda el rechazo.
+function igualConstante(a: string, b: string): boolean {
+  const ea = new TextEncoder().encode(a), eb = new TextEncoder().encode(b)
+  let d = ea.length ^ eb.length
+  const n = Math.max(ea.length, eb.length)
+  for (let i = 0; i < n; i++) d |= (ea[i] ?? 0) ^ (eb[i] ?? 0)
+  return d === 0
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
   const url = new URL(req.url)
   // Fallar CERRADO: sin secreto configurado, o con secreto incorrecto, se rechaza.
   // Configura el secreto con: supabase secrets set ALEGRA_WEBHOOK_SECRET=...
   if (!WEBHOOK_SECRET) return json({ error: 'webhook no configurado' }, 503)
-  if (url.searchParams.get('secret') !== WEBHOOK_SECRET) return json({ error: 'no autorizado' }, 401)
+  if (!igualConstante(url.searchParams.get('secret') || '', WEBHOOK_SECRET)) return json({ error: 'no autorizado' }, 401)
 
   const supabase = createClient(SUPABASE_URL, SERVICE_KEY)
   try {
