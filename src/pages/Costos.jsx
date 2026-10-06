@@ -44,8 +44,18 @@ import {
 } from '../lib/loteoProducto'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
+// Clase ESTRUCTURAL del producto (define su lógica de producción/inventario).
+// Las categorías de dominio (mermelada, infusión, pulpa…) van aparte, en `categorias`.
+const CLASES_PRODUCTO = [
+  { id: 'final', label: 'Producto final', hint: 'Se vende como producto terminado.' },
+  { id: 'subproducto', label: 'Producto interno', hint: 'Se fabrica para uso en planta; alimenta una materia prima.' },
+  { id: 'mp', label: 'Materia prima vendible', hint: 'Materia prima que también se vende.' },
+]
+const CLASES_IDS = CLASES_PRODUCTO.map(c => c.id)
+const NO_CATEGORIA = new Set(['final', 'subproducto', 'mp', 'otro'])
+
 const EMPTY_PROD = {
-  nombre: '', tipo: 'galleta', bache: 70, baches_mes: 3,
+  nombre: '', tipo: 'final', vendible: false, bache: 70, baches_mes: 3,
   merma: 0, comision: 3, precio_mayor: 10000, precio_detal: 15000,
   presentacion: 'Unidad', activo: true, mp_id: '',
   vida_util_valor: '', vida_util_unidad: 'meses', descripcion: '',
@@ -455,8 +465,20 @@ export default function Costos({ vista = 'productos' }) {
     queryFn: async () => { const { data } = await supabase.from('product_types').select('*').order('nombre'); return data || [] },
   })
   // Opciones del select de Tipo: gestionables + especiales fijos
-  const tipoLabel = (t) => ({ subproducto: 'Subproducto interno', mp: 'Materia prima vendible', otro: 'Otro' }[t] || (t.charAt(0).toUpperCase() + t.slice(1)))
+  const tipoLabel = (t) => ({ final: 'Producto final', subproducto: 'Producto interno', mp: 'Materia prima vendible', otro: 'Otro' }[t] || (t.charAt(0).toUpperCase() + t.slice(1)))
   const opcionesTipo = [...new Set([...tiposProducto.map(t => t.nombre), 'subproducto', 'mp', 'otro'])]
+  // Categorías de dominio disponibles (mermelada, infusión, pulpa…) = tipos gestionables.
+  const categoriasDominio = tiposProducto.map(t => t.nombre)
+  // Clase estructural de una ficha (compat: el `tipo` legado podía traer la categoría).
+  const claseDe = (p) => (p?.tipo === 'subproducto' ? 'subproducto' : p?.tipo === 'mp' ? 'mp' : 'final')
+  // Categoría principal de una ficha final (para agrupar la lista). Compat con `tipo` legado.
+  const catPrincipalDe = (p) => {
+    let cats = []
+    try { cats = Array.isArray(p?.categorias) ? p.categorias : JSON.parse(p?.categorias || '[]') } catch { cats = [] }
+    if (cats.length) return cats[0]
+    if (p?.tipo && !NO_CATEGORIA.has(p.tipo)) return p.tipo   // legado: tipo era la categoría
+    return 'otro'
+  }
   const [tiposModal, setTiposModal] = useState(false)
   const [nuevoTipo, setNuevoTipo] = useState('')
   const [confirmDel, setConfirmDel] = useState(null)   // ficha a eliminar (confirmación reforzada)
@@ -544,7 +566,10 @@ export default function Costos({ vista = 'productos' }) {
   const productosAgrupados = useMemo(() => {
     const map = new Map()
     for (const p of productos) {
-      const t = p.tipo || 'otro'
+      // Finales → agrupados por su categoría de dominio (mermelada, galleta…).
+      // Internos y MP vendibles → agrupados por su clase estructural.
+      const clase = claseDe(p)
+      const t = clase === 'final' ? catPrincipalDe(p) : clase
       if (!map.has(t)) map.set(t, [])
       map.get(t).push(p)
     }
@@ -1092,10 +1117,17 @@ export default function Costos({ vista = 'productos' }) {
     if (!p) return
     setEditingId(p.id)
     setSelFuente(`prod-${p.id}`)
-    setFormProd({ nombre: p.nombre, tipo: p.tipo, bache: p.bache, baches_mes: p.baches_mes, merma: p.merma, comision: p.comision, precio_mayor: p.precio_mayor, precio_detal: p.precio_detal, presentacion: p.presentacion || 'Unidad', activo: p.activo !== false, mp_id: p.mp_id || '', vida_util_valor: p.vida_util_valor || '', vida_util_unidad: p.vida_util_unidad || 'meses', descripcion: p.descripcion || '', empaca_surtido: !!p.empaca_surtido, metodo_loteo: normalizarMetodoLoteo(p.metodo_loteo),
+    const clase = claseDe(p)
+    // Un producto interno "también vendible" se refleja en la MP que alimenta (raw_materials.vendible).
+    const mpLink = p.mp_id ? mps.find(m => String(m.id) === String(p.mp_id)) : null
+    const vendible = clase === 'mp' ? true : (clase === 'subproducto' ? !!mpLink?.vendible : false)
+    setFormProd({ nombre: p.nombre, tipo: clase, vendible, bache: p.bache, baches_mes: p.baches_mes, merma: p.merma, comision: p.comision, precio_mayor: p.precio_mayor, precio_detal: p.precio_detal, presentacion: p.presentacion || 'Unidad', activo: p.activo !== false, mp_id: p.mp_id || '', vida_util_valor: p.vida_util_valor || '', vida_util_unidad: p.vida_util_unidad || 'meses', descripcion: p.descripcion || '', empaca_surtido: !!p.empaca_surtido, metodo_loteo: normalizarMetodoLoteo(p.metodo_loteo),
       utilidad_objetivo: p.utilidad_objetivo ?? '', iva_pct: p.iva_pct ?? '', imp_saludable_pct: p.imp_saludable_pct ?? '', ibua_valor: p.ibua_valor ?? '' })
     setCamposExtra(parseJSON(p.campos_personalizados, []))
-    setCategorias(parseJSON(p.categorias, []))
+    // Categorías de dominio: las guardadas + (compat) el `tipo` legado si era una categoría.
+    const catsGuardadas = parseJSON(p.categorias, []).filter(c => !NO_CATEGORIA.has(c))
+    const legadoCat = p.tipo && !NO_CATEGORIA.has(p.tipo) && !catsGuardadas.includes(p.tipo) ? [p.tipo] : []
+    setCategorias([...legadoCat, ...catsGuardadas])
     const adic = parseJSON(p.costos_adicionales, [])
     setAdicionales(adic.map(a => ({ ...a, _id: Date.now() + Math.random() })))
     const horas = parseJSON(p.costos_hora, []).map(c => ({ ...c, _id: Date.now() + Math.random() }))
@@ -1203,6 +1235,9 @@ export default function Costos({ vista = 'productos' }) {
       // metodo_loteo (v150/v155): NUNCA en el update principal — si la columna no existe
       // tumba todo el guardado. Se escribe aparte y se verifica con lectura.
       delete datos.metodo_loteo
+      // `vendible` es un indicador de UI (overlap interno+vendible): no es columna de la ficha.
+      // Se refleja en la MP que alimenta (raw_materials.vendible), más abajo.
+      delete datos.vendible
 
       if (editingId) {
         // Detectar cambios en cantidades/costos de ingredientes para guardar histórico
@@ -1248,6 +1283,11 @@ export default function Costos({ vista = 'productos' }) {
           equipo_unit: r.equipoUnit || 0,
         }).eq('id', idFicha)
       } catch { /* columnas opcionales: no bloquea el guardado */ }
+      // Overlap producto interno + vendible: marca la MP que alimenta como vendible (o no).
+      // Así "lo fabrico, alimenta una materia prima que también termina siendo vendible".
+      if (formProd.tipo === 'subproducto' && formProd.mp_id) {
+        try { await supabase.from('raw_materials').update({ vendible: !!formProd.vendible }).eq('id', parseInt(formProd.mp_id)) } catch { /* no bloquea el guardado */ }
+      }
       // Método de loteo (v150/v155) — escritura aparte + verificación de lectura.
       try {
         const idFicha = editingId || datos._newId
@@ -2061,13 +2101,12 @@ export default function Costos({ vista = 'productos' }) {
             <div className="form-grid">
                 <div className="form-group" style={{ gridColumn:'1 / -1' }}><label className="form-label">Nombre del Producto</label><input className="form-control" value={formProd.nombre} onChange={e => setFormProd(f=>({...f,nombre:e.target.value}))} placeholder="Nombre de mi producto" /></div>
                 <div className="form-group">
-                  <label className="form-label" style={{ display:'flex', alignItems:'center' }}>
-                    Tipo
-                    {esAdmin && <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft:'auto' }} onClick={() => setTiposModal(true)}><Ico as={Settings} size={14} />Gestionar</button>}
-                  </label>
-                  <Select className="form-control" value={formProd.tipo} onChange={e => setFormProd(f=>({...f,tipo:e.target.value}))}>
-                    {opcionesTipo.map(t => <option key={t} value={t}>{tipoLabel(t)}</option>)}
+                  <label className="form-label">Clase de producto</label>
+                  <Select className="form-control" value={CLASES_IDS.includes(formProd.tipo) ? formProd.tipo : 'final'}
+                    onChange={e => { const v = e.target.value; setFormProd(f => ({ ...f, tipo: v, vendible: v === 'mp' ? true : (v === 'final' ? false : f.vendible) })) }}>
+                    {CLASES_PRODUCTO.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                   </Select>
+                  <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>{CLASES_PRODUCTO.find(c => c.id === (CLASES_IDS.includes(formProd.tipo) ? formProd.tipo : 'final'))?.hint}</small>
                 </div>
                 <div className="form-group">
                   <label className="form-label">Presentación <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(elige de la lista)</small></label>
@@ -2097,20 +2136,30 @@ export default function Costos({ vista = 'productos' }) {
                       {mps.filter(m => m.tipo === 'interno' || m.vendible).map(m => <option key={m.id} value={m.id}>{m.nombre}</option>)}
                     </Select>
                     <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Indica a qué materia prima interna surte este producto cuando se fabrica. No es necesario al crear órdenes de producción.</small>
+                    <label style={{ display:'flex', alignItems:'center', gap:8, cursor:'pointer', marginTop:8 }}>
+                      <input type="checkbox" checked={!!formProd.vendible} onChange={e => setFormProd(f=>({...f, vendible: e.target.checked}))} />
+                      <span style={{ fontWeight:600, display:'inline-flex', alignItems:'center', color: formProd.vendible ? 'var(--selva)' : 'var(--texto-suave)' }}><Ico as={formProd.vendible ? Check : Plus} size={14} />También es materia prima vendible</span>
+                    </label>
+                    <small style={{ color:'var(--texto-suave)', fontSize:'0.72rem' }}>Márcalo si lo fabricas y la materia prima que alimenta también se vende. Marca esa MP como vendible al guardar.</small>
                   </div>
                 )}
-                {/* Categorías adicionales — cualquier producto puede pertenecer a varias */}
+                {/* Categorías de producto (mermelada, infusión, pulpa…) — una o varias.
+                    La primera marcada es la principal y agrupa la lista de fichas. */}
                 <div className="form-group" style={{ gridColumn:'1 / -1' }}>
-                  <label className="form-label">Categorías adicionales <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)' }}>(además del tipo principal, puede pertenecer a varias)</small></label>
+                  <label className="form-label" style={{ display:'flex', alignItems:'center' }}>
+                    Categoría del producto <small style={{ fontWeight:400, textTransform:'none', color:'var(--texto-suave)', marginLeft:6 }}>(mermelada, infusión, pulpa… — puede tener varias)</small>
+                    {esAdmin && <button type="button" className="btn btn-xs btn-secondary" style={{ marginLeft:'auto' }} onClick={() => setTiposModal(true)}><Ico as={Settings} size={14} />Gestionar</button>}
+                  </label>
                   <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
-                    {opcionesTipo.filter(t => t !== formProd.tipo).map(t => { const on = categorias.includes(t); return (
+                    {categoriasDominio.map(t => { const on = categorias.includes(t); return (
                       <button type="button" key={t} className={`btn btn-xs ${on ? 'btn-primary' : 'btn-secondary'}`}
                         onClick={() => setCategorias(cs => on ? cs.filter(x => x !== t) : [...cs, t])}>
                         <Ico as={on ? Check : Plus} size={12} />{tipoLabel(t)}
                       </button>
                     ) })}
+                    {categoriasDominio.length === 0 && <small style={{ color:'var(--texto-suave)' }}>No hay categorías. Usa <strong>Gestionar</strong> para crearlas (mermelada, infusión…).</small>}
                   </div>
-                  {categorias.length > 0 && <small style={{ display:'block', marginTop:4, color:'var(--selva)' }}>Categorías: {[formProd.tipo, ...categorias].map(tipoLabel).join(', ')}</small>}
+                  {categorias.length > 0 && <small style={{ display:'block', marginTop:4, color:'var(--selva)' }}>Categorías: {categorias.map(tipoLabel).join(', ')} · <strong>principal: {tipoLabel(categorias[0])}</strong></small>}
                 </div>
             </div>
 
@@ -3505,14 +3554,14 @@ export default function Costos({ vista = 'productos' }) {
             </>}
           </Modal>
 
-          <Modal open={tiposModal} onClose={() => setTiposModal(false)} title="Tipos de Producto"
+          <Modal open={tiposModal} onClose={() => setTiposModal(false)} title="Categorías de Producto"
             footer={<button className="btn btn-secondary" onClick={() => setTiposModal(false)}>Cerrar</button>}
           >
             <div className="alert alert-info" style={{ fontSize:'0.83rem' }}>
-              Crea o elimina los tipos de producto. "Subproducto interno" y "Otro" son fijos del sistema.
+              Crea o elimina las categorías de producto (mermelada, infusión, pulpa, galleta…). La <strong>clase</strong> (producto final / interno / materia prima vendible) se elige en la ficha, no aquí.
             </div>
             <div style={{ display:'flex', gap:8, marginBottom:12 }}>
-              <input className="form-control" placeholder="Nuevo tipo (ej. chocolate)" value={nuevoTipo} onChange={e => setNuevoTipo(e.target.value)} />
+              <input className="form-control" placeholder="Nueva categoría (ej. mermelada)" value={nuevoTipo} onChange={e => setNuevoTipo(e.target.value)} />
               <button className="btn btn-primary btn-sm" onClick={addTipo}>+ Crear</button>
             </div>
             {tiposProducto.length === 0
