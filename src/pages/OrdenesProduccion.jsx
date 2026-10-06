@@ -887,6 +887,29 @@ export default function OrdenesProduccion() {
     },
   })
 
+  // Lotes de la MISMA materia prima (solo subproductos internos).
+  // Regla del negocio: para productos internos los lotes se pueden repetir si son de DISTINTA
+  // materia prima; solo se enumeran consecutivos cuando pertenecen a la MISMA materia prima.
+  // Por eso la sugerencia del subproducto se calcula aislada por mp_id (no contra el histórico global).
+  const prepMpSubproducto = ordenPrep?.es_subproducto && ordenPrep?.mp_id ? ordenPrep.mp_id : null
+  const { data: lotesMismaMp = [], isFetched: lotesMismaMpListo } = useQuery({
+    queryKey: ['lotes_misma_mp', prepMpSubproducto],
+    enabled: !!prepMpSubproducto,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const [o, l, m] = await Promise.all([
+        supabase.from('production_orders').select('lote').eq('mp_id', prepMpSubproducto).not('lote', 'is', null).neq('lote', '').range(0, 9999),
+        supabase.from('raw_material_lots').select('lote').eq('mp_id', prepMpSubproducto).not('lote', 'is', null).neq('lote', '').range(0, 9999),
+        supabase.from('inventory_movements').select('lote').eq('mp_id', prepMpSubproducto).not('lote', 'is', null).neq('lote', '').range(0, 9999),
+      ])
+      return expandirLotes([
+        ...(o.data || []).map(x => x.lote),
+        ...(l.data || []).map(x => x.lote),
+        ...(m.data || []).map(x => x.lote),
+      ])
+    },
+  })
+
   // Producto de un lote (para autocompletar el nombre del surtido según el lote combinado)
   const productoDeLote = (lote) => {
     const k = String(lote || '').trim().split(/[,;]/)[0].trim()
@@ -903,6 +926,17 @@ export default function OrdenesProduccion() {
   //    (Evita el bug de sugerir 260826 cuando SQL no trae la config nAA.)
   const analisisLote = useMemo(() => {
     if (!ordenPrep) return null
+    // Subproducto interno: la numeración es independiente por materia prima. Solo cuentan los
+    // lotes de la MISMA MP; los de otras MP pueden repetirse, así que no entran en el cálculo.
+    if (prepMpSubproducto) {
+      const lotesMemoriaMp = expandirLotes(
+        ordenes
+          .filter(o => o.id !== ordenPrep.id && o.es_subproducto && String(o.mp_id) === String(prepMpSubproducto))
+          .map(o => o.lote)
+      )
+      const lotes = [...new Set([...lotesMismaMp, ...lotesMemoriaMp])]
+      return analizarSugerenciaLote(prepMetodoLoteo, lotes, { listo: lotesMismaMpListo })
+    }
     const lotesMemoria = expandirLotes([
       ...ordenes.filter(o => o.id !== ordenPrep.id).map(o => o.lote),
       ...prodRecords.filter(r => r.orden_id !== ordenPrep.id).map(r => r.lote),
@@ -910,7 +944,7 @@ export default function OrdenesProduccion() {
     ])
     const lotes = [...new Set([...lotesHistSugerencia, ...lotesMemoria])]
     return analizarSugerenciaLote(prepMetodoLoteo, lotes, { listo: lotesHistListo })
-  }, [prepMetodoLoteo, ordenPrep, ordenes, prodRecords, saldosMezcla, lotesHistSugerencia, lotesHistListo])
+  }, [prepMetodoLoteo, ordenPrep, ordenes, prodRecords, saldosMezcla, lotesHistSugerencia, lotesHistListo, prepMpSubproducto, lotesMismaMp, lotesMismaMpListo])
   const siguienteLoteSugerido = analisisLote?.sugerido || null
 
   // ===== RECONCILIACIÓN DE CIERRES OFFLINE =====
@@ -4552,9 +4586,16 @@ export default function OrdenesProduccion() {
                             </span>
                           )}
                         </>
-                      : !lotesHistListo
+                      : (prepMpSubproducto ? !lotesMismaMpListo : !lotesHistListo)
                         ? <span>Buscando lotes existentes para sugerir el siguiente…</span>
                         : <span>No hay lotes previos ni método en ficha — escribe el lote a mano o configura <strong>Serie nAA</strong> en la ficha.</span>}
+                  {prepMpSubproducto && (
+                    <span style={{ display: 'block', marginTop: 4, color: 'var(--selva)', lineHeight: 1.35 }}>
+                      ℹ Producto interno: la numeración es independiente por materia prima
+                      {(() => { const n = mps.find(m => String(m.id) === String(prepMpSubproducto))?.nombre; return n ? <> (<strong>{n}</strong>)</> : null })()}.
+                      El lote solo se enumera consecutivo dentro de la misma MP; con otra materia prima puede repetirse.
+                    </span>
+                  )}
                 </small>
               </div>
               <div className="form-group" style={{ margin: 0 }}><label className="form-label">Fecha de vencimiento *</label><input type="date" className="form-control" value={prepVence} onChange={e => setPrepVence(e.target.value)} disabled={!prepFechaInicio} />
