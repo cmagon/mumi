@@ -833,7 +833,7 @@ export default function OrdenesProduccion() {
   const { data: productos = [] } = useQuery({
     queryKey: ['products_costing', 'ordenes'],
     queryFn: async () => {
-      const base = 'id, nombre, tipo, bache, costo_final, costo_variable, activo, mp_id'
+      const base = 'id, nombre, tipo, bache, costo_final, costo_variable, activo, mp_id, presentacion'
       const r = await supabase.from('products_costing').select(base + ', empaca_surtido').order('nombre')
       if (r.error && /empaca_surtido/i.test(r.error.message || '')) {
         const fallback = await supabase.from('products_costing').select(base).order('nombre')
@@ -3617,7 +3617,11 @@ export default function OrdenesProduccion() {
       // Para una MP interna medida por peso, la orden se cuenta en la unidad de la MP (Kg, Gramo…),
       // no en "unidades": así el resultado se captura y acredita al inventario en esa unidad.
       const unidadMpFicha = esMpFicha ? (mps.find(m => String(m.id) === String(p?.mp_id))?.unidad || '') : ''
-      setForm(f => ({ ...f, producto: p?.nombre || '', origen: 'producto', origen_id: id, es_subproducto: p?.tipo === 'subproducto' || esMpFicha, es_mp: esMpFicha, mp_id: esMpFicha ? String(p?.mp_id || '') : f.mp_id, unidad: (esMpFicha && esUnidadPeso(unidadMpFicha)) ? unidadMpFicha : 'unidades', unidadesPorBache: parseFloat(p?.bache) || 0 }))
+      // Producto terminado: la cantidad se cuenta en su PRESENTACIÓN de ficha (Bolsa, Caja…),
+      // así la orden hereda la misma unidad que la ficha. MP interna por peso mantiene su unidad.
+      const esSub = p?.tipo === 'subproducto'
+      const presentacionFicha = (!esSub && !esMpFicha && p?.presentacion) ? String(p.presentacion) : ''
+      setForm(f => ({ ...f, producto: p?.nombre || '', origen: 'producto', origen_id: id, es_subproducto: esSub || esMpFicha, es_mp: esMpFicha, mp_id: esMpFicha ? String(p?.mp_id || '') : f.mp_id, unidad: (esMpFicha && esUnidadPeso(unidadMpFicha)) ? unidadMpFicha : (presentacionFicha || 'unidades'), unidadesPorBache: parseFloat(p?.bache) || 0 }))
       // Cargar la receta para permitir planear por ingrediente disponible
       const { data: full } = await supabase.from('products_costing').select('ingredientes, bache, rendimiento, desperdicio, peso_unidad, peso_subporcion').eq('id', id).single()
       if (full) {
@@ -4033,14 +4037,15 @@ export default function OrdenesProduccion() {
           )
         })()}
         <div className="form-grid-2">
-          <div className="form-group"><label className="form-label">Cantidad planificada (unidades) *</label><input type="number" className="form-control" value={form.cantidad_plan} onChange={e => {
+          <div className="form-group"><label className="form-label">Cantidad planificada ({form.unidad || 'unidades'}) *</label><input type="number" className="form-control" value={form.cantidad_plan} onChange={e => {
             const v = e.target.value
             setForm(f => ({ ...f, cantidad_plan: v, baches_plan: '' }))
           }} min={0} readOnly={empacarSaldo === true && Object.keys(saldoPackSel).length > 0} style={empacarSaldo === true && Object.keys(saldoPackSel).length > 0 ? { background: 'var(--crema)' } : undefined} /></div>
-          <div className="form-group"><label className="form-label">Unidad</label>
+          <div className="form-group"><label className="form-label">Unidad / presentación</label>
             <Select className="form-control" value={form.unidad} onChange={e => setForm(f => ({ ...f, unidad: e.target.value }))}>
-              <option value="unidades">unidades</option><option value="cajas">cajas</option><option value="kilos">kilos</option><option value="bolsas">bolsas</option>
+              {[...new Set(['unidades', 'cajas', 'kilos', 'bolsas', ...(form.unidad ? [form.unidad] : [])])].map(u => <option key={u} value={u}>{u}</option>)}
             </Select>
+            <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Se toma de la presentación de la ficha; puedes cambiarla aquí.</small>
           </div>
         </div>
         {/* Guía: equivalencia de un bache según el producto elegido */}
@@ -4265,7 +4270,7 @@ export default function OrdenesProduccion() {
               {ordenActiva.notas_orden && <><br /><strong>Notas:</strong> {ordenActiva.notas_orden}</>}
             </div>
             <div className="form-grid-2">
-              <div className="form-group"><label className="form-label">Cantidad resultante</label><input type="number" className="form-control" value={ejec.cantidad_result} onChange={e => setEjec(s => ({ ...s, cantidad_result: e.target.value }))} disabled={soloLectura} /></div>
+              <div className="form-group"><label className="form-label">Cantidad producida{ordenActiva.unidad ? ` (${ordenActiva.unidad})` : ''}</label><input type="number" className="form-control" value={ejec.cantidad_result} onChange={e => setEjec(s => ({ ...s, cantidad_result: e.target.value }))} disabled={soloLectura} /></div>
               <div className="form-group"><label className="form-label">Fecha producción</label><input type="date" className="form-control" value={ejec.fecha_prod || ''} onChange={e => setEjec(s => ({ ...s, fecha_prod: e.target.value }))} disabled={soloLectura} /></div>
             </div>
             <div className="form-grid-3">
@@ -4699,7 +4704,7 @@ export default function OrdenesProduccion() {
               <div className="form-grid-2" style={{ marginTop: 8 }}>
                 <div className="form-group" style={{ margin: 0 }}>
                   <label className="form-label">
-                    {esInternoPeso ? 'Cantidad obtenida *' : esUnidadPeso(prepMpUnidad) ? `${prepMpUnidad} obtenidos *` : 'Unidades obtenidas *'}
+                    {esInternoPeso ? 'Cantidad obtenida *' : esUnidadPeso(prepMpUnidad) ? `${prepMpUnidad} obtenidos *` : (ordenPrep.unidad && ordenPrep.unidad !== 'unidades' ? `${ordenPrep.unidad} obtenidas *` : 'Unidades obtenidas *')}
                     {ordenPrep.empaque_saldo ? ' (del saldo empacado)' : ''}
                   </label>
                   <div style={{ display: 'flex', gap: 8, alignItems: 'stretch' }}>

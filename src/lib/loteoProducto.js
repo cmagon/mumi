@@ -15,6 +15,8 @@ export const FICHAS_LOTEO = [
   { id: 'aa', tipo: 'aa', label: 'Año aa', hint: '26', grupoAnio: true },
   { id: 'aaaa', tipo: 'aaaa', label: 'Año aaaa', hint: '2026', grupoAnio: true },
   { id: 'mm', tipo: 'mm', label: 'Mes mm', hint: '08', unica: true },
+  { id: 'mmm', tipo: 'mmm', label: 'Mes abrev.', hint: 'oct', unica: true },
+  { id: 'mmmm', tipo: 'mmmm', label: 'Mes en texto', hint: 'octubre', unica: true },
   { id: 'dd', tipo: 'dd', label: 'Día dd', hint: '06', unica: true },
   { id: 'texto', tipo: 'texto', label: 'Texto', hint: 'ABC…', pideValor: true },
   { id: 'sep', tipo: 'sep', label: 'Separador', hint: '-', pideValor: true, defaultValor: '-' },
@@ -56,7 +58,27 @@ export const ATAJOS_LOTEO = [
     desc: '06/10/2026',
     config: { metodo: 'patron', partes: [{ tipo: 'dd' }, { tipo: 'sep', valor: '/' }, { tipo: 'mm' }, { tipo: 'sep', valor: '/' }, { tipo: 'aaaa' }], reinicio: 'nunca' },
   },
+  {
+    id: 'fecha_mes_abrev',
+    label: 'Fecha con mes abrev.',
+    desc: '06-oct-2026',
+    config: { metodo: 'patron', partes: [{ tipo: 'dd' }, { tipo: 'sep', valor: '-' }, { tipo: 'mmm' }, { tipo: 'sep', valor: '-' }, { tipo: 'aaaa' }], reinicio: 'nunca' },
+  },
+  {
+    id: 'fecha_mes_texto',
+    label: 'Mes en texto + año',
+    desc: 'octubre-2026',
+    config: { metodo: 'patron', partes: [{ tipo: 'mmmm' }, { tipo: 'sep', valor: '-' }, { tipo: 'aaaa' }], reinicio: 'nunca' },
+  },
 ]
+
+/** Nombres de mes en español (índice 0 = enero). */
+export const MESES_NOMBRE = ['enero', 'febrero', 'marzo', 'abril', 'mayo', 'junio', 'julio', 'agosto', 'septiembre', 'octubre', 'noviembre', 'diciembre']
+export const MESES_ABREV = ['ene', 'feb', 'mar', 'abr', 'may', 'jun', 'jul', 'ago', 'sep', 'oct', 'nov', 'dic']
+function mesTexto(fecha, abrev) {
+  const i = fecha.getMonth()
+  return (abrev ? MESES_ABREV[i] : MESES_NOMBRE[i]) || ''
+}
 
 const p2 = (n) => String(n).padStart(2, '0')
 
@@ -121,7 +143,7 @@ function normalizarParte(p) {
     if (tipo === 'texto' && !valor) return { tipo: 'texto', valor: '' }
     return { tipo, valor: valor || (tipo === 'sep' ? '-' : '') }
   }
-  if (['aa', 'aaaa', 'mm', 'dd'].includes(tipo)) return { tipo }
+  if (['aa', 'aaaa', 'mm', 'mmm', 'mmmm', 'dd'].includes(tipo)) return { tipo }
   return null
 }
 
@@ -158,6 +180,8 @@ export function etiquetaParte(parte) {
   if (parte.tipo === 'aa') return 'aa'
   if (parte.tipo === 'aaaa') return 'aaaa'
   if (parte.tipo === 'mm') return 'mm'
+  if (parte.tipo === 'mmm') return 'mes'
+  if (parte.tipo === 'mmmm') return 'mes texto'
   if (parte.tipo === 'dd') return 'dd'
   if (parte.tipo === 'texto') return parte.valor ? `"${parte.valor}"` : 'Texto…'
   if (parte.tipo === 'sep') return parte.valor || '-'
@@ -169,15 +193,18 @@ function valorParteFija(parte, fecha) {
   if (parte.tipo === 'aa') return anioStr(fecha, 'aa')
   if (parte.tipo === 'aaaa') return anioStr(fecha, 'aaaa')
   if (parte.tipo === 'mm') return p2(fecha.getMonth() + 1)
+  if (parte.tipo === 'mmm') return mesTexto(fecha, true)
+  if (parte.tipo === 'mmmm') return mesTexto(fecha, false)
   if (parte.tipo === 'dd') return p2(fecha.getDate())
   if (parte.tipo === 'texto' || parte.tipo === 'sep') return parte.valor || ''
   return null
 }
 
 /** Longitud fija de una parte (null = variable / seq). */
-function lenFija(parte) {
+function lenFija(parte, fecha = new Date()) {
   if (parte.tipo === 'aa' || parte.tipo === 'mm' || parte.tipo === 'dd') return 2
   if (parte.tipo === 'aaaa') return 4
+  if (parte.tipo === 'mmm' || parte.tipo === 'mmmm') return valorParteFija(parte, fecha).length
   if (parte.tipo === 'texto' || parte.tipo === 'sep') return (parte.valor || '').length
   return null
 }
@@ -242,10 +269,15 @@ export function parseSeqDeLote(lote, config, fechaRef = new Date()) {
   for (let k = 0; k < idxSeq; k++) {
     const p = partes[k]
     const v = valorParteFija(p, fechaRef)
-    const len = lenFija(p)
+    const len = lenFija(p, fechaRef)
     if (p.tipo === 'texto' || p.tipo === 'sep') {
       if (!L.startsWith(p.valor || '', i)) return null
       i += (p.valor || '').length
+      continue
+    }
+    if (p.tipo === 'mmm' || p.tipo === 'mmmm') {
+      if (!L.startsWith(v, i)) return null
+      i += v.length
       continue
     }
     // fecha: validar dígitos de longitud fija; con reinicio anual exigir año actual
@@ -261,11 +293,16 @@ export function parseSeqDeLote(lote, config, fechaRef = new Date()) {
   for (let k = partes.length - 1; k > idxSeq; k--) {
     const p = partes[k]
     const v = valorParteFija(p, fechaRef)
-    const len = lenFija(p)
+    const len = lenFija(p, fechaRef)
     if (p.tipo === 'texto' || p.tipo === 'sep') {
       const lit = p.valor || ''
       if (L.slice(j - lit.length, j) !== lit) return null
       j -= lit.length
+      continue
+    }
+    if (p.tipo === 'mmm' || p.tipo === 'mmmm') {
+      if (L.slice(j - v.length, j) !== v) return null
+      j -= v.length
       continue
     }
     if (len == null) return null
@@ -478,7 +515,13 @@ export function agregarParte(partes, ficha, valorExtra = '') {
     }
     return [...list, { tipo: 'seq', ancho: 2 }]
   }
-  if (tipo === 'mm' || tipo === 'dd') {
+  // Mes: un solo formato a la vez (mm numérico, mmm abreviado o mmmm en texto).
+  if (tipo === 'mm' || tipo === 'mmm' || tipo === 'mmmm') {
+    const sinMes = list.filter(p => p.tipo !== 'mm' && p.tipo !== 'mmm' && p.tipo !== 'mmmm')
+    if (sinMes.length !== list.length && list.some(p => p.tipo === tipo)) return list
+    return [...sinMes, { tipo }]
+  }
+  if (tipo === 'dd') {
     if (list.some(p => p.tipo === tipo)) return list
     return [...list, { tipo }]
   }
