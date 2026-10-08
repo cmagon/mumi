@@ -258,8 +258,8 @@ export const GRUPOS = [
   {
     id: 'costo', titulo: 'Costos',
     campos: [
-      B('costo.total', 'Costo total de la orden', 'numero', 'Costo total.'),
-      B('costo.unitario', 'Costo por unidad', 'numero', 'Costo unitario.'),
+      B('costo.total', 'Costo total de la orden', 'numero', 'Es un dato calculado (se ve en Costos); no se digita. Aún no se imprime en la orden.'),
+      B('costo.unitario', 'Costo por unidad', 'numero', 'Es un dato calculado (se ve en Costos); no se digita. Aún no se imprime en la orden.'),
     ],
   },
   {
@@ -328,9 +328,21 @@ export const CAPTURA_UI = [
   { titulo: 'Verificaciones previas', ids: ['check.despeje_linea', 'check.equipos_limpios', 'check.personal_dotacion', 'check.mp_verificada', 'check.balanzas_calibradas'] },
   { titulo: 'Control en proceso', ids: ['calidad.temp_proceso', 'calidad.brix', 'calidad.ph', 'calidad.aw', 'calidad.humedad', 'calidad.acidez', 'calidad.temp_envasado', 'calidad.temp_producto_final'] },
   { titulo: 'Características organolépticas', ids: ['calidad.color', 'calidad.olor', 'calidad.sabor', 'calidad.textura', 'calidad.apariencia'] },
-  { titulo: 'Producto terminado', ids: ['check.sellado_ok', 'check.etiqueta_ok', 'check.detector_metales', 'check.muestra_retencion', 'calidad.peso_neto_muestra', 'calidad.cuerpos_extranos'] },
-  { titulo: 'Ambiente, equipo y personal', ids: ['ambiente.temperatura', 'ambiente.humedad_relativa', 'equipo.principal', 'personal.supervisor'] },
+  { titulo: 'Producto terminado', ids: ['check.sellado_ok', 'check.etiqueta_ok', 'check.detector_metales', 'check.muestra_retencion', 'calidad.peso_neto_muestra', 'calidad.sellado', 'calidad.cuerpos_extranos'] },
+  { titulo: 'Ambiente, equipo y personal', ids: ['ambiente.temperatura', 'ambiente.humedad_relativa', 'ambiente.temp_cuarto_frio', 'ambiente.presion_diferencial', 'equipo.principal', 'personal.supervisor'] },
+  { titulo: 'Datos de la orden', ids: ['orden.turno', 'orden.linea', 'orden.cliente', 'orden.prioridad', 'orden.autorizada_por'] },
+  { titulo: 'Personal y responsables', ids: ['personal.auxiliar', 'personal.control_calidad', 'personal.jefe_produccion', 'personal.liberado_por', 'personal.fecha_capacitacion'] },
+  { titulo: 'Tiempos de proceso', ids: ['tiempo.coccion', 'tiempo.enfriamiento', 'tiempo.reposo'] },
+  { titulo: 'Equipos e instrumentos', ids: ['equipo.codigo', 'equipo.balanza', 'equipo.termometro', 'equipo.refractometro', 'equipo.phmetro', 'equipo.calibracion_vigente', 'equipo.mantenimiento'] },
+  { titulo: 'Limpieza y desinfección', ids: ['limpieza.ultima_fecha', 'limpieza.responsable', 'limpieza.desinfectante', 'limpieza.verificada_por'] },
+  { titulo: 'Empaque y embalaje', ids: ['empaque.tipo', 'empaque.lote_envase', 'empaque.lote_caja', 'empaque.lote_etiqueta', 'empaque.unidades_por_caja', 'empaque.peso_bruto_caja', 'empaque.atmosfera', 'cantidad.cajas', 'cantidad.reproceso'] },
+  { titulo: 'Producto y rotulado', ids: ['producto.codigo_interno', 'producto.condiciones_conservacion', 'producto.alergenos', 'producto.version_receta', 'rotulo.ingredientes', 'rotulo.pais_origen', 'rotulo.contenido_neto', 'rotulo.tabla_nutricional'] },
+  { titulo: 'Calidad: resultado final', ids: ['calidad.resultado', 'calidad.analista', 'calidad.observaciones', 'obs.supervisor'] },
+  { titulo: 'No conformidades y acciones', ids: ['nc.descripcion', 'nc.causa', 'nc.accion_correctiva', 'nc.disposicion', 'nc.responsable', 'nc.numero_acpm'] },
+  { titulo: 'Liberación del lote y despacho', ids: ['check.liberado', 'liberacion.estado', 'liberacion.fecha', 'liberacion.aprobado_por', 'liberacion.analisis_micro', 'lote.fecha_envasado', 'lote.cuarentena_hasta', 'traza.destino', 'traza.factura_remision'] },
 ]
+// Campos de texto largo (se muestran como área de texto en el formulario)
+export const IDS_TEXTO_LARGO = new Set(['nc.descripcion', 'nc.causa', 'nc.accion_correctiva', 'rotulo.ingredientes', 'producto.alergenos', 'calidad.observaciones', 'obs.supervisor', 'rotulo.tabla_nutricional'])
 const CAPT_META = {
   'calidad.temp_proceso': { unidad: '°C', ejemplo: '92' }, 'calidad.brix': { unidad: '°Brix', ejemplo: '66' },
   'calidad.ph': { unidad: '', ejemplo: '3,4' }, 'calidad.aw': { unidad: '', ejemplo: '0,82' },
@@ -344,14 +356,49 @@ const CAPT_META = {
   'check.despeje_linea': { ejemplo: 'SI' }, 'check.equipos_limpios': { ejemplo: 'SI' }, 'check.personal_dotacion': { ejemplo: 'SI' },
   'check.mp_verificada': { ejemplo: 'SI' }, 'check.balanzas_calibradas': { ejemplo: 'SI' }, 'check.sellado_ok': { ejemplo: 'SI' },
   'check.etiqueta_ok': { ejemplo: 'SI' }, 'check.detector_metales': { ejemplo: 'SI' }, 'check.muestra_retencion': { ejemplo: 'NO' },
+  'calidad.sellado': { ejemplo: 'Hermético, sin arrugas' }, 'ambiente.temp_cuarto_frio': { unidad: '°C', ejemplo: '4' }, 'ambiente.presion_diferencial': { ejemplo: '+10 Pa' },
+  'orden.turno': { ejemplo: 'Mañana' }, 'orden.linea': { ejemplo: 'Línea 1 — Bocadillos' }, 'orden.cliente': { ejemplo: 'Cliente Éxito — pedido 4581' },
+  'orden.prioridad': { ejemplo: 'Normal' }, 'orden.autorizada_por': { ejemplo: 'Gerencia' },
+  'personal.auxiliar': { ejemplo: 'Luis Gómez' }, 'personal.control_calidad': { ejemplo: 'Ana Torres' }, 'personal.jefe_produccion': { ejemplo: 'Carlos Ruiz' },
+  'personal.liberado_por': { ejemplo: 'Ana Torres' }, 'personal.fecha_capacitacion': { ejemplo: '2026-03-15' },
+  'tiempo.coccion': { ejemplo: '1 h 40 min' }, 'tiempo.enfriamiento': { ejemplo: '30 min' }, 'tiempo.reposo': { ejemplo: '12 h' },
+  'equipo.codigo': { ejemplo: 'EQ-014' }, 'equipo.balanza': { ejemplo: 'BAL-03' }, 'equipo.termometro': { ejemplo: 'TER-02' },
+  'equipo.refractometro': { ejemplo: 'REF-01' }, 'equipo.phmetro': { ejemplo: 'PH-01' }, 'equipo.calibracion_vigente': { ejemplo: '2026-12-01' }, 'equipo.mantenimiento': { ejemplo: '2026-08-20' },
+  'limpieza.ultima_fecha': { ejemplo: '2026-10-05' }, 'limpieza.responsable': { ejemplo: 'Luis Gómez' }, 'limpieza.desinfectante': { ejemplo: 'Amonio cuaternario 200 ppm' }, 'limpieza.verificada_por': { ejemplo: 'Ana Torres' },
+  'empaque.tipo': { ejemplo: 'Bolsa metalizada' }, 'empaque.lote_envase': { ejemplo: 'ENV-2210' }, 'empaque.lote_caja': { ejemplo: 'CJ-118' }, 'empaque.lote_etiqueta': { ejemplo: 'ET-077' },
+  'empaque.unidades_por_caja': { unidad: 'und', ejemplo: '24' }, 'empaque.peso_bruto_caja': { unidad: 'kg', ejemplo: '1,2' }, 'empaque.atmosfera': { ejemplo: 'Sin vacío' },
+  'cantidad.cajas': { unidad: 'cajas', ejemplo: '20' }, 'cantidad.reproceso': { ejemplo: '0' },
+  'producto.codigo_interno': { ejemplo: 'BOC-040' }, 'producto.condiciones_conservacion': { ejemplo: 'Lugar fresco y seco' }, 'producto.alergenos': { ejemplo: 'Ninguno' }, 'producto.version_receta': { ejemplo: 'v3' },
+  'rotulo.ingredientes': { ejemplo: 'Guayaba, azúcar, pectina' }, 'rotulo.pais_origen': { ejemplo: 'Colombia' }, 'rotulo.contenido_neto': { ejemplo: '40 g' }, 'rotulo.tabla_nutricional': { ejemplo: 'Verificada' },
+  'calidad.resultado': { ejemplo: 'Conforme' }, 'calidad.analista': { ejemplo: 'Ana Torres' }, 'calidad.observaciones': { ejemplo: 'Sin novedades' }, 'obs.supervisor': { ejemplo: 'Lote aprobado' },
+  'nc.descripcion': { ejemplo: 'Sin no conformidades' }, 'nc.causa': { ejemplo: '' }, 'nc.accion_correctiva': { ejemplo: '' }, 'nc.disposicion': { ejemplo: '' }, 'nc.responsable': { ejemplo: '' }, 'nc.numero_acpm': { ejemplo: '' },
+  'check.liberado': { ejemplo: 'SI' }, 'liberacion.estado': { ejemplo: 'Liberado' }, 'liberacion.fecha': { ejemplo: '2026-10-07' }, 'liberacion.aprobado_por': { ejemplo: 'Ana Torres' },
+  'liberacion.analisis_micro': { ejemplo: 'LAB-2210' }, 'lote.fecha_envasado': { ejemplo: '2026-10-06' }, 'lote.cuarentena_hasta': { ejemplo: '' },
+  'traza.destino': { ejemplo: 'Bodega principal' }, 'traza.factura_remision': { ejemplo: 'FV-1203' },
 }
 export const IDS_CAPTURA = new Set(CAPTURA_UI.flatMap(g => g.ids))
+// Campos que el sistema DERIVA solo (antes «en blanco»): se calculan de la ficha, la orden o Configuración.
+const DERIVADOS = {
+  'empresa.registro_sanitario': ['Se toma de Configuración → datos de la empresa.', 'INVIMA RSAL-12345'],
+  'empresa.representante': ['Se toma de Configuración → datos de la empresa.', 'Juan Pérez'],
+  'tiempo.duracion': ['Calculada con las horas de inicio/fin (o la suma de los procesos en modo avanzado).', '4 h 15 min'],
+  'cantidad.rendimiento_pct': ['Peso obtenido ÷ mezcla total de la receta (si se registró el peso obtenido).', '78,4%'],
+  'cantidad.merma_pct': ['100% − rendimiento (si se registró el peso obtenido).', '21,6%'],
+  'producto.registro_invima': ['Se toma de los datos adicionales de la ficha («Registro Invima»).', 'RSAL-12345'],
+  'producto.codigo_barras': ['Se toma de los datos adicionales de la ficha («Código de barras»).', '7701234567890'],
+  'producto.vida_util': ['Se toma de la vida útil definida en la ficha del producto.', '12 mes(es)'],
+}
+for (const g of GRUPOS) for (const c of g.campos) {
+  const d = DERIVADOS[c.id]
+  if (d) { c.estado = 'auto'; c.desc = d[0]; c.ejemplo = d[1] }
+}
+const aFechaCo = (v) => (/^\d{4}-\d{2}-\d{2}$/.test(v) ? v.split('-').reverse().join('/') : v)
 for (const g of GRUPOS) for (const c of g.campos) {
   const m = CAPT_META[c.id]
   if (IDS_CAPTURA.has(c.id) && m) {
     c.estado = 'captura'
     c.unidad = m.unidad || ''
-    c.ejemplo = m.ejemplo ?? ''
+    c.ejemplo = c.tipo === 'fecha' ? aFechaCo(m.ejemplo ?? '') : (m.ejemplo ?? '')
     c.desc = c.desc + ' Lo diligencia el operario en la orden (Controles de proceso y calidad).'
   }
 }
@@ -435,7 +482,7 @@ export const INSTRUCTIVO = [
       'No importan las mayúsculas: {{LOTE.NUMERO}} funciona igual que {{lote.numero}}.',
       'Puedes mezclar texto y marcadores en la misma celda: «Lote: {{lote.numero}} — vence {{lote.fecha_vencimiento}}».',
       'Si escribes un ID que no existe, esa parte se imprime en blanco y la pantalla de carga te avisa cuál es.',
-      'Los campos «Automático» los llena el sistema. Los «Se capturan en la orden» (pH, °Brix, temperaturas, verificaciones…) los diligencia el operario en el paso de resultados («Controles de proceso y calidad») y salen en la plantilla. Los «Queda en blanco» aún no se capturan: se imprimen vacíos para escribirlos a mano; ya tienen su ID reservado.',
+      'Los campos «Automático» los llena el sistema. Los «Se capturan en la orden» (pH, °Brix, temperaturas, verificaciones, equipos, limpieza, empaque, no conformidades, liberación…) los diligencia el operario en el paso de resultados («Controles de proceso, calidad y trazabilidad») y salen en la plantilla. Algunos se derivan solos (duración, rendimiento, registro INVIMA y código de barras de la ficha, datos de empresa de Configuración). Los «Queda en blanco» (solo costos, que son datos calculados) se imprimen vacíos.',
     ],
   },
   {
@@ -489,6 +536,6 @@ export const capturaParaFormulario = () => CAPTURA_UI.map(g => ({
   titulo: g.titulo,
   campos: g.ids.map(id => {
     const c = GRUPOS.flatMap(x => x.campos).find(x => x.id === id)
-    return { id, label: c.label, tipo: c.tipo, unidad: c.unidad || '' }
+    return { id, label: c.label, tipo: c.tipo, unidad: c.unidad || '', largo: IDS_TEXTO_LARGO.has(id) }
   }),
 }))

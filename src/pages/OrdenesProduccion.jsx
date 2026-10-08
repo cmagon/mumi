@@ -13,6 +13,7 @@ import { generarPlantillaBase, htmlOrdenDesdePlantilla, escanearPlantilla, desca
 import { obtenerDocumentoVivo, publicarArchivoDocumento, esArchivoExcel, COD_ORDEN } from '../lib/documentoVivo'
 import { BibliotecaCamposModal, InstructivoPlantillaModal, CargarPlantillaModal } from '../components/ordenes/PlantillasOrdenModal'
 import ControlesProceso, { limpiarControles } from '../components/ordenes/ControlesProceso'
+import { CAMPO_POR_ID } from '../lib/plantillaCampos'
 import { esCategoriaEmpaque, stockSeMovioAlReservar } from '../lib/reservasMp'
 import { writeOrQueue } from '../lib/offlineQueue'
 import { encolarEfectos, aplicarEfectos, contarEfectos, onEfectosChange, ordenesConEfectosPendientes } from '../lib/efectosPendientes'
@@ -958,6 +959,7 @@ export default function OrdenesProduccion() {
         'doc.fecha_impresion': new Date().toLocaleDateString('es-CO'), 'orden.numero': 'OP-',
         'empresa.nombre': cfg.empresa || '', 'empresa.nit': cfg.nit || '', 'empresa.direccion': cfg.direccion || '',
         'empresa.ciudad': cfg.ciudad || '', 'empresa.telefono': cfg.telefono || '',
+        'empresa.registro_sanitario': cfg.registro_sanitario || '', 'empresa.representante': cfg.representante || '',
       },
       sino: {}, listas: {}, imagenes: { 'empresa.logo': cfg.logo_url || '' },
     }
@@ -2049,6 +2051,22 @@ export default function OrdenesProduccion() {
         const sn = (v) => (v === true || v === false) ? v : null
         const fF = (x) => x ? new Date(x + 'T00:00:00').toLocaleDateString('es-CO') : ''
         const lotesTraza = filasIngPrint.flatMap(f => (f.traza?.lotes || [])).map(l => lineaLoteVenceTraza(l))
+        // Datos que se DERIVAN solos: de la ficha (registro INVIMA, código de barras, vida útil) y de la orden
+        let fichaExtra = {}
+        if (o.origen === 'producto' && o.origen_id) {
+          try { const rf = await supabase.from('products_costing').select('campos_personalizados, vida_util_valor, vida_util_unidad').eq('id', o.origen_id).single(); if (!rf.error) fichaExtra = rf.data || {} } catch { /* sin datos de ficha */ }
+        }
+        const cps = (() => { try { return Array.isArray(fichaExtra.campos_personalizados) ? fichaExtra.campos_personalizados : JSON.parse(fichaExtra.campos_personalizados || '[]') } catch { return [] } })()
+        const cpVal = (re) => String((cps.find(c => re.test(String(c?.nombre || ''))) || {}).valor || '')
+        const aMin = (hhmm) => { const mm = String(hhmm || '').match(/^(\d{1,2}):(\d{2})/); return mm ? (+mm[1]) * 60 + (+mm[2]) : null }
+        const durMin = (a, b) => { const x = aMin(a), y = aMin(b); if (x == null || y == null) return null; return y >= x ? y - x : y + 1440 - x }
+        let minTot = null
+        if (vModoAvanzado) { const ds = procRows.map(pr => durMin(pr.inicio, pr.fin)).filter(v => v != null); minTot = ds.length ? ds.reduce((a, v) => a + v, 0) : null }
+        else minTot = durMin(vHoraInicio, vHoraFin)
+        const durTxt = minTot == null ? '' : `${Math.floor(minTot / 60)} h ${String(minTot % 60).padStart(2, '0')} min`
+        const pfNum = parseFloat(vPesoFinal) || 0
+        const rend = pfNum > 0 && totalG > 0 ? pfNum / totalG * 100 : null
+        const pctTxt = (v) => v == null ? '' : v.toFixed(1).replace('.', ',') + '%'
         const datosPl = {
           v: {
             'doc.codigo': COD_ORDEN, 'doc.version': docOrden?.version || '1', 'doc.titulo': 'Orden de producción',
@@ -2078,6 +2096,10 @@ export default function OrdenesProduccion() {
             'traza.lotes_mp': [...new Set(lotesTraza.map(x => x.lot))].join(', '),
             'traza.proveedores': [...new Set(lotesTraza.map(x => x.prov).filter(pv => pv !== NA_TRAZA))].join(', '),
             'obs.notas': o.notas_orden || '', 'obs.resultado': o.obs_result || '',
+            'empresa.registro_sanitario': cfg.registro_sanitario || '', 'empresa.representante': cfg.representante || '',
+            'tiempo.duracion': durTxt, 'cantidad.rendimiento_pct': pctTxt(rend), 'cantidad.merma_pct': rend != null ? pctTxt(Math.max(0, 100 - rend)) : '',
+            'producto.registro_invima': cpVal(/invima|registro|notificaci/i), 'producto.codigo_barras': cpVal(/barras|ean|gtin/i),
+            'producto.vida_util': fichaExtra.vida_util_valor ? `${fichaExtra.vida_util_valor} ${fichaExtra.vida_util_unidad === 'dias' ? 'día(s)' : 'mes(es)'}` : '',
           },
           sino: { 'check.conforme': sn(vConforme), 'check.empaco_surtido': sn(vSurtido), 'check.hay_sobrante': sn(vHaySobrante) },
           listas: {
@@ -2104,7 +2126,10 @@ export default function OrdenesProduccion() {
         // Controles de proceso/calidad que diligenció el operario → sus marcadores ({{calidad.ph}}, {{check.despeje_linea}}…)
         for (const [cid, cv] of Object.entries(vControles || {})) {
           if (typeof cv === 'boolean') datosPl.sino[cid] = cv
-          else if (cv != null && String(cv).trim() !== '') datosPl.v[cid] = String(cv)
+          else if (cv != null && String(cv).trim() !== '') {
+            const sv = String(cv)
+            datosPl.v[cid] = (CAMPO_POR_ID[cid]?.tipo === 'fecha' && /^\d{4}-\d{2}-\d{2}$/.test(sv)) ? sv.split('-').reverse().join('/') : sv
+          }
         }
         htmlPlantilla = await htmlOrdenDesdePlantilla(bufPlantilla, datosPl, { titulo: archivoNombre, marcaAgua: o.estado === 'cancelada' ? 'NO EJECUTADA' : '' })
       }

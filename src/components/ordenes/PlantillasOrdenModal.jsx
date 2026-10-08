@@ -42,7 +42,7 @@ export function BibliotecaCamposModal({ open, onClose }) {
       footer={<button className="btn btn-secondary" onClick={onClose}>Cerrar</button>}>
       <div className="alert alert-info" style={{ fontSize: '0.83rem' }}>
         Escribe el marcador tal cual (con las dobles llaves) en cualquier celda de tu Excel. Pulsa <b>Copiar</b> para llevarlo al portapapeles.
-        Los <b>«Se capturan en la orden»</b> (pH, °Brix, temperaturas, verificaciones…) los diligencia el operario en el paso de resultados. Los <b>«Queda en blanco»</b> son propios de la industria de alimentos que aún no se capturan: se imprimen vacíos para llenarlos a mano.
+        Los <b>«Se capturan en la orden»</b> (pH, °Brix, temperaturas, verificaciones, equipos, limpieza, empaque, no conformidades, liberación…) los diligencia el operario en el paso de resultados. Los <b>«Queda en blanco»</b> (hoy solo los de costos, que son datos calculados) se imprimen vacíos.
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
         <div style={{ position: 'relative', flex: '1 1 220px' }}>
