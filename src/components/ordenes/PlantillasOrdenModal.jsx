@@ -12,10 +12,10 @@ const Ico = ({ as: C, size = 14 }) => <C size={size} style={{ display: 'inline',
 
 const copiar = async (txt) => { try { await navigator.clipboard.writeText(txt); return true } catch { return false } }
 
-function Etiqueta({ auto }) {
-  return auto
-    ? <span className="badge badge-verde" title="El sistema lo llena con datos reales de la orden">Automático</span>
-    : <span className="badge badge-dorado" title="Aún no se captura en el sistema: se imprime en blanco para escribirlo a mano. El ID ya queda reservado.">Queda en blanco</span>
+function Etiqueta({ estado }) {
+  if (estado === 'auto') return <span className="badge badge-verde" title="El sistema lo llena con datos reales de la orden">Automático</span>
+  if (estado === 'captura') return <span className="badge badge-azul" title="Lo diligencia el operario en el paso de resultados de la orden («Controles de proceso y calidad»)">Se captura en la orden</span>
+  return <span className="badge badge-dorado" title="Aún no se captura en el sistema: se imprime en blanco para escribirlo a mano. El ID ya queda reservado.">Queda en blanco</span>
 }
 
 // ───────────────────────── Biblioteca ─────────────────────────
@@ -42,14 +42,14 @@ export function BibliotecaCamposModal({ open, onClose }) {
       footer={<button className="btn btn-secondary" onClick={onClose}>Cerrar</button>}>
       <div className="alert alert-info" style={{ fontSize: '0.83rem' }}>
         Escribe el marcador tal cual (con las dobles llaves) en cualquier celda de tu Excel. Pulsa <b>Copiar</b> para llevarlo al portapapeles.
-        Los campos <b>«Queda en blanco»</b> son propios de la industria de alimentos que aún no se capturan: se imprimen vacíos para llenarlos a mano.
+        Los <b>«Se capturan en la orden»</b> (pH, °Brix, temperaturas, verificaciones…) los diligencia el operario en el paso de resultados. Los <b>«Queda en blanco»</b> son propios de la industria de alimentos que aún no se capturan: se imprimen vacíos para llenarlos a mano.
       </div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 10 }}>
         <div style={{ position: 'relative', flex: '1 1 220px' }}>
           <Search size={14} style={{ position: 'absolute', left: 9, top: 11, color: 'var(--texto-suave)' }} aria-hidden="true" />
           <input className="form-control" style={{ paddingLeft: 30 }} placeholder="Buscar campo (lote, temperatura, ph…)" value={q} onChange={e => setQ(e.target.value)} />
         </div>
-        {[['todos', 'Todos'], ['auto', 'Automáticos'], ['blanco', 'En blanco']].map(([k, l]) => (
+        {[['todos', 'Todos'], ['auto', 'Automáticos'], ['captura', 'Se capturan'], ['blanco', 'En blanco']].map(([k, l]) => (
           <button key={k} type="button" className={`btn btn-sm ${solo === k ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setSolo(k)}>{l}</button>
         ))}
       </div>
@@ -67,7 +67,7 @@ export function BibliotecaCamposModal({ open, onClose }) {
                     <td><code style={{ fontSize: '0.78rem', whiteSpace: 'nowrap' }}>{`{{${c.id}}}`}</code></td>
                     <td style={{ fontSize: '0.8rem' }}><b>{c.label}</b><div style={{ color: 'var(--texto-suave)' }}>{c.desc}</div></td>
                     <td style={{ fontSize: '0.78rem' }}>{c.ejemplo}</td>
-                    <td><Etiqueta auto={c.estado === 'auto'} /></td>
+                    <td><Etiqueta estado={c.estado} /></td>
                     <td><button type="button" className="btn btn-xs btn-secondary" onClick={() => onCopiar(c.id)}><Ico as={copiado === c.id ? Check : Copy} size={12} />{copiado === c.id ? 'Copiado' : 'Copiar'}</button></td>
                   </tr>
                 ))}

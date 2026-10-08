@@ -364,3 +364,5 @@ La orden se puede imprimir/descargar con **tu propio diseño de Excel**.
 5. También se puede reemplazar el archivo de PTZ-OR-01 directamente en Gestión Documental: las órdenes usan siempre el archivo vigente de ese documento.
 
 Sin plantilla Excel válida, las órdenes siguen usando el diseño original del sistema. Los campos «Queda en blanco» de la biblioteca se imprimen vacíos para llenarlos a mano.
+
+**Controles de proceso y calidad (operario):** en el paso de resultados de la orden hay un bloque opcional «Controles de proceso y calidad» (verificaciones previas SÍ/NO, pH, °Brix, temperaturas, organolépticos, sellado, detector de metales…). Lo que se llene sale en la plantilla con sus marcadores (`{{calidad.ph}}`, `{{check.despeje_linea.si}}`…). Requiere ejecutar `supabase/migration_v183_controles_orden.sql` una vez.
