@@ -12,6 +12,7 @@ import { analizarSugerenciaLote, normalizarMetodoLoteo, expandirLotes } from '..
 import { generarPlantillaBase, htmlOrdenDesdePlantilla, escanearPlantilla, descargarBlob } from '../lib/plantillaOrden'
 import { obtenerDocumentoVivo, publicarArchivoDocumento, esArchivoExcel, COD_ORDEN } from '../lib/documentoVivo'
 import { BibliotecaCamposModal, InstructivoPlantillaModal, CargarPlantillaModal } from '../components/ordenes/PlantillasOrdenModal'
+import ControlesProceso, { limpiarControles } from '../components/ordenes/ControlesProceso'
 import { esCategoriaEmpaque, stockSeMovioAlReservar } from '../lib/reservasMp'
 import { writeOrQueue } from '../lib/offlineQueue'
 import { encolarEfectos, aplicarEfectos, contarEfectos, onEfectosChange, ordenesConEfectosPendientes } from '../lib/efectosPendientes'
@@ -155,6 +156,7 @@ export default function OrdenesProduccion() {
   const [prepPesoDesp, setPrepPesoDesp] = useState('')
   const [prepObs, setPrepObs] = useState('')
   const [prepResp, setPrepResp] = useState('')
+  const [prepControles, setPrepControles] = useState({})   // controles de proceso/calidad (pH, °Brix, temperaturas…) → plantilla
   const [prepConforme, setPrepConforme] = useState(null)   // null = sin marcar (obligatorio antes de enviar)
   const [prepSurtido, setPrepSurtido] = useState(null)   // null = sin marcar (obligatorio)
   const [prepPermiteSurtido, setPrepPermiteSurtido] = useState(false)
@@ -1490,6 +1492,7 @@ export default function OrdenesProduccion() {
     setPrepSurtidoCantidad(ord.surtido_cantidad != null ? String(ord.surtido_cantidad) : '')
     setPrepSurtidoConsumos({})
     setPrepCamposExtra(Array.isArray(ord.campos_extra) ? ord.campos_extra.map(c => ({ ...c, _id: Date.now() + Math.random() })) : [])
+    setPrepControles(ord.controles && typeof ord.controles === 'object' && !Array.isArray(ord.controles) ? ord.controles : {})
     await prepararDatos(ord)
     // Si la orden nació como empaque MEZCLADO (surtido prellenado), habilita la sección de surtido
     // aunque el producto base no tenga marcado "empaca_surtido": ya viene decidido desde el origen.
@@ -1598,7 +1601,7 @@ export default function OrdenesProduccion() {
 
   // Columnas opcionales del proceso (agregadas por migraciones tardías). Se escriben en el MISMO
   // UPDATE que el resto; si alguna no existe en esta base, se reintenta sin ellas (ver abajo).
-  const COLS_PROC_OPCIONALES = ['prep_sino', 'saldos_reservados', 'campos_extra', 'parametros_calidad_resultado', 'ajustes_ingredientes']
+  const COLS_PROC_OPCIONALES = ['prep_sino', 'saldos_reservados', 'campos_extra', 'parametros_calidad_resultado', 'ajustes_ingredientes', 'controles']
 
   // Guarda TODOS los campos del proceso (datos + resultado) en la orden.
   // RENDIMIENTO: antes esto hacía ~6 escrituras secuenciales + un refetch de toda la lista en
@@ -1641,6 +1644,7 @@ export default function OrdenesProduccion() {
         campos_extra: prepCamposExtra.filter(c => (c.nombre || '').trim()).map(c => ({ nombre: c.nombre, valor: c.valor || '' })),
         parametros_calidad_resultado: serializarParamsCalidad(prepParamsCalidad),
         ajustes_ingredientes: ajustesPayload,
+        controles: limpiarControles(prepControles),   // v183 (opcional)
       }
 
       const doUpdate = (p) => writeOrQueue({ table: 'production_orders', action: 'update', match: { id: ordenPrep.id }, payload: p })
@@ -1673,7 +1677,7 @@ export default function OrdenesProduccion() {
     const t = setTimeout(() => guardarProcesoData(true), 1200)
     return () => clearTimeout(t)
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [prepLote, prepVence, prepFechaInicio, prepModoAvanzado, prepHoraInicio, prepHoraFin, prepProcesos, prepUnidades, prepUnidadEntrada, prepPesoFinal, prepPesoDesp, prepPesoSubp, prepCantSubp, prepObs, prepSurtido, prepLoteMezcla, prepProductoSurtido, prepSurtidoCantidad, prepHaySobrante, prepSobrantePeso, prepSobranteUnidad, prepResp, prepConforme, prepLotesExtra, prepDestajo, prepCamposExtra, prepParamsCalidad, prepIngs, prepIngsBase, autoguardar, modalProceso, ordenPrep, prepMpUnidad])
+  }, [prepLote, prepVence, prepFechaInicio, prepModoAvanzado, prepHoraInicio, prepHoraFin, prepProcesos, prepUnidades, prepUnidadEntrada, prepPesoFinal, prepPesoDesp, prepPesoSubp, prepCantSubp, prepObs, prepSurtido, prepLoteMezcla, prepProductoSurtido, prepSurtidoCantidad, prepHaySobrante, prepSobrantePeso, prepSobranteUnidad, prepResp, prepConforme, prepLotesExtra, prepDestajo, prepCamposExtra, prepControles, prepParamsCalidad, prepIngs, prepIngsBase, autoguardar, modalProceso, ordenPrep, prepMpUnidad])
 
   // Prellena la CANTIDAD del sobrante (solo como ayuda) — NUNCA marca el SÍ/NO, eso es siempre manual.
   // Solo actúa si el usuario ya marcó "¿Sobró? = SÍ" y no ha editado la cantidad a mano.
@@ -1913,6 +1917,7 @@ export default function OrdenesProduccion() {
     const vSobranteUnidad = live ? prepSobranteUnidad : (o.sobrante_unidad || 'g')
     const vLoteMezcla = live ? prepLoteMezcla : (o.lote_mezcla || '')
     const vCamposExtra = live ? prepCamposExtra : (Array.isArray(o.campos_extra) ? o.campos_extra : [])
+    const vControles = live ? prepControles : ((o.controles && typeof o.controles === 'object' && !Array.isArray(o.controles)) ? o.controles : {})
     const vParamsCalidad = live ? prepParamsCalidad : (Array.isArray(o.parametros_calidad_resultado) ? o.parametros_calidad_resultado : parseJsonArr(o.parametros_calidad_resultado, []))
     // Valores REALES diligenciados por el operario (no los previstos de la ficha).
     const vPesoFinal = live ? prepPesoFinal : (o.peso_final != null ? String(o.peso_final) : '')
@@ -2095,6 +2100,11 @@ export default function OrdenesProduccion() {
             extra: camposEx.map(ce => ({ nombre: ce.nombre, valor: ce.valor || '' })),
           },
           imagenes: { 'empresa.logo': cfg.logo_url || '', 'producto.imagen': imagenFicha || '' },
+        }
+        // Controles de proceso/calidad que diligenció el operario → sus marcadores ({{calidad.ph}}, {{check.despeje_linea}}…)
+        for (const [cid, cv] of Object.entries(vControles || {})) {
+          if (typeof cv === 'boolean') datosPl.sino[cid] = cv
+          else if (cv != null && String(cv).trim() !== '') datosPl.v[cid] = String(cv)
         }
         htmlPlantilla = await htmlOrdenDesdePlantilla(bufPlantilla, datosPl, { titulo: archivoNombre, marcaAgua: o.estado === 'cancelada' ? 'NO EJECUTADA' : '' })
       }
@@ -2679,6 +2689,7 @@ export default function OrdenesProduccion() {
       }
       try { await supabase.from('production_orders').update({ campos_extra: prepCamposExtra.filter(c => (c.nombre || '').trim()).map(c => ({ nombre: c.nombre, valor: c.valor || '' })) }).eq('id', o.id) } catch { /* columna opcional */ }
       try { await supabase.from('production_orders').update({ parametros_calidad_resultado: serializarParamsCalidad(prepParamsCalidad) }).eq('id', o.id) } catch { /* columna v161 opcional */ }
+      try { await supabase.from('production_orders').update({ controles: limpiarControles(prepControles) }).eq('id', o.id) } catch { /* columna v183 opcional */ }
       // (8) Si se empacó surtido con otro(s) lote(s), marca también ESA orden como empacada surtida
       //     con este lote — aunque ya esté cerrada. Solo en línea.
       if (!r.queued && prepSurtido && prepLoteMezcla) {
@@ -4971,6 +4982,7 @@ export default function OrdenesProduccion() {
                   <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>Estos datos se guardan en la orden, salen en la impresión y en el detalle al cerrar.</small>
                 </div>
               )}
+              <ControlesProceso valores={prepControles} onChange={setPrepControles} SiNo={SiNo} />
               {/* Empaque que se descontará (bolsas/cajas) según lo empacado — informativo, sale en la impresión */}
               {empaquePrevio && empaquePrevio.plan.length > 0 && (
                 <div className="form-group" style={{ background: 'rgba(124,179,66,0.07)', borderRadius: 'var(--radio)', padding: 10 }}>

@@ -320,6 +320,42 @@ export const LISTAS = [
   },
 ]
 
+// ───────────────────────── Campos que el OPERARIO captura en la orden ─────────────────────────
+// Antes eran «en blanco»; ahora se diligencian en el paso de resultados de la orden
+// («Controles de proceso y calidad») y se guardan en production_orders.controles.
+// Aquí se define su agrupación en el formulario, unidad y ejemplo.
+export const CAPTURA_UI = [
+  { titulo: 'Verificaciones previas', ids: ['check.despeje_linea', 'check.equipos_limpios', 'check.personal_dotacion', 'check.mp_verificada', 'check.balanzas_calibradas'] },
+  { titulo: 'Control en proceso', ids: ['calidad.temp_proceso', 'calidad.brix', 'calidad.ph', 'calidad.aw', 'calidad.humedad', 'calidad.acidez', 'calidad.temp_envasado', 'calidad.temp_producto_final'] },
+  { titulo: 'Características organolépticas', ids: ['calidad.color', 'calidad.olor', 'calidad.sabor', 'calidad.textura', 'calidad.apariencia'] },
+  { titulo: 'Producto terminado', ids: ['check.sellado_ok', 'check.etiqueta_ok', 'check.detector_metales', 'check.muestra_retencion', 'calidad.peso_neto_muestra', 'calidad.cuerpos_extranos'] },
+  { titulo: 'Ambiente, equipo y personal', ids: ['ambiente.temperatura', 'ambiente.humedad_relativa', 'equipo.principal', 'personal.supervisor'] },
+]
+const CAPT_META = {
+  'calidad.temp_proceso': { unidad: '°C', ejemplo: '92' }, 'calidad.brix': { unidad: '°Brix', ejemplo: '66' },
+  'calidad.ph': { unidad: '', ejemplo: '3,4' }, 'calidad.aw': { unidad: '', ejemplo: '0,82' },
+  'calidad.humedad': { unidad: '%', ejemplo: '18' }, 'calidad.acidez': { unidad: '%', ejemplo: '0,8' },
+  'calidad.temp_envasado': { unidad: '°C', ejemplo: '85' }, 'calidad.temp_producto_final': { unidad: '°C', ejemplo: '30' },
+  'calidad.color': { ejemplo: 'Rojo intenso' }, 'calidad.olor': { ejemplo: 'Característico a guayaba' },
+  'calidad.sabor': { ejemplo: 'Dulce, sin amargor' }, 'calidad.textura': { ejemplo: 'Firme, homogénea' }, 'calidad.apariencia': { ejemplo: 'Uniforme' },
+  'calidad.peso_neto_muestra': { unidad: 'g', ejemplo: '40,2' }, 'calidad.cuerpos_extranos': { ejemplo: 'Ninguno' },
+  'ambiente.temperatura': { unidad: '°C', ejemplo: '24' }, 'ambiente.humedad_relativa': { unidad: '%', ejemplo: '62' },
+  'equipo.principal': { ejemplo: 'Marmita 2' }, 'personal.supervisor': { ejemplo: 'Carlos Ruiz' },
+  'check.despeje_linea': { ejemplo: 'SI' }, 'check.equipos_limpios': { ejemplo: 'SI' }, 'check.personal_dotacion': { ejemplo: 'SI' },
+  'check.mp_verificada': { ejemplo: 'SI' }, 'check.balanzas_calibradas': { ejemplo: 'SI' }, 'check.sellado_ok': { ejemplo: 'SI' },
+  'check.etiqueta_ok': { ejemplo: 'SI' }, 'check.detector_metales': { ejemplo: 'SI' }, 'check.muestra_retencion': { ejemplo: 'NO' },
+}
+export const IDS_CAPTURA = new Set(CAPTURA_UI.flatMap(g => g.ids))
+for (const g of GRUPOS) for (const c of g.campos) {
+  const m = CAPT_META[c.id]
+  if (IDS_CAPTURA.has(c.id) && m) {
+    c.estado = 'captura'
+    c.unidad = m.unidad || ''
+    c.ejemplo = m.ejemplo ?? ''
+    c.desc = c.desc + ' Lo diligencia el operario en la orden (Controles de proceso y calidad).'
+  }
+}
+
 // ───────────────────────── Índices y utilidades ─────────────────────────
 // Los campos «sino» generan además .si y .no
 const expandirSino = (campos) => campos.flatMap(c => c.tipo === 'sino'
@@ -346,7 +382,7 @@ export const prefijoLista = (id) => { const p = normalizarId(id).split('.')[0]; 
 export function datosEjemplo() {
   const v = {}, sino = {}
   for (const c of CAMPOS) {
-    if (c.estado !== 'auto' || c.tipo === 'imagen') continue
+    if ((c.estado !== 'auto' && c.estado !== 'captura') || c.tipo === 'imagen') continue
     if (c.tipo === 'sino') { sino[c.id] = c.ejemplo === 'SI' ? true : c.ejemplo === 'NO' ? false : null; continue }
     if (c.tipo === 'casilla') continue
     v[c.id] = c.ejemplo
@@ -399,7 +435,7 @@ export const INSTRUCTIVO = [
       'No importan las mayúsculas: {{LOTE.NUMERO}} funciona igual que {{lote.numero}}.',
       'Puedes mezclar texto y marcadores en la misma celda: «Lote: {{lote.numero}} — vence {{lote.fecha_vencimiento}}».',
       'Si escribes un ID que no existe, esa parte se imprime en blanco y la pantalla de carga te avisa cuál es.',
-      'Los campos marcados «Queda en blanco» de la biblioteca (por ejemplo {{calidad.ph}}) aún no se capturan en el sistema: se imprimen vacíos para escribirlos a mano. Ya tienen su ID reservado.',
+      'Los campos «Automático» los llena el sistema. Los «Se capturan en la orden» (pH, °Brix, temperaturas, verificaciones…) los diligencia el operario en el paso de resultados («Controles de proceso y calidad») y salen en la plantilla. Los «Queda en blanco» aún no se capturan: se imprimen vacíos para escribirlos a mano; ya tienen su ID reservado.',
     ],
   },
   {
@@ -447,3 +483,12 @@ export const INSTRUCTIVO = [
     ],
   },
 ]
+
+// Campos capturables en el formulario de la orden, agrupados (con tipo, etiqueta y unidad)
+export const capturaParaFormulario = () => CAPTURA_UI.map(g => ({
+  titulo: g.titulo,
+  campos: g.ids.map(id => {
+    const c = GRUPOS.flatMap(x => x.campos).find(x => x.id === id)
+    return { id, label: c.label, tipo: c.tipo, unidad: c.unidad || '' }
+  }),
+}))

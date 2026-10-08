@@ -391,12 +391,25 @@ export async function generarPlantillaBase() {
   seccion(27, 'DATOS ADICIONALES')
   etiqueta('A28', '{{extra.nombre}}'); celda('B28:F28', '{{extra.valor}}')
 
-  seccion(29, 'OBSERVACIONES')
-  celda('A30:F30', '{{obs.notas}}', { v: 'top' }); alto(30, 60)
+  seccion(29, 'CONTROLES DE PROCESO Y CALIDAD')
+  const sino = (fila, txt, id, col) => {   // «SI [X]  NO [X]» en dos celdas pequeñas
+    const [a, b] = col === 1 ? ['B', 'C'] : ['E', 'F']
+    celda(`${a}${fila}`, `SI  {{${id}.si}}`, { h: 'center' }); celda(`${b}${fila}`, `NO  {{${id}.no}}`, { h: 'center' })
+    etiqueta(col === 1 ? `A${fila}` : `D${fila}`, txt)
+  }
+  sino(30, 'Despeje de línea realizado', 'check.despeje_linea', 1); sino(30, 'Equipos limpios y desinfectados', 'check.equipos_limpios', 2)
+  sino(31, 'Materia prima verificada', 'check.mp_verificada', 1); sino(31, 'Balanzas calibradas', 'check.balanzas_calibradas', 2)
+  etiqueta('A32', 'Temp. de proceso (°C)'); celda('B32:C32', '{{calidad.temp_proceso}}'); etiqueta('D32', '°Brix'); celda('E32:F32', '{{calidad.brix}}')
+  etiqueta('A33', 'pH'); celda('B33:C33', '{{calidad.ph}}'); etiqueta('D33', 'Temp. de envasado (°C)'); celda('E33:F33', '{{calidad.temp_envasado}}')
+  sino(34, 'Sellado conforme', 'check.sellado_ok', 1); sino(34, 'Pasó detector de metales', 'check.detector_metales', 2)
+  etiqueta('A35', 'Organolépticos'); celda('B35:F35', 'Color: {{calidad.color}}  ·  Olor: {{calidad.olor}}  ·  Sabor: {{calidad.sabor}}  ·  Textura: {{calidad.textura}}', { size: 10 }); alto(35, 30)
 
-  alto(31, 44)
-  celda('A32:C32', 'ENTREGADO POR', { h: 'center', borde: false }); celda('D32:F32', 'RECIBIDO POR', { h: 'center', borde: false })
-  for (let c = 1; c <= 6; c++) ws.getCell(32, c).border = { top: { style: 'thin', color: { argb: GRIS } } }
+  seccion(36, 'OBSERVACIONES')
+  celda('A37:F37', '{{obs.notas}}', { v: 'top' }); alto(37, 60)
+
+  alto(38, 44)
+  celda('A39:C39', 'ENTREGADO POR', { h: 'center', borde: false }); celda('D39:F39', 'RECIBIDO POR', { h: 'center', borde: false })
+  for (let c = 1; c <= 6; c++) ws.getCell(39, c).border = { top: { style: 'thin', color: { argb: GRIS } } }
 
   // Hoja de instructivo
   const wi = wb.addWorksheet('_INSTRUCTIVO')
@@ -418,8 +431,8 @@ export async function generarPlantillaBase() {
   let fb = 2
   const volcar = (grupo, campos, esTabla) => {
     for (const c of campos) {
-      const fila = [`{{${c.id}}}`, c.label + (c.desc ? ` — ${c.desc}` : ''), grupo, esTabla ? 'tabla' : c.tipo, c.ejemplo || '', c.estado === 'auto' ? 'El sistema lo llena' : 'Queda en blanco (escribir a mano)']
-      fila.forEach((v, i) => { const x = wbib.getCell(fb, i + 1); x.value = v; x.alignment = { wrapText: true, vertical: 'top' }; if (i === 5 && c.estado !== 'auto') x.font = { color: { argb: 'FF9A6A00' } } })
+      const fila = [`{{${c.id}}}`, c.label + (c.desc ? ` — ${c.desc}` : ''), grupo, esTabla ? 'tabla' : c.tipo, c.ejemplo || '', c.estado === 'auto' ? 'El sistema lo llena' : c.estado === 'captura' ? 'Lo captura el operario en la orden' : 'Queda en blanco (escribir a mano)']
+      fila.forEach((v, i) => { const x = wbib.getCell(fb, i + 1); x.value = v; x.alignment = { wrapText: true, vertical: 'top' }; if (i === 5 && c.estado === 'blanco') x.font = { color: { argb: 'FF9A6A00' } } })
       fb++
     }
   }
