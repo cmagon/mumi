@@ -440,6 +440,23 @@ export default function Documentos() {
       }
       qc.invalidateQueries({ queryKey: ['documentos'] })
       qc.invalidateQueries({ queryKey: ['documento_versiones'] })
+      // PTZ-OR-01 es la plantilla OFICIAL de las Órdenes de Producción: se refresca ese módulo y,
+      // si se subió un archivo nuevo, se valida que sirva como plantilla (aviso, no bloquea).
+      if ((form.codigo || '').trim().toUpperCase() === 'PTZ-OR-01') {
+        qc.invalidateQueries({ queryKey: ['doc_ptz_or_01'] })
+        if (file) {
+          try {
+            if (!/\.xlsx$/i.test(file.name)) {
+              toast('PTZ-OR-01: para que las órdenes usen este archivo como plantilla debe ser un Excel .xlsx con marcadores {{campo}}. Mientras tanto se usa el diseño original.', 'warning')
+            } else {
+              const { escanearPlantilla } = await import('../lib/plantillaOrden')
+              const sc = await escanearPlantilla(await file.arrayBuffer())
+              if (!sc.ok) toast('PTZ-OR-01: el Excel no tiene marcadores válidos {{campo}}; las órdenes seguirán con el diseño original. Consulta el instructivo en Órdenes de Producción → Opciones.', 'warning')
+              else toast(`PTZ-OR-01: plantilla oficial de órdenes actualizada ✓ (${sc.conocidos.length} campos reconocidos${sc.desconocidos.length ? `; desconocidos: ${sc.desconocidos.slice(0, 4).join(', ')}` : ''})`, sc.desconocidos.length ? 'warning' : undefined)
+            }
+          } catch (e) { toast('PTZ-OR-01: no se pudo leer el Excel como plantilla (' + (e.message || e) + ').', 'warning') }
+        }
+      }
       setModal(false)
     } catch (e) {
       toast(e.message, 'error')

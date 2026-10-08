@@ -350,3 +350,17 @@ CREATE TABLE IF NOT EXISTS documentos (
 - **~70 documentos** controlados (maestros + registros + formatos + POES/POS).
 - **5 fichas técnicas** de producto (Arazá, Asaí, Cacay, Copoazú, Moriche).
 - **Anexo ambiental** (ADEMI) con entregables, PMIRS y evidencias de capacitación.
+
+---
+
+## Plantilla personalizable de la Orden de Producción (PTZ-OR-01)
+
+La orden se puede imprimir/descargar con **tu propio diseño de Excel**.
+
+1. **Órdenes de Producción → Opciones → Descargar plantilla → Excel editable.** Incluye las hojas `_INSTRUCTIVO` y `_BIBLIOTECA`.
+2. Edita el diseño en Excel y escribe marcadores `{{campo}}` donde quieras cada dato (ej. `{{lote.numero}}`, `{{producto.nombre}}`). La **Biblioteca de campos** (Opciones) lista todos con su ID y permite copiarlos.
+3. Las tablas (`{{ing.nombre}}`, `{{proc.nombre}}`, `{{cal.nombre}}`, `{{extra.nombre}}`) repiten su fila por cada elemento.
+4. **Opciones → Cargar plantilla (Excel)**: muestra vista previa y avisa de marcadores mal escritos. Al publicar queda como archivo oficial del documento **PTZ-OR-01** en Gestión Documental (con historial de versiones).
+5. También se puede reemplazar el archivo de PTZ-OR-01 directamente en Gestión Documental: las órdenes usan siempre el archivo vigente de ese documento.
+
+Sin plantilla Excel válida, las órdenes siguen usando el diseño original del sistema. Los campos «Queda en blanco» de la biblioteca se imprimen vacíos para llenarlos a mano.
