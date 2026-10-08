@@ -270,6 +270,14 @@ export const GRUPOS = [
       B('obs.supervisor', 'Observaciones del supervisor', 'texto', 'Notas del supervisor.'),
     ],
   },
+  {
+    id: 'directiva', titulo: 'Directivas de diseño (no imprimen nada)',
+    desc: 'Controlan qué se muestra. Escríbelas en una celda de la fila; ellas mismas no aparecen en el documento.',
+    campos: [
+      A('ocultar_si_vacio', 'Ocultar si está vacío', 'directiva', 'En una fila CON campos: la fila se oculta si todos sus campos están vacíos. En una fila de título SIN otros campos: oculta el título y las filas siguientes (hasta la próxima directiva) si ninguna tiene datos.', ''),
+      A('fin_seccion', 'Fin de sección', 'directiva', 'Marca el título de una sección que NO se oculta: cierra la sección ocultable anterior.', ''),
+    ],
+  },
 ]
 
 // ───────────────────────── Campos de TABLA (repiten fila) ─────────────────────────
@@ -419,6 +427,7 @@ export const TODOS_LOS_CAMPOS = [...CAMPOS, ...CAMPOS_LISTA]
 export const CAMPO_POR_ID = Object.fromEntries(TODOS_LOS_CAMPOS.map(c => [c.id, c]))
 export const PREFIJOS_LISTA = new Set(LISTAS.map(l => l.prefijo))
 export const IDS_SINO = new Set(GRUPOS.flatMap(g => g.campos).filter(c => c.tipo === 'sino').map(c => c.id))
+export const DIRECTIVAS = new Set(['ocultar_si_vacio', 'fin_seccion'])
 export const IDS_IMAGEN = new Set(TODOS_LOS_CAMPOS.filter(c => c.tipo === 'imagen').map(c => c.id))
 
 export const normalizarId = (id) => String(id || '').trim().toLowerCase()
@@ -429,7 +438,7 @@ export const prefijoLista = (id) => { const p = normalizarId(id).split('.')[0]; 
 export function datosEjemplo() {
   const v = {}, sino = {}
   for (const c of CAMPOS) {
-    if ((c.estado !== 'auto' && c.estado !== 'captura') || c.tipo === 'imagen') continue
+    if ((c.estado !== 'auto' && c.estado !== 'captura') || c.tipo === 'imagen' || c.tipo === 'directiva') continue
     if (c.tipo === 'sino') { sino[c.id] = c.ejemplo === 'SI' ? true : c.ejemplo === 'NO' ? false : null; continue }
     if (c.tipo === 'casilla') continue
     v[c.id] = c.ejemplo
@@ -476,6 +485,16 @@ export const INSTRUCTIVO = [
     ],
   },
   {
+    titulo: '2b. Una plantilla por categoría (opcional)',
+    items: [
+      'En Opciones elige «Plantilla para:» General, Producto interno o una categoría (galleta, bocadillo, aromática…) y carga el Excel: se publica como un documento propio, por ejemplo PTZ-OR-01-GALLETA.',
+      'Cada orden usa la plantilla de la categoría de su producto; si no tiene, la de producto interno (si lo es), luego la General y, si no hay ninguna, el diseño original.',
+      'Para crear la de una categoría: elige la categoría, descarga el Excel (parte de la General), edítalo y cárgalo en ese mismo ámbito.',
+      '«Quitar la plantilla de este ámbito» devuelve esas órdenes a la siguiente plantilla de la cadena (el archivo queda en la papelera de Gestión Documental).',
+      'Antes de crear variantes prueba la directiva {{ocultar_si_vacio}} (sección 4b): con una sola plantilla que oculta lo vacío, normalmente no hace falta una por categoría.',
+    ],
+  },
+  {
     titulo: '3. Reglas de los marcadores',
     items: [
       'Se escriben así: {{id}} — dos llaves al abrir y dos al cerrar, sin espacios dentro del ID (se permiten, pero evítalos).',
@@ -493,6 +512,16 @@ export const INSTRUCTIVO = [
       'No mezcles en la misma fila marcadores de dos tablas distintas (ing. y proc.). Si no hay datos, la fila queda en blanco para escribir a mano.',
       'Puedes combinar celdas dentro de la fila modelo (por ejemplo el nombre ocupando dos columnas): se replica en cada fila.',
       '{{ing.n}} numera las filas 1, 2, 3…',
+    ],
+  },
+  {
+    titulo: '4b. Ocultar lo que está vacío',
+    items: [
+      'Fila con campos: escribe {{ocultar_si_vacio}} en cualquiera de sus celdas (no imprime nada). Si todos los campos de esa fila están vacíos, la fila no aparece.',
+      'Sección completa: escribe {{ocultar_si_vacio}} en la fila de TÍTULO de la sección (sin otros campos en esa fila). Si ninguna fila de la sección trae datos, desaparece el título y todo lo que sigue hasta la próxima directiva.',
+      'Una sección que SIEMPRE debe verse (por ejemplo Observaciones, donde se escribe a mano) se marca con {{fin_seccion}} en su título: así cierra la sección ocultable anterior.',
+      'Regla práctica: pon una directiva en el título de CADA sección: {{ocultar_si_vacio}} si es opcional, {{fin_seccion}} si es fija.',
+      'La plantilla «en blanco» (PDF para imprimir y llenar a mano) nunca oculta nada.',
     ],
   },
   {

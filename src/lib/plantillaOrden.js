@@ -9,7 +9,7 @@
 //
 // Se usa ExcelJS (carga diferida): conserva estilos, combinadas, anchos e imágenes del diseño del usuario.
 import {
-  TOKEN_RE, CAMPO_POR_ID, IDS_SINO, IDS_IMAGEN, GRUPOS_EXPANDIDOS, LISTAS, INSTRUCTIVO,
+  TOKEN_RE, CAMPO_POR_ID, IDS_SINO, IDS_IMAGEN, DIRECTIVAS, GRUPOS_EXPANDIDOS, LISTAS, INSTRUCTIVO,
   prefijoLista, normalizarId,
 } from './plantillaCampos'
 
@@ -174,20 +174,25 @@ function valorEscalar(id, datos) {
   return ''
 }
 
+// Devuelve { t, dato }: el texto con los marcadores resueltos y si ALGÚN marcador trajo valor
+// (sirve para ocultar filas/secciones vacías; el texto fijo no cuenta como dato).
 function reemplazar(texto, datos, itemLista, prefLista) {
-  return String(texto || '').replace(TOKEN_RE, (m, raw) => {
+  let dato = false
+  const t = String(texto || '').replace(TOKEN_RE, (m, raw) => {
     const id = normalizarId(raw)
+    if (DIRECTIVAS.has(id)) return ''
     const p = prefijoLista(id)
-    if (p) {
-      if (p !== prefLista || !itemLista) return ''
-      return String(itemLista[id.slice(p.length + 1)] ?? '')
-    }
-    if (IDS_IMAGEN.has(id)) return ''
-    return valorEscalar(id, datos)
+    let v
+    if (p) v = (p !== prefLista || !itemLista) ? '' : String(itemLista[id.slice(p.length + 1)] ?? '')
+    else if (IDS_IMAGEN.has(id)) v = ''
+    else v = valorEscalar(id, datos)
+    if (String(v).trim() !== '') dato = true
+    return v
   })
+  return { t, dato }
 }
 
-export function aplicarDatos(modelo, datos) {
+export function aplicarDatos(modelo, datos, { ocultarVacios = true } = {}) {
   datos = datos || {}
   const filasNuevas = []
   const mapa = []   // fila vieja (1-based) → { inicio, n }  (1-based en la salida)
@@ -206,17 +211,31 @@ export function aplicarDatos(modelo, datos) {
         const unico = trim.match(/^\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}$/)
         const idImg = unico && IDS_IMAGEN.has(normalizarId(unico[1])) ? normalizarId(unico[1]) : null
         const tieneTokens = TOKEN_RE.test(c.t || ''); TOKEN_RE.lastIndex = 0
-        return {
-          ...c,
-          t: idImg ? '' : reemplazar(c.t, datos, item, pref),
-          img: idImg ? ((datos.imagenes || {})[idImg] || null) : null,
-          conTokens: tieneTokens,
-        }
+        const imgUrl = idImg ? ((datos.imagenes || {})[idImg] || null) : null
+        const r = idImg ? { t: '', dato: !!imgUrl } : reemplazar(c.t, datos, item, pref)
+        return { ...c, t: r.t, dato: r.dato, img: imgUrl, conTokens: tieneTokens }
       })
-      filasNuevas.push({ ...fila, cells })
+      const marca = todos.includes('ocultar_si_vacio')
+      filasNuevas.push({
+        ...fila, cells, dato: cells.some(c => c.dato), marca, fin: todos.includes('fin_seccion'),
+        soloMarca: marca && !todos.some(id => !DIRECTIVAS.has(id)),
+      })
     }
     mapa[idx + 1] = { inicio, n: veces }
   })
+
+  // Ocultar filas/secciones sin datos (directivas {{ocultar_si_vacio}} / {{fin_seccion}})
+  if (ocultarVacios) {
+    let sec = null   // sección ocultable abierta: { desde, dato }
+    const cerrar = (hasta) => { if (sec && !sec.dato) for (let k = sec.desde; k < hasta; k++) filasNuevas[k].hidden = true; sec = null }
+    filasNuevas.forEach((f, i) => {
+      if (f.marca || f.fin) cerrar(i)
+      if (f.marca && f.soloMarca) sec = { desde: i, dato: false }
+      else if (f.marca) { if (!f.dato) f.hidden = true }
+      else if (sec && f.dato) sec.dato = true
+    })
+    cerrar(filasNuevas.length)
+  }
 
   // Combinadas: se replican en filas repetidas; las que abarcan varias filas se estiran
   const merges = []
@@ -319,7 +338,7 @@ export function modeloAHtml(m, { titulo = 'Orden de producción', marcaAgua = ''
 
 export async function htmlOrdenDesdePlantilla(buffer, datos, opts = {}) {
   const modelo = await leerModelo(buffer)
-  return modeloAHtml(aplicarDatos(modelo, datos), opts)
+  return modeloAHtml(aplicarDatos(modelo, datos, { ocultarVacios: opts.ocultarVacios !== false }), opts)
 }
 
 // ─────────────────────────── 5) Plantilla base (Excel editable) ───────────────────────────
@@ -360,7 +379,7 @@ export async function generarPlantillaBase() {
   celda('A4:F4', '{{empresa.nombre}} · NIT {{empresa.nit}} · {{empresa.direccion}} {{empresa.ciudad}} · Tel {{empresa.telefono}}', { size: 9, h: 'center', borde: false })
   celda('A5:F5', '{{orden.es_prueba}}', { bold: true, color: 'FFC0392B', h: 'center', borde: false })
 
-  seccion(6, 'DATOS DE LA ORDEN')
+  seccion(6, 'DATOS DE LA ORDEN {{fin_seccion}}')
   etiqueta('A7', 'Nombre comercial'); celda('B7:F7', '{{producto.nombre}}', { bold: true, size: 14, color: 'FF2D5A3D' }); alto(7, 26)
   etiqueta('A8', 'Lote'); celda('B8:C8', '{{lote.numero}}'); etiqueta('D8', 'Presentación'); celda('E8:F8', '{{producto.presentacion_g}}')
   etiqueta('A9', 'Fecha de fabricación'); celda('B9:C9', '{{lote.fecha_fabricacion}}'); etiqueta('D9', 'Fecha de vencimiento'); celda('E9:F9', '{{lote.fecha_vencimiento}}')
@@ -371,27 +390,27 @@ export async function generarPlantillaBase() {
   etiqueta('A13', '¿Quedó sin empacar?'); celda('B13', 'SI  {{check.hay_sobrante.si}}', { h: 'center' }); celda('C13', 'NO  {{check.hay_sobrante.no}}', { h: 'center' })
   etiqueta('D13', 'Cantidad sobrante'); celda('E13:F13', '{{cantidad.sobrante}}')
 
-  seccion(14, 'LISTA DE INGREDIENTES Y TRAZABILIDAD')
+  seccion(14, 'LISTA DE INGREDIENTES Y TRAZABILIDAD {{fin_seccion}}')
   ;['Ingrediente', 'Lote MP', 'Vence', 'Proveedor', '% mezcla', 'Cantidad (g)'].forEach((t, i) => celda(`${colALetra(i + 1)}15`, t, { bold: true, fill: 'FFE9EFE7' }))
   ;['{{ing.nombre}}', '{{ing.lote}}', '{{ing.vence}}', '{{ing.proveedor}}', '{{ing.porcentaje}}', '{{ing.cantidad_g}}'].forEach((t, i) => celda(`${colALetra(i + 1)}16`, t, { size: i === 0 ? 11 : 10, h: i >= 4 ? 'right' : 'left' }))
 
-  seccion(17, 'TIEMPOS')
+  seccion(17, 'TIEMPOS {{fin_seccion}}')
   etiqueta('A18', 'Hora de inicio'); celda('B18:C18', '{{tiempo.hora_inicio}}'); etiqueta('D18', 'Hora de finalización'); celda('E18:F18', '{{tiempo.hora_fin}}')
-  celda('A19:C19', 'Proceso / subproceso', { bold: true, fill: 'FFE9EFE7' }); celda('D19', 'Fecha', { bold: true, fill: 'FFE9EFE7' }); celda('E19', 'Inicio', { bold: true, fill: 'FFE9EFE7' }); celda('F19', 'Fin', { bold: true, fill: 'FFE9EFE7' })
+  celda('A19:C19', 'Proceso / subproceso {{ocultar_si_vacio}}', { bold: true, fill: 'FFE9EFE7' }); celda('D19', 'Fecha', { bold: true, fill: 'FFE9EFE7' }); celda('E19', 'Inicio', { bold: true, fill: 'FFE9EFE7' }); celda('F19', 'Fin', { bold: true, fill: 'FFE9EFE7' })
   celda('A20:C20', '{{proc.nombre}}'); celda('D20', '{{proc.fecha}}'); celda('E20', '{{proc.inicio}}'); celda('F20', '{{proc.fin}}')
 
-  seccion(21, 'ROTULADO DEL PRODUCTO FINAL')
+  seccion(21, 'ROTULADO DEL PRODUCTO FINAL {{fin_seccion}}')
   etiqueta('A22', 'Lote (Lot.)'); celda('B22:C22', '{{rotulo.lote}}'); etiqueta('D22', 'Vence (Exp.) ddmmaa'); celda('E22:F22', '{{rotulo.vence}}')
   etiqueta('A23', 'Empacado surtido con lote(s)'); celda('B23:F23', '{{lote.mezcla}}')
 
-  seccion(24, 'PARÁMETROS DE CALIDAD')
+  seccion(24, 'PARÁMETROS DE CALIDAD {{ocultar_si_vacio}}')
   celda('A25:B25', 'Parámetro', { bold: true, fill: 'FFE9EFE7' }); celda('C25', 'Especificación', { bold: true, fill: 'FFE9EFE7' }); celda('D25', 'Valor obtenido', { bold: true, fill: 'FFE9EFE7' }); celda('E25:F25', '¿Cumple?', { bold: true, fill: 'FFE9EFE7' })
   celda('A26:B26', '{{cal.nombre}}'); celda('C26', '{{cal.esperado}}'); celda('D26', '{{cal.obtenido}}'); celda('E26:F26', '{{cal.cumple}}')
 
-  seccion(27, 'DATOS ADICIONALES')
+  seccion(27, 'DATOS ADICIONALES {{ocultar_si_vacio}}')
   etiqueta('A28', '{{extra.nombre}}'); celda('B28:F28', '{{extra.valor}}')
 
-  seccion(29, 'CONTROLES DE PROCESO Y CALIDAD')
+  seccion(29, 'CONTROLES DE PROCESO Y CALIDAD {{ocultar_si_vacio}}')
   const sino = (fila, txt, id, col) => {   // «SI [X]  NO [X]» en dos celdas pequeñas
     const [a, b] = col === 1 ? ['B', 'C'] : ['E', 'F']
     celda(`${a}${fila}`, `SI  {{${id}.si}}`, { h: 'center' }); celda(`${b}${fila}`, `NO  {{${id}.no}}`, { h: 'center' })
@@ -404,15 +423,15 @@ export async function generarPlantillaBase() {
   sino(34, 'Sellado conforme', 'check.sellado_ok', 1); sino(34, 'Pasó detector de metales', 'check.detector_metales', 2)
   etiqueta('A35', 'Organolépticos'); celda('B35:F35', 'Color: {{calidad.color}}  ·  Olor: {{calidad.olor}}  ·  Sabor: {{calidad.sabor}}  ·  Textura: {{calidad.textura}}', { size: 10 }); alto(35, 30)
 
-  seccion(36, 'LIBERACIÓN DEL LOTE Y DESPACHO')
+  seccion(36, 'LIBERACIÓN DEL LOTE Y DESPACHO {{ocultar_si_vacio}}')
   etiqueta('A37', 'Estado del lote'); celda('B37:C37', '{{liberacion.estado}}'); etiqueta('D37', 'Aprobado por'); celda('E37:F37', '{{liberacion.aprobado_por}}')
   etiqueta('A38', 'Fecha de liberación'); celda('B38:C38', '{{liberacion.fecha}}'); etiqueta('D38', 'Destino'); celda('E38:F38', '{{traza.destino}}')
 
-  seccion(39, 'NO CONFORMIDADES Y ACCIONES')
+  seccion(39, 'NO CONFORMIDADES Y ACCIONES {{ocultar_si_vacio}}')
   etiqueta('A40', 'Descripción'); celda('B40:F40', '{{nc.descripcion}}', { v: 'top' }); alto(40, 34)
   etiqueta('A41', 'Acción correctiva'); celda('B41:C41', '{{nc.accion_correctiva}}'); etiqueta('D41', 'Disposición'); celda('E41:F41', '{{nc.disposicion}}')
 
-  seccion(42, 'OBSERVACIONES')
+  seccion(42, 'OBSERVACIONES {{fin_seccion}}')
   celda('A43:F43', '{{obs.notas}}', { v: 'top' }); alto(43, 60)
 
   alto(44, 44)
