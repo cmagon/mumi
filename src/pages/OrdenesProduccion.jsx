@@ -10,7 +10,7 @@ import {
 } from '../lib/lotes'
 import { analizarSugerenciaLote, normalizarMetodoLoteo, expandirLotes } from '../lib/loteoProducto'
 import { generarPlantillaBase, htmlOrdenDesdePlantilla, escanearPlantilla, descargarBlob } from '../lib/plantillaOrden'
-import { obtenerDocumentoVivo, publicarArchivoDocumento, esArchivoExcel, COD_ORDEN } from '../lib/documentoVivo'
+import { obtenerPlantillasOrden, publicarArchivoDocumento, quitarDocumento, esArchivoExcel, COD_ORDEN, codigoAmbito, etiquetaAmbito, ambitosCandidatos, AMBITO_INTERNO } from '../lib/documentoVivo'
 import { BibliotecaCamposModal, InstructivoPlantillaModal, CargarPlantillaModal } from '../components/ordenes/PlantillasOrdenModal'
 import ControlesProceso, { limpiarControles } from '../components/ordenes/ControlesProceso'
 import { CAMPO_POR_ID } from '../lib/plantillaCampos'
@@ -916,46 +916,79 @@ export default function OrdenesProduccion() {
     },
   })
 
-  // ===== Plantilla OFICIAL de la orden (documento PTZ-OR-01 de Gestión Documental) =====
-  // Si existe un Excel con marcadores {{campo}} como archivo del documento, TODAS las órdenes
-  // (PDF, impresión, descargas) se generan con ese diseño. Si no, se usa el diseño original.
-  const { data: docOrden } = useQuery({
-    queryKey: ['doc_ptz_or_01'],
-    queryFn: () => obtenerDocumentoVivo(COD_ORDEN),
+  // ===== Plantillas OFICIALES de la orden (documentos PTZ-OR-01 de Gestión Documental) =====
+  // Una orden usa, en este orden: la plantilla de su CATEGORÍA (galleta, bocadillo…), la de
+  // PRODUCTO INTERNO, la GENERAL (PTZ-OR-01) y, si no hay ninguna, el diseño original del sistema.
+  // Cada variante es el documento PTZ-OR-01-<CATEGORÍA> en Gestión Documental.
+  const { data: docsPlantillas } = useQuery({
+    queryKey: ['docs_ptz_or_01'],
+    queryFn: obtenerPlantillasOrden,
     staleTime: 30_000,
   })
-  const hayPlantillaPropia = esArchivoExcel(docOrden)
+  const { data: categoriasOrden = [] } = useQuery({
+    queryKey: ['product_types', 'ordenes'],
+    queryFn: async () => { const { data } = await supabase.from('product_types').select('nombre').order('nombre'); return (data || []).map(t => t.nombre).filter(Boolean) },
+    staleTime: 5 * 60_000,
+  })
+  const docGeneral = docsPlantillas === undefined ? undefined : (docsPlantillas.find(d => d.codigo === COD_ORDEN) || null)
   const [menuPlantilla, setMenuPlantilla] = useState(false)
+  const [ambitoPlantilla, setAmbitoPlantilla] = useState('')   // '' general · '@interno' · nombre de categoría
   const [modalBiblioteca, setModalBiblioteca] = useState(false)
   const [modalInstructivo, setModalInstructivo] = useState(false)
   const [archivoPlantilla, setArchivoPlantilla] = useState(null)
   const [publicandoPlantilla, setPublicandoPlantilla] = useState(false)
-  const plantillaCache = useRef({ url: '', buf: null, ok: false })
+  const plantillaCache = useRef(new Map())   // storage_url → ArrayBuffer | null (si no sirve como plantilla)
   const inputPlantillaRef = useRef(null)
 
-  // Buffer de la plantilla oficial; null si no hay una válida (entonces se usa el diseño original).
-  const plantillaOficial = async () => {
-    let doc = docOrden
-    if (doc === undefined) doc = await obtenerDocumentoVivo(COD_ORDEN)   // la consulta aún no terminó
+  const docDeAmbito = (amb) => (docsPlantillas || []).find(d => d.codigo === codigoAmbito(amb) && esArchivoExcel(d)) || null
+  const hayPlantillaPropia = !!docDeAmbito('')
+
+  // Descarga y valida el Excel de un documento (con caché por URL). null si no sirve como plantilla.
+  const bufferDePlantilla = async (doc) => {
     if (!esArchivoExcel(doc)) return null
     const c = plantillaCache.current
-    if (c.url === doc.storage_url) return c.ok ? c.buf : null
+    if (c.has(doc.storage_url)) return c.get(doc.storage_url)
     try {
       const res = await fetch(doc.storage_url, { cache: 'no-store' })
       if (!res.ok) throw new Error('HTTP ' + res.status)
       const buf = await res.arrayBuffer()
       const scan = await escanearPlantilla(buf)
-      plantillaCache.current = { url: doc.storage_url, buf, ok: scan.ok }
+      c.set(doc.storage_url, scan.ok ? buf : null)
       return scan.ok ? buf : null
-    } catch (e) { console.warn('No se pudo usar la plantilla oficial; se usa el diseño original:', e); return null }
+    } catch (e) { console.warn('No se pudo usar la plantilla; se prueba la siguiente:', e); return null }
+  }
+
+  // Plantilla que corresponde a UNA orden: { buf, doc } o null (→ diseño original)
+  const plantillaParaOrden = async (orden) => {
+    let docs = docsPlantillas
+    if (docs === undefined) docs = await obtenerPlantillasOrden()
+    const xl = (docs || []).filter(esArchivoExcel)
+    if (!xl.length) return null
+    let ambitos = ['']
+    if (xl.some(d => d.codigo !== COD_ORDEN)) {   // solo se consulta la ficha si existe alguna variante
+      let ficha = null
+      if (orden?.origen === 'producto' && orden.origen_id) {
+        try { const r = await supabase.from('products_costing').select('categorias, tipo').eq('id', orden.origen_id).single(); ficha = r.data || null } catch { /* sin ficha */ }
+      }
+      let cats = []
+      try { cats = Array.isArray(ficha?.categorias) ? ficha.categorias : JSON.parse(ficha?.categorias || '[]') } catch { cats = [] }
+      ambitos = ambitosCandidatos({ esSubproducto: !!orden?.es_subproducto || ficha?.tipo === 'subproducto', categorias: cats, tipo: ficha?.tipo || '' })
+    }
+    for (const amb of ambitos) {
+      const doc = xl.find(d => d.codigo === codigoAmbito(amb))
+      if (!doc) continue
+      const buf = await bufferDePlantilla(doc)
+      if (buf) return { buf, doc }
+    }
+    return null
   }
 
   // Datos de una orden EN BLANCO (encabezado y empresa sí; el resto para llenar a mano)
-  const datosPlantillaBlanco = () => {
+  const datosPlantillaBlanco = (codigo, version) => {
     const cfg = getConfig()
     return {
       v: {
-        'doc.codigo': COD_ORDEN, 'doc.version': docOrden?.version || '1', 'doc.titulo': 'Orden de producción',
+        'doc.codigo': codigo || COD_ORDEN, 'doc.version': version || '1', 'doc.titulo': 'Orden de producción',
         'doc.fecha_impresion': new Date().toLocaleDateString('es-CO'), 'orden.numero': 'OP-',
         'empresa.nombre': cfg.empresa || '', 'empresa.nit': cfg.nit || '', 'empresa.direccion': cfg.direccion || '',
         'empresa.ciudad': cfg.ciudad || '', 'empresa.telefono': cfg.telefono || '',
@@ -965,22 +998,27 @@ export default function OrdenesProduccion() {
     }
   }
 
+  // Para descargar: la del ámbito elegido; si no tiene, la general (punto de partida natural); si no, la base.
+  const docParaDescarga = () => docDeAmbito(ambitoPlantilla) || docDeAmbito('')
+
   const descargarPlantillaPDF = async () => {
     setMenuPlantilla(false); setBusy(true)
     try {
-      const buf = (await plantillaOficial()) || await generarPlantillaBase()
-      const html = await htmlOrdenDesdePlantilla(buf, datosPlantillaBlanco(), { titulo: 'PTZ-OR-01 plantilla' })
-      await descargarComoPDF(html, 'PTZ-OR-01 Orden de producción (plantilla en blanco)')
+      const doc = docParaDescarga()
+      const buf = (doc ? await bufferDePlantilla(doc) : null) || await generarPlantillaBase()
+      const html = await htmlOrdenDesdePlantilla(buf, datosPlantillaBlanco(doc?.codigo, doc?.version), { titulo: 'PTZ-OR-01 plantilla', ocultarVacios: false })
+      await descargarComoPDF(html, `${codigoAmbito(ambitoPlantilla)} Orden de producción (plantilla en blanco)`)
     } catch (e) { toast('No se pudo generar el PDF de la plantilla: ' + (e.message || e), 'error') } finally { setBusy(false) }
   }
 
   const descargarPlantillaExcel = async (origen = 'oficial') => {
     setMenuPlantilla(false); setBusy(true)
     try {
-      if (origen === 'oficial' && hayPlantillaPropia) {
-        const res = await fetch(docOrden.storage_url, { cache: 'no-store' })
+      const doc = docParaDescarga()
+      if (origen === 'oficial' && doc) {
+        const res = await fetch(doc.storage_url, { cache: 'no-store' })
         if (!res.ok) throw new Error('No se pudo descargar el archivo de la plantilla.')
-        descargarBlob(await res.blob(), docOrden.archivo_nombre || 'PTZ-OR-01 plantilla.xlsx')
+        descargarBlob(await res.blob(), doc.archivo_nombre || `${doc.codigo} plantilla.xlsx`)
       } else {
         descargarBlob(await generarPlantillaBase(), 'PTZ-OR-01 plantilla base.xlsx', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
       }
@@ -989,17 +1027,34 @@ export default function OrdenesProduccion() {
 
   const onArchivoPlantilla = (e) => { const f = e.target.files?.[0]; e.target.value = ''; if (f) setArchivoPlantilla(f) }
 
+  const refrescarPlantillas = async () => {
+    plantillaCache.current.clear()
+    await qc.invalidateQueries({ queryKey: ['docs_ptz_or_01'] })
+    qc.invalidateQueries({ queryKey: ['documentos'] }); qc.invalidateQueries({ queryKey: ['documento_versiones'] })
+  }
+
   const publicarPlantilla = async () => {
     if (!archivoPlantilla) return
     setPublicandoPlantilla(true)
     try {
-      await publicarArchivoDocumento({ codigo: COD_ORDEN, file: archivoPlantilla, creadoPor: profile?.nombre || '' })
-      plantillaCache.current = { url: '', buf: null, ok: false }
-      await qc.invalidateQueries({ queryKey: ['doc_ptz_or_01'] })
-      qc.invalidateQueries({ queryKey: ['documentos'] }); qc.invalidateQueries({ queryKey: ['documento_versiones'] })
+      await publicarArchivoDocumento({
+        codigo: codigoAmbito(ambitoPlantilla), file: archivoPlantilla, creadoPor: profile?.nombre || '',
+        nombre: ambitoPlantilla ? `Orden de producción — ${ambitoPlantilla === AMBITO_INTERNO ? 'producto interno' : ambitoPlantilla}` : 'Orden de producción',
+      })
+      await refrescarPlantillas()
       setArchivoPlantilla(null)
-      toast('Plantilla publicada ✓ Es la plantilla oficial PTZ-OR-01 (también queda en Gestión Documental)')
+      toast(`Plantilla publicada ✓ ${codigoAmbito(ambitoPlantilla)} (${etiquetaAmbito(ambitoPlantilla)}) — también queda en Gestión Documental`)
     } catch (e) { toast('No se pudo publicar la plantilla: ' + (e.message || e), 'error') } finally { setPublicandoPlantilla(false) }
+  }
+
+  const quitarPlantillaAmbito = async () => {
+    const doc = docDeAmbito(ambitoPlantilla)
+    if (!doc) return
+    const ok = await confirmar(`¿Quitar la plantilla ${doc.codigo}? Las órdenes de ese ámbito usarán la siguiente: ${ambitoPlantilla ? 'la general o el diseño original' : 'el diseño original'}. El archivo queda en la papelera de Gestión Documental.`)
+    if (!ok) return
+    setMenuPlantilla(false); setBusy(true)
+    try { await quitarDocumento(doc.codigo); await refrescarPlantillas(); toast('Plantilla quitada ✓') }
+    catch (e) { toast('No se pudo quitar: ' + (e.message || e), 'error') } finally { setBusy(false) }
   }
 
   // Producto de un lote (para autocompletar el nombre del surtido según el lote combinado)
@@ -2046,7 +2101,8 @@ export default function OrdenesProduccion() {
     // Plantilla oficial personalizada (Excel con marcadores): reemplaza el diseño original.
     let htmlPlantilla = null
     try {
-      const bufPlantilla = await plantillaOficial()
+      const plant = await plantillaParaOrden(o)
+      const bufPlantilla = plant?.buf
       if (bufPlantilla) {
         const sn = (v) => (v === true || v === false) ? v : null
         const fF = (x) => x ? new Date(x + 'T00:00:00').toLocaleDateString('es-CO') : ''
@@ -2069,7 +2125,7 @@ export default function OrdenesProduccion() {
         const pctTxt = (v) => v == null ? '' : v.toFixed(1).replace('.', ',') + '%'
         const datosPl = {
           v: {
-            'doc.codigo': COD_ORDEN, 'doc.version': docOrden?.version || '1', 'doc.titulo': 'Orden de producción',
+            'doc.codigo': plant.doc?.codigo || COD_ORDEN, 'doc.version': plant.doc?.version || '1', 'doc.titulo': 'Orden de producción',
             'doc.fecha_emision': emision, 'doc.fecha_impresion': fecha,
             'empresa.nombre': cfg.empresa || '', 'empresa.nit': cfg.nit || '', 'empresa.direccion': cfg.direccion || '',
             'empresa.ciudad': cfg.ciudad || '', 'empresa.telefono': cfg.telefono || '',
@@ -3861,19 +3917,36 @@ export default function OrdenesProduccion() {
             {menuPlantilla && (<>
               <div onClick={() => setMenuPlantilla(false)} style={{ position: 'fixed', inset: 0, zIndex: 29 }} />
               <div style={{ position: 'absolute', top: '100%', right: 0, zIndex: 30, background: 'var(--blanco, #fff)', border: '1px solid var(--crema-oscuro)', borderRadius: 8, boxShadow: '0 8px 24px rgba(0,0,0,0.15)', minWidth: 290, overflow: 'hidden' }}>
-                <div style={{ padding: '9px 12px', borderBottom: '1px solid var(--crema-oscuro)', fontSize: '0.74rem', color: 'var(--texto-suave)' }}>
-                  <b style={{ color: 'var(--selva)' }}>Plantilla de la orden · {COD_ORDEN}</b><br />
-                  {hayPlantillaPropia ? <>Oficial: <b>{docOrden?.archivo_nombre}</b> (v{docOrden?.version})</> : 'Diseño original del sistema'}
-                </div>
+                {(() => {
+                  const propia = docDeAmbito(ambitoPlantilla)
+                  const general = docDeAmbito('')
+                  const estado = propia ? <>Plantilla propia: <b>{propia.archivo_nombre}</b> (v{propia.version})</>
+                    : ambitoPlantilla && general ? <>Sin plantilla propia: usa la <b>General</b></>
+                    : 'Usa el diseño original del sistema'
+                  return (
+                    <div style={{ padding: '9px 12px', borderBottom: '1px solid var(--crema-oscuro)', fontSize: '0.74rem', color: 'var(--texto-suave)' }}>
+                      <b style={{ color: 'var(--selva)' }}>Plantilla de la orden · {codigoAmbito(ambitoPlantilla)}</b>
+                      <label style={{ display: 'block', margin: '6px 0 3px' }}>Plantilla para:</label>
+                      <Select className="form-control" style={{ width: '100%' }} value={ambitoPlantilla} onChange={e => setAmbitoPlantilla(e.target.value)}>
+                        <option value="">{etiquetaAmbito('')}{docDeAmbito('') ? ' ✓' : ''}</option>
+                        <option value={AMBITO_INTERNO}>{etiquetaAmbito(AMBITO_INTERNO)}{docDeAmbito(AMBITO_INTERNO) ? ' ✓' : ''}</option>
+                        {categoriasOrden.map(c => <option key={c} value={c}>{etiquetaAmbito(c)}{docDeAmbito(c) ? ' ✓' : ''}</option>)}
+                      </Select>
+                      <div style={{ marginTop: 4 }}>{estado}</div>
+                      <div style={{ marginTop: 2, fontSize: '0.68rem' }}>Cada orden usa: su categoría → producto interno → General → diseño original.</div>
+                    </div>
+                  )
+                })()}
                 <div style={{ padding: '7px 12px 2px', fontSize: '0.7rem', fontWeight: 700, color: 'var(--texto-suave)' }}>DESCARGAR PLANTILLA</div>
                 {[
                   { ico: FileText, txt: 'PDF (en blanco, para imprimir)', fn: descargarPlantillaPDF, ok: true },
-                  { ico: FileSpreadsheet, txt: hayPlantillaPropia ? 'Excel editable (la oficial actual)' : 'Excel editable', fn: () => descargarPlantillaExcel('oficial'), ok: true },
-                  { ico: FileSpreadsheet, txt: 'Excel base original (con marcadores)', fn: () => descargarPlantillaExcel('base'), ok: hayPlantillaPropia },
+                  { ico: FileSpreadsheet, txt: docDeAmbito(ambitoPlantilla) ? 'Excel editable (la de este ámbito)' : hayPlantillaPropia ? 'Excel editable (parte de la General)' : 'Excel editable', fn: () => descargarPlantillaExcel('oficial'), ok: true },
+                  { ico: FileSpreadsheet, txt: 'Excel base original (con marcadores)', fn: () => descargarPlantillaExcel('base'), ok: !!docParaDescarga() },
                 ].filter(x => x.ok).map(x => (
                   <button key={x.txt} className="btn btn-menu" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '8px 12px', background: 'none', border: 'none', cursor: 'pointer' }} onClick={x.fn}><Ico as={x.ico} size={14} />{x.txt}</button>
                 ))}
-                {esAdmin && <button className="btn btn-menu" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 12px', background: 'none', border: 'none', borderTop: '1px solid var(--crema-oscuro)', cursor: 'pointer' }} onClick={() => { setMenuPlantilla(false); inputPlantillaRef.current?.click() }}><Ico as={Upload} size={14} />Cargar plantilla (Excel)…</button>}
+                {esAdmin && <button className="btn btn-menu" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 12px', background: 'none', border: 'none', borderTop: '1px solid var(--crema-oscuro)', cursor: 'pointer' }} onClick={() => { setMenuPlantilla(false); inputPlantillaRef.current?.click() }}><Ico as={Upload} size={14} />Cargar plantilla para este ámbito (Excel)…</button>}
+                {esAdmin && docDeAmbito(ambitoPlantilla) && <button className="btn btn-menu" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 12px', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--rojo, #c0392b)' }} onClick={quitarPlantillaAmbito}><Ico as={Trash2} size={14} />Quitar la plantilla de este ámbito</button>}
                 <button className="btn btn-menu" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 12px', background: 'none', border: 'none', borderTop: '1px solid var(--crema-oscuro)', cursor: 'pointer' }} onClick={() => { setMenuPlantilla(false); setModalBiblioteca(true) }}><Ico as={BookOpen} size={14} />Biblioteca de campos</button>
                 <button className="btn btn-menu" style={{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 12px', background: 'none', border: 'none', cursor: 'pointer' }} onClick={() => { setMenuPlantilla(false); setModalInstructivo(true) }}><Ico as={ScrollText} size={14} />Instructivo para personalizar</button>
               </div>
@@ -3886,7 +3959,7 @@ export default function OrdenesProduccion() {
 
       <BibliotecaCamposModal open={modalBiblioteca} onClose={() => setModalBiblioteca(false)} />
       <InstructivoPlantillaModal open={modalInstructivo} onClose={() => setModalInstructivo(false)} onAbrirBiblioteca={() => { setModalInstructivo(false); setModalBiblioteca(true) }} />
-      <CargarPlantillaModal file={archivoPlantilla} onClose={() => { if (!publicandoPlantilla) setArchivoPlantilla(null) }} onPublicar={publicarPlantilla} publicando={publicandoPlantilla} versionActual={hayPlantillaPropia ? docOrden?.version : ''} />
+      <CargarPlantillaModal file={archivoPlantilla} onClose={() => { if (!publicandoPlantilla) setArchivoPlantilla(null) }} onPublicar={publicarPlantilla} publicando={publicandoPlantilla} versionActual={docDeAmbito(ambitoPlantilla)?.version || ''} destino={`${codigoAmbito(ambitoPlantilla)} · ${etiquetaAmbito(ambitoPlantilla)}`} />
 
       {saldosMezcla.length > 0 && (
         <details className="acordeon-item" style={{ borderLeft: '4px solid var(--lima)' }}>

@@ -440,10 +440,10 @@ export default function Documentos() {
       }
       qc.invalidateQueries({ queryKey: ['documentos'] })
       qc.invalidateQueries({ queryKey: ['documento_versiones'] })
-      // PTZ-OR-01 es la plantilla OFICIAL de las Órdenes de Producción: se refresca ese módulo y,
+      // PTZ-OR-01 (y sus variantes por categoría PTZ-OR-01-<CATEGORÍA>) son las plantillas OFICIALES de las Órdenes de Producción: se refresca ese módulo y,
       // si se subió un archivo nuevo, se valida que sirva como plantilla (aviso, no bloquea).
-      if ((form.codigo || '').trim().toUpperCase() === 'PTZ-OR-01') {
-        qc.invalidateQueries({ queryKey: ['doc_ptz_or_01'] })
+      if ((form.codigo || '').trim().toUpperCase().startsWith('PTZ-OR-01')) {
+        qc.invalidateQueries({ queryKey: ['docs_ptz_or_01'] })
         if (file) {
           try {
             if (!/\.xlsx$/i.test(file.name)) {

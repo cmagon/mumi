@@ -102,7 +102,7 @@ export function InstructivoPlantillaModal({ open, onClose, onAbrirBiblioteca }) 
 }
 
 // ───────────────────────── Cargar plantilla ─────────────────────────
-export function CargarPlantillaModal({ file, onClose, onPublicar, publicando, versionActual }) {
+export function CargarPlantillaModal({ file, onClose, onPublicar, publicando, versionActual, destino = '' }) {
   const [estado, setEstado] = useState({ cargando: true, error: '', scan: null, html: '' })
 
   useEffect(() => {
@@ -136,6 +136,7 @@ export function CargarPlantillaModal({ file, onClose, onPublicar, publicando, ve
         </button>
       </>}>
       <p style={{ fontSize: '0.85rem', margin: '0 0 8px' }}>Archivo: <b>{file?.name}</b></p>
+      {destino && <p style={{ fontSize: '0.85rem', margin: '0 0 8px' }}>Se publicará como: <b>{destino}</b></p>}
       {cargando && <p>Analizando la plantilla…</p>}
       {error && <div className="alert alert-danger"><Ico as={AlertTriangle} />{error}</div>}
       {scan && !scan.ok && (
