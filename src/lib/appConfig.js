@@ -4,6 +4,7 @@ export const DEFAULT_CFG = {
   empresa: 'Mumi Amazonia',
   eslogan: 'Sistema de Gestión Empresarial',
   nit: '', direccion: '', ciudad: '', telefono: '', email: '', web: '',
+  registro_sanitario: '', representante: '',   // salen en las plantillas de documentos (PTZ-OR-01)
   logo_url: '',
   color_primario: '#2d5a3d',   // --selva
   color_dorado: '#C8A94A',     // --dorado

@@ -366,3 +366,5 @@ La orden se puede imprimir/descargar con **tu propio diseño de Excel**.
 Sin plantilla Excel válida, las órdenes siguen usando el diseño original del sistema. Los campos «Queda en blanco» de la biblioteca se imprimen vacíos para llenarlos a mano.
 
 **Controles de proceso y calidad (operario):** en el paso de resultados de la orden hay un bloque opcional «Controles de proceso y calidad» (verificaciones previas SÍ/NO, pH, °Brix, temperaturas, organolépticos, sellado, detector de metales…). Lo que se llene sale en la plantilla con sus marcadores (`{{calidad.ph}}`, `{{check.despeje_linea.si}}`…). Requiere ejecutar `supabase/migration_v183_controles_orden.sql` una vez.
+
+**Actualización:** el bloque de controles ahora cubre también turno/línea/cliente, personal, tiempos de proceso, equipos e instrumentos, limpieza y desinfección, empaque y embalaje, rotulado, no conformidades y liberación del lote (≈110 campos, en grupos plegables). Se derivan solos: duración, rendimiento y merma (con el peso obtenido), registro INVIMA, código de barras y vida útil (de la ficha) y registro sanitario / representante legal (Configuración → datos de la empresa).

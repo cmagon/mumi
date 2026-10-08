@@ -404,12 +404,20 @@ export async function generarPlantillaBase() {
   sino(34, 'Sellado conforme', 'check.sellado_ok', 1); sino(34, 'Pasó detector de metales', 'check.detector_metales', 2)
   etiqueta('A35', 'Organolépticos'); celda('B35:F35', 'Color: {{calidad.color}}  ·  Olor: {{calidad.olor}}  ·  Sabor: {{calidad.sabor}}  ·  Textura: {{calidad.textura}}', { size: 10 }); alto(35, 30)
 
-  seccion(36, 'OBSERVACIONES')
-  celda('A37:F37', '{{obs.notas}}', { v: 'top' }); alto(37, 60)
+  seccion(36, 'LIBERACIÓN DEL LOTE Y DESPACHO')
+  etiqueta('A37', 'Estado del lote'); celda('B37:C37', '{{liberacion.estado}}'); etiqueta('D37', 'Aprobado por'); celda('E37:F37', '{{liberacion.aprobado_por}}')
+  etiqueta('A38', 'Fecha de liberación'); celda('B38:C38', '{{liberacion.fecha}}'); etiqueta('D38', 'Destino'); celda('E38:F38', '{{traza.destino}}')
 
-  alto(38, 44)
-  celda('A39:C39', 'ENTREGADO POR', { h: 'center', borde: false }); celda('D39:F39', 'RECIBIDO POR', { h: 'center', borde: false })
-  for (let c = 1; c <= 6; c++) ws.getCell(39, c).border = { top: { style: 'thin', color: { argb: GRIS } } }
+  seccion(39, 'NO CONFORMIDADES Y ACCIONES')
+  etiqueta('A40', 'Descripción'); celda('B40:F40', '{{nc.descripcion}}', { v: 'top' }); alto(40, 34)
+  etiqueta('A41', 'Acción correctiva'); celda('B41:C41', '{{nc.accion_correctiva}}'); etiqueta('D41', 'Disposición'); celda('E41:F41', '{{nc.disposicion}}')
+
+  seccion(42, 'OBSERVACIONES')
+  celda('A43:F43', '{{obs.notas}}', { v: 'top' }); alto(43, 60)
+
+  alto(44, 44)
+  celda('A45:C45', 'ENTREGADO POR', { h: 'center', borde: false }); celda('D45:F45', 'RECIBIDO POR', { h: 'center', borde: false })
+  for (let c = 1; c <= 6; c++) ws.getCell(45, c).border = { top: { style: 'thin', color: { argb: GRIS } } }
 
   // Hoja de instructivo
   const wi = wb.addWorksheet('_INSTRUCTIVO')

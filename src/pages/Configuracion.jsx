@@ -90,6 +90,10 @@ export default function Configuracion() {
             </div>
             <div className="form-group"><label className="form-label">Dirección</label><input className="form-control" value={cfg.direccion} onChange={e => set('direccion', e.target.value)} /></div>
             <div className="form-group"><label className="form-label">Sitio web</label><input className="form-control" value={cfg.web} onChange={e => set('web', e.target.value)} /></div>
+            <div className="form-grid-2">
+              <div className="form-group"><label className="form-label">Registro / permiso sanitario de la planta</label><input className="form-control" value={cfg.registro_sanitario || ''} onChange={e => set('registro_sanitario', e.target.value)} placeholder="Ej: concepto sanitario o INVIMA" /></div>
+              <div className="form-group"><label className="form-label">Representante legal</label><input className="form-control" value={cfg.representante || ''} onChange={e => set('representante', e.target.value)} /></div>
+            </div>
           </div>
         </div>
       </div>
