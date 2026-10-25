@@ -4,6 +4,7 @@ import { getConfig, saveConfig, aplicarTema, DEFAULT_CFG, PALETAS } from '../lib
 import { useToast } from '../hooks/useToast'
 import { Settings, Building2, Palette, Upload, RotateCcw, Save, Trash2 } from 'lucide-react'
 import Select from '../components/ui/Select'
+import RespaldoMigracion from '../components/config/RespaldoMigracion'
 const Ico = ({ as: C, size = 15 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-2px', marginRight: 5 }} aria-hidden="true" />
 
 // Fuentes agrupadas para el selector. Las Google Fonts se importan en globals.css.
@@ -165,6 +166,8 @@ export default function Configuracion() {
       <div className="alert alert-info" style={{ fontSize: '0.82rem', marginTop: 12 }}>
         Los colores y las fuentes se aplican en vivo a toda la aplicación. El <strong>logo y los datos de la empresa</strong> se usan en el header y las impresiones. Pulsa <strong>Guardar</strong> para que apliquen a todos los usuarios.
       </div>
+
+      <RespaldoMigracion />
     </div>
   )
 }
