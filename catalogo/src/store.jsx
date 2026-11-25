@@ -17,6 +17,7 @@ export const CFG_DEFAULT = {
   subtitulo: 'Productos naturales de la selva del Guaviare', mostrar_mayor: false,
   pedido_minimo: 30000, mostrar_stock: true, umbral_pocas: 10, umbral_ultimas: 3,
   categorias_orden: [], secciones: SECCIONES_DEFAULT,
+  colecciones: [], coleccion_activa: null,   // catálogos múltiples: [{id,nombre,items:[{tipo,ref}]}] + id del activo (null = Normal/todos)
   nombre_tienda: null, slogan: null, logo_url: '', favicon_url: '', nosotros_texto: '', solo_logo: false, mostrar_filtro_frutos: false, mostrar_slogan: true,
   fuente_titulos: 'Playfair Display', fuente_subtitulos: 'Source Sans 3', fuente_texto: 'Source Sans 3',
   contacto_mapa: '', paginas: [], galeria_albumes: [], galeria_titulo: '', galeria_subtitulo: '', categorias_extra: [],
@@ -150,16 +151,26 @@ export function StoreProvider({ children }) {
     })
     all.forEach(p => { const c = (p.categoria || '').trim(); if (c) p.categoria = canonCat[sinTildes(c)] || c })
 
+    // Catálogo activo: si hay una colección seleccionada, solo se muestran sus productos
+    // y/o las categorías elegidas. Sin colección activa (o vacía) = catálogo "Normal" (todo).
+    const allVis = (() => {
+      const act = (cfg?.colecciones || []).find(c => String(c.id) === String(cfg?.coleccion_activa))
+      if (!act || !Array.isArray(act.items) || !act.items.length) return all
+      const ids = new Set(act.items.filter(i => i?.tipo === 'producto').map(i => String(i.ref)))
+      const cats = new Set(act.items.filter(i => i?.tipo === 'categoria').map(i => sinTildes(String(i.ref).trim())))
+      return all.filter(p => ids.has(String(p.id)) || cats.has(sinTildes((p.categoria || '').trim())))
+    })()
+
     // Presentaciones: mismos `grupo` → chips en la tarjeta (x6, x12…)
     const byGrupo = {}
-    all.forEach(p => {
+    allVis.forEach(p => {
       if (!p.grupo) return
       ;(byGrupo[p.grupo] ||= []).push(p)
     })
     Object.values(byGrupo).forEach(list => {
       list.sort((a, b) => (a.pack_orden - b.pack_orden) || String(a.pack_label || '').localeCompare(String(b.pack_label || ''), 'es') || String(a.nombre).localeCompare(String(b.nombre), 'es'))
     })
-    return all.map(p => {
+    return allVis.map(p => {
       if (!p.grupo || !byGrupo[p.grupo] || byGrupo[p.grupo].length < 2) return { ...p, presentaciones: null }
       const presentaciones = byGrupo[p.grupo].map(s => ({
         id: s.id,
@@ -169,7 +180,7 @@ export function StoreProvider({ children }) {
       }))
       return { ...p, presentaciones }
     })
-  }, [base, extra])
+  }, [base, extra, cfg?.coleccion_activa, cfg?.colecciones])
 
   // Re-hidrata el carrito contra los productos frescos: refresca precio/stock/oferta/nombre/imagen,
   // topa la cantidad al stock disponible y descarta lo que ya no existe o fue ocultado.

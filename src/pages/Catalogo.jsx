@@ -7,7 +7,7 @@ import { useToast } from '../hooks/useToast'
 import { useAuth } from '../context/AuthContext'
 import { puedeVerSeccion } from '../lib/permisos'
 import { fNum } from '../lib/businessLogic'
-import { Store, Eye, EyeOff, Star, Save, Settings, BarChart3, ExternalLink, Pencil, X, Plus, Upload, Trash2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Palette, Image as ImageIcon, Layout, Users, RefreshCw, Monitor, Tablet, Smartphone, Mail } from 'lucide-react'
+import { Store, Eye, EyeOff, Star, Save, Settings, BarChart3, ExternalLink, Pencil, X, Plus, Upload, Trash2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Palette, Image as ImageIcon, Layout, Users, RefreshCw, Monitor, Tablet, Smartphone, Mail, Check } from 'lucide-react'
 import { Truck, ShieldCheck, MessageCircle, Package, CreditCard, Heart, Clock, Gift, Award, Sprout, BadgeCheck, Sparkles, MapPin, Phone, Percent, ThumbsUp, Recycle, HandCoins, Leaf } from 'lucide-react'
 import { Banknote, Wallet, QrCode, Landmark, Coins, Receipt, PiggyBank, BadgeDollarSign, Megaphone } from 'lucide-react'
 
@@ -2560,6 +2560,107 @@ function ModalBloque({ bloque, paginas = [], toast, onGuardar, onClose }) {
   )
 }
 
+// Editor de catálogos múltiples: colecciones de productos/categorías + cuál se muestra en la web.
+function CatalogosEditor({ colecciones = [], activa = null, onChange, onActiva, categorias = [], productos = [] }) {
+  const [abierta, setAbierta] = useState(null)   // id de colección expandida
+  const [busca, setBusca] = useState('')
+  const nuevaColeccion = () => {
+    const id = 'c' + Date.now().toString(36)
+    onChange([...(colecciones || []), { id, nombre: `Catálogo ${(colecciones?.length || 0) + 1}`, items: [] }])
+    setAbierta(id)
+  }
+  const setCol = (id, patch) => onChange((colecciones || []).map(c => c.id === id ? { ...c, ...patch } : c))
+  const borrar = (id) => {
+    if (!confirm('¿Eliminar este catálogo? Los productos no se borran, solo deja de existir esta selección.')) return
+    onChange((colecciones || []).filter(c => c.id !== id))
+    if (String(activa) === String(id)) onActiva(null)
+  }
+  const tieneItem = (col, tipo, ref) => (col.items || []).some(i => i.tipo === tipo && String(i.ref) === String(ref))
+  const toggleItem = (id, tipo, ref) => {
+    const col = (colecciones || []).find(c => c.id === id); if (!col) return
+    const items = tieneItem(col, tipo, ref)
+      ? (col.items || []).filter(i => !(i.tipo === tipo && String(i.ref) === String(ref)))
+      : [...(col.items || []), { tipo, ref: String(ref) }]
+    setCol(id, { items })
+  }
+  const nProd = (col) => (col.items || []).filter(i => i.tipo === 'producto').length
+  const nCat = (col) => (col.items || []).filter(i => i.tipo === 'categoria').length
+  const q = sinTildes(busca.trim().toLowerCase())
+  const prodsFiltrados = (q ? productos.filter(p => sinTildes((p.nombre || '').toLowerCase()).includes(q)) : productos).slice(0, 60)
+
+  return (
+    <div>
+      <p style={{ fontSize: '0.84rem', color: 'var(--texto-suave)', marginTop: 0 }}>
+        Crea catálogos (ej. <em>Fechas especiales</em>) eligiendo productos y/o categorías completas. Marca cuál se muestra en tu web.
+      </p>
+      <div style={{ marginBottom: 12 }}>
+        <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Catálogo que se muestra en la web</label>
+        <select className="form-control" value={activa == null ? '' : String(activa)} onChange={e => onActiva(e.target.value || null)}>
+          <option value="">🛍️ Normal (todos los productos)</option>
+          {(colecciones || []).map(c => <option key={c.id} value={c.id}>{c.nombre} ({nProd(c)} prod. · {nCat(c)} cat.)</option>)}
+        </select>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {(colecciones || []).map(col => {
+          const open = abierta === col.id
+          const esActiva = String(activa) === String(col.id)
+          return (
+            <div key={col.id} className="card" style={{ padding: 10, border: esActiva ? '2px solid var(--selva, #1A3A2A)' : '1px solid var(--crema-oscuro)' }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button type="button" className="btn btn-xs btn-secondary" onClick={() => setAbierta(open ? null : col.id)}>
+                  <ChevronDown size={14} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+                </button>
+                <input className="form-control" style={{ flex: 1, padding: '4px 8px' }} value={col.nombre} onChange={e => setCol(col.id, { nombre: e.target.value })} />
+                {esActiva
+                  ? <span className="badge badge-dorado">En la web</span>
+                  : <button type="button" className="btn btn-xs btn-secondary" onClick={() => onActiva(col.id)}>Mostrar en web</button>}
+                <button type="button" className="btn btn-xs btn-danger" onClick={() => borrar(col.id)}><Trash2 size={13} /></button>
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)', margin: '6px 0 0 36px' }}>{nProd(col)} productos · {nCat(col)} categorías</div>
+
+              {open && (
+                <div style={{ marginTop: 10 }}>
+                  {/* Categorías completas */}
+                  <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 4 }}>Categorías completas</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                    {categorias.length === 0 && <span style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>Sin categorías.</span>}
+                    {categorias.map(cat => {
+                      const on = tieneItem(col, 'categoria', cat)
+                      return (
+                        <button key={cat} type="button" className={`btn btn-xs ${on ? 'btn-primary' : 'btn-secondary'}`} onClick={() => toggleItem(col.id, 'categoria', cat)}>
+                          {on ? <Check size={12} /> : <Plus size={12} />} {cat}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {/* Productos individuales */}
+                  <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 4 }}>Productos</div>
+                  <input className="form-control" style={{ padding: '4px 8px', marginBottom: 6 }} placeholder="Buscar producto…" value={busca} onChange={e => setBusca(e.target.value)} />
+                  <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    {prodsFiltrados.map(p => {
+                      const on = tieneItem(col, 'producto', p.id)
+                      return (
+                        <button key={p.id} type="button" className="btn btn-xs" style={{ justifyContent: 'flex-start', background: on ? 'var(--crema)' : 'transparent', border: '1px solid var(--crema-oscuro)' }} onClick={() => toggleItem(col.id, 'producto', p.id)}>
+                          {on ? <Check size={12} /> : <Plus size={12} />}
+                          <span style={{ flex: 1, textAlign: 'left' }}>{p.nombre}</span>
+                          {p.categoria && <span style={{ fontSize: '0.68rem', color: 'var(--texto-suave)' }}>{p.categoria}</span>}
+                        </button>
+                      )
+                    })}
+                    {prodsFiltrados.length === 0 && <span style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>Sin resultados.</span>}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      <button type="button" className="btn btn-sm btn-secondary" style={{ marginTop: 10 }} onClick={nuevaColeccion}><Plus size={14} /> Agregar catálogo</button>
+    </div>
+  )
+}
+
 // Sección de acordeón del panel Personalizar (a nivel de módulo para no perder el foco al escribir)
 function PzSec({ id, titulo, abierto, setAbierto, children, onSave, saving }) {
   const open = abierto === id
@@ -2618,6 +2719,17 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
     queryFn: async () => { const { data } = await supabase.from('finished_products').select('categoria_alegra_nombre').eq('catalogo_visible', true); return [...new Set((data || []).map(p => p.categoria_alegra_nombre).filter(Boolean))] },
   })
   const { data: bannersLista = [] } = useQuery({ queryKey: ['banners_catalogo'], queryFn: async () => { const { data } = await supabase.from('banners_catalogo').select('id, nombre, titulo, es_secundario, grupo').order('orden'); return data || [] } })
+  const { data: prodsCat = [] } = useQuery({ queryKey: ['catalogo_productos_sel'], queryFn: async () => { const { data } = await supabase.from('catalogo_productos').select('id, nombre, categoria').order('nombre'); return data || [] } })
+  // Productos disponibles para armar catálogos: los de la vista pública + los "extra" de config.
+  const prodsPicker = useMemo(() => [
+    ...prodsCat,
+    ...((cfg?.productos_extra || []).filter(e => e && e.visible !== false).map(e => ({ id: e.id, nombre: e.nombre, categoria: e.categoria || 'otros' }))),
+  ], [prodsCat, cfg?.productos_extra])
+  const categoriasColeccion = useMemo(() => [...new Set([
+    ...categorias,
+    ...(cfg?.categorias_extra || []),
+    ...(cfg?.productos_extra || []).map(p => p.categoria).filter(Boolean),
+  ])], [categorias, cfg?.categorias_extra, cfg?.productos_extra])
 
   const diseñosGuardados = useMemo(() => (
     Array.isArray(cfg?.plantillas_guardadas)
@@ -3072,6 +3184,17 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
             </small>
           )}
           <TabBanners toast={toast} qc={qc} embed modoAtelier={familiaActiva === 'atelier'} />
+        </PzSec>
+
+        <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="catalogos" titulo={<><Store size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Catálogos (colecciones de productos)</>}>
+          <CatalogosEditor
+            colecciones={Array.isArray(cfg.colecciones) ? cfg.colecciones : []}
+            activa={cfg.coleccion_activa ?? null}
+            onChange={(cx) => set('colecciones', cx)}
+            onActiva={(id) => set('coleccion_activa', id)}
+            categorias={categoriasColeccion}
+            productos={prodsPicker}
+          />
         </PzSec>
 
         <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="secciones" titulo={<><Layout size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Secciones del inicio</>}>
