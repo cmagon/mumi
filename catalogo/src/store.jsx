@@ -154,11 +154,18 @@ export function StoreProvider({ children }) {
     // Catálogo activo: si hay una colección seleccionada, solo se muestran sus productos
     // y/o las categorías elegidas. Sin colección activa (o vacía) = catálogo "Normal" (todo).
     const allVis = (() => {
-      const act = (cfg?.colecciones || []).find(c => String(c.id) === String(cfg?.coleccion_activa))
+      const cols = Array.isArray(cfg?.colecciones) ? cfg.colecciones : []
+      const activa = cfg?.coleccion_activa
+      // Sin catálogo activo (Normal) → se muestran todos los productos.
+      if (activa == null || activa === '') return all
+      const act = cols.find(c => String(c.id) === String(activa))
       if (!act || !Array.isArray(act.items) || !act.items.length) return all
       const ids = new Set(act.items.filter(i => i?.tipo === 'producto').map(i => String(i.ref)))
       const cats = new Set(act.items.filter(i => i?.tipo === 'categoria').map(i => sinTildes(String(i.ref).trim())))
-      return all.filter(p => ids.has(String(p.id)) || cats.has(sinTildes((p.categoria || '').trim())))
+      const filtrados = all.filter(p => ids.has(String(p.id)) || cats.has(sinTildes((p.categoria || '').trim())))
+      // Red de seguridad: si el catálogo activo no coincide con ningún producto
+      // (mala configuración), no dejamos la tienda vacía: mostramos todo.
+      return filtrados.length ? filtrados : all
     })()
 
     // Presentaciones: mismos `grupo` → chips en la tarjeta (x6, x12…)
