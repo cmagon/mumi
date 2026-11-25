@@ -2574,20 +2574,37 @@ function ModalBloque({ bloque, paginas = [], toast, onGuardar, onClose }) {
   )
 }
 
+// Catálogo por defecto "Todos los productos" (todos:true = muestra todo el inventario).
+const TODOS_ID = '__todos__'
+const CATALOGO_TODOS = { id: TODOS_ID, nombre: 'Todos los productos', todos: true, items: [] }
+
 // Editor de catálogos múltiples: colecciones de productos/categorías + cuál se muestra en la web.
+// Siempre existe un catálogo "Todos los productos" (no se puede borrar) y siempre hay uno activo.
 function CatalogosEditor({ colecciones = [], activa = null, onChange, onActiva, categorias = [], productos = [] }) {
   const [abierta, setAbierta] = useState(null)   // id de colección expandida
   const [busca, setBusca] = useState('')
+
+  // Garantiza que exista el catálogo "Todos los productos" y que siempre haya uno activo.
+  useEffect(() => {
+    const cols = colecciones || []
+    const tieneTodos = cols.some(c => c.todos || c.id === TODOS_ID)
+    const next = tieneTodos ? cols : [CATALOGO_TODOS, ...cols]
+    if (!tieneTodos) onChange(next)
+    const activaValida = next.some(c => String(c.id) === String(activa))
+    if (!activaValida) onActiva(TODOS_ID)
+  }, [colecciones, activa]) // eslint-disable-line react-hooks/exhaustive-deps
+
   const nuevaColeccion = () => {
     const id = 'c' + Date.now().toString(36)
-    onChange([...(colecciones || []), { id, nombre: `Catálogo ${(colecciones?.length || 0) + 1}`, items: [] }])
+    onChange([...(colecciones || []), { id, nombre: `Catálogo ${(colecciones?.length || 0)}`, items: [] }])
     setAbierta(id)
   }
   const setCol = (id, patch) => onChange((colecciones || []).map(c => c.id === id ? { ...c, ...patch } : c))
-  const borrar = (id) => {
+  const borrar = (col) => {
+    if (col.todos || col.id === TODOS_ID) return   // el catálogo "Todos los productos" no se borra
     if (!confirm('¿Eliminar este catálogo? Los productos no se borran, solo deja de existir esta selección.')) return
-    onChange((colecciones || []).filter(c => c.id !== id))
-    if (String(activa) === String(id)) onActiva(null)
+    onChange((colecciones || []).filter(c => c.id !== col.id))
+    if (String(activa) === String(col.id)) onActiva(TODOS_ID)   // vuelve a "Todos los productos"
   }
   const tieneItem = (col, tipo, ref) => (col.items || []).some(i => i.tipo === tipo && String(i.ref) === String(ref))
   const toggleItem = (id, tipo, ref) => {
@@ -2601,39 +2618,44 @@ function CatalogosEditor({ colecciones = [], activa = null, onChange, onActiva, 
   const nCat = (col) => (col.items || []).filter(i => i.tipo === 'categoria').length
   const q = sinTildes(busca.trim().toLowerCase())
   const prodsFiltrados = (q ? productos.filter(p => sinTildes((p.nombre || '').toLowerCase()).includes(q)) : productos).slice(0, 60)
+  const lista = (colecciones && colecciones.length) ? colecciones : [CATALOGO_TODOS]
 
   return (
     <div>
       <p style={{ fontSize: '0.84rem', color: 'var(--texto-suave)', marginTop: 0 }}>
-        Crea catálogos (ej. <em>Fechas especiales</em>) eligiendo productos y/o categorías completas. Marca cuál se muestra en tu web.
+        Siempre hay un catálogo activo. Por defecto es <strong>Todos los productos</strong>. Crea otros (ej. <em>Fechas especiales</em>) eligiendo productos y/o categorías completas, y elige cuál se muestra en tu web.
       </p>
       <div style={{ marginBottom: 12 }}>
         <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Catálogo que se muestra en la web</label>
-        <select className="form-control" value={activa == null ? '' : String(activa)} onChange={e => onActiva(e.target.value || null)}>
-          <option value="">🛍️ Normal (todos los productos)</option>
-          {(colecciones || []).map(c => <option key={c.id} value={c.id}>{c.nombre} ({nProd(c)} prod. · {nCat(c)} cat.)</option>)}
+        <select className="form-control" value={activa == null ? TODOS_ID : String(activa)} onChange={e => onActiva(e.target.value)}>
+          {lista.map(c => <option key={c.id} value={c.id}>{c.nombre}{c.todos ? '' : ` (${nProd(c)} prod. · ${nCat(c)} cat.)`}</option>)}
         </select>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {(colecciones || []).map(col => {
+        {lista.map(col => {
           const open = abierta === col.id
-          const esActiva = String(activa) === String(col.id)
+          const esActiva = String(activa == null ? TODOS_ID : activa) === String(col.id)
+          const esTodos = !!col.todos || col.id === TODOS_ID
           return (
             <div key={col.id} className="card" style={{ padding: 10, border: esActiva ? '2px solid var(--selva, #1A3A2A)' : '1px solid var(--crema-oscuro)' }}>
               <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
-                <button type="button" className="btn btn-xs btn-secondary" onClick={() => setAbierta(open ? null : col.id)}>
+                <button type="button" className="btn btn-xs btn-secondary" disabled={esTodos} style={esTodos ? { visibility: 'hidden' } : undefined} onClick={() => setAbierta(open ? null : col.id)}>
                   <ChevronDown size={14} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
                 </button>
-                <input className="form-control" style={{ flex: 1, padding: '4px 8px' }} value={col.nombre} onChange={e => setCol(col.id, { nombre: e.target.value })} />
+                {esTodos
+                  ? <span style={{ flex: 1, fontWeight: 700, color: 'var(--selva)' }}>🛍️ {col.nombre} <span style={{ fontWeight: 400, fontSize: '0.72rem', color: 'var(--texto-suave)' }}>· por defecto</span></span>
+                  : <input className="form-control" style={{ flex: 1, padding: '4px 8px' }} value={col.nombre} onChange={e => setCol(col.id, { nombre: e.target.value })} />}
                 {esActiva
                   ? <span className="badge badge-dorado">En la web</span>
                   : <button type="button" className="btn btn-xs btn-secondary" onClick={() => onActiva(col.id)}>Mostrar en web</button>}
-                <button type="button" className="btn btn-xs btn-danger" onClick={() => borrar(col.id)}><Trash2 size={13} /></button>
+                {!esTodos && <button type="button" className="btn btn-xs btn-danger" onClick={() => borrar(col)}><Trash2 size={13} /></button>}
               </div>
-              <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)', margin: '6px 0 0 36px' }}>{nProd(col)} productos · {nCat(col)} categorías</div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)', margin: '6px 0 0 36px' }}>
+                {esTodos ? 'Muestra todos los productos del inventario.' : `${nProd(col)} productos · ${nCat(col)} categorías`}
+              </div>
 
-              {open && (
+              {open && !esTodos && (
                 <div style={{ marginTop: 10 }}>
                   {/* Categorías completas */}
                   <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 4 }}>Categorías completas</div>

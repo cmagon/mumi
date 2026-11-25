@@ -156,10 +156,9 @@ export function StoreProvider({ children }) {
     const allVis = (() => {
       const cols = Array.isArray(cfg?.colecciones) ? cfg.colecciones : []
       const activa = cfg?.coleccion_activa
-      // Sin catálogo activo (Normal) → se muestran todos los productos.
-      if (activa == null || activa === '') return all
       const act = cols.find(c => String(c.id) === String(activa))
-      if (!act || !Array.isArray(act.items) || !act.items.length) return all
+      // Catálogo "Todos los productos" (todos:true) o sin catálogo activo → se muestra todo.
+      if (!act || act.todos || !Array.isArray(act.items) || !act.items.length) return all
       const ids = new Set(act.items.filter(i => i?.tipo === 'producto').map(i => String(i.ref)))
       const cats = new Set(act.items.filter(i => i?.tipo === 'categoria').map(i => sinTildes(String(i.ref).trim())))
       const filtrados = all.filter(p => ids.has(String(p.id)) || cats.has(sinTildes((p.categoria || '').trim())))
