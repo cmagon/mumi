@@ -98,6 +98,46 @@ button { font: inherit; cursor: pointer; color: inherit; }
 .dis-organico .card { transition: transform .18s ease, box-shadow .18s ease; }
 @media (hover: hover) { .dis-organico .card:hover { transform: translateY(-6px); box-shadow: var(--sombra); } }
 
+/* --- NAVIDAD AMAZÓNICA (tema festivo): verde selva + rojo + dorado, con nieve y adornos.
+   Hereda el layout 'selva' (no es una familia nueva de estructura), solo cambia la piel.
+   Los colores base los aporta la paleta de la plantilla (color_primario/secundario/fondo). --- */
+.dis-navidad { --radio: 14px; --radio-sm: 8px; --navidad-oro: #D4AF37; --navidad-rojo: #C8102E; }
+
+/* Nieve cayendo: capa fija, decorativa, nunca intercepta clics. Debajo del header (z 30) y de modales. */
+.dis-navidad::after {
+  content: ""; position: fixed; inset: 0; z-index: 3; pointer-events: none;
+  background-image:
+    radial-gradient(2px 2px at 20% 30%, rgba(255,255,255,0.92), transparent),
+    radial-gradient(2px 2px at 70% 60%, rgba(255,255,255,0.80), transparent),
+    radial-gradient(1.5px 1.5px at 40% 85%, rgba(255,255,255,0.85), transparent),
+    radial-gradient(2.5px 2.5px at 85% 18%, rgba(255,255,255,0.72), transparent),
+    radial-gradient(1.5px 1.5px at 12% 72%, rgba(255,255,255,0.80), transparent);
+  background-size: 420px 420px, 300px 300px, 260px 260px, 360px 360px, 200px 200px;
+  animation: nieve-caer 16s linear infinite;
+  opacity: 0.5;
+}
+@keyframes nieve-caer {
+  from { background-position: 0 -420px, 0 -300px, 0 -260px, 0 -360px, 0 -200px; }
+  to   { background-position: 0 420px, 0 300px, 0 260px, 0 360px, 0 200px; }
+}
+
+/* Acento dorado festivo en el borde superior del header */
+.dis-navidad .hdr { border-top: 3px solid var(--navidad-oro); }
+/* Títulos de sección con adorno navideño */
+.dis-navidad .sec-title::before { background: var(--navidad-rojo); }
+.dis-navidad .sec-title::after { content: " ❄"; color: var(--navidad-oro); font-size: 0.8em; }
+/* Badge/eyebrow y CTA del hero con brillo dorado */
+.dis-navidad .hero-cta { box-shadow: 0 0 0 2px rgba(212,175,55,0.35), 0 8px 20px rgba(0,0,0,0.18); }
+.dis-navidad .precio-oferta, .dis-navidad .badge-oferta { background: var(--navidad-rojo); color: #fff; }
+/* Marco festivo sutil en las tarjetas */
+.dis-navidad .card { border: 1px solid rgba(212,175,55,0.35); }
+/* Guirnalda dorada bajo la barra de beneficios */
+.dis-navidad .barra { border-bottom: 2px dotted rgba(212,175,55,0.5); }
+
+@media (prefers-reduced-motion: reduce) {
+  .dis-navidad::after { animation: none; }
+}
+
 /* --- ATELIER: tema completo en themes/atelier.css (Stitch catÃ¡logo + ficha) --- */
 
 /* ==================== HEADER ==================== */

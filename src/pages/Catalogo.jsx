@@ -1816,7 +1816,9 @@ const SECCIONES_DEFAULT = [
 ]
 const SECCION_LABEL = { hero: '🖼️ Banner principal (hero)', novedades: '✨ Novedades', categorias: '🛍️ Productos por categoría', frutos: '🌿 Frutos que nos inspiran', newsletter: '✉️ Suscripción (newsletter)' }
 // Familia web: atelier = layout completo; todo lo demás = catálogo clásico
-const familiaWeb = (diseno) => ((diseno || 'selva') === 'atelier' ? 'atelier' : 'clasico')
+const familiaWeb = (diseno) => (diseno === 'atelier' ? 'atelier' : diseno === 'navidad' ? 'navidad' : 'clasico')
+// Id de la plantilla web que corresponde a un `diseno` (para preseleccionar la vista previa)
+const packIdDeDiseno = (diseno) => { const f = familiaWeb(diseno); return f === 'atelier' ? 'atelier' : f === 'navidad' ? 'navidad' : 'clasico' }
 
 // Formas del catálogo clásico (bordes/botones). No aplica cuando la plantilla web es Atelier.
 const ESTILOS_FORMA = [
@@ -1856,6 +1858,18 @@ const PLANTILLAS_WEB = [
       impacto_link_texto: 'Conoce más',
       cosecha_eyebrow: 'Productos destacados', cosecha_titulo: 'Nuestra cosecha',
       frutos_filtro_titulo: 'Explora por ingrediente',
+    },
+  },
+  {
+    id: 'navidad',
+    nombre: 'Navidad amazónica',
+    desc: 'Tema festivo: verde selva, rojo y dorado, con nieve y adornos navideños',
+    payload: {
+      diseno: 'navidad', plantilla: 'amazonia', color_primario: '#0E3B2E', color_secundario: '#C8102E', color_fondo: '#F6F1E7',
+      fuente_titulos: 'Playfair Display', fuente_subtitulos: 'Source Sans 3', fuente_texto: 'Source Sans 3',
+      ficha_cta_fijo: false, ficha_mostrar_envio: true, ficha_titulo_relacionados: 'Ideal para regalar',
+      titulo_banner: 'Navidad amazónica', subtitulo: 'Regalos con sabor de la selva: infusiones y superalimentos para celebrar y compartir.',
+      hero_cta_texto: 'Ver regalos', hero_cta_link: '/tienda', hero_cta2_texto: 'Nuestra historia', hero_mostrar_cta2: true,
     },
   },
 ]
@@ -2780,7 +2794,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
       setCfg(base)
       setSavedSnap(snapConfig(base))
       // Selecciona la plantilla web según la familia activa (no por color)
-      setSelPackId(familiaWeb(base.diseno) === 'atelier' ? 'atelier' : 'clasico')
+      setSelPackId(packIdDeDiseno(base.diseno))
     })
   }, [])
   useEffect(() => {
@@ -2789,7 +2803,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
   }, [cfg, savedSnap, onDirtyChange])
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
 
-  const syncSelPackAFamilia = (diseno) => setSelPackId(familiaWeb(diseno) === 'atelier' ? 'atelier' : 'clasico')
+  const syncSelPackAFamilia = (diseno) => setSelPackId(packIdDeDiseno(diseno))
   const set = (k, v) => {
     if (k === 'diseno') syncSelPackAFamilia(v)
     // Si ajustas color mientras previsualizas otra plantilla web, vuelve a la activa para ver el color
@@ -2920,7 +2934,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
   const borrarDiseñoGuardado = (id) => {
     if (!window.confirm('¿Eliminar este diseño guardado?')) return
     setCfg(c => ({ ...c, plantillas_guardadas: (c.plantillas_guardadas || []).filter(p => p.id !== id) }))
-    if (selPackId === id) setSelPackId(familiaActiva === 'atelier' ? 'atelier' : 'clasico')
+    if (selPackId === id) setSelPackId(packIdDeDiseno(cfg?.diseno))
   }
   const moverSeccion = (i, d) => setCfg(c => { const a = [...(c.secciones || SECCIONES_DEFAULT)]; const j = i + d; if (j < 0 || j >= a.length) return c;[a[i], a[j]] = [a[j], a[i]]; return { ...c, secciones: a } })
   const toggleSeccion = (id) => setCfg(c => ({ ...c, secciones: (c.secciones || SECCIONES_DEFAULT).map(s => s.id === id ? { ...s, on: !(s.on !== false) } : s) }))
@@ -2999,7 +3013,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
             La <strong>plantilla web</strong> define la estructura (inicio, ficha, menú). Los <strong>colores</strong> son independientes: puedes cambiar la paleta sin cambiar de plantilla.
           </small>
 
-          <label className="form-label">1. Plantilla web <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(2 opciones · clic para previsualizar → Aplicar)</small></label>
+          <label className="form-label">1. Plantilla web <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(clic para previsualizar → Aplicar)</small></label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
             {PLANTILLAS_WEB.map(pack => {
               const seleccionada = selPackId === pack.id
@@ -3344,7 +3358,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
       {/* Vista previa en vivo */}
       <div className="pz-preview">
         <div className="pz-preview-bar">
-          <span><Eye size={14} style={{ verticalAlign: '-2px' }} /> Vista previa{import.meta.env.DEV ? ' · local' : ''}{packPendiente && selPack ? ` · ${selPack.nombre}` : familiaActiva === 'atelier' ? ' · Atelier' : ' · Clásico'}</span>
+          <span><Eye size={14} style={{ verticalAlign: '-2px' }} /> Vista previa{import.meta.env.DEV ? ' · local' : ''}{packPendiente && selPack ? ` · ${selPack.nombre}` : familiaActiva === 'atelier' ? ' · Atelier' : familiaActiva === 'navidad' ? ' · Navidad' : ' · Clásico'}</span>
           <div className="pz-devices">
             <button type="button" className={dispositivo === 'desktop' ? 'on' : ''} onClick={() => setDispositivo('desktop')} title="PC"><Monitor size={15} /></button>
             <button type="button" className={dispositivo === 'tablet' ? 'on' : ''} onClick={() => setDispositivo('tablet')} title="Tablet"><Tablet size={15} /></button>
