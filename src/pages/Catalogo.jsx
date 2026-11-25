@@ -7,7 +7,7 @@ import { useToast } from '../hooks/useToast'
 import { useAuth } from '../context/AuthContext'
 import { puedeVerSeccion } from '../lib/permisos'
 import { fNum } from '../lib/businessLogic'
-import { Store, Eye, EyeOff, Star, Save, Settings, BarChart3, ExternalLink, Pencil, X, Plus, Upload, Trash2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Palette, Image as ImageIcon, Layout, Users, RefreshCw, Monitor, Tablet, Smartphone, Mail } from 'lucide-react'
+import { Store, Eye, EyeOff, Star, Save, Settings, BarChart3, ExternalLink, Pencil, X, Plus, Upload, Trash2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Palette, Image as ImageIcon, Layout, Users, RefreshCw, Monitor, Tablet, Smartphone, Mail, Check } from 'lucide-react'
 import { Truck, ShieldCheck, MessageCircle, Package, CreditCard, Heart, Clock, Gift, Award, Sprout, BadgeCheck, Sparkles, MapPin, Phone, Percent, ThumbsUp, Recycle, HandCoins, Leaf } from 'lucide-react'
 import { Banknote, Wallet, QrCode, Landmark, Coins, Receipt, PiggyBank, BadgeDollarSign, Megaphone } from 'lucide-react'
 
@@ -1816,7 +1816,9 @@ const SECCIONES_DEFAULT = [
 ]
 const SECCION_LABEL = { hero: '🖼️ Banner principal (hero)', novedades: '✨ Novedades', categorias: '🛍️ Productos por categoría', frutos: '🌿 Frutos que nos inspiran', newsletter: '✉️ Suscripción (newsletter)' }
 // Familia web: atelier = layout completo; todo lo demás = catálogo clásico
-const familiaWeb = (diseno) => ((diseno || 'selva') === 'atelier' ? 'atelier' : 'clasico')
+const familiaWeb = (diseno) => (diseno === 'atelier' ? 'atelier' : diseno === 'navidad' ? 'navidad' : 'clasico')
+// Id de la plantilla web que corresponde a un `diseno` (para preseleccionar la vista previa)
+const packIdDeDiseno = (diseno) => { const f = familiaWeb(diseno); return f === 'atelier' ? 'atelier' : f === 'navidad' ? 'navidad' : 'clasico' }
 
 // Formas del catálogo clásico (bordes/botones). No aplica cuando la plantilla web es Atelier.
 const ESTILOS_FORMA = [
@@ -1856,6 +1858,18 @@ const PLANTILLAS_WEB = [
       impacto_link_texto: 'Conoce más',
       cosecha_eyebrow: 'Productos destacados', cosecha_titulo: 'Nuestra cosecha',
       frutos_filtro_titulo: 'Explora por ingrediente',
+    },
+  },
+  {
+    id: 'navidad',
+    nombre: 'Navidad amazónica',
+    desc: 'Tema festivo: verde selva, rojo y dorado, con nieve y adornos navideños',
+    payload: {
+      diseno: 'navidad', plantilla: 'amazonia', color_primario: '#0E3B2E', color_secundario: '#C8102E', color_fondo: '#F6F1E7',
+      fuente_titulos: 'Playfair Display', fuente_subtitulos: 'Source Sans 3', fuente_texto: 'Source Sans 3',
+      ficha_cta_fijo: false, ficha_mostrar_envio: true, ficha_titulo_relacionados: 'Ideal para regalar',
+      titulo_banner: 'Navidad amazónica', subtitulo: 'Regalos con sabor de la selva: infusiones y superalimentos para celebrar y compartir.',
+      hero_cta_texto: 'Ver regalos', hero_cta_link: '/tienda', hero_cta2_texto: 'Nuestra historia', hero_mostrar_cta2: true,
     },
   },
 ]
@@ -2560,6 +2574,129 @@ function ModalBloque({ bloque, paginas = [], toast, onGuardar, onClose }) {
   )
 }
 
+// Catálogo por defecto "Todos los productos" (todos:true = muestra todo el inventario).
+const TODOS_ID = '__todos__'
+const CATALOGO_TODOS = { id: TODOS_ID, nombre: 'Todos los productos', todos: true, items: [] }
+
+// Editor de catálogos múltiples: colecciones de productos/categorías + cuál se muestra en la web.
+// Siempre existe un catálogo "Todos los productos" (no se puede borrar) y siempre hay uno activo.
+function CatalogosEditor({ colecciones = [], activa = null, onChange, onActiva, categorias = [], productos = [] }) {
+  const [abierta, setAbierta] = useState(null)   // id de colección expandida
+  const [busca, setBusca] = useState('')
+
+  // Garantiza que exista el catálogo "Todos los productos" y que siempre haya uno activo.
+  useEffect(() => {
+    const cols = colecciones || []
+    const tieneTodos = cols.some(c => c.todos || c.id === TODOS_ID)
+    const next = tieneTodos ? cols : [CATALOGO_TODOS, ...cols]
+    if (!tieneTodos) onChange(next)
+    const activaValida = next.some(c => String(c.id) === String(activa))
+    if (!activaValida) onActiva(TODOS_ID)
+  }, [colecciones, activa]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const nuevaColeccion = () => {
+    const id = 'c' + Date.now().toString(36)
+    onChange([...(colecciones || []), { id, nombre: `Catálogo ${(colecciones?.length || 0)}`, items: [] }])
+    setAbierta(id)
+  }
+  const setCol = (id, patch) => onChange((colecciones || []).map(c => c.id === id ? { ...c, ...patch } : c))
+  const borrar = (col) => {
+    if (col.todos || col.id === TODOS_ID) return   // el catálogo "Todos los productos" no se borra
+    if (!confirm('¿Eliminar este catálogo? Los productos no se borran, solo deja de existir esta selección.')) return
+    onChange((colecciones || []).filter(c => c.id !== col.id))
+    if (String(activa) === String(col.id)) onActiva(TODOS_ID)   // vuelve a "Todos los productos"
+  }
+  const tieneItem = (col, tipo, ref) => (col.items || []).some(i => i.tipo === tipo && String(i.ref) === String(ref))
+  const toggleItem = (id, tipo, ref) => {
+    const col = (colecciones || []).find(c => c.id === id); if (!col) return
+    const items = tieneItem(col, tipo, ref)
+      ? (col.items || []).filter(i => !(i.tipo === tipo && String(i.ref) === String(ref)))
+      : [...(col.items || []), { tipo, ref: String(ref) }]
+    setCol(id, { items })
+  }
+  const nProd = (col) => (col.items || []).filter(i => i.tipo === 'producto').length
+  const nCat = (col) => (col.items || []).filter(i => i.tipo === 'categoria').length
+  const q = sinTildes(busca.trim().toLowerCase())
+  const prodsFiltrados = (q ? productos.filter(p => sinTildes((p.nombre || '').toLowerCase()).includes(q)) : productos).slice(0, 60)
+  const lista = (colecciones && colecciones.length) ? colecciones : [CATALOGO_TODOS]
+
+  return (
+    <div>
+      <p style={{ fontSize: '0.84rem', color: 'var(--texto-suave)', marginTop: 0 }}>
+        Siempre hay un catálogo activo. Por defecto es <strong>Todos los productos</strong>. Crea otros (ej. <em>Fechas especiales</em>) eligiendo productos y/o categorías completas, y elige cuál se muestra en tu web.
+      </p>
+      <div style={{ marginBottom: 12 }}>
+        <label style={{ fontSize: '0.8rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Catálogo que se muestra en la web</label>
+        <select className="form-control" value={activa == null ? TODOS_ID : String(activa)} onChange={e => onActiva(e.target.value)}>
+          {lista.map(c => <option key={c.id} value={c.id}>{c.nombre}{c.todos ? '' : ` (${nProd(c)} prod. · ${nCat(c)} cat.)`}</option>)}
+        </select>
+      </div>
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {lista.map(col => {
+          const open = abierta === col.id
+          const esActiva = String(activa == null ? TODOS_ID : activa) === String(col.id)
+          const esTodos = !!col.todos || col.id === TODOS_ID
+          return (
+            <div key={col.id} className="card" style={{ padding: 10, border: esActiva ? '2px solid var(--selva, #1A3A2A)' : '1px solid var(--crema-oscuro)' }}>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <button type="button" className="btn btn-xs btn-secondary" disabled={esTodos} style={esTodos ? { visibility: 'hidden' } : undefined} onClick={() => setAbierta(open ? null : col.id)}>
+                  <ChevronDown size={14} style={{ transform: open ? 'rotate(180deg)' : 'none', transition: 'transform .2s' }} />
+                </button>
+                {esTodos
+                  ? <span style={{ flex: 1, fontWeight: 700, color: 'var(--selva)' }}>🛍️ {col.nombre} <span style={{ fontWeight: 400, fontSize: '0.72rem', color: 'var(--texto-suave)' }}>· por defecto</span></span>
+                  : <input className="form-control" style={{ flex: 1, padding: '4px 8px' }} value={col.nombre} onChange={e => setCol(col.id, { nombre: e.target.value })} />}
+                {esActiva
+                  ? <span className="badge badge-dorado">En la web</span>
+                  : <button type="button" className="btn btn-xs btn-secondary" onClick={() => onActiva(col.id)}>Mostrar en web</button>}
+                {!esTodos && <button type="button" className="btn btn-xs btn-danger" onClick={() => borrar(col)}><Trash2 size={13} /></button>}
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--texto-suave)', margin: '6px 0 0 36px' }}>
+                {esTodos ? 'Muestra todos los productos del inventario.' : `${nProd(col)} productos · ${nCat(col)} categorías`}
+              </div>
+
+              {open && !esTodos && (
+                <div style={{ marginTop: 10 }}>
+                  {/* Categorías completas */}
+                  <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 4 }}>Categorías completas</div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 10 }}>
+                    {categorias.length === 0 && <span style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>Sin categorías.</span>}
+                    {categorias.map(cat => {
+                      const on = tieneItem(col, 'categoria', cat)
+                      return (
+                        <button key={cat} type="button" className={`btn btn-xs ${on ? 'btn-primary' : 'btn-secondary'}`} onClick={() => toggleItem(col.id, 'categoria', cat)}>
+                          {on ? <Check size={12} /> : <Plus size={12} />} {cat}
+                        </button>
+                      )
+                    })}
+                  </div>
+                  {/* Productos individuales */}
+                  <div style={{ fontSize: '0.78rem', fontWeight: 600, marginBottom: 4 }}>Productos</div>
+                  <input className="form-control" style={{ padding: '4px 8px', marginBottom: 6 }} placeholder="Buscar producto…" value={busca} onChange={e => setBusca(e.target.value)} />
+                  <div style={{ maxHeight: 220, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 3 }}>
+                    {prodsFiltrados.map(p => {
+                      const on = tieneItem(col, 'producto', p.id)
+                      return (
+                        <button key={p.id} type="button" className="btn btn-xs" style={{ justifyContent: 'flex-start', background: on ? 'var(--crema)' : 'transparent', border: '1px solid var(--crema-oscuro)' }} onClick={() => toggleItem(col.id, 'producto', p.id)}>
+                          {on ? <Check size={12} /> : <Plus size={12} />}
+                          <span style={{ flex: 1, textAlign: 'left' }}>{p.nombre}</span>
+                          {p.categoria && <span style={{ fontSize: '0.68rem', color: 'var(--texto-suave)' }}>{p.categoria}</span>}
+                        </button>
+                      )
+                    })}
+                    {prodsFiltrados.length === 0 && <span style={{ fontSize: '0.78rem', color: 'var(--texto-suave)' }}>Sin resultados.</span>}
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+      </div>
+      <button type="button" className="btn btn-sm btn-secondary" style={{ marginTop: 10 }} onClick={nuevaColeccion}><Plus size={14} /> Agregar catálogo</button>
+    </div>
+  )
+}
+
 // Sección de acordeón del panel Personalizar (a nivel de módulo para no perder el foco al escribir)
 function PzSec({ id, titulo, abierto, setAbierto, children, onSave, saving }) {
   const open = abierto === id
@@ -2618,6 +2755,17 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
     queryFn: async () => { const { data } = await supabase.from('finished_products').select('categoria_alegra_nombre').eq('catalogo_visible', true); return [...new Set((data || []).map(p => p.categoria_alegra_nombre).filter(Boolean))] },
   })
   const { data: bannersLista = [] } = useQuery({ queryKey: ['banners_catalogo'], queryFn: async () => { const { data } = await supabase.from('banners_catalogo').select('id, nombre, titulo, es_secundario, grupo').order('orden'); return data || [] } })
+  const { data: prodsCat = [] } = useQuery({ queryKey: ['catalogo_productos_sel'], queryFn: async () => { const { data } = await supabase.from('catalogo_productos').select('id, nombre, categoria').order('nombre'); return data || [] } })
+  // Productos disponibles para armar catálogos: los de la vista pública + los "extra" de config.
+  const prodsPicker = useMemo(() => [
+    ...prodsCat,
+    ...((cfg?.productos_extra || []).filter(e => e && e.visible !== false).map(e => ({ id: e.id, nombre: e.nombre, categoria: e.categoria || 'otros' }))),
+  ], [prodsCat, cfg?.productos_extra])
+  const categoriasColeccion = useMemo(() => [...new Set([
+    ...categorias,
+    ...(cfg?.categorias_extra || []),
+    ...(cfg?.productos_extra || []).map(p => p.categoria).filter(Boolean),
+  ])], [categorias, cfg?.categorias_extra, cfg?.productos_extra])
 
   const diseñosGuardados = useMemo(() => (
     Array.isArray(cfg?.plantillas_guardadas)
@@ -2668,7 +2816,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
       setCfg(base)
       setSavedSnap(snapConfig(base))
       // Selecciona la plantilla web según la familia activa (no por color)
-      setSelPackId(familiaWeb(base.diseno) === 'atelier' ? 'atelier' : 'clasico')
+      setSelPackId(packIdDeDiseno(base.diseno))
     })
   }, [])
   useEffect(() => {
@@ -2677,7 +2825,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
   }, [cfg, savedSnap, onDirtyChange])
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
 
-  const syncSelPackAFamilia = (diseno) => setSelPackId(familiaWeb(diseno) === 'atelier' ? 'atelier' : 'clasico')
+  const syncSelPackAFamilia = (diseno) => setSelPackId(packIdDeDiseno(diseno))
   const set = (k, v) => {
     if (k === 'diseno') syncSelPackAFamilia(v)
     // Si ajustas color mientras previsualizas otra plantilla web, vuelve a la activa para ver el color
@@ -2808,7 +2956,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
   const borrarDiseñoGuardado = (id) => {
     if (!window.confirm('¿Eliminar este diseño guardado?')) return
     setCfg(c => ({ ...c, plantillas_guardadas: (c.plantillas_guardadas || []).filter(p => p.id !== id) }))
-    if (selPackId === id) setSelPackId(familiaActiva === 'atelier' ? 'atelier' : 'clasico')
+    if (selPackId === id) setSelPackId(packIdDeDiseno(cfg?.diseno))
   }
   const moverSeccion = (i, d) => setCfg(c => { const a = [...(c.secciones || SECCIONES_DEFAULT)]; const j = i + d; if (j < 0 || j >= a.length) return c;[a[i], a[j]] = [a[j], a[i]]; return { ...c, secciones: a } })
   const toggleSeccion = (id) => setCfg(c => ({ ...c, secciones: (c.secciones || SECCIONES_DEFAULT).map(s => s.id === id ? { ...s, on: !(s.on !== false) } : s) }))
@@ -2887,7 +3035,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
             La <strong>plantilla web</strong> define la estructura (inicio, ficha, menú). Los <strong>colores</strong> son independientes: puedes cambiar la paleta sin cambiar de plantilla.
           </small>
 
-          <label className="form-label">1. Plantilla web <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(2 opciones · clic para previsualizar → Aplicar)</small></label>
+          <label className="form-label">1. Plantilla web <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(clic para previsualizar → Aplicar)</small></label>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 8 }}>
             {PLANTILLAS_WEB.map(pack => {
               const seleccionada = selPackId === pack.id
@@ -3074,6 +3222,17 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
           <TabBanners toast={toast} qc={qc} embed modoAtelier={familiaActiva === 'atelier'} />
         </PzSec>
 
+        <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="catalogos" titulo={<><Store size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Catálogos (colecciones de productos)</>}>
+          <CatalogosEditor
+            colecciones={Array.isArray(cfg.colecciones) ? cfg.colecciones : []}
+            activa={cfg.coleccion_activa ?? null}
+            onChange={(cx) => set('colecciones', cx)}
+            onActiva={(id) => set('coleccion_activa', id)}
+            categorias={categoriasColeccion}
+            productos={prodsPicker}
+          />
+        </PzSec>
+
         <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="secciones" titulo={<><Layout size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Secciones del inicio</>}>
           <SeccionesEditor secciones={Array.isArray(cfg.secciones) ? cfg.secciones : SECCIONES_DEFAULT} onChange={(sx) => set('secciones', sx)} categorias={[...new Set([...categorias, ...(cfg.categorias_extra || []), ...(cfg.productos_extra || []).map(p => p.categoria).filter(Boolean)])]} banners={bannersLista} />
           {familiaActiva !== 'atelier' && (
@@ -3221,7 +3380,7 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
       {/* Vista previa en vivo */}
       <div className="pz-preview">
         <div className="pz-preview-bar">
-          <span><Eye size={14} style={{ verticalAlign: '-2px' }} /> Vista previa{import.meta.env.DEV ? ' · local' : ''}{packPendiente && selPack ? ` · ${selPack.nombre}` : familiaActiva === 'atelier' ? ' · Atelier' : ' · Clásico'}</span>
+          <span><Eye size={14} style={{ verticalAlign: '-2px' }} /> Vista previa{import.meta.env.DEV ? ' · local' : ''}{packPendiente && selPack ? ` · ${selPack.nombre}` : familiaActiva === 'atelier' ? ' · Atelier' : familiaActiva === 'navidad' ? ' · Navidad' : ' · Clásico'}</span>
           <div className="pz-devices">
             <button type="button" className={dispositivo === 'desktop' ? 'on' : ''} onClick={() => setDispositivo('desktop')} title="PC"><Monitor size={15} /></button>
             <button type="button" className={dispositivo === 'tablet' ? 'on' : ''} onClick={() => setDispositivo('tablet')} title="Tablet"><Tablet size={15} /></button>
