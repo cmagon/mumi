@@ -1,3 +1,4 @@
+// deploy: 2026-11-26 re-trigger build tras reconectar Workers Builds
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
