@@ -113,6 +113,7 @@ export function StoreProvider({ children }) {
       const imagen_url = typeof primera === 'string' ? primera : (primera?.url || null)
       return {
         id: e.id, nombre: e.nombre, descripcion: e.descripcion || '',
+        resumen: e.resumen || '', seo_titulo: e.seo_titulo || '', seo_desc: e.seo_desc || '',
         precio_detal: Number(e.precio_detal) || 0, precio_mayor: Number(e.precio_mayor) || 0,
         precio_oferta: Number(e.precio_oferta) || null,
         imagen_url, imagenes: imgs, categoria: e.categoria || 'otros',
