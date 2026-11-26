@@ -10,7 +10,7 @@ import { leerPaquete, importarDatos, importarArchivos } from '../../lib/respaldo
 
 const Ico = ({ as: C, size = 16 }) => <C size={size} style={{ display: 'inline', verticalAlign: '-3px', marginRight: 6 }} aria-hidden="true" />
 const api = crearApi(supabase)
-const URL_ACTUAL = (import.meta.env.VITE_SUPABASE_URL || '').replace(/\/+$/, '')
+const URL_ACTUAL = (import.meta.env.VITE_SUPABASE_URL || 'https://awjvggpeuxayvnreldvw.supabase.co').replace(/\/+$/, '')
 const fmt = (n) => Number(n || 0).toLocaleString('es-CO')
 
 function Barra({ progreso, onCancelar }) {
