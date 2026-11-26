@@ -14,11 +14,13 @@ export default {
 function conSeguridad(res) {
   const r = new Response(res.body, res)
   r.headers.set('X-Content-Type-Options', 'nosniff')
-  r.headers.set('X-Frame-Options', 'SAMEORIGIN')
+  // No se usa X-Frame-Options (no admite varios orígenes): el control de framing lo
+  // hace CSP frame-ancestors, que permite SOLO el panel de administración (app.*.workers.dev)
+  // para la vista previa, y bloquea el framing por terceros (anti-clickjacking).
   r.headers.set('Referrer-Policy', 'strict-origin-when-cross-origin')
   r.headers.set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()')
   r.headers.set('Strict-Transport-Security', 'max-age=31536000')
-  r.headers.set('Content-Security-Policy', "object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self'")
+  r.headers.set('Content-Security-Policy', "object-src 'none'; base-uri 'self'; frame-ancestors 'self' https://*.mumiamazonia.workers.dev; form-action 'self'")
   return r
 }
 
