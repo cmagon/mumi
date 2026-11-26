@@ -1,4 +1,4 @@
-// deploy: 2026-11-26 re-trigger build tras reconectar Workers Builds
+// deploy: 2026-11-26 (2) build tras reconectar cuenta de GitHub
 import React from 'react'
 import ReactDOM from 'react-dom/client'
 import { BrowserRouter } from 'react-router-dom'
