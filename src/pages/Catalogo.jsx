@@ -2802,17 +2802,27 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
   }
 
   const [savedSnap, setSavedSnap] = useState(null)
+  const [liveSnap, setLiveSnap] = useState(null)      // snapshot de lo PUBLICADO (columnas en vivo)
+  const [hayBorrador, setHayBorrador] = useState(false) // hay un borrador guardado sin publicar
   useEffect(() => {
     supabase.from('config_catalogo').select('*').eq('id', 1).maybeSingle().then(({ data }) => {
-      const base = data || { id: 1 }
-      if (!Array.isArray(base.secciones) || !base.secciones.length) base.secciones = SECCIONES_DEFAULT
+      const row = data || { id: 1 }
+      const borrador = row.borrador && typeof row.borrador === 'object' && !Array.isArray(row.borrador) ? row.borrador : null
+      // "En vivo" = columnas publicadas (sin la columna borrador)
+      const live = { ...row }; delete live.borrador
+      if (!Array.isArray(live.secciones) || !live.secciones.length) live.secciones = SECCIONES_DEFAULT
       // Por defecto: fuentes y logo de la app principal (si el catálogo no tiene los suyos)
       const app = getConfig()
-      if (!base.fuente_titulos) base.fuente_titulos = app.fuente_titulos || 'Playfair Display'
-      if (!base.fuente_subtitulos) base.fuente_subtitulos = app.fuente || 'Source Sans 3'
-      if (!base.fuente_texto) base.fuente_texto = app.fuente || 'Source Sans 3'
-      if (base.favicon_url == null) base.favicon_url = ''
-      if (!(base.logo_url || '').trim() && (app.logo_url || '').trim()) base.logo_url = app.logo_url
+      if (!live.fuente_titulos) live.fuente_titulos = app.fuente_titulos || 'Playfair Display'
+      if (!live.fuente_subtitulos) live.fuente_subtitulos = app.fuente || 'Source Sans 3'
+      if (!live.fuente_texto) live.fuente_texto = app.fuente || 'Source Sans 3'
+      if (live.favicon_url == null) live.favicon_url = ''
+      if (!(live.logo_url || '').trim() && (app.logo_url || '').trim()) live.logo_url = app.logo_url
+      setLiveSnap(snapConfig(live))
+      // Si hay borrador, se edita el borrador (fusionado sobre lo vivo para no perder campos nuevos)
+      const base = borrador ? { ...live, ...borrador } : live
+      delete base.borrador
+      setHayBorrador(!!borrador)
       setCfg(base)
       setSavedSnap(snapConfig(base))
       // Selecciona la plantilla web según la familia activa (no por color)
@@ -2961,22 +2971,61 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
   const moverSeccion = (i, d) => setCfg(c => { const a = [...(c.secciones || SECCIONES_DEFAULT)]; const j = i + d; if (j < 0 || j >= a.length) return c;[a[i], a[j]] = [a[j], a[i]]; return { ...c, secciones: a } })
   const toggleSeccion = (id) => setCfg(c => ({ ...c, secciones: (c.secciones || SECCIONES_DEFAULT).map(s => s.id === id ? { ...s, on: !(s.on !== false) } : s) }))
 
+  // Config "limpia" para guardar (sin la clave borrador ni metadatos internos)
+  const cfgParaGuardar = () => {
+    const c = { ...cfg }; delete c.borrador
+    if (!(c.url_publica || '').trim() && (cfgUrl || '').trim()) c.url_publica = cfgUrl
+    return c
+  }
+
+  // GUARDAR BORRADOR: persiste los cambios en la columna `borrador` SIN afectar la web pública.
   const guardar = async () => {
     setSaving(true)
     try {
-      // No pisar url_publica si el estado local la perdió
-      const payload = { ...cfg, id: 1, updated_at: new Date().toISOString() }
-      if (!(payload.url_publica || '').trim() && (cfgUrl || '').trim()) payload.url_publica = cfgUrl
+      const borrador = cfgParaGuardar()
+      const { error } = await supabase.from('config_catalogo')
+        .upsert({ id: 1, borrador, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+      if (error) throw error
+      setSavedSnap(snapConfig({ ...cfg }))
+      setHayBorrador(true)
+      toast('Borrador guardado ✓ (no publicado)')
+    } catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
+  }
+
+  // PUBLICAR: vuelca la configuración a las columnas en vivo y limpia el borrador. Ya es público.
+  const publicar = async () => {
+    setSaving(true)
+    try {
+      const payload = { ...cfgParaGuardar(), id: 1, borrador: null, updated_at: new Date().toISOString() }
       const { error } = await supabase.from('config_catalogo').upsert(payload, { onConflict: 'id' })
       if (error) throw error
-      setSavedSnap(snapConfig(payload))
-      toast('Personalización guardada ✓')
+      const snap = snapConfig({ ...cfg, borrador: undefined })
+      setSavedSnap(snap); setLiveSnap(snap); setHayBorrador(false)
+      toast('¡Publicado! Los cambios ya están en vivo ✓')
       qc.invalidateQueries({ queryKey: ['catalogo_url'] })
-      if (iframeEl) iframeEl.src = iframeEl.src   // recarga el preview con datos guardados
+      if (iframeEl) iframeEl.src = iframeEl.src   // recarga el preview con datos publicados
+    } catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
+  }
+
+  // DESCARTAR BORRADOR: borra el borrador y vuelve a lo publicado.
+  const descartar = async () => {
+    if (!confirm('¿Descartar el borrador y volver a lo que está publicado? Se perderán los cambios sin publicar.')) return
+    setSaving(true)
+    try {
+      const { error } = await supabase.from('config_catalogo')
+        .upsert({ id: 1, borrador: null, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+      if (error) throw error
+      setHayBorrador(false)
+      toast('Borrador descartado. Recargando lo publicado…')
+      qc.invalidateQueries({ queryKey: ['catalogo_url'] })
+      setTimeout(() => window.location.reload(), 600)
     } catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
   }
 
   if (!cfg) return <div className="card"><p className="empty-table">Cargando…</p></div>
+  const snapActual = snapConfig({ ...cfg, borrador: undefined })
+  const sinGuardar = savedSnap != null && snapActual !== savedSnap               // cambios sin guardar ni como borrador
+  const pendientePublicar = hayBorrador || (liveSnap != null && snapActual !== liveSnap)  // algo distinto a lo publicado
   const secciones = cfg.secciones || SECCIONES_DEFAULT
   // En desarrollo local: preview del Vite del catálogo (npm run dev:catalogo → :5174).
   // En producción: URL pública desplegada. Sin esto el iframe sigue mostrando el Worker viejo.
@@ -2987,8 +3036,17 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
     <div className="pz-layout">
       {/* Panel de controles */}
       <div className="pz-panel">
-        <div className="pz-panel-toolbar">
-          <button className="btn btn-primary btn-sm" onClick={guardar} disabled={saving}><Ico as={Save} size={13} />{saving ? 'Guardando…' : 'Guardar cambios'}</button>{savedSnap != null && cfg && snapConfig(cfg) !== savedSnap && <span className="badge badge-dorado" style={{ marginLeft: 8 }}>Sin guardar</span>}
+        <div className="pz-panel-toolbar" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+          <button className="btn btn-secondary btn-sm" onClick={guardar} disabled={saving} title="Guarda tus cambios como borrador. NO se ven en la web hasta que pulses Publicar.">
+            <Ico as={Save} size={13} />{saving ? 'Guardando…' : 'Guardar borrador'}
+          </button>
+          <button className="btn btn-primary btn-sm" onClick={publicar} disabled={saving || !pendientePublicar} title="Publica el borrador: los cambios pasan a estar en vivo en la web.">
+            <Ico as={ExternalLink} size={13} />{saving ? 'Publicando…' : 'Publicar'}
+          </button>
+          {hayBorrador && <button className="btn btn-xs" onClick={descartar} disabled={saving} style={{ color: 'var(--rojo, #b01e28)' }} title="Descarta el borrador y vuelve a lo publicado.">Descartar borrador</button>}
+          {sinGuardar && <span className="badge badge-dorado" style={{ fontWeight: 700 }}>● Sin guardar</span>}
+          {!sinGuardar && pendientePublicar && <span className="badge" style={{ background: '#fff3cd', color: '#8a6d00', border: '1px solid #e8d48a' }}>Borrador sin publicar</span>}
+          {!sinGuardar && !pendientePublicar && liveSnap != null && <span className="badge" style={{ background: '#e7f5ec', color: '#1a6b3a', border: '1px solid #b7e0c6' }}>✓ Publicado</span>}
         </div>
 
         <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="marca" titulo={<><ImageIcon size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Marca (logo, favicon, nombre, slogan)</>}>
