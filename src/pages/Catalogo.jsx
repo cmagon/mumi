@@ -1298,10 +1298,18 @@ function TabConfig({ toast, onDirtyChange }) {
   const [cropOg, setCropOg] = useState(null)
   const [subiendoOg, setSubiendoOg] = useState(false)
   const [savedSnap, setSavedSnap] = useState(null)
+  const [liveSnap, setLiveSnap] = useState(null)
+  const [hayBorrador, setHayBorrador] = useState(false)
   useEffect(() => {
     supabase.from('config_catalogo').select('*').eq('id', 1).maybeSingle()
       .then(({ data }) => {
-        const c = data || { id: 1 }
+        const row = data || { id: 1 }
+        const borrador = row.borrador && typeof row.borrador === 'object' && !Array.isArray(row.borrador) ? row.borrador : null
+        const live = { ...row }; delete live.borrador
+        setLiveSnap(snapConfig(live))
+        const c = borrador ? { ...live, ...borrador } : live
+        delete c.borrador
+        setHayBorrador(!!borrador)
         setCfg(c)
         setSavedSnap(snapConfig(c))
       })
@@ -1328,25 +1336,60 @@ function TabConfig({ toast, onDirtyChange }) {
     } catch (e) { toast('No se pudo subir la imagen: ' + e.message, 'error') }
     finally { setSubiendoOg(false) }
   }
+  const cfgLimpio = () => { const c = { ...cfg }; delete c.borrador; return c }
+  // GUARDAR BORRADOR: no afecta la web pública hasta Publicar.
   const guardar = async () => {
     setSaving(true)
     try {
-      const { error } = await supabase.from('config_catalogo').upsert({ ...cfg, id: 1, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+      const { error } = await supabase.from('config_catalogo')
+        .upsert({ id: 1, borrador: cfgLimpio(), updated_at: new Date().toISOString() }, { onConflict: 'id' })
       if (error) throw error
-      setSavedSnap(snapConfig(cfg))
-      toast('Configuración del catálogo guardada ✓')
+      setSavedSnap(snapConfig(cfg)); setHayBorrador(true)
+      toast('Borrador guardado ✓ (no publicado)')
+    } catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
+  }
+  // PUBLICAR: vuelca a columnas en vivo y limpia el borrador.
+  const publicar = async () => {
+    setSaving(true)
+    try {
+      const { error } = await supabase.from('config_catalogo')
+        .upsert({ ...cfgLimpio(), id: 1, borrador: null, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+      if (error) throw error
+      const snap = snapConfig(cfgLimpio())
+      setSavedSnap(snap); setLiveSnap(snap); setHayBorrador(false)
+      toast('¡Publicado! Los cambios ya están en vivo ✓')
       qc.invalidateQueries({ queryKey: ['catalogo_url'] })
     } catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
   }
+  const descartar = async () => {
+    if (!confirm('¿Descartar el borrador y volver a lo publicado? Se perderán los cambios sin publicar.')) return
+    setSaving(true)
+    try {
+      const { error } = await supabase.from('config_catalogo')
+        .upsert({ id: 1, borrador: null, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+      if (error) throw error
+      setHayBorrador(false); toast('Borrador descartado. Recargando…')
+      qc.invalidateQueries({ queryKey: ['catalogo_url'] })
+      setTimeout(() => window.location.reload(), 600)
+    } catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
+  }
   if (!cfg) return <div className="card"><p className="empty-table">Cargando…</p></div>
+  const snapActual = snapConfig(cfgLimpio())
+  const sinGuardar = savedSnap != null && snapActual !== savedSnap
+  const pendientePublicar = hayBorrador || (liveSnap != null && snapActual !== liveSnap)
   const base = (cfg.url_publica || '').replace(/\/+$/, '')
   return (
     <div className="pz-layout">
       {/* Panel de ajustes en acordeón */}
       <div className="pz-panel">
-        <div className="pz-panel-toolbar">
-          <button className="btn btn-primary btn-sm" onClick={guardar} disabled={saving}><Ico as={Save} size={13} />{saving ? 'Guardando…' : 'Guardar configuración'}</button>{savedSnap != null && snapConfig(cfg) !== savedSnap && <span className="badge badge-dorado" style={{ marginLeft: 8 }}>Sin guardar</span>}
-          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>La apariencia se edita en <strong>Personalizar</strong>.</small>
+        <div className="pz-panel-toolbar" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: 8 }}>
+          <button className="btn btn-secondary btn-sm" onClick={guardar} disabled={saving} title="Guarda como borrador. No se ve en la web hasta Publicar."><Ico as={Save} size={13} />{saving ? 'Guardando…' : 'Guardar borrador'}</button>
+          <button className="btn btn-primary btn-sm" onClick={publicar} disabled={saving || !pendientePublicar} title="Publica los cambios: pasan a estar en vivo."><Ico as={ExternalLink} size={13} />{saving ? 'Publicando…' : 'Publicar'}</button>
+          {hayBorrador && <button className="btn btn-xs" onClick={descartar} disabled={saving} style={{ color: 'var(--rojo, #b01e28)' }}>Descartar borrador</button>}
+          {sinGuardar && <span className="badge badge-dorado" style={{ fontWeight: 700 }}>● Sin guardar</span>}
+          {!sinGuardar && pendientePublicar && <span className="badge" style={{ background: '#fff3cd', color: '#8a6d00', border: '1px solid #e8d48a' }}>Borrador sin publicar</span>}
+          {!sinGuardar && !pendientePublicar && liveSnap != null && <span className="badge" style={{ background: '#e7f5ec', color: '#1a6b3a', border: '1px solid #b7e0c6' }}>✓ Publicado</span>}
+          <small style={{ color: 'var(--texto-suave)', fontSize: '0.72rem' }}>La apariencia se edita en <strong>Personalizar</strong> (mismo borrador).</small>
         </div>
 
         <PzSec abierto={sec} setAbierto={setSec} id="general" titulo={<><Ico as={Settings} size={14} />Datos generales</>}>
