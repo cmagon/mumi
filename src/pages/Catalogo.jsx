@@ -369,7 +369,7 @@ function TabProductos({ toast, qc, onDirtyChange }) {
 }
 
 // ---- Productos y combos adicionales (no vienen de Productos Terminados) ----
-const EXTRA_VACIO = (tipo) => ({ id: 'x' + Date.now() + Math.random().toString(36).slice(2, 5), tipo, nombre: '', categoria: '', descripcion: '', imagenes: [], precio_detal: '', precio_oferta: '', precio_mayor: '', stock: '', componentes: [], destacado: false, novedad: false, visible: true, grupo: '', pack_label: '', pack_orden: 0 })
+const EXTRA_VACIO = (tipo) => ({ id: 'x' + Date.now() + Math.random().toString(36).slice(2, 5), tipo, nombre: '', categoria: '', descripcion: '', resumen: '', contenido: '', origen: '', seo_titulo: '', seo_desc: '', imagenes: [], precio_detal: '', precio_oferta: '', precio_mayor: '', stock: '', componentes: [], destacado: false, novedad: false, visible: true, grupo: '', pack_label: '', pack_orden: 0 })
 function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
   const [items, setItems] = useState(null)
   const [cats, setCats] = useState([])            // categorías creadas por el usuario
@@ -473,7 +473,18 @@ function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
               <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Nombre</label><input className="form-control" value={x.nombre} onChange={e => upd(i, 'nombre', e.target.value)} /></div>
               <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Categoría</label><input className="form-control" list="cats-extra" value={x.categoria} onChange={e => upd(i, 'categoria', e.target.value)} placeholder="Elige o escribe una categoría" /></div>
             </div>
-            <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Descripción</label><textarea className="form-control" rows={2} value={x.descripcion} onChange={e => upd(i, 'descripcion', e.target.value)} /></div>
+            <div className="form-group" style={{ marginBottom: 6 }}>
+              <label className="form-label">Descripción corta <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(subtítulo breve; se muestra arriba en la ficha)</small></label>
+              <RichEditor value={x.resumen || ''} onChange={(html) => upd(i, 'resumen', html)} placeholder="Una frase que enganche…" />
+            </div>
+            <div className="form-group" style={{ marginBottom: 6 }}>
+              <label className="form-label">Características <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(detalles, ingredientes, modo de uso…)</small></label>
+              <RichEditor value={x.descripcion || ''} onChange={(html) => upd(i, 'descripcion', html)} />
+            </div>
+            <div className="form-grid-2" style={{ marginBottom: 6 }}>
+              <div className="form-group" style={{ marginBottom: 0 }}><label className="form-label">Contenido <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(ej. 75 g)</small></label><input className="form-control" value={x.contenido || ''} onChange={e => upd(i, 'contenido', e.target.value)} placeholder="75 g" /></div>
+              <div className="form-group" style={{ marginBottom: 0 }}><label className="form-label">Origen</label><input className="form-control" value={x.origen || ''} onChange={e => upd(i, 'origen', e.target.value)} placeholder="Guaviare, Amazonía" /></div>
+            </div>
             <div className="form-grid-2">
               <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Precio</label><MoneyInput value={x.precio_detal} onChange={v => upd(i, 'precio_detal', v)} /></div>
               <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Precio de oferta</label><MoneyInput value={x.precio_oferta} onChange={v => upd(i, 'precio_oferta', v)} /></div>
@@ -507,6 +518,10 @@ function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
                 </div>
               </div>
             )}
+            <div className="form-grid-2" style={{ marginBottom: 6 }}>
+              <div className="form-group" style={{ marginBottom: 0 }}><label className="form-label">Título SEO <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(opcional, para Google/redes)</small></label><input className="form-control" value={x.seo_titulo || ''} maxLength={70} onChange={e => upd(i, 'seo_titulo', e.target.value)} placeholder={x.nombre || 'Título en Google'} /></div>
+              <div className="form-group" style={{ marginBottom: 0 }}><label className="form-label">Descripción SEO <small style={{ fontWeight: 400, textTransform: 'none', color: 'var(--texto-suave)' }}>(opcional)</small></label><textarea className="form-control" rows={2} value={x.seo_desc || ''} maxLength={200} onChange={e => upd(i, 'seo_desc', e.target.value)} placeholder="Cómo aparece en Google y al compartir…" /></div>
+            </div>
             <div>
               <label className="btn btn-xs btn-secondary" style={{ cursor: 'pointer' }}><Upload size={12} /> {subiendo ? 'Subiendo…' : 'Subir imágenes'}<input type="file" accept="image/*" multiple hidden onChange={e => { encolarRecorte(i, e.target.files || []); e.target.value = '' }} /></label>
               <small style={{ display: 'block', color: 'var(--texto-suave)', fontSize: '0.68rem', marginTop: 4 }}>Cuadrada 1:1 · se generan web 1200 y móvil 780.</small>
