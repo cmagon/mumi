@@ -1,5 +1,5 @@
 // Worker del catálogo: SEO server-side (robots, sitemap, meta OG/Twitter, JSON-LD).
-// deploy: 2026-11-26 re-trigger build tras reconectar Workers Builds
+// deploy: 2026-11-26 (2) build tras reconectar cuenta de GitHub
 // Los rastreadores sociales no ejecutan JS; por eso se inyecta HTML en rutas clave.
 // Assets y SPA fallback se sirven vía ASSETS (Wrangler).
 
