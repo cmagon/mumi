@@ -2,8 +2,12 @@ import { createClient } from '@supabase/supabase-js'
 import { setBusy } from './busy'
 import { motivoBloqueoEscritura } from './devMode'
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+// Fallback a los valores de producción si el build no inyectó las variables VITE_*
+// (p. ej. un build de Cloudflare sin "Build variables"). La anon key es publicable
+// y está protegida por RLS; el catálogo usa el mismo patrón. Evita el error
+// "supabaseUrl is required" que deja el admin en blanco.
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || 'https://awjvggpeuxayvnreldvw.supabase.co'
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_dSxnLZKF7Ji7vRPFRXQQdg__8kwhoeR'
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
 
