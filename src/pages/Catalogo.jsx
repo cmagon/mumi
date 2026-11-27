@@ -7,7 +7,7 @@ import { useToast } from '../hooks/useToast'
 import { useAuth } from '../context/AuthContext'
 import { puedeVerSeccion } from '../lib/permisos'
 import { fNum } from '../lib/businessLogic'
-import { Store, Eye, EyeOff, Star, Save, Settings, BarChart3, ExternalLink, Pencil, X, Plus, Upload, Trash2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Palette, Image as ImageIcon, Layout, Users, RefreshCw, Monitor, Tablet, Smartphone, Mail, Check } from 'lucide-react'
+import { Store, Eye, EyeOff, Star, Save, Settings, BarChart3, ExternalLink, Pencil, X, Plus, Upload, Trash2, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, GripVertical, Palette, Image as ImageIcon, Layout, Users, RefreshCw, Monitor, Tablet, Smartphone, Mail, Check, Copy } from 'lucide-react'
 import { Truck, ShieldCheck, MessageCircle, Package, CreditCard, Heart, Clock, Gift, Award, Sprout, BadgeCheck, Sparkles, MapPin, Phone, Percent, ThumbsUp, Recycle, HandCoins, Leaf } from 'lucide-react'
 import { Banknote, Wallet, QrCode, Landmark, Coins, Receipt, PiggyBank, BadgeDollarSign, Megaphone } from 'lucide-react'
 
@@ -260,8 +260,29 @@ export default function Catalogo() {
 }
 
 // ==================== PRODUCTOS ====================
+// Convierte un Producto Terminado en un "producto adicional" (copia editable)
+const extraDesdeProducto = (p) => ({
+  ...EXTRA_VACIO('producto'),
+  nombre: ((p.nombre || '') + ' (copia)').trim(),
+  categoria: p.categoria || p.categoria_alegra_nombre || '',
+  descripcion: p.catalogo_descripcion || '',
+  resumen: p.catalogo_resumen || '',
+  contenido: p.catalogo_contenido || '',
+  origen: p.catalogo_origen || '',
+  seo_titulo: p.catalogo_seo_titulo || '',
+  seo_desc: p.catalogo_seo_desc || '',
+  precio_detal: p.precio_detal || '',
+  precio_oferta: p.catalogo_precio_oferta ?? '',
+  precio_mayor: p.precio_mayor || '',
+  stock: p.stock ?? '',
+  imagenes: Array.isArray(p.imagenes) && p.imagenes.length ? p.imagenes : (p.imagen_url ? [{ url: p.imagen_url }] : []),
+  frutos: Array.isArray(p.catalogo_frutos) ? p.catalogo_frutos : [],
+  beneficios: Array.isArray(p.catalogo_beneficios) ? p.catalogo_beneficios : [],
+})
+
 function TabProductos({ toast, qc, onDirtyChange }) {
   const [editar, setEditar] = useState(null)   // producto en edición
+  const [copiaExtra, setCopiaExtra] = useState(null)   // producto a añadir como adicional (duplicar)
   const [gestFrutos, setGestFrutos] = useState(false)
   const [dirtyExtra, setDirtyExtra] = useState(false)
   const [dirtyEditor, setDirtyEditor] = useState(false)
@@ -353,7 +374,12 @@ function TabProductos({ toast, qc, onDirtyChange }) {
                   <td className="td-number movil-hide">{fCOP(p.precio_detal)}</td>
                   <td className="movil-hide" style={{ fontSize: '0.8rem', color: 'var(--texto-suave)' }}>{(p.catalogo_frutos || []).map(f => labelFrutoCat(f, frutosCat)).join(', ') || '—'}</td>
                   <td className="td-center">{p.catalogo_destacado ? <Star size={16} color="var(--dorado)" fill="var(--dorado)" /> : ''}</td>
-                  <td><button className="btn btn-xs btn-secondary" onClick={() => setEditar(p)}><Pencil size={13} /> Editar</button></td>
+                  <td>
+                    <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+                      <button className="btn btn-xs btn-secondary" onClick={() => setEditar(p)}><Pencil size={13} /> Editar</button>
+                      <button className="btn btn-xs btn-secondary" onClick={() => { setCopiaExtra(extraDesdeProducto(p)); toast('Copia creada abajo en «Productos adicionales» ✓') }} title="Crear una copia editable como producto adicional"><Copy size={13} /> Duplicar</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
           </tbody>
@@ -363,14 +389,15 @@ function TabProductos({ toast, qc, onDirtyChange }) {
       {editar && <EditorProducto producto={editar} frutosCat={frutosCat} toast={toast} qc={qc} onDirtyChange={setDirtyEditor} onSyncedSheets={() => syncSheets({ forzar: true })} onClose={() => { setDirtyEditor(false); setEditar(null) }} />}
       {gestFrutos && <GestionFrutos frutos={frutosCat} toast={toast} qc={qc} onClose={() => setGestFrutos(false)} />}
     </div>
-    <ProductosExtra toast={toast} baseProductos={productos} onDirtyChange={setDirtyExtra} />
+    <ProductosExtra toast={toast} baseProductos={productos} onDirtyChange={setDirtyExtra} nuevoItem={copiaExtra} onConsumirNuevo={() => setCopiaExtra(null)} />
+    <CatalogosProductos baseProductos={productos} toast={toast} />
     </>
   )
 }
 
 // ---- Productos y combos adicionales (no vienen de Productos Terminados) ----
 const EXTRA_VACIO = (tipo) => ({ id: 'x' + Date.now() + Math.random().toString(36).slice(2, 5), tipo, nombre: '', categoria: '', descripcion: '', resumen: '', contenido: '', origen: '', seo_titulo: '', seo_desc: '', imagenes: [], precio_detal: '', precio_oferta: '', precio_mayor: '', stock: '', componentes: [], destacado: false, novedad: false, visible: true, grupo: '', pack_label: '', pack_orden: 0 })
-function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
+function ProductosExtra({ toast, baseProductos = [], onDirtyChange, nuevoItem = null, onConsumirNuevo }) {
   const [items, setItems] = useState(null)
   const [cats, setCats] = useState([])            // categorías creadas por el usuario
   const [catInput, setCatInput] = useState('')
@@ -392,6 +419,18 @@ function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
     onDirtyChange?.(snapConfig({ items, cats }) !== savedSnap)
   }, [items, cats, savedSnap, onDirtyChange])
   useEffect(() => () => onDirtyChange?.(false), [onDirtyChange])
+  // Copia entrante (duplicar un producto terminado): se añade al final de la lista.
+  useEffect(() => {
+    if (!nuevoItem) return
+    const copia = { ...nuevoItem, id: 'x' + Date.now() + Math.random().toString(36).slice(2, 5) }
+    setItems(a => [...(a || []), copia])
+    onConsumirNuevo?.()
+  }, [nuevoItem]) // eslint-disable-line react-hooks/exhaustive-deps
+  const duplicar = (i) => setItems(a => {
+    const base = a[i]
+    const copia = { ...base, id: 'x' + Date.now() + Math.random().toString(36).slice(2, 5), nombre: ((base.nombre || '') + ' (copia)').trim() }
+    const n = [...a]; n.splice(i + 1, 0, copia); return n
+  })
   const catsConocidas = [...new Set([...baseProductos.map(p => p.categoria).filter(Boolean), ...cats, ...(items || []).map(x => x.categoria).filter(Boolean)])]
   const addCat = () => { const v = catInput.trim(); if (v && !cats.includes(v)) setCats(c => [...c, v]); setCatInput('') }
   const delCat = (c) => setCats(cs => cs.filter(x => x !== c))
@@ -467,7 +506,8 @@ function ProductosExtra({ toast, baseProductos = [], onDirtyChange }) {
               <button className={`btn btn-xs ${x.visible === false ? 'btn-secondary' : 'btn-success'}`} onClick={() => upd(i, 'visible', x.visible === false)}>{x.visible === false ? <><EyeOff size={12} /> Oculto</> : <><Eye size={12} /> Visible</>}</button>
               <label style={{ fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}><input type="checkbox" checked={!!x.destacado} onChange={e => upd(i, 'destacado', e.target.checked)} /> Destacado</label>
               <label style={{ fontSize: '0.78rem', display: 'inline-flex', alignItems: 'center', gap: 4, cursor: 'pointer' }}><input type="checkbox" checked={!!x.novedad} onChange={e => upd(i, 'novedad', e.target.checked)} /> Novedad</label>
-              <button className="btn btn-xs btn-danger" style={{ marginLeft: 'auto' }} onClick={() => del(i)}><Trash2 size={12} /></button>
+              <button className="btn btn-xs btn-secondary" style={{ marginLeft: 'auto' }} onClick={() => duplicar(i)} title="Duplicar este producto"><Copy size={12} /> Duplicar</button>
+              <button className="btn btn-xs btn-danger" onClick={() => del(i)}><Trash2 size={12} /></button>
             </div>
             <div className="form-grid-2">
               <div className="form-group" style={{ marginBottom: 6 }}><label className="form-label">Nombre</label><input className="form-control" value={x.nombre} onChange={e => upd(i, 'nombre', e.target.value)} /></div>
@@ -556,6 +596,53 @@ function AutoTextarea({ value, onChange, maxLength, placeholder, className = 'fo
   return (
     <textarea ref={ref} className={className} rows={minRows} value={value} maxLength={maxLength} placeholder={placeholder}
       onChange={e => onChange(e.target.value)} style={{ resize: 'none', overflow: 'hidden' }} />
+  )
+}
+
+// ---- Catálogos (colecciones) gestionados junto a los productos; se guardan en vivo ----
+function CatalogosProductos({ baseProductos = [], toast }) {
+  const [colecciones, setColecciones] = useState(null)
+  const [activa, setActiva] = useState(null)
+  const [extras, setExtras] = useState([])
+  const [catsExtra, setCatsExtra] = useState([])
+  const [saving, setSaving] = useState(false)
+  const [snap, setSnap] = useState(null)
+  useEffect(() => {
+    supabase.from('config_catalogo').select('colecciones, coleccion_activa, productos_extra, categorias_extra').eq('id', 1).maybeSingle().then(({ data }) => {
+      const cols = Array.isArray(data?.colecciones) ? data.colecciones : []
+      setColecciones(cols); setActiva(data?.coleccion_activa ?? null)
+      setExtras(Array.isArray(data?.productos_extra) ? data.productos_extra : [])
+      setCatsExtra(Array.isArray(data?.categorias_extra) ? data.categorias_extra : [])
+      setSnap(snapConfig({ cols, activa: data?.coleccion_activa ?? null }))
+    })
+  }, [])
+  const productos = useMemo(() => [
+    ...baseProductos.map(p => ({ id: p.id, nombre: p.nombre, categoria: p.categoria || 'otros' })),
+    ...extras.filter(e => e && e.visible !== false).map(e => ({ id: e.id, nombre: e.nombre, categoria: e.categoria || 'otros' })),
+  ], [baseProductos, extras])
+  const categorias = useMemo(() => [...new Set([
+    ...baseProductos.map(p => p.categoria).filter(Boolean),
+    ...catsExtra, ...extras.map(e => e.categoria).filter(Boolean),
+  ])], [baseProductos, catsExtra, extras])
+  const guardar = async () => {
+    setSaving(true)
+    try {
+      const { error } = await supabase.from('config_catalogo')
+        .upsert({ id: 1, colecciones: colecciones || [], coleccion_activa: activa ?? null, updated_at: new Date().toISOString() }, { onConflict: 'id' })
+      if (error) throw error
+      setSnap(snapConfig({ cols: colecciones || [], activa: activa ?? null }))
+      toast('Catálogos guardados ✓')
+    } catch (e) { toast(e.message, 'error') } finally { setSaving(false) }
+  }
+  if (colecciones === null) return null
+  const sucio = snap != null && snapConfig({ cols: colecciones, activa }) !== snap
+  return (
+    <div className="card" style={{ marginTop: 16 }}>
+      <div className="card-title"><Ico as={Store} size={16} />Catálogos (colecciones de productos)</div>
+      <CatalogosEditor colecciones={colecciones} activa={activa} onChange={setColecciones} onActiva={setActiva} categorias={categorias} productos={productos} />
+      <button className="btn btn-primary" style={{ marginTop: 12 }} onClick={guardar} disabled={saving}><Ico as={Save} size={14} />{saving ? 'Guardando…' : 'Guardar catálogos'}</button>
+      {sucio && <span className="badge badge-dorado" style={{ marginLeft: 8 }}>Sin guardar</span>}
+    </div>
   )
 }
 
@@ -1351,7 +1438,7 @@ function TabConfig({ toast, onDirtyChange }) {
     } catch (e) { toast('No se pudo subir la imagen: ' + e.message, 'error') }
     finally { setSubiendoOg(false) }
   }
-  const cfgLimpio = () => { const c = { ...cfg }; delete c.borrador; return c }
+  const cfgLimpio = () => { const c = { ...cfg }; delete c.borrador; delete c.colecciones; delete c.coleccion_activa; return c }
   // GUARDAR BORRADOR: no afecta la web pública hasta Publicar.
   const guardar = async () => {
     setSaving(true)
@@ -2813,17 +2900,6 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
     queryFn: async () => { const { data } = await supabase.from('finished_products').select('categoria_alegra_nombre').eq('catalogo_visible', true); return [...new Set((data || []).map(p => p.categoria_alegra_nombre).filter(Boolean))] },
   })
   const { data: bannersLista = [] } = useQuery({ queryKey: ['banners_catalogo'], queryFn: async () => { const { data } = await supabase.from('banners_catalogo').select('id, nombre, titulo, es_secundario, grupo').order('orden'); return data || [] } })
-  const { data: prodsCat = [] } = useQuery({ queryKey: ['catalogo_productos_sel'], queryFn: async () => { const { data } = await supabase.from('catalogo_productos').select('id, nombre, categoria').order('nombre'); return data || [] } })
-  // Productos disponibles para armar catálogos: los de la vista pública + los "extra" de config.
-  const prodsPicker = useMemo(() => [
-    ...prodsCat,
-    ...((cfg?.productos_extra || []).filter(e => e && e.visible !== false).map(e => ({ id: e.id, nombre: e.nombre, categoria: e.categoria || 'otros' }))),
-  ], [prodsCat, cfg?.productos_extra])
-  const categoriasColeccion = useMemo(() => [...new Set([
-    ...categorias,
-    ...(cfg?.categorias_extra || []),
-    ...(cfg?.productos_extra || []).map(p => p.categoria).filter(Boolean),
-  ])], [categorias, cfg?.categorias_extra, cfg?.productos_extra])
 
   const diseñosGuardados = useMemo(() => (
     Array.isArray(cfg?.plantillas_guardadas)
@@ -3032,6 +3108,8 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
   // Config "limpia" para guardar (sin la clave borrador ni metadatos internos)
   const cfgParaGuardar = () => {
     const c = { ...cfg }; delete c.borrador
+    // Los catálogos (colecciones) se gestionan en la pestaña Productos, en vivo: no los pisamos aquí.
+    delete c.colecciones; delete c.coleccion_activa
     if (!(c.url_publica || '').trim() && (cfgUrl || '').trim()) c.url_publica = cfgUrl
     return c
   }
@@ -3336,17 +3414,6 @@ function TabPersonalizar({ toast, qc, cfgUrl, onDirtyChange }) {
             </small>
           )}
           <TabBanners toast={toast} qc={qc} embed modoAtelier={familiaActiva === 'atelier'} />
-        </PzSec>
-
-        <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="catalogos" titulo={<><Store size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Catálogos (colecciones de productos)</>}>
-          <CatalogosEditor
-            colecciones={Array.isArray(cfg.colecciones) ? cfg.colecciones : []}
-            activa={cfg.coleccion_activa ?? null}
-            onChange={(cx) => set('colecciones', cx)}
-            onActiva={(id) => set('coleccion_activa', id)}
-            categorias={categoriasColeccion}
-            productos={prodsPicker}
-          />
         </PzSec>
 
         <PzSec abierto={abierto} setAbierto={setAbierto} onSave={guardar} saving={saving} id="secciones" titulo={<><Layout size={14} style={{ verticalAlign: '-2px', marginRight: 6 }} />Secciones del inicio</>}>
